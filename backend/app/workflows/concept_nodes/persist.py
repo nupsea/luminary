@@ -67,7 +67,7 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
         await asyncio.to_thread(lance.clear_concept_vectors)
 
         used: set[str] = set()
-        slug_to_id: dict[str, str] = {}      # stable slug -> new concept id (for card re-mapping)
+        slug_to_id: dict[str, str] = {}  # stable slug -> new concept id (for card re-mapping)
         chunk_to_concept: dict[str, str] = {}  # source chunk -> concept id (re-grounding fallback)
 
         def _slug(entities: list[str]) -> str:
@@ -88,16 +88,25 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
             chunk_ids = sorted(
                 {c for e in node.get("entities", []) for c in entity_chunks.get(e, [])}
             )[:25]
-            evidence = [{
-                "chunk_ids": chunk_ids,
-                "document_ids": node.get("document_ids", []),
-                "members": node.get("entities", [])[:12],
-            }]
+            evidence = [
+                {
+                    "chunk_ids": chunk_ids,
+                    "document_ids": node.get("document_ids", []),
+                    "members": node.get("entities", [])[:12],
+                }
+            ]
             session.add(
                 ConceptModel(
-                    id=cid, slug=slug, label=label, kind="concept", origin="document",
-                    status=status, level=LEVEL_CONCEPT, parent_id=None,
-                    salience=float(node.get("salience", 0.0)), evidence_json=evidence,
+                    id=cid,
+                    slug=slug,
+                    label=label,
+                    kind="concept",
+                    origin="document",
+                    status=status,
+                    level=LEVEL_CONCEPT,
+                    parent_id=None,
+                    salience=float(node.get("salience", 0.0)),
+                    evidence_json=evidence,
                 )
             )
             slug_to_id[slug] = cid
@@ -136,13 +145,17 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
         # source chunk -- ride the stable chunk layer, and correct its slug for the next rebuild.
         rebound_via_chunk = 0
         orphans = (
-            await session.execute(
-                select(FlashcardModel).where(
-                    FlashcardModel.concept_slug.is_not(None),
-                    FlashcardModel.concept_id.is_(None),
+            (
+                await session.execute(
+                    select(FlashcardModel).where(
+                        FlashcardModel.concept_slug.is_not(None),
+                        FlashcardModel.concept_id.is_(None),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for card in orphans:
             cid = chunk_to_concept.get(card.chunk_id) if card.chunk_id else None
             if cid:

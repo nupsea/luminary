@@ -13,19 +13,19 @@ from app.workflows.concept_nodes._shared import is_junk_entity
 @pytest.mark.parametrize(
     "label",
     [
-        "false",                       # boolean literal
+        "false",  # boolean literal
         "true",
         "null",
-        "dynamic",                     # generic type keyword
-        "--acl-spec",                  # CLI flag
+        "dynamic",  # generic type keyword
+        "--acl-spec",  # CLI flag
         "-v",
-        "unique_files",                # snake_case code identifier
+        "unique_files",  # snake_case code identifier
         "rollback_to_timestamp procedure",
         "emp_partitioned_table",
         "𝐆𝐚𝐭𝐞𝐰𝐚𝐲 𝐚𝐠𝐠𝐫𝐞𝐠𝐚𝐭𝐢𝐨𝐧 𝐥𝐚𝐲𝐞𝐫",  # unicode math-alphanumeric garbage
-        "123",                         # digit-dominant
-        "",                            # empty
-        "performance",                 # pre-existing generic stoplist
+        "123",  # digit-dominant
+        "",  # empty
+        "performance",  # pre-existing generic stoplist
     ],
 )
 def test_junk_dropped(label):
@@ -38,7 +38,7 @@ def test_junk_dropped(label):
         "microservices architectures",
         "data lakehouse",
         "iceberg tables",
-        "exactly-once delivery semantics",   # hyphen + multiword stays
+        "exactly-once delivery semantics",  # hyphen + multiword stays
         "oauth token",
         "graphql federation",
         "statement-based replication",

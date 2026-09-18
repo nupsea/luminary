@@ -87,9 +87,7 @@ class KuzuEntityRepo:
             while result.has_next():
                 row = result.get_next()
                 if row[0] and row[1]:
-                    out.append(
-                        {"name": row[0], "type": row[1], "frequency": int(row[2] or 1)}
-                    )
+                    out.append({"name": row[0], "type": row[1], "frequency": int(row[2] or 1)})
             return out
         except Exception:
             logger.warning("get_entities_detailed_for_document failed", exc_info=True)
@@ -206,9 +204,7 @@ class KuzuEntityRepo:
             "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did}) DETACH DELETE e",
             {"did": document_id},
         )
-        logger.info(
-            "Deleted %d entities for document", count, extra={"document_id": document_id}
-        )
+        logger.info("Deleted %d entities for document", count, extra={"document_id": document_id})
         return count
 
     def add_relation(

@@ -33,6 +33,7 @@ async def test_db(tmp_path, monkeypatch):
     # Clean up note creation background tasks to avoid engine.dispose hang
 
     from app.routers.notes import _background_tasks
+
     await drain_background_tasks(_background_tasks)
 
     db_module._engine = orig_engine

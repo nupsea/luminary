@@ -31,8 +31,12 @@ from app.services import (
     note_graph as _note_graph_module,  # indirect: get_note_graph_service is patched
 )
 from app.services import (
+    note_tagger as _note_tagger_module,  # indirect: get_note_tagger is patched
+)
+from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
+from app.services.engagement_service import EngagementService
 from app.services.naming import normalize_tag_slug
 from app.services.tag_graph import invalidate_tag_graph_cache
 
@@ -167,7 +171,6 @@ async def sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) -
 
     # Invalidate tag graph cache when tag index changes
     if removed or added:
-
         invalidate_tag_graph_cache()
 
 
@@ -320,7 +323,6 @@ async def upsert_note_graph(
 ) -> None:
     """Fire-and-forget: upsert Note node and edges in Kuzu graph."""
     try:
-
         await _note_graph_module.get_note_graph_service().upsert_note_node(
             note_id, content, document_id, tags, source_document_ids or []
         )
@@ -336,7 +338,6 @@ async def embed_and_store_note(note_id: str, content: str, document_id: str | No
     newer embedding with a stale one (race between create and rapid update).
     """
     try:
-
         loop = asyncio.get_event_loop()
         embedder = _embedder_module.get_embedding_service()
         vector = await loop.run_in_executor(None, lambda: embedder.encode([content])[0])
@@ -385,6 +386,37 @@ async def generate_and_store_description(note_id: str, content: str) -> None:
         logger.debug("Note description stored note_id=%s", note_id)
     except Exception as exc:
         logger.warning("generate_and_store_description failed (non-fatal): %s", exc)
+
+
+async def auto_tag_and_store_note(note_id: str, content: str) -> None:
+    """Background: suggest tags for a note created with none, and persist them.
+
+    Runs off the request path -- the tagger's LLM call queues behind whatever
+    else holds the model (a background ingestion job can occupy it for
+    minutes), and awaiting it inline made every note save, and the "Open full
+    note" navigation gated on that save, hang for as long as the queue was
+    busy. Skips the write if the note was deleted, tagged since (by the user
+    or a race with this same task), or its content changed, so a stale
+    suggestion never clobbers a newer state. Non-fatal on any failure.
+    """
+    try:
+        raw_tags = await _note_tagger_module.get_note_tagger().suggest_tags(content)
+        tags = [nt for t in raw_tags if (nt := normalize_tag_slug(t))]
+        if not tags:
+            return
+        async with get_session_factory()() as session:
+            note = (
+                await session.execute(select(NoteModel).where(NoteModel.id == note_id))
+            ).scalar_one_or_none()
+            if note is None or note.content != content or note.tags:
+                return
+            note.tags = tags
+            await sync_tag_index(note_id, tags, session)
+            await EngagementService(session).award_note_tag_bonus(note_id, len(tags))
+            await session.commit()
+        logger.debug("Note auto-tagged note_id=%s tags=%d", note_id, len(tags))
+    except Exception as exc:
+        logger.warning("auto_tag_and_store_note failed (non-fatal): %s", exc)
 
 
 async def backfill_missing_descriptions(limit: int = 500, force: bool = False) -> int:

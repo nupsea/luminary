@@ -89,8 +89,7 @@ def _collapse_repeated_furniture(lines: list[str]) -> list[str]:
     # can, and it does so without a number to tune.
     freq = Counter(line.strip() for line in lines if line.strip())
     recurring = [
-        bool(ln.strip()) and ln == ln.lstrip() and freq[ln.strip()] >= _MIN_REPEATS
-        for ln in lines
+        bool(ln.strip()) and ln == ln.lstrip() and freq[ln.strip()] >= _MIN_REPEATS for ln in lines
     ]
 
     in_run = [False] * len(lines)

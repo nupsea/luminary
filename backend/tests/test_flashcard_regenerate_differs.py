@@ -130,9 +130,7 @@ async def test_the_old_deck_is_still_present_while_the_replacement_is_generated(
         service = FlashcardService()
 
         async def fake_generate(**kwargs):
-            rows = (
-                await session.execute(select(FlashcardModel.question))
-            ).all()
+            rows = (await session.execute(select(FlashcardModel.question))).all()
             seen["deck_during_generation"] = sorted(r[0] for r in rows)
             seen["excluded"] = kwargs["exclude_chunk_ids"]
             new = _card("fresh", ["chunk-4"])
@@ -165,9 +163,7 @@ async def test_a_run_that_produces_nothing_leaves_the_deck_alone(factory):
         service.generate = fake_generate  # type: ignore[method-assign]
         result = await service.regenerate(session, document_id="doc-1")
 
-        remaining = (
-            await session.execute(select(FlashcardModel.question))
-        ).all()
+        remaining = (await session.execute(select(FlashcardModel.question))).all()
 
     assert result.kept_previous is True
     assert result.replaced == 0
@@ -189,9 +185,7 @@ async def test_a_generation_that_raises_leaves_the_deck_alone(factory):
         with pytest.raises(RuntimeError):
             await service.regenerate(session, document_id="doc-1")
 
-        remaining = (
-            await session.execute(select(FlashcardModel.question))
-        ).all()
+        remaining = (await session.execute(select(FlashcardModel.question))).all()
 
     assert sorted(r[0] for r in remaining) == ["q1", "q2"]
 
@@ -245,7 +239,7 @@ async def test_a_repeat_of_the_note_s_own_card_is_rejected(factory, monkeypatch)
     the deck it replaced."""
     vectors = {
         "What is backpressure?": [1.0, 0.0],
-        "What does backpressure do?": [1.0, 0.0],   # a repeat, reworded
+        "What does backpressure do?": [1.0, 0.0],  # a repeat, reworded
         "How large should a buffer be?": [0.0, 1.0],
         "A card about some other note": [1.0, 0.0],
     }
@@ -317,9 +311,7 @@ async def test_a_note_deck_is_replaced_the_same_way_a_document_deck_is(factory):
         service = FlashcardService()
 
         async def fake_notes(**kwargs):
-            rows = (
-                await session.execute(select(FlashcardModel.question))
-            ).all()
+            rows = (await session.execute(select(FlashcardModel.question))).all()
             seen["deck_during_generation"] = sorted(r[0] for r in rows)
             seen["replacing_note_id"] = kwargs["replacing_note_id"]
             seen["note_ids"] = kwargs["note_ids"]
@@ -331,9 +323,7 @@ async def test_a_note_deck_is_replaced_the_same_way_a_document_deck_is(factory):
         service.generate_from_notes = fake_notes  # type: ignore[method-assign]
         result = await service.regenerate(session, note_id="note-1")
 
-        remaining = (
-            await session.execute(select(FlashcardModel.question))
-        ).all()
+        remaining = (await session.execute(select(FlashcardModel.question))).all()
 
     assert seen["note_ids"] == ["note-1"]
     assert seen["replacing_note_id"] == "note-1", (
@@ -357,9 +347,7 @@ async def test_a_note_run_that_produces_nothing_leaves_its_cards_alone(factory):
         service.generate_from_notes = fake_notes  # type: ignore[method-assign]
         result = await service.regenerate(session, note_id="note-1")
 
-        remaining = (
-            await session.execute(select(FlashcardModel.question))
-        ).all()
+        remaining = (await session.execute(select(FlashcardModel.question))).all()
 
     assert result.kept_previous is True
     assert [r[0] for r in remaining] == ["What is backpressure?"]
@@ -406,11 +394,13 @@ _NOTE_TEXT = "Backpressure is the signal a slow consumer sends upstream to stop.
 def _llm_returning_one_card() -> AsyncMock:
     """Concept extraction, then one card whose quote is really in the note --
     anything else is dropped by the grounding gate before it reaches the DB."""
-    return AsyncMock(side_effect=[
-        '{"domain": "systems", "concepts": [{"concept": "backpressure"}]}',
-        '[{"question": "What is backpressure?", "answer": "A stop signal.",'
-        ' "source_excerpt": "the signal a slow consumer sends upstream"}]',
-    ])
+    return AsyncMock(
+        side_effect=[
+            '{"domain": "systems", "concepts": [{"concept": "backpressure"}]}',
+            '[{"question": "What is backpressure?", "answer": "A stop signal.",'
+            ' "source_excerpt": "the signal a slow consumer sends upstream"}]',
+        ]
+    )
 
 
 @pytest.mark.asyncio

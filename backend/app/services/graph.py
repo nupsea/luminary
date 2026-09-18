@@ -24,7 +24,7 @@ Schema:
          DEPICTS(DiagramNode->Entity, document_id)
          WRITTEN_ABOUT(Note->Entity, confidence)
          TAG_IS_CONCEPT(Note->Entity, tag)
-         DERIVED_FROM(Note->Document)                              
+         DERIVED_FROM(Note->Document)
 Note: `aliases` column on Entity was added in S86.  Databases created before S86 will
 not have this column; aliases writes are wrapped in try/except for graceful degradation.
 
@@ -129,9 +129,7 @@ class KuzuService:
         document_id: str,
         confidence: float = 1.0,
     ) -> None:
-        return self._prereq.add_prerequisite(
-            dependent_id, prerequisite_id, document_id, confidence
-        )
+        return self._prereq.add_prerequisite(dependent_id, prerequisite_id, document_id, confidence)
 
     def get_prerequisite_edges_for_document(self, document_id: str) -> list[dict]:
         return self._prereq.get_prerequisite_edges_for_document(document_id)
@@ -337,9 +335,7 @@ class KuzuService:
         relation_label: str,
         document_id: str,
     ) -> None:
-        return self._tech.add_tech_relation(
-            entity_id_a, entity_id_b, relation_label, document_id
-        )
+        return self._tech.add_tech_relation(entity_id_a, entity_id_b, relation_label, document_id)
 
     def add_version_of(self, version_entity_id: str, base_entity_id: str, document_id: str) -> None:
         return self._tech.add_version_of(version_entity_id, base_entity_id, document_id)

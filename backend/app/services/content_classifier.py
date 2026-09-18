@@ -55,9 +55,28 @@ _ROLE_SPEAKER = re.compile(
 
 _METADATA_LABELS = frozenset(
     {
-        "date", "author", "title", "source", "tags", "note", "notes", "updated",
-        "created", "summary", "status", "url", "link", "from", "to", "subject",
-        "location", "time", "topic", "category", "type", "version",
+        "date",
+        "author",
+        "title",
+        "source",
+        "tags",
+        "note",
+        "notes",
+        "updated",
+        "created",
+        "summary",
+        "status",
+        "url",
+        "link",
+        "from",
+        "to",
+        "subject",
+        "location",
+        "time",
+        "topic",
+        "category",
+        "type",
+        "version",
     }
 )
 _TRANSCRIPT_HEADER = re.compile(
@@ -191,9 +210,7 @@ _NAMED_MARKER = re.compile(
 )
 # Chapter, Part, Book, Canto, Act, Scene are how a NARRATIVE divides itself.
 # Counting them makes every novel a reference: Hamlet rates 1.63 on them alone.
-_NARRATIVE_DIVISION = re.compile(
-    r"^[ \t]{0,6}(?:Chapter|Part|Book|Canto|Act|Scene)\b", re.I | re.M
-)
+_NARRATIVE_DIVISION = re.compile(r"^[ \t]{0,6}(?:Chapter|Part|Book|Canto|Act|Scene)\b", re.I | re.M)
 
 # Three dated units is a habit rather than a mention.
 _DATED_ENTRY = re.compile(

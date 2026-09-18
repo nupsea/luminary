@@ -215,9 +215,11 @@ class TestImportFidelity:
         from app.config import get_settings
 
         get_settings.cache_clear()
-        svg = '<svg width="600" height="400" aria-label="Architecture">' + (
-            '<rect x="1" y="2" width="30" height="40"/>' * 20
-        ) + "</svg>"
+        svg = (
+            '<svg width="600" height="400" aria-label="Architecture">'
+            + ('<rect x="1" y="2" width="30" height="40"/>' * 20)
+            + "</svg>"
+        )
         extracted = _extract(_wrap(f"<figure>{svg}<figcaption>Figure 2</figcaption></figure>"))
         get_settings.cache_clear()
         assert "__LUMINARY_IMG__/testdoc/" in extracted
@@ -313,10 +315,8 @@ class TestVisualWarningScope:
 
     def test_a_static_js_page_with_no_images_is_still_warned_about(self):
         """The original inference: scripts never ran, so figures may be absent."""
-        html = '<html><body><script>self.__next_f=[]</script><p>x</p></body></html>'
-        warnings = self._extractor()._detect_uncaptured_visuals(
-            html, "prose only", 500, "static"
-        )
+        html = "<html><body><script>self.__next_f=[]</script><p>x</p></body></html>"
+        warnings = self._extractor()._detect_uncaptured_visuals(html, "prose only", 500, "static")
         assert warnings, "a static hydrated page with no images must still warn"
 
     def test_a_rendered_page_with_no_canvas_is_not_warned_about(self):
@@ -326,18 +326,14 @@ class TestVisualWarningScope:
         prose and code that had no figures at all, and a warning that fires when
         nothing is wrong is one the reader learns to scroll past.
         """
-        html = '<html><body><script>self.__next_f=[]</script><p>x</p></body></html>'
-        warnings = self._extractor()._detect_uncaptured_visuals(
-            html, "prose only", 500, "webview"
-        )
+        html = "<html><body><script>self.__next_f=[]</script><p>x</p></body></html>"
+        warnings = self._extractor()._detect_uncaptured_visuals(html, "prose only", 500, "webview")
         assert warnings == []
 
     def test_a_rendered_page_with_a_canvas_is_warned_about(self):
         """Brackets the rule: canvas pixels need a screenshot, not a DOM capture."""
         html = "<html><body><canvas id='chart'></canvas><p>x</p></body></html>"
-        warnings = self._extractor()._detect_uncaptured_visuals(
-            html, "prose only", 500, "webview"
-        )
+        warnings = self._extractor()._detect_uncaptured_visuals(html, "prose only", 500, "webview")
         assert warnings, "a rendered canvas is a real, uncapturable figure"
 
 
@@ -354,10 +350,7 @@ class TestPageSpecificTitle:
             "<html><head><title>Chapter 4: Databases &#x2014; Where Data Lives "
             "&#x2014; The Builder&#x27;s Gita</title></head><body></body></html>"
         )
-        assert (
-            self._refine("The Builder's Gita", html)
-            == "Chapter 4: Databases — Where Data Lives"
-        )
+        assert self._refine("The Builder's Gita", html) == "Chapter 4: Databases — Where Data Lives"
 
     def test_a_correct_metadata_title_is_left_alone(self):
         """The bracketing case: here the metadata is a prefix, not a suffix.
@@ -372,7 +365,7 @@ class TestPageSpecificTitle:
         assert self._refine("Understanding LSTM Networks", html) == "Understanding LSTM Networks"
 
     def test_a_remainder_too_short_to_be_a_title_is_refused(self):
-        """"Ch 4" is a fragment, and the metadata title is the safer answer."""
+        """ "Ch 4" is a fragment, and the metadata title is the safer answer."""
         html = "<html><head><title>Ch 4 - The Builder&#x27;s Gita</title></head></html>"
         assert self._refine("The Builder's Gita", html) == "The Builder's Gita"
 

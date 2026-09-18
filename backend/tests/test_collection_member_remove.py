@@ -87,9 +87,7 @@ async def test_remove_with_member_type_scopes_to_one_row(test_db):
     col_id = await _seed(factory, shared_id=shared)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        r = await c.delete(
-            f"/collections/{col_id}/members/{shared}?member_type=document"
-        )
+        r = await c.delete(f"/collections/{col_id}/members/{shared}?member_type=document")
         assert r.status_code == 204
 
     assert await _types_left(factory, col_id, shared) == {"note"}
@@ -127,9 +125,7 @@ async def test_remove_wrong_type_is_noop(test_db):
         await s.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        r = await c.delete(
-            f"/collections/{col_id}/members/{shared}?member_type=document"
-        )
+        r = await c.delete(f"/collections/{col_id}/members/{shared}?member_type=document")
         assert r.status_code == 204
 
     assert await _types_left(factory, col_id, shared) == {"note"}

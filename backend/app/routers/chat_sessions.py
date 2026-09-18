@@ -117,9 +117,7 @@ async def list_sessions(
 
 
 @router.get("/{session_id}", response_model=SessionDetail)
-async def get_session(
-    session_id: str, db: AsyncSession = Depends(get_db)
-) -> SessionDetail:
+async def get_session(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionDetail:
     sess = await svc.get_session(db, session_id)
     if sess is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -162,9 +160,7 @@ async def rename_session(
     elif req.title is not None:
         sess = await svc.rename_session(db, session_id, title=req.title, auto=False)
     elif not model_touched:
-        raise HTTPException(
-            status_code=400, detail="Provide title, auto_from_message, or model"
-        )
+        raise HTTPException(status_code=400, detail="Provide title, auto_from_message, or model")
     if model_touched:
         sess = await svc.update_session_model(db, session_id, model=req.model)
     if sess is None:
@@ -184,9 +180,7 @@ async def rename_session(
 
 
 @router.delete("/{session_id}")
-async def delete_session(
-    session_id: str, db: AsyncSession = Depends(get_db)
-) -> dict[str, bool]:
+async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)) -> dict[str, bool]:
     ok = await svc.delete_session(db, session_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Session not found")

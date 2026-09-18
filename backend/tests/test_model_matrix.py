@@ -123,9 +123,7 @@ def test_repairs_are_the_movement_between_two_snapshots():
 
 def test_the_matrix_refuses_to_run_against_the_wrong_prompt_arm(monkeypatch, capsys):
     """A matrix that straddles the shipped and bare arms measures neither."""
-    monkeypatch.setattr(
-        run_model_matrix, "_environment", lambda url: {"prompt_arm": "shipped"}
-    )
+    monkeypatch.setattr(run_model_matrix, "_environment", lambda url: {"prompt_arm": "shipped"})
     monkeypatch.setattr(sys, "argv", ["run_model_matrix.py", "--models", "a,b", "--arm", "bare"])
 
     assert run_model_matrix.main() == 1
@@ -133,12 +131,8 @@ def test_the_matrix_refuses_to_run_against_the_wrong_prompt_arm(monkeypatch, cap
 
 
 def test_the_matrix_refuses_a_model_that_is_not_installed(monkeypatch, capsys):
-    monkeypatch.setattr(
-        run_model_matrix, "_environment", lambda url: {"prompt_arm": "shipped"}
-    )
-    monkeypatch.setattr(
-        run_model_matrix, "_installed_models", lambda url: ["ollama/llama3.2"]
-    )
+    monkeypatch.setattr(run_model_matrix, "_environment", lambda url: {"prompt_arm": "shipped"})
+    monkeypatch.setattr(run_model_matrix, "_installed_models", lambda url: ["ollama/llama3.2"])
     monkeypatch.setattr(
         sys, "argv", ["run_model_matrix.py", "--models", "ollama/llama3.2,ollama/absent"]
     )
@@ -322,9 +316,7 @@ def test_a_qa_run_asks_for_no_judge():
 def test_naming_a_holdout_dataset_is_called_out(monkeypatch, capsys):
     """Choosing a model on the holdout spends it. Recorded, not blocked --
     a comparison is not the ablation sweep the split forbids."""
-    monkeypatch.setattr(
-        run_model_matrix, "_environment", lambda url: {"prompt_arm": "shipped"}
-    )
+    monkeypatch.setattr(run_model_matrix, "_environment", lambda url: {"prompt_arm": "shipped"})
     monkeypatch.setattr(run_model_matrix, "_installed_models", lambda url: [])
     monkeypatch.setattr(
         sys,

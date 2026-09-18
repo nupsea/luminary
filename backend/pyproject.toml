@@ -1,6 +1,6 @@
 [project]
 name = "luminary-backend"
-version = "0.12.8"
+version = "0.12.11"
 description = "Luminary — local-first personal knowledge and learning assistant"
 requires-python = ">=3.13"
 dependencies = [
@@ -74,6 +74,7 @@ dependencies = [
     # downloads on Linux is a .tar.zst, and until now zstandard arrived only as
     # a langsmith dependency -- a tracing package, nothing to do with archives.
     "zstandard>=0.25.0",
+    "curl-cffi>=0.7.0",
 ]
 
 

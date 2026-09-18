@@ -36,9 +36,14 @@ async def test_db(tmp_path, monkeypatch):
 
 def _card(cid: str, *, document_id=None, note_id=None, source="document", deck="default"):
     return FlashcardModel(
-        id=cid, question=f"Q {cid}?", answer="A real multi-word answer here.",
-        source_excerpt="s", document_id=document_id, note_id=note_id,
-        source=source, deck=deck,
+        id=cid,
+        question=f"Q {cid}?",
+        answer="A real multi-word answer here.",
+        source_excerpt="s",
+        document_id=document_id,
+        note_id=note_id,
+        source=source,
+        deck=deck,
     )
 
 
@@ -47,10 +52,19 @@ async def _seed(factory) -> str:
     doc_id, note_id, other_doc = "doc-in", "note-in", "doc-out"
     async with factory() as s:
         s.add(CollectionModel(id=coll_id, name="Data Architecture", color="#6366F1", sort_order=0))
-        s.add(CollectionMemberModel(
-            id=str(uuid.uuid4()), collection_id=coll_id, member_id=doc_id, member_type="document"))
-        s.add(CollectionMemberModel(
-            id=str(uuid.uuid4()), collection_id=coll_id, member_id=note_id, member_type="note"))
+        s.add(
+            CollectionMemberModel(
+                id=str(uuid.uuid4()),
+                collection_id=coll_id,
+                member_id=doc_id,
+                member_type="document",
+            )
+        )
+        s.add(
+            CollectionMemberModel(
+                id=str(uuid.uuid4()), collection_id=coll_id, member_id=note_id, member_type="note"
+            )
+        )
         s.add(_card("c-doc", document_id=doc_id))
         s.add(_card("c-note", note_id=note_id, source="note", deck="Data Architecture"))
         s.add(_card("c-outside", document_id=other_doc))
@@ -77,7 +91,7 @@ async def test_delete_all_collection_flashcards(test_db):
         assert resp.json()["deleted"] == 2
 
         # collection cards gone, the outsider survives
-        remaining = (await client.get("/flashcards/search", params={"collection_id": coll_id}))
+        remaining = await client.get("/flashcards/search", params={"collection_id": coll_id})
         assert remaining.json()["items"] == []
         outsider = await client.get("/flashcards/search", params={"document_id": "doc-out"})
         assert {c["id"] for c in outsider.json()["items"]} == {"c-outside"}

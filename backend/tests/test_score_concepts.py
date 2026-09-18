@@ -30,9 +30,7 @@ def labels():
 
 async def test_flags_rejected_concepts(monkeypatch, labels):
     fake = _FakeLLM("[2,4]")  # reject "servers" and "example code"
-    monkeypatch.setattr(
-        "app.workflows.concept_nodes.score_concepts.get_llm_service", lambda: fake
-    )
+    monkeypatch.setattr("app.workflows.concept_nodes.score_concepts.get_llm_service", lambda: fake)
     state = _state(labels)
     out = await score_concepts(state)
     statuses = {c["label"]: c.get("status", "proposed") for c in out["hierarchy"]["concepts"]}

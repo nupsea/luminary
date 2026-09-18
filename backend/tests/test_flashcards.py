@@ -485,12 +485,16 @@ async def test_generate_retries_to_backfill_gated_cards(test_db):
     first = json.dumps(
         {
             "flashcards": [
-                {"question": "What is a write-ahead log?",
-                 "answer": "A durable append-only record written before applying changes.",
-                  "source_excerpt": _CHUNK_QUOTE},
-                {"question": "What is a follower replica?",
-                 "answer": "A replica that applies the leader's writes to serve reads.",
-                  "source_excerpt": _CHUNK_QUOTE},
+                {
+                    "question": "What is a write-ahead log?",
+                    "answer": "A durable append-only record written before applying changes.",
+                    "source_excerpt": _CHUNK_QUOTE,
+                },
+                {
+                    "question": "What is a follower replica?",
+                    "answer": "A replica that applies the leader's writes to serve reads.",
+                    "source_excerpt": _CHUNK_QUOTE,
+                },
                 {"question": "What input closes the analytics loop?", "answer": "Feedback"},
                 {"question": "What names a data partition?", "answer": "Shard"},
             ]
@@ -499,12 +503,16 @@ async def test_generate_retries_to_backfill_gated_cards(test_db):
     second = json.dumps(
         {
             "flashcards": [
-                {"question": "What does a quorum guarantee?",
-                 "answer": "That a read and a write overlap on at least one replica.",
-                  "source_excerpt": _CHUNK_QUOTE},
-                {"question": "What is eventual consistency?",
-                 "answer": "Replicas converge to the same value once writes stop.",
-                  "source_excerpt": _CHUNK_QUOTE},
+                {
+                    "question": "What does a quorum guarantee?",
+                    "answer": "That a read and a write overlap on at least one replica.",
+                    "source_excerpt": _CHUNK_QUOTE,
+                },
+                {
+                    "question": "What is eventual consistency?",
+                    "answer": "Replicas converge to the same value once writes stop.",
+                    "source_excerpt": _CHUNK_QUOTE,
+                },
             ]
         }
     )

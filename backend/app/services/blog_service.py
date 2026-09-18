@@ -147,11 +147,7 @@ def _summarize_post(path: Path) -> dict:
 def list_posts(content_dir: Path) -> list[dict]:
     if not content_dir.is_dir():
         return []
-    posts = [
-        _summarize_post(p)
-        for p in content_dir.glob("*.md")
-        if _is_published_slug(p.stem)
-    ]
+    posts = [_summarize_post(p) for p in content_dir.glob("*.md") if _is_published_slug(p.stem)]
 
     def _date_key(p: dict) -> datetime:
         try:
@@ -214,9 +210,7 @@ def transform_note_to_blog(content: str, slug: str, kind: str = "blog") -> BlogD
     note_links = len(_NOTE_LINK_RE.findall(content))
     text = _NOTE_LINK_RE.sub("", content)
     if note_links:
-        warnings.append(
-            f"{note_links} note-link(s) removed (no target on the public site)"
-        )
+        warnings.append(f"{note_links} note-link(s) removed (no target on the public site)")
 
     excalidraw_comments = len(_EXCALIDRAW_COMMENT_RE.findall(text))
     text = _EXCALIDRAW_COMMENT_RE.sub("", text)
@@ -227,9 +221,7 @@ def transform_note_to_blog(content: str, slug: str, kind: str = "blog") -> BlogD
         nonlocal diagram_n
         diagram_n += 1
         dest = f"diagram{diagram_n}.svg"
-        assets.append(
-            BlogAsset(kind="mermaid", dest_filename=dest, key=f"mermaid-{diagram_n}")
-        )
+        assets.append(BlogAsset(kind="mermaid", dest_filename=dest, key=f"mermaid-{diagram_n}"))
         return f"![diagram](/{kind}/{slug}/{dest})"
 
     text = _MERMAID_BLOCK_RE.sub(_mermaid_sub, text)
@@ -246,9 +238,7 @@ def transform_note_to_blog(content: str, slug: str, kind: str = "blog") -> BlogD
         doc_id, filename = match.group(1), match.group(2)
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "png"
         dest = f"asset{asset_n}.{ext}"
-        assets.append(
-            BlogAsset(kind="copy", dest_filename=dest, doc_id=doc_id, filename=filename)
-        )
+        assets.append(BlogAsset(kind="copy", dest_filename=dest, doc_id=doc_id, filename=filename))
         return f"/{kind}/{slug}/{dest}"
 
     text = _LUMINARY_IMG_RE.sub(_img_sub, text)

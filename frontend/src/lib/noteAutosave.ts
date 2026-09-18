@@ -103,6 +103,42 @@ export function createNoteAutosaver(opts: NoteAutosaverOptions) {
   }
 }
 
+/**
+ * The PATCH body for a draft, minus tags when `preserveTags` is set -- see
+ * `UseNoteAutosaveOptions.preserveTags`. A field left out of the JSON body
+ * (as opposed to sent as `null`) leaves the note's existing tags alone,
+ * since the backend only overwrites tags when the field is present.
+ */
+export function buildPatchPayload(
+  draft: NoteDraft,
+  preserveTags: boolean,
+): { content: string; tags?: string[]; title: string; source_document_ids: string[] } {
+  return {
+    content: draft.content,
+    ...(preserveTags ? {} : { tags: draft.tags }),
+    title: draft.title.trim(),
+    source_document_ids: draft.sourceDocIds,
+  }
+}
+
+/**
+ * What "finalize" (Open full note / dismiss) should treat as the note, once
+ * flush() has run.
+ *
+ * flush() returns null whenever nothing was dirty this session -- true both
+ * for a fresh draft that was never touched and for an existing note that was
+ * opened and closed unedited, because `bind()` always resets the autosaver's
+ * own last-saved note to null (it has no fetched `Note` to remember, only a
+ * `NoteDraft` baseline). An unedited existing note is silence, not evidence
+ * it doesn't exist (#137): opening a note and immediately clicking "Open full
+ * note" flushed nothing, so the caller treated the note as missing and closed
+ * the composer without ever navigating to it. `openNote` names the note in
+ * that case; there is nothing to fall back to for a draft that never existed.
+ */
+export function resolveFinalizedNote(flushed: Note | null, openNote: Note | null): Note | null {
+  return flushed ?? openNote
+}
+
 export type NoteAutosaver = ReturnType<typeof createNoteAutosaver>
 
 export const NEW_NOTE_KEY = "__new__"
@@ -125,6 +161,15 @@ export interface UseNoteAutosaveOptions {
   }
   onCreated?: (note: Note) => void
   onSaved?: (note: Note) => void
+  /**
+   * True for a surface (e.g. the note composer) that has no tag UI of its
+   * own. `draft.tags` is only ever the value tags happened to have when the
+   * composer opened -- background auto-tagging or an edit made elsewhere
+   * lands after that and this surface never learns about it, so re-sending
+   * that stale array on every patch would overwrite the real tags with it.
+   * Tags are omitted from outgoing patches instead, leaving them untouched.
+   */
+  preserveTags?: boolean
 }
 
 export function useNoteAutosave(options: UseNoteAutosaveOptions) {
@@ -148,12 +193,7 @@ export function useNoteAutosave(options: UseNoteAutosaveOptions) {
           source_document_ids: d.sourceDocIds,
         }),
       patch: (noteId, d) =>
-        patchNote(noteId, {
-          content: d.content,
-          tags: d.tags,
-          title: d.title.trim(),
-          source_document_ids: d.sourceDocIds,
-        }),
+        patchNote(noteId, buildPatchPayload(d, !!latest.current.preserveTags)),
       onStatus: setStatus,
       onCreated: (n) => latest.current.onCreated?.(n),
       onSaved: (n) => latest.current.onSaved?.(n),

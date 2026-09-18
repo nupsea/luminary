@@ -117,9 +117,7 @@ async def test_create_invalid_target_unit_raises(test_db):
     async with factory() as db:
         svc = LearningGoalsService(db)
         with pytest.raises(InvalidTargetUnit):
-            await svc.create_goal(
-                title="Bad unit", goal_type="read", target_unit="lightyears"
-            )
+            await svc.create_goal(title="Bad unit", goal_type="read", target_unit="lightyears")
 
 
 @pytest.mark.asyncio
@@ -263,12 +261,14 @@ async def test_delete_goal_nulls_linked_sessions(test_db):
 
     async with factory() as db:
         rows = (
-            await db.execute(
-                select(PomodoroSessionModel).where(
-                    PomodoroSessionModel.id.in_([sid1, sid2])
+            (
+                await db.execute(
+                    select(PomodoroSessionModel).where(PomodoroSessionModel.id.in_([sid1, sid2]))
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(rows) == 2
         assert all(r.goal_id is None for r in rows)
 

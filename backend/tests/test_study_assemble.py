@@ -44,16 +44,46 @@ async def test_assemble_concept_scope_yields_event_and_due_card(test_db):
     factory = test_db
     past = datetime.now(UTC) - timedelta(days=1)
     async with factory() as s:
-        s.add(ConceptModel(id="c1", slug="iceberg", label="Iceberg", kind="concept",
-                           origin="document", status="confirmed", mastery=10.0))
-        s.add(FlashcardModel(id="f1", document_id="d1", chunk_id=None, concept_id="c1",
-                             mapping_status="mapped", source="document", question="Q",
-                             answer="A", source_excerpt="e", due_date=past))
+        s.add(
+            ConceptModel(
+                id="c1",
+                slug="iceberg",
+                label="Iceberg",
+                kind="concept",
+                origin="document",
+                status="confirmed",
+                mastery=10.0,
+            )
+        )
+        s.add(
+            FlashcardModel(
+                id="f1",
+                document_id="d1",
+                chunk_id=None,
+                concept_id="c1",
+                mapping_status="mapped",
+                source="document",
+                question="Q",
+                answer="A",
+                source_excerpt="e",
+                due_date=past,
+            )
+        )
         # not due -> must be excluded
-        s.add(FlashcardModel(id="f2", document_id="d1", chunk_id=None, concept_id="c1",
-                             mapping_status="mapped", source="document", question="Q2",
-                             answer="A2", source_excerpt="e",
-                             due_date=datetime.now(UTC) + timedelta(days=5)))
+        s.add(
+            FlashcardModel(
+                id="f2",
+                document_id="d1",
+                chunk_id=None,
+                concept_id="c1",
+                mapping_status="mapped",
+                source="document",
+                question="Q2",
+                answer="A2",
+                source_excerpt="e",
+                due_date=datetime.now(UTC) + timedelta(days=5),
+            )
+        )
         await s.commit()
 
     transport = ASGITransport(app=app)
@@ -110,16 +140,20 @@ async def test_assemble_note_scope_generates_unmapped_cards_on_commit(test_db, m
     # mock the shipped generator: persist + return one fresh card (no concept)
     async def fake_gen(self, tag, note_ids, count, session, difficulty="medium"):
         card = FlashcardModel(
-            id="genned", document_id=None, chunk_id=None, note_id=note_ids[0],
-            source="note", question="GQ", answer="GA", source_excerpt="e",
+            id="genned",
+            document_id=None,
+            chunk_id=None,
+            note_id=note_ids[0],
+            source="note",
+            question="GQ",
+            answer="GA",
+            source_excerpt="e",
         )
         session.add(card)
         await session.flush()
         return [card]
 
-    monkeypatch.setattr(
-        "app.services.flashcard.FlashcardService.generate_from_notes", fake_gen
-    )
+    monkeypatch.setattr("app.services.flashcard.FlashcardService.generate_from_notes", fake_gen)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as client:

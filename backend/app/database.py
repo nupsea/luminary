@@ -76,9 +76,7 @@ def _note_write(conn, cursor, statement, parameters, context, executemany):  # n
     """
     head = statement.lstrip()[:7].upper()
     if head.startswith(("INSERT", "UPDATE", "DELETE", "REPLACE")):
-        _write_holds.setdefault(
-            id(conn), (time.monotonic(), " ".join(statement.split())[:90])
-        )
+        _write_holds.setdefault(id(conn), (time.monotonic(), " ".join(statement.split())[:90]))
 
 
 def _clear_write_hold(conn):

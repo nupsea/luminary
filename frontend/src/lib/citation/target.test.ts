@@ -2,7 +2,14 @@
 
 import { describe, expect, it } from "vitest"
 
-import { buildCitationTarget, stateValueToWords, stripCitationPrefixes, targetToStateValue, wordsPresentIn } from "./target"
+import {
+  buildCitationTarget,
+  resolveInPlaceCitation,
+  stateValueToWords,
+  stripCitationPrefixes,
+  targetToStateValue,
+  wordsPresentIn,
+} from "./target"
 
 const TITLE = "Optimization with Linear Programming (and the Simplex Algorithm), Main Ideas!!!"
 
@@ -51,6 +58,36 @@ describe("wordsPresentIn", () => {
   it("returns nothing for text that holds none of it", () => {
     const t = buildCitationTarget({ section_preview_snippet: "alpha beta gamma delta epsilon" })
     expect(wordsPresentIn(t, "entirely unrelated prose here")).toEqual([])
+  })
+})
+
+describe("resolveInPlaceCitation", () => {
+  // #137-adjacent: a citation to "DDIA / Batch and Stream Processing p.495"
+  // was landing the PDF viewer on the table of contents (p.14) instead --
+  // PDFViewer's own `initialPage` prop is fixed at mount, so a click later in
+  // the session had no current page to search first and fell back to a full
+  // scan that stopped at the heading's other, much shorter appearance in the
+  // ToC before ever reaching the real page. The page must travel with the
+  // click, not sit in a prop that never updates after mount.
+  const arrival = ["some", "arrival", "words"]
+
+  it("has no page when the reader has not clicked a citation yet", () => {
+    expect(resolveInPlaceCitation(null, arrival)).toEqual({ words: arrival, page: null })
+  })
+
+  it("carries the clicked citation's own page, not the mount-time page", () => {
+    const clicked = { against: arrival, words: ["cited", "prose"], page: 517 }
+    expect(resolveInPlaceCitation(clicked, arrival)).toEqual({ words: ["cited", "prose"], page: 517 })
+  })
+
+  it("drops a stale click once a new arrival supersedes it", () => {
+    const staleClick = { against: ["old", "arrival"], words: ["stale"], page: 517 }
+    expect(resolveInPlaceCitation(staleClick, arrival)).toEqual({ words: arrival, page: null })
+  })
+
+  it("resets the page to null for a citation with no page of its own", () => {
+    const clicked = { against: arrival, words: ["heading", "only"], page: null }
+    expect(resolveInPlaceCitation(clicked, arrival)).toEqual({ words: ["heading", "only"], page: null })
   })
 })
 

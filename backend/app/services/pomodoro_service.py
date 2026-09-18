@@ -59,9 +59,7 @@ class InvalidTransition(PomodoroError):
     status_code = 409
 
     def __init__(self, session_id: str, from_status: str, action: str) -> None:
-        super().__init__(
-            f"cannot {action} session {session_id} from status={from_status}"
-        )
+        super().__init__(f"cannot {action} session {session_id} from status={from_status}")
         self.session_id = session_id
         self.from_status = from_status
         self.action = action
@@ -95,9 +93,7 @@ class PomodoroService:
 
     async def _get_active_or_paused(self) -> PomodoroSessionModel | None:
         result = await self._session.execute(
-            select(PomodoroSessionModel).where(
-                PomodoroSessionModel.status.in_(ACTIVE_STATUSES)
-            )
+            select(PomodoroSessionModel).where(PomodoroSessionModel.status.in_(ACTIVE_STATUSES))
         )
         return result.scalar_one_or_none()
 
@@ -234,11 +230,7 @@ class PomodoroService:
         for (created_at,) in rows:
             if created_at is None:
                 continue
-            ts = (
-                created_at
-                if created_at.tzinfo is not None
-                else created_at.replace(tzinfo=UTC)
-            )
+            ts = created_at if created_at.tzinfo is not None else created_at.replace(tzinfo=UTC)
             completed_dates.add(ts.date())
 
         streak = 0

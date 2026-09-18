@@ -248,15 +248,11 @@ async def get_collection_tree(
       - ?contains=note:     equals inclusive descendant note count
     """
     if contains is not None and contains not in ("document", "note"):
-        raise HTTPException(
-            status_code=422, detail="contains must be 'document' or 'note'"
-        )
+        raise HTTPException(status_code=422, detail="contains must be 'document' or 'note'")
 
     all_cols = list(await repo.list_all())
     counts = await repo.member_counts()
-    note_counts: dict[str, int] = {
-        cid: c for (cid, mtype), c in counts.items() if mtype == "note"
-    }
+    note_counts: dict[str, int] = {cid: c for (cid, mtype), c in counts.items() if mtype == "note"}
     doc_counts: dict[str, int] = {
         cid: c for (cid, mtype), c in counts.items() if mtype == "document"
     }
@@ -682,10 +678,7 @@ async def get_collection_overview(
             {"cid": collection_id, "tag_limit": tag_limit},
         )
     ).all()
-    tags = [
-        CollectionTagChip(id=r[0], display_name=r[1], count=int(r[2]))
-        for r in tag_rows
-    ]
+    tags = [CollectionTagChip(id=r[0], display_name=r[1], count=int(r[2])) for r in tag_rows]
 
     # Member counts for the mini-stat row at the top of the tab.
     count_rows = (

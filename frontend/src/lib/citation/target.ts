@@ -54,3 +54,32 @@ export function targetToStateValue(target: CitationTarget): string {
 export function stateValueToWords(value: string | null | undefined): string[] {
   return normalise(value).split(" ").filter(Boolean)
 }
+
+/** A citation clicked in place, kept only until a new arrival retires it (see DocumentReader). */
+export interface InPlaceCitation {
+  against: string[]
+  words: string[]
+  page: number | null
+}
+
+/**
+ * The words and page a PDF viewer should search for right now.
+ *
+ * `inPlace` names the arrival it was clicked against so an old click never
+ * answers a new arrival; when it does not match, there is no click to honour
+ * and the words fall back to the arrival's own (page is not tracked for an
+ * arrival, since PDFViewer's own `initialPage` prop already carries it).
+ * A page threaded through here, and not left to whatever page the viewer
+ * happened to be on, is what lets a citation search its own page first
+ * instead of scanning the document from page 1 and stopping at the first
+ * coincidental match -- a heading recurring in the table of contents, for one.
+ */
+export function resolveInPlaceCitation(
+  inPlace: InPlaceCitation | null,
+  initialCitationWords: string[],
+): { words: string[]; page: number | null } {
+  if (inPlace?.against === initialCitationWords) {
+    return { words: inPlace.words, page: inPlace.page }
+  }
+  return { words: initialCitationWords, page: null }
+}

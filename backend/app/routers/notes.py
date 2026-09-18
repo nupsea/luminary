@@ -77,6 +77,9 @@ from app.services.note_graph import get_note_graph_service
 from app.services.note_search import get_note_search_service
 from app.services.note_title_generator import get_title_generator
 from app.services.notes_service import (
+    auto_tag_and_store_note as _auto_tag_and_store_note,
+)
+from app.services.notes_service import (
     backfill_missing_descriptions as _backfill_missing_descriptions,
 )
 from app.services.notes_service import (
@@ -120,6 +123,13 @@ def _schedule_description(note_id: str, content: str) -> None:
     if len(content.strip()) < 40:
         return
     task = asyncio.create_task(_generate_and_store_description(note_id, content))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+def _schedule_auto_tag(note_id: str, content: str) -> None:
+    """Fire-and-forget tag suggestion for a note saved with none."""
+    task = asyncio.create_task(_auto_tag_and_store_note(note_id, content))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
@@ -192,33 +202,13 @@ async def create_note(
         logger.info("Dedup: returning existing note %s", existing.id)
         return _to_response(existing)
 
-    # Automatic tag saving for new notes if none provided
+    # Tags given by the caller are kept as-is. A note saved with none gets
+    # suggested tags in the background (see `_schedule_auto_tag` below) rather
+    # than blocking this request on the tagger's LLM call: that call queues
+    # behind whatever else holds the model, and awaiting it here used to hang
+    # every note save -- and the "Open full note" navigation gated on it --
+    # for as long as the queue was busy.
     tags = [_nt for t in (req.tags or []) if (_nt := normalize_tag_slug(t))]
-    if not tags and req.content.strip():
-        try:
-            raw_tags = await _note_tagger_module.get_note_tagger().suggest_tags(req.content)
-            tags = [_nt for t in raw_tags if (_nt := normalize_tag_slug(t))]
-        except Exception:
-            logger.warning("Auto-tagging failed for note creation", exc_info=True)
-
-    # Re-check dedup AFTER auto-tagging. The first check at the top of this
-    # endpoint can be lost to a race when the client fires several POSTs in
-    # quick succession (e.g. Cmd+S held down): each request reads "no match"
-    # before any of them commits, and all three then create distinct rows.
-    # Auto-tagging widens that window because it can take seconds. Repeating
-    # the lookup here, with a freshly-evaluated cutoff, closes it: by this
-    # point any sibling request that arrived first will have committed, so
-    # we'll see its row and reuse it instead of inserting a fourth.
-    dedup_cutoff = datetime.now(UTC) - timedelta(seconds=5)
-    existing = await repo.find_for_dedup(
-        document_id=req.document_id,
-        section_id=req.section_id,
-        content_hash=content_hash,
-        cutoff=dedup_cutoff,
-    )
-    if existing is not None:
-        logger.info("Dedup (post-tag): returning existing note %s", existing.id)
-        return _to_response(existing)
 
     now = datetime.now(UTC)
     note = NoteModel(
@@ -235,7 +225,6 @@ async def create_note(
         updated_at=now,
     )
     note.tags = tags
-    logger.info("Auto-tagged new note %s with %d tags", note.id, len(tags))
     # Four-table transactional write: note + FTS index + tag index + source pivot must
     # all commit atomically; breaking this into a repo method adds no clarity.
     session.add(note)
@@ -272,6 +261,8 @@ async def create_note(
     _xp_task.add_done_callback(_background_tasks.discard)
 
     _schedule_description(note.id, note.content)
+    if not tags and req.content.strip():
+        _schedule_auto_tag(note.id, note.content)
 
     logger.info("Created note", extra={"note_id": note.id})
     return _to_response(note, source_document_ids=req.source_document_ids)

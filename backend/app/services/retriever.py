@@ -200,7 +200,6 @@ class HybridRetriever:
         hybrid retrieval can fall back to keyword-only results gracefully.
         """
         try:
-
             svc = _vector_store_module.get_lancedb_service()
             # Check if any vectors exist before running a search.
             if svc.count_for_document(document_ids[0] if document_ids else "") == 0:
@@ -325,9 +324,7 @@ class HybridRetriever:
         async with get_session_factory()() as session:
             rows = await self._fts_match(session, safe_query, document_ids, k)
             if len(rows) < k and len(terms) > 1:
-                or_rows = await self._fts_match(
-                    session, " OR ".join(terms), document_ids, k
-                )
+                or_rows = await self._fts_match(session, " OR ".join(terms), document_ids, k)
                 seen = {r.chunk_id for r in rows}
                 for r in or_rows:
                     if r.chunk_id not in seen:
@@ -455,40 +452,40 @@ class HybridRetriever:
     ) -> list[ScoredChunk]:
         """Full hybrid retrieval: vector(k=20) + keyword(k=20) fused via RRF + context expansion.
 
-        *expand_context=False* skips the neighbour-window expansion and returns
-        the raw ranked list. The eval harness needs this to measure L1 pool
-        recall exactly: expansion appends neighbours the cross-encoder never
-        saw, which would leak past the "reranked HR@k is bounded by pool
-        recall@depth" invariant the ablation exists to test.
+         *expand_context=False* skips the neighbour-window expansion and returns
+         the raw ranked list. The eval harness needs this to measure L1 pool
+         recall exactly: expansion appends neighbours the cross-encoder never
+         saw, which would leak past the "reranked HR@k is bounded by pool
+         recall@depth" invariant the ablation exists to test.
 
-        Diversity re-ranking is disabled when the query is scoped to a
-        single document. In that case the user is asking a focused
-        question and wants the highest-scoring chunks, not section
-        breadth -- the diversifier was authored for broad cross-document
-        queries where variety helps. Without this skip, top-scored
-        chunks from one chapter get bumped down by less-relevant chunks
-        from elsewhere in the same book and HR@5 collapses
+         Diversity re-ranking is disabled when the query is scoped to a
+         single document. In that case the user is asking a focused
+         question and wants the highest-scoring chunks, not section
+         breadth -- the diversifier was authored for broad cross-document
+         queries where variety helps. Without this skip, top-scored
+         chunks from one chapter get bumped down by less-relevant chunks
+         from elsewhere in the same book and HR@5 collapses
 
-        When *hyde* is True, generates a hypothetical answer via the local
-        LLM and uses ``"<query> <answer>"`` as the search query for both
-        vector and BM25. This bridges question/answer phrasing divergence
-       : the hypothetical contains likely answer vocabulary that
-        the bare question lacks. Falls back to the original query on LLM
-        failure so retrieval is never harder than the no-hyde baseline.
+         When *hyde* is True, generates a hypothetical answer via the local
+         LLM and uses ``"<query> <answer>"`` as the search query for both
+         vector and BM25. This bridges question/answer phrasing divergence
+        : the hypothetical contains likely answer vocabulary that
+         the bare question lacks. Falls back to the original query on LLM
+         failure so retrieval is never harder than the no-hyde baseline.
 
-        When *rerank* is True, the top-N RRF candidates are re-scored by a
-        cross-encoder and the top-k of that re-ranking is returned. The
-        cross-encoder reads (query, chunk) pairs jointly, so it catches
-        answer chunks whose vocabulary diverges from the question's surface
-        form -- the dominant remaining failure mode. Diversification
-        is skipped when reranking (the cross-encoder already optimises for
-        relevance, and section breadth would dilute the rerank signal).
-        Fails soft: any reranker error returns the RRF order unchanged.
+         When *rerank* is True, the top-N RRF candidates are re-scored by a
+         cross-encoder and the top-k of that re-ranking is returned. The
+         cross-encoder reads (query, chunk) pairs jointly, so it catches
+         answer chunks whose vocabulary diverges from the question's surface
+         form -- the dominant remaining failure mode. Diversification
+         is skipped when reranking (the cross-encoder already optimises for
+         relevance, and section breadth would dilute the rerank signal).
+         Fails soft: any reranker error returns the RRF order unchanged.
 
-        *rerank_depth* overrides the settings-default candidate pool fed to
-        the cross-encoder; *rerank_threshold* overrides the settings-default
-        score cut. Both are per-request so the eval harness can sweep them
-        without process restarts.
+         *rerank_depth* overrides the settings-default candidate pool fed to
+         the cross-encoder; *rerank_threshold* overrides the settings-default
+         score cut. Both are per-request so the eval harness can sweep them
+         without process restarts.
         """
         settings = _config_module.get_settings()
         # Correct typo'd query tokens to their nearest corpus term BEFORE any
@@ -638,7 +635,6 @@ class HybridRetriever:
     ) -> list[str]:
         """Search image_vectors_v1 by embedding similarity; return matching image_ids."""
         try:
-
             rows = _vector_store_module.get_lancedb_service().search_image_vectors(
                 query_vector, document_ids, k=k, threshold=threshold
             )
@@ -699,7 +695,6 @@ class HybridRetriever:
         Returns (chunks, deduplicated_image_ids).
         """
         try:
-
             chunks = await self.retrieve(
                 query,
                 document_ids,

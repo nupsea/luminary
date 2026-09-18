@@ -147,9 +147,7 @@ async def test_patch_title_flips_auto_flag_off(test_db):
         ).json()
         note_id = created["id"]
 
-        patched = (
-            await c.patch(f"/notes/{note_id}", json={"title": "My Custom Title"})
-        ).json()
+        patched = (await c.patch(f"/notes/{note_id}", json={"title": "My Custom Title"})).json()
         assert patched["title"] == "My Custom Title"
         assert patched["title_auto_generated"] is False
 
@@ -169,9 +167,7 @@ async def test_patch_empty_title_clears_to_null(test_db):
         note_id = created["id"]
 
         await c.patch(f"/notes/{note_id}", json={"title": "A"})  # set
-        cleared = (
-            await c.patch(f"/notes/{note_id}", json={"title": "   "})
-        ).json()
+        cleared = (await c.patch(f"/notes/{note_id}", json={"title": "   "})).json()
         assert cleared["title"] is None
         assert cleared["title_auto_generated"] is False
 

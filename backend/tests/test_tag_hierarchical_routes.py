@@ -28,9 +28,7 @@ def client():
 def hierarchical_tag(client):
     """A two-level tag, created the way the product creates one."""
     client.delete("/tags/probe/nested-child")
-    resp = client.post(
-        "/tags", json={"id": "Probe/Nested_Child", "display_name": "Nested Child"}
-    )
+    resp = client.post("/tags", json={"id": "Probe/Nested_Child", "display_name": "Nested Child"})
     assert resp.status_code == 201, resp.text
     tag_id = resp.json()["id"]
     assert "/" in tag_id, f"expected a hierarchical id, got {tag_id!r}"
@@ -68,9 +66,10 @@ def test_a_hierarchical_tag_can_be_deleted(client, hierarchical_tag):
 def test_a_flat_tag_still_works(client):
     """The greedy path parameter must not change the single-segment case."""
     client.delete("/tags/probe-flat")
-    assert client.post(
-        "/tags", json={"id": "probe-flat", "display_name": "Probe Flat"}
-    ).status_code == 201
+    assert (
+        client.post("/tags", json={"id": "probe-flat", "display_name": "Probe Flat"}).status_code
+        == 201
+    )
     assert client.delete("/tags/probe-flat").status_code == 204
 
 
@@ -79,6 +78,5 @@ def test_the_literal_routes_still_win(client):
     for path in ("/tags/tree", "/tags/graph", "/tags/autocomplete?q=a"):
         resp = client.get(path)
         assert resp.status_code == 200, (
-            f"{path} returned {resp.status_code} -- the greedy tag route is "
-            "shadowing a literal one"
+            f"{path} returned {resp.status_code} -- the greedy tag route is shadowing a literal one"
         )

@@ -147,7 +147,6 @@ def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
     fire_and_forget(coro, _background_tasks, label="study background task")
 
 
-
 # Serialize background teachback evaluations to avoid SQLite "database is locked"
 # when multiple concurrent tasks try to write (invariant I-1).
 _teachback_eval_sem = asyncio.Semaphore(1)
@@ -291,9 +290,7 @@ async def _card_scope_passage(card: FlashcardModel, session: AsyncSession) -> st
     excerpt = (card.source_excerpt or "").strip()
     if len(ids) < 2:
         return ""
-    rows = await session.execute(
-        select(ChunkModel).where(ChunkModel.id.in_(ids))
-    )
+    rows = await session.execute(select(ChunkModel).where(ChunkModel.id.in_(ids)))
     runs = contiguous_runs(list(rows.scalars().all()))
     if len(runs) < 2:
         return ""
@@ -326,9 +323,7 @@ async def _source_passage(card: FlashcardModel, session: AsyncSession) -> str:
     from app.services.flashcard_parsers import _normalise_for_match  # noqa: PLC0415
 
     try:
-        text = await _card_scope_passage(card, session) or await passage_for_card(
-            card, session
-        )
+        text = await _card_scope_passage(card, session) or await passage_for_card(card, session)
     except Exception:  # noqa: BLE001
         logger.warning("teachback: could not rebuild the passage for card %s", card.id)
         return ""
@@ -685,9 +680,7 @@ async def get_due_cards(
 
     # Build chunk_id -> section_id map for SourcePanel
     repo = StudyRepo(session)
-    chunk_to_section = await repo.chunk_section_id_map(
-        [c.chunk_id for c in cards if c.chunk_id]
-    )
+    chunk_to_section = await repo.chunk_section_id_map([c.chunk_id for c in cards if c.chunk_id])
 
     return [_to_response(c, section_id=chunk_to_section.get(c.chunk_id or "")) for c in cards]
 
@@ -769,8 +762,8 @@ async def get_session_plan(
 
     # (a) Count all due flashcards (no document filter). Inline because
     # this is a single-purpose count -- no shared shape with /due-count.
-    due_stmt = select(func.count()).select_from(FlashcardModel).where(
-        FlashcardModel.due_date <= now
+    due_stmt = (
+        select(func.count()).select_from(FlashcardModel).where(FlashcardModel.due_date <= now)
     )
     due_count = (await session.execute(due_stmt)).scalar_one()
 
@@ -880,12 +873,16 @@ async def _write_back_concept_mastery(
     if not card_ids:
         return
     rows = (
-        await session.execute(
-            select(FlashcardModel.concept_id).where(
-                FlashcardModel.id.in_(card_ids), FlashcardModel.concept_id.is_not(None)
+        (
+            await session.execute(
+                select(FlashcardModel.concept_id).where(
+                    FlashcardModel.id.in_(card_ids), FlashcardModel.concept_id.is_not(None)
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     concept_ids = [c for c in rows if c]
     if not concept_ids:
         return
@@ -912,9 +909,7 @@ async def end_session(
 
     if tb_rows:
         # Latest attempt per card, not per submission: see _latest_attempt_per_card.
-        cards_reviewed, cards_correct, accuracy_pct, tb_pending_count = _teachback_tally(
-            tb_rows
-        )
+        cards_reviewed, cards_correct, accuracy_pct, tb_pending_count = _teachback_tally(tb_rows)
     else:
         # Latest event per card, for the same reason the teach-back arm reads its
         # latest attempt: a card graded twice in one sitting is one card
@@ -1048,9 +1043,7 @@ async def get_collection_study_dashboard(
     # Collections are small (typically < 200 rows) so this beats recursive CTEs for
     # clarity and keeps query count flat regardless of tree depth.
     all_colls_rows = (
-        await session.execute(
-            select(CollectionModel.id, CollectionModel.parent_collection_id)
-        )
+        await session.execute(select(CollectionModel.id, CollectionModel.parent_collection_id))
     ).all()
     children_of: dict[str | None, list[str]] = defaultdict(list)
     for cid, pid in all_colls_rows:
@@ -1125,12 +1118,12 @@ async def get_collection_study_dashboard(
                             else_=0,
                         )
                     ).label("due_today"),
-                    func.sum(
-                        case((FlashcardModel.fsrs_state == "new", 1), else_=0)
-                    ).label("new_today"),
-                    func.sum(
-                        case((FlashcardModel.fsrs_stability > 30.0, 1), else_=0)
-                    ).label("mastered"),
+                    func.sum(case((FlashcardModel.fsrs_state == "new", 1), else_=0)).label(
+                        "new_today"
+                    ),
+                    func.sum(case((FlashcardModel.fsrs_stability > 30.0, 1), else_=0)).label(
+                        "mastered"
+                    ),
                 ).where(or_(*where_clauses))
             )
         ).one()
@@ -1208,9 +1201,7 @@ async def get_collection_study_dashboard(
         )
         note_count = len(tag_to_notes.get(t, ()))
         if card_count > 0 or note_count > 0:
-            topics.append(
-                CollectionTopic(tag=t, card_count=card_count, note_count=note_count)
-            )
+            topics.append(CollectionTopic(tag=t, card_count=card_count, note_count=note_count))
     topics.sort(key=lambda x: (x.card_count, x.note_count), reverse=True)
     topics = topics[:10]
 
@@ -1235,9 +1226,7 @@ async def get_collection_study_dashboard(
         ).all()
         for did, dtitle, dchunks in doc_rows:
             sources.append(
-                CollectionSource(
-                    id=did, title=dtitle, type="document", weight=int(dchunks or 0)
-                )
+                CollectionSource(id=did, title=dtitle, type="document", weight=int(dchunks or 0))
             )
     if note_ids:
         note_snippet_rows = (
@@ -1254,9 +1243,7 @@ async def get_collection_study_dashboard(
             # express note size in chunk-equivalents (~1500 chars/chunk) so notes
             # share a unit with documents; never 0 for a non-empty note.
             note_weight = max(1, int((chars or 0) / 1500)) if chars else 0
-            sources.append(
-                CollectionSource(id=nid, title=ntitle, type="note", weight=note_weight)
-            )
+            sources.append(CollectionSource(id=nid, title=ntitle, type="note", weight=note_weight))
 
     # 7. Sub-enclaves: for each direct child we already know its full descendant set.
     # Map descendant collection ID -> sub-enclave root, then bucket the members rows
@@ -1281,12 +1268,8 @@ async def get_collection_study_dashboard(
     # hierarchy_ids members. Sub-enclave members can include docs/notes outside the
     # parent hierarchy (when a child enclave directly holds an item the parent does
     # not). Top up with one extra pair of queries for any missing IDs.
-    missing_doc_ids = (
-        set().union(*sub_doc_ids.values()) if sub_doc_ids else set()
-    ) - doc_ids
-    missing_note_ids = (
-        set().union(*sub_note_ids.values()) if sub_note_ids else set()
-    ) - note_ids
+    missing_doc_ids = (set().union(*sub_doc_ids.values()) if sub_doc_ids else set()) - doc_ids
+    missing_note_ids = (set().union(*sub_note_ids.values()) if sub_note_ids else set()) - note_ids
     if missing_doc_ids:
         rows = (
             await session.execute(
@@ -1419,9 +1402,7 @@ async def list_sessions(
             )
             .group_by(TeachbackResultModel.session_id)
         )
-        pending_by_session = {
-            sid: n for sid, n in pending_result.all() if sid is not None
-        }
+        pending_by_session = {sid: n for sid, n in pending_result.all() if sid is not None}
 
     items: list[SessionListItem] = []
     for sess in sessions:
@@ -1487,8 +1468,6 @@ async def get_session_cards(
     ]
 
 
-
-
 @router.post(
     "/sessions/{session_id}/cards",
     response_model=AppendSessionCardsResponse,
@@ -1511,9 +1490,7 @@ async def append_session_cards(
     """
     sess = await repo.get_session_or_404(session_id)
     live_ids = set(await FlashcardRepo(repo.session).list_existing_ids_in(req.card_ids))
-    added = repo.append_planned_cards(
-        sess, [cid for cid in req.card_ids if cid in live_ids]
-    )
+    added = repo.append_planned_cards(sess, [cid for cid in req.card_ids if cid in live_ids])
     if added:
         await repo.commit_session(sess)
     planned_count = len(sess.planned_card_ids or [])
@@ -1562,9 +1539,7 @@ async def get_session_remaining_cards(
             "remaining-cards: session has empty planned_card_ids",
             extra={"session_id": session_id, "ended_at": str(sess.ended_at)},
         )
-        return SessionRemainingResponse(
-            answered_count=0, planned_count=0, cards=[]
-        )
+        return SessionRemainingResponse(answered_count=0, planned_count=0, cards=[])
 
     # A card is "answered" if it has a teach-back result OR a review event for this session.
     tb_result = await db.execute(
@@ -1574,9 +1549,7 @@ async def get_session_remaining_cards(
     )
     answered: set[str] = {row[0] for row in tb_result.all()}
     rev_result = await db.execute(
-        select(ReviewEventModel.flashcard_id).where(
-            ReviewEventModel.session_id == session_id
-        )
+        select(ReviewEventModel.flashcard_id).where(ReviewEventModel.session_id == session_id)
     )
     answered.update(row[0] for row in rev_result.all())
 
@@ -1873,9 +1846,7 @@ async def _evaluate_teachback_bg(
     factory = get_session_factory()
     async with factory() as read_session:
         card_row = (
-            await read_session.execute(
-                select(FlashcardModel).where(FlashcardModel.id == card_id)
-            )
+            await read_session.execute(select(FlashcardModel).where(FlashcardModel.id == card_id))
         ).scalar_one_or_none()
         if card_row is not None:
             source = await _source_passage(card_row, read_session)
@@ -1913,9 +1884,7 @@ async def _evaluate_teachback_bg(
             try:
                 # Update the pending row
                 result = await session.execute(
-                    select(TeachbackResultModel).where(
-                        TeachbackResultModel.id == tb_id
-                    )
+                    select(TeachbackResultModel).where(TeachbackResultModel.id == tb_id)
                 )
                 tb_row = result.scalar_one_or_none()
                 if tb_row is None:
@@ -1975,24 +1944,18 @@ async def _evaluate_teachback_bg(
                 )
 
             except Exception:
-                logger.exception(
-                    "Teachback background evaluation failed for %s", tb_id
-                )
+                logger.exception("Teachback background evaluation failed for %s", tb_id)
                 try:
                     await session.rollback()
                     result = await session.execute(
-                        select(TeachbackResultModel).where(
-                            TeachbackResultModel.id == tb_id
-                        )
+                        select(TeachbackResultModel).where(TeachbackResultModel.id == tb_id)
                     )
                     tb_row = result.scalar_one_or_none()
                     if tb_row:
                         tb_row.status = "error"
                         await session.commit()
                 except Exception:  # noqa: BLE001
-                    logger.exception(
-                        "Failed to mark teachback %s as error", tb_id
-                    )
+                    logger.exception("Failed to mark teachback %s as error", tb_id)
                 return
 
     # The verdict is on screen by here. What follows costs another LLM call and
@@ -2036,9 +1999,7 @@ async def _teachback_correction_bg(
     factory = get_session_factory()
     async with factory() as read_session:
         correction_card = (
-            await read_session.execute(
-                select(FlashcardModel).where(FlashcardModel.id == card_id)
-            )
+            await read_session.execute(select(FlashcardModel).where(FlashcardModel.id == card_id))
         ).scalar_one_or_none()
     if correction_card is None:
         return
@@ -2080,9 +2041,7 @@ async def _teachback_correction_bg(
                     )
                 await session.commit()
             except Exception:
-                logger.exception(
-                    "Teachback correction card failed for %s", tb_id
-                )
+                logger.exception("Teachback correction card failed for %s", tb_id)
                 await session.rollback()
 
 
@@ -2104,9 +2063,7 @@ async def teachback_async(
     # Ensure the study session is marked as teachback mode
     if req.session_id:
         sess_result = await session.execute(
-            select(StudySessionModel).where(
-                StudySessionModel.id == req.session_id
-            )
+            select(StudySessionModel).where(StudySessionModel.id == req.session_id)
         )
         study_sess = sess_result.scalar_one_or_none()
         if study_sess and study_sess.mode != "teachback":
@@ -2175,9 +2132,7 @@ async def get_teachback_results(
             try:
                 rubric_response = TeachbackRubricResponse(
                     accuracy=RubricDimensionResponse(**tb.rubric_json["accuracy"]),
-                    completeness=RubricCompletenessResponse(
-                        **tb.rubric_json["completeness"]
-                    ),
+                    completeness=RubricCompletenessResponse(**tb.rubric_json["completeness"]),
                     clarity=RubricDimensionResponse(**tb.rubric_json["clarity"]),
                 )
             except (KeyError, TypeError, ValueError):
@@ -2231,9 +2186,7 @@ async def get_session_teachback_results(
             try:
                 rubric_response = TeachbackRubricResponse(
                     accuracy=RubricDimensionResponse(**tb.rubric_json["accuracy"]),
-                    completeness=RubricCompletenessResponse(
-                        **tb.rubric_json["completeness"]
-                    ),
+                    completeness=RubricCompletenessResponse(**tb.rubric_json["completeness"]),
                     clarity=RubricDimensionResponse(**tb.rubric_json["clarity"]),
                 )
             except (KeyError, TypeError, ValueError):
@@ -2478,14 +2431,13 @@ async def get_decay_debt(
     # Collect at-risk card IDs grouped by document.
     doc_ids: list[str] = list({c[1] for c in cards})
     docs_result = await session.execute(
-        select(DocumentModel.id, DocumentModel.title).where(
-            DocumentModel.id.in_(doc_ids)
-        )
+        select(DocumentModel.id, DocumentModel.title).where(DocumentModel.id.in_(doc_ids))
     )
     doc_title_map: dict[str, str] = {r[0]: r[1] for r in docs_result.all()}
 
     # Group at-risk cards by document.
     from collections import defaultdict
+
     doc_cards: dict[str, list[tuple[float, int]]] = defaultdict(list)
     for _card_id, doc_id, stability, due_date in cards:
         # days elapsed since the scheduled due date (positive = overdue)
@@ -2494,9 +2446,8 @@ async def get_decay_debt(
         # stability is measured in days; retention at 'days_since_due' days past due
         current_retention = math.exp(-max(0.0, days_since_due) / stability)
         # R_target = e^(-t/S)  =>  t = -S * ln(R_target)
-        days_to_threshold = (
-            -stability * math.log(_DECAY_DEBT_RETENTION_THRESHOLD)
-            - max(0.0, days_since_due)
+        days_to_threshold = -stability * math.log(_DECAY_DEBT_RETENTION_THRESHOLD) - max(
+            0.0, days_since_due
         )
         at_risk = (
             current_retention < _DECAY_DEBT_RETENTION_THRESHOLD
@@ -2628,8 +2579,6 @@ async def get_section_heatmap(
 # Study path endpoints
 
 
-
-
 @router.get("/path", response_model=StudyPathAPIResponse)
 async def get_study_path(
     document_id: str = Query(...),
@@ -2754,9 +2703,7 @@ def _parse_teachback_response(raw: str) -> dict | None:
     # the headline has to be a function of the breakdown printed under it.
     score = _score_from_dimensions(parsed)
     if score is None:
-        logger.warning(
-            "Teachback reply carried no usable dimensions", extra={"raw": raw[:200]}
-        )
+        logger.warning("Teachback reply carried no usable dimensions", extra={"raw": raw[:200]})
         return None
     parsed["score"] = score
     for field in ("correct_points", "missing_points", "misconceptions"):
@@ -2791,9 +2738,7 @@ async def _llm_correction_card_payload(
         question=card.question,
         answer=card.answer,
     )
-    raw = await llm.generate(
-        prompt=prompt, system=_CORRECTION_SYSTEM, background=background
-    )
+    raw = await llm.generate(prompt=prompt, system=_CORRECTION_SYSTEM, background=background)
     cleaned = raw.strip()
     if cleaned.startswith("```"):
         lines = cleaned.splitlines()

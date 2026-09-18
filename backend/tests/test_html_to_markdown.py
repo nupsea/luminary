@@ -69,8 +69,7 @@ class TestLists:
 class TestBlocks:
     def test_table_becomes_a_markdown_table(self):
         out = _md(
-            "<table><tr><th>Model</th><th>Score</th></tr>"
-            "<tr><td>A</td><td>0.91</td></tr></table>"
+            "<table><tr><th>Model</th><th>Score</th></tr><tr><td>A</td><td>0.91</td></tr></table>"
         )
         assert "| Model | Score |" in out
         assert "| A | 0.91 |" in out
@@ -154,3 +153,19 @@ class TestBlocks:
         """Brackets the rule above: a real marker is a link, and stays one."""
         out = _md('<p>As shown<sup><a href="#fn1">1</a></sup>.</p>')
         assert "(#fn1)" in out
+
+
+class TestComments:
+    def test_an_html_comment_is_never_content(self):
+        """Framer plants bare `<!--$-->` hydration markers around rich-text spans;
+
+        Comment is a NavigableString subclass, so left unchecked its `$` / `/$`
+        text read as prose and wrapped the link it straddled in bogus
+        inline-math delimiters: `$[3 to 329 seconds](https://...)/$`.
+        """
+        out = _md('<p>Speed is <!--$--><a href="https://x.dev">70ms</a><!--/$--> flat.</p>')
+        assert out.strip() == "Speed is [70ms](https://x.dev) flat."
+
+    def test_a_comment_between_block_elements_leaves_no_stray_line(self):
+        out = _md("<p>First.</p><!-- section boundary --><p>Second.</p>")
+        assert out.strip() == "First.\n\nSecond."

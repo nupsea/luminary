@@ -143,7 +143,7 @@ def test_the_bands_agree_across_platforms(sh, ps1):
     assert '"$_gb" -lt 16 ]' in sh, "install.sh must warn under the floor"
     assert "$MemGB -gt 24" in ps1
     assert "$MemGB -lt 16" in ps1, "install.ps1 must warn under the floor"
-    assert 'public' not in sh.split("_default_profile")[1][:400]
+    assert "public" not in sh.split("_default_profile")[1][:400]
 
 
 def test_the_desktop_shell_agrees_about_the_residency_band():
@@ -301,6 +301,7 @@ def test_bootstrap_uses_the_same_memory_bands_as_install_sh():
     assert re.search(r"MEM_GB.*-lt 16", boot), "bootstrap.sh lost the 16GB floor warning"
     for name, source in (("install.sh", _SH.read_text(encoding="utf-8")), ("bootstrap.sh", boot)):
         assert "performance" in source and "standard" in source, f"{name} lost a profile"
+
 
 def test_start_sh_does_not_assert_a_model_name():
     """A pre-flight warning that names the wrong model sends the user to pull it."""

@@ -211,8 +211,7 @@ class TestFrontMatter:
 
     def test_a_paginated_contents_is_front_matter(self) -> None:
         leaders = (
-            "Contents\n1 Introduction . . . . . . . . . . . . 9\n"
-            "2 Methods . . . . . . . . 14\n"
+            "Contents\n1 Introduction . . . . . . . . . . . . 9\n2 Methods . . . . . . . . 14\n"
         )
         assert looks_like_front_matter(leaders) is True
 
@@ -281,8 +280,9 @@ class TestFormIsStructuralOnly:
         )
         assert classify_form(rules, [], 4000, "txt") == "reference"
 
-        articles = "".join(f"Section {i}.\nAll legislative powers herein granted\n"
-                           for i in range(1, 30))
+        articles = "".join(
+            f"Section {i}.\nAll legislative powers herein granted\n" for i in range(1, 30)
+        )
         assert classify_form(articles, [], 3000, "txt") == "reference"
 
     def test_chapters_do_not_make_a_novel_a_reference(self) -> None:
@@ -301,8 +301,9 @@ class TestFormIsStructuralOnly:
         assert classify_form(post, [], 1700, "md") == "article"
 
     def test_entries_are_dated_units(self) -> None:
-        journal = "".join(f"Date: 2026-06-{d:02d}\nWoke before the alarm again.\n\n"
-                          for d in range(1, 9))
+        journal = "".join(
+            f"Date: 2026-06-{d:02d}\nWoke before the alarm again.\n\n" for d in range(1, 9)
+        )
         assert classify_form(journal, [], 600, "txt") == "entries"
 
     def test_a_very_long_manual_is_still_a_reference(self) -> None:

@@ -49,8 +49,14 @@ def _state():
         "lateral_edges": [],
         "hierarchy": {
             "concepts": [
-                {"label": "data modeling", "sun": "data modeling", "entities": _ENTITIES,
-                 "document_ids": ["bookA"], "salience": 5.0, "centroid": cen},
+                {
+                    "label": "data modeling",
+                    "sun": "data modeling",
+                    "entities": _ENTITIES,
+                    "document_ids": ["bookA"],
+                    "salience": 5.0,
+                    "centroid": cen,
+                },
             ],
         },
     }
@@ -59,10 +65,18 @@ def _state():
 def _card(card_id: str, concept_slug: str, chunk_id: str, stability: float) -> FlashcardModel:
     now = datetime.now(UTC)
     return FlashcardModel(
-        id=card_id, document_id="bookA", chunk_id=chunk_id,
-        question="q", answer="a", source_excerpt="src",
-        fsrs_stability=stability, fsrs_state="review", last_review=now,
-        concept_id="old-id", concept_slug=concept_slug, mapping_status="mapped",
+        id=card_id,
+        document_id="bookA",
+        chunk_id=chunk_id,
+        question="q",
+        answer="a",
+        source_excerpt="src",
+        fsrs_stability=stability,
+        fsrs_state="review",
+        last_review=now,
+        concept_id="old-id",
+        concept_slug=concept_slug,
+        mapping_status="mapped",
     )
 
 

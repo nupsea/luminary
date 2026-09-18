@@ -247,9 +247,7 @@ class KuzuConceptRepo:
         self, concept_id: str, slug: str, label: str, kind: str, status: str
     ) -> None:
         """Create or update a Concept node. Idempotent on concept_id."""
-        existing = self._conn.execute(
-            "MATCH (c:Concept {id: $id}) RETURN c.id", {"id": concept_id}
-        )
+        existing = self._conn.execute("MATCH (c:Concept {id: $id}) RETURN c.id", {"id": concept_id})
         if existing.has_next():
             self._conn.execute(
                 "MATCH (c:Concept {id: $id})"
@@ -327,9 +325,7 @@ class KuzuConceptRepo:
     def delete_concept_node(self, concept_id: str) -> None:
         """Delete a Concept node and its edges. Idempotent."""
         try:
-            self._conn.execute(
-                "MATCH (c:Concept {id: $id}) DETACH DELETE c", {"id": concept_id}
-            )
+            self._conn.execute("MATCH (c:Concept {id: $id}) DETACH DELETE c", {"id": concept_id})
         except Exception:
             logger.warning("delete_concept_node failed for %s", concept_id, exc_info=True)
 

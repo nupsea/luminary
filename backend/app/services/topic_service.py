@@ -27,18 +27,48 @@ logger = logging.getLogger(__name__)
 # front/back-matter + metadata headings that are navigation/boilerplate, never study topics
 _EXACT_JUNK = frozenset(
     {
-        "index", "contents", "table of contents", "copyright", "copyright page",
-        "dedication", "acknowledgments", "acknowledgements", "about the author",
-        "about the authors", "about the publisher", "about this book", "bibliography",
-        "references", "glossary", "colophon", "title page", "imprint", "credits",
-        "list of figures", "list of tables", "list of illustrations", "frontmatter",
-        "front matter", "back matter", "endnotes", "footnotes", "permissions",
+        "index",
+        "contents",
+        "table of contents",
+        "copyright",
+        "copyright page",
+        "dedication",
+        "acknowledgments",
+        "acknowledgements",
+        "about the author",
+        "about the authors",
+        "about the publisher",
+        "about this book",
+        "bibliography",
+        "references",
+        "glossary",
+        "colophon",
+        "title page",
+        "imprint",
+        "credits",
+        "list of figures",
+        "list of tables",
+        "list of illustrations",
+        "frontmatter",
+        "front matter",
+        "back matter",
+        "endnotes",
+        "footnotes",
+        "permissions",
     }
 )
 # substrings that mark boilerplate wherever they appear
 _CONTAINS_JUNK = (
-    "copyright", "all rights reserved", "isbn", "newsletter", "subscribe",
-    "©", "oreilly.com", "o'reilly media", "first edition", "printed in",
+    "copyright",
+    "all rights reserved",
+    "isbn",
+    "newsletter",
+    "subscribe",
+    "©",
+    "oreilly.com",
+    "o'reilly media",
+    "first edition",
+    "printed in",
 )
 
 # a "good" topic level has chapter-like granularity; fewer is too coarse (DDIA's 3 Parts),
@@ -215,9 +245,7 @@ class TopicService:
     async def _llm_outline(
         self, session: AsyncSession, doc: DocumentModel, sections: list[SectionModel]
     ) -> list[dict]:
-        headings = [
-            _clean_title(s.heading) for s in sections if not is_junk_heading(s.heading)
-        ]
+        headings = [_clean_title(s.heading) for s in sections if not is_junk_heading(s.heading)]
         # span the WHOLE document so later chapters aren't cut off (DDIA's ch.6-12 live past the
         # first 80 headings). Even-sample only if there are too many to fit context.
         cap = 250
@@ -250,9 +278,7 @@ class TopicService:
             for t in (items or [])[:20]:
                 title = (t if isinstance(t, str) else t.get("title", "")).strip()
                 if title and not is_junk_heading(title):
-                    out.append(
-                        {"title": title, "level": 1, "section_id": None, "page_start": None}
-                    )
+                    out.append({"title": title, "level": 1, "section_id": None, "page_start": None})
             return out
         except Exception:
             logger.warning("LLM outline failed for doc %s", doc.id, exc_info=True)

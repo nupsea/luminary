@@ -93,9 +93,7 @@ def test_strip_source_ref_removes_trailing_citation() -> None:
 
 
 def test_strip_source_ref_handles_chapter_forms() -> None:
-    assert strip_source_ref("The log keeps replicas in sync. In Chapter 3.").endswith(
-        "in sync."
-    )
+    assert strip_source_ref("The log keeps replicas in sync. In Chapter 3.").endswith("in sync.")
     out = strip_source_ref("Quorums overlap reads and writes. See Section 5.2")
     assert "See Section" not in out
 

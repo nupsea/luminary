@@ -59,8 +59,7 @@ class TestGroundingState:
         from app.services.flashcard_prompts import EXAMPLE_SOURCE_EXCERPT
 
         assert (
-            grounding_state(EXAMPLE_SOURCE_EXCERPT, EXAMPLE_SOURCE_EXCERPT)
-            == GROUNDING_UNSUPPORTED
+            grounding_state(EXAMPLE_SOURCE_EXCERPT, EXAMPLE_SOURCE_EXCERPT) == GROUNDING_UNSUPPORTED
         )
 
 
@@ -82,9 +81,7 @@ class TestQuoteEdges:
 
     def test_a_trailing_clause_the_document_does_not_have_does_not_match(self):
         """Content, not punctuation -- this must stay rejected."""
-        assert not excerpt_is_verbatim(
-            "the weaving was never done and the suitors left", _PASSAGE
-        )
+        assert not excerpt_is_verbatim("the weaving was never done and the suitors left", _PASSAGE)
 
 
 @pytest.fixture()
@@ -291,9 +288,7 @@ async def test_the_factuality_audit_skips_cards_whose_passage_is_gone(test_db, m
     async with test_db() as session:
         # `source_chunk_ids` names chunks that no longer exist, so nothing can be
         # rebuilt -- the state a re-ingest leaves behind.
-        session.add(
-            _card(doc_id, "she undid her work each night", source_chunk_ids=["gone-1"])
-        )
+        session.add(_card(doc_id, "she undid her work each night", source_chunk_ids=["gone-1"]))
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:

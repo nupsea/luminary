@@ -1,10 +1,10 @@
-import html
 import logging
 import re
 from collections import Counter
 from pathlib import Path
 
 import fitz  # PyMuPDF
+from bs4 import BeautifulSoup
 from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
@@ -13,53 +13,188 @@ from app.services.source_text import read_source_text
 from app.services.universal_parser import UniversalParser
 from app.types import ParsedDocument, Section
 
-# HTML tag stripper for EPUB content
+# HTML tag stripper fallback and whitespace normalizer
 _RE_HTML_TAGS = re.compile(r"<[^>]+>")
 _RE_WHITESPACE = re.compile(r"\s+")
-
-# An EPUB may pack many chapters into one document, so sections come from
-# headings rather than files.
-_RE_EPUB_HEADING = re.compile(r"<h([1-6])[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
-# Block ends become paragraph breaks before tags are stripped; collapsing all
-# whitespace first would leave each chapter a single run-on line.
-_RE_EPUB_BLOCK_END = re.compile(
-    r"</(?:p|div|h[1-6]|li|blockquote|tr|section|article)\s*>|<br\s*/?>",
-    re.IGNORECASE,
-)
 _RE_BLANK_RUN = re.compile(r"\n{3,}")
 _RE_INLINE_SPACE = re.compile(r"[ \t\r\f\v]+")
 
 
-def _epub_text(fragment: str) -> str:
-    """HTML fragment to reading text, with paragraph breaks preserved."""
-    text = _RE_EPUB_BLOCK_END.sub("\n\n", fragment)
-    text = _RE_HTML_TAGS.sub(" ", text)
-    text = html.unescape(text)
-    text = _RE_INLINE_SPACE.sub(" ", text)
-    text = "\n".join(line.strip() for line in text.split("\n"))
-    return _RE_BLANK_RUN.sub("\n\n", text).strip()
+def _epub_html_to_markdown(html_content: str) -> str:
+    """Convert EPUB XHTML fragment to rich Markdown.
+
+    Preserves:
+    - Code blocks (<pre><code>) with language tag, indentation, and formatting
+    - Inline code (<code>)
+    - Headings (<h1>..<h6>)
+    - Figures and images (<figure>, <img>) with captions and [Figure: ...] labels
+    - Lists (<ul>, <ol>, <li>)
+    - Tables (<table>)
+    - Blockquotes (<blockquote>)
+    - Paragraph breaks
+    """
+    if not html_content or not html_content.strip():
+        return ""
+    soup = BeautifulSoup(html_content, "html.parser")
+    for s in soup(["script", "style", "head", "meta", "link"]):
+        s.decompose()
+
+    # Preformatted code blocks: preserve exact indentation, newlines, and code fences
+    for pre in soup.find_all("pre"):
+        lang = pre.get("data-code-language", "") or pre.get("data-language", "")
+        if not lang:
+            code_tag = pre.find("code")
+            raw_cls = pre.get("class")
+            pre_cls = raw_cls if isinstance(raw_cls, list) else [raw_cls or ""]
+            tag_cls = (
+                code_tag.get("class")
+                if code_tag and isinstance(code_tag.get("class"), list)
+                else [code_tag.get("class") or ""]
+                if code_tag
+                else []
+            )
+            classes = " ".join(pre_cls + tag_cls)
+            m = re.search(
+                r"language-(\w+)|lang-(\w+)|python|bash|json|sql|javascript|typescript|"
+                r"yaml|rust|go|cpp|c\+\+|html|css",
+                classes,
+                re.IGNORECASE,
+            )
+            if m:
+                matched = m.group(1) or m.group(2) or m.group(0)
+                lang = matched.replace("language-", "").replace("lang-", "")
+        code_text = pre.get_text()
+        pre.replace_with(f"\n\n```{lang}\n{code_text.strip()}\n```\n\n")
+
+    # Inline code
+    for code in soup.find_all("code"):
+        code.replace_with(f"`{code.get_text()}`")
+
+    # Figures and images
+    for fig in soup.find_all("figure"):
+        img = fig.find("img")
+        # A figure without an image (a listing, a table) is converted below by its
+        # own elements; collapsing it to a caption here would drop its body.
+        if img is None:
+            continue
+        caption = fig.find(["figcaption", "h6", "h5", "p"])
+        cap_text = caption.get_text().strip() if caption else ""
+        # A blank line inside `![...]` ends the paragraph there, per CommonMark --
+        # so an auto-generated alt text like "A close up of a sign\n\nDescription
+        # automatically generated" (seen verbatim on an O'Reilly EPUB) silently
+        # broke the image into two stray paragraphs of literal `![...]`/`](...)`
+        # text, with no <img> at all. Collapsed once here, before it ever reaches
+        # the bracket.
+        alt = _RE_WHITESPACE.sub(" ", (img.get("alt") if img else "") or "").strip()
+        src = (img.get("src") if img else "") or ""
+        lines = []
+        if alt:
+            lines.append(f"[Figure: {alt}]")
+        if cap_text and cap_text != alt:
+            lines.append(cap_text)
+        caption_markdown = "\n".join(f"*{line}*" for line in lines) if lines else "*[Figure]*"
+        bracket_text = alt or _RE_WHITESPACE.sub(" ", cap_text).strip() or "Figure"
+        fig.replace_with(f"\n\n![{bracket_text}]({src})\n{caption_markdown}\n\n")
+
+    for img in soup.find_all("img"):
+        alt = _RE_WHITESPACE.sub(" ", img.get("alt", "") or img.get("title", "")).strip()
+        src = img.get("src", "")
+        label = f"\n*[Figure: {alt}]*\n" if alt else ""
+        img.replace_with(f"\n\n![{alt or 'Figure'}]({src}){label}\n\n")
+
+    # Headings
+    for i in range(1, 7):
+        for h in soup.find_all(f"h{i}"):
+            prefix = "#" * i
+            h.replace_with(f"\n\n{prefix} {h.get_text().strip()}\n\n")
+
+    # Blockquotes
+    for bq in soup.find_all("blockquote"):
+        bq.replace_with(f"\n\n> {bq.get_text().strip()}\n\n")
+
+    # Unordered Lists
+    for ul in soup.find_all("ul"):
+        items = [f"- {li.get_text().strip()}" for li in ul.find_all("li", recursive=False)]
+        ul.replace_with("\n\n" + "\n".join(items) + "\n\n")
+
+    # Ordered Lists
+    for ol in soup.find_all("ol"):
+        items = [
+            f"{idx}. {li.get_text().strip()}"
+            for idx, li in enumerate(ol.find_all("li", recursive=False), 1)
+        ]
+        ol.replace_with("\n\n" + "\n".join(items) + "\n\n")
+
+    # Tables
+    for table in soup.find_all("table"):
+        rows = []
+        for tr in table.find_all("tr"):
+            cols = [td.get_text().strip().replace("\n", " ") for td in tr.find_all(["th", "td"])]
+            if cols:
+                rows.append("| " + " | ".join(cols) + " |")
+        if rows:
+            if len(rows) > 1:
+                cols_count = len(rows[0].split("|")) - 2
+                header_sep = "| " + " | ".join(["---"] * max(1, cols_count)) + " |"
+                rows.insert(1, header_sep)
+            table.replace_with("\n\n" + "\n".join(rows) + "\n\n")
+
+    # Paragraphs and line breaks
+    for br in soup.find_all("br"):
+        br.replace_with("\n")
+    for p in soup.find_all("p"):
+        p.replace_with(f"\n\n{p.get_text().strip()}\n\n")
+
+    text = soup.get_text()
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+# Backwards-compatible alias for plain text / extraction callers
+_epub_text = _epub_html_to_markdown
+
+
+_RE_EPUB_HEADING = re.compile(r"<h([1-6])[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
 
 
 def _split_epub_document(raw_html: str, fallback_heading: str) -> list[tuple[str, str]]:
-    """Split one EPUB document into (heading, text) per heading tag it contains.
+    """Split one EPUB document into (heading, markdown) per heading tag it contains.
 
     Text before the first heading is kept under `fallback_heading` so front
-    matter is not dropped. A document with no headings yields a single entry.
+    matter is not dropped. Headings inside <figure>, <figcaption>, or <aside>
+    are ignored so captions do not fracture chapters.
     """
     matches = list(_RE_EPUB_HEADING.finditer(raw_html))
-    if not matches:
-        return [(fallback_heading, _epub_text(raw_html))]
+    valid_matches = []
+    for m in matches:
+        start = m.start()
+        last_open_fig = raw_html.rfind("<figure", 0, start)
+        last_close_fig = raw_html.rfind("</figure", 0, start)
+        if last_open_fig > last_close_fig:
+            continue
+        last_open_aside = raw_html.rfind("<aside", 0, start)
+        last_close_aside = raw_html.rfind("</aside", 0, start)
+        if last_open_aside > last_close_aside:
+            continue
+        valid_matches.append(m)
+
+    if not valid_matches:
+        md = _epub_html_to_markdown(raw_html)
+        return [(fallback_heading, md)] if md else []
 
     out: list[tuple[str, str]] = []
-    preamble = _epub_text(raw_html[: matches[0].start()])
+    preamble = _epub_html_to_markdown(raw_html[: valid_matches[0].start()])
     if preamble:
         out.append((fallback_heading, preamble))
 
-    for i, m in enumerate(matches):
-        heading = _epub_text(m.group(2)) or fallback_heading
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(raw_html)
-        out.append((heading, _epub_text(raw_html[m.end() : end])))
+    for i, m in enumerate(valid_matches):
+        heading = _epub_html_to_markdown(m.group(2)).strip() or fallback_heading
+        heading = re.sub(r"^#+\s*", "", heading).strip()
+        end = valid_matches[i + 1].start() if i + 1 < len(valid_matches) else len(raw_html)
+        body = _epub_html_to_markdown(raw_html[m.end() : end])
+        if body:
+            out.append((heading, body))
     return out
+
 
 # Kindle clippings separator
 _KINDLE_SEP = "=========="
@@ -263,6 +398,28 @@ def _block_start_offsets(blocks: list[str]) -> list[int]:
     return offsets
 
 
+def _normalize_heading_text(text: str) -> str:
+    return _RE_WHITESPACE.sub(" ", text).strip().lower()
+
+
+def _find_heading_block(blocks: list[str], title: str, start_from: int = 0) -> int | None:
+    """Index of the block that opens `title`, searched from `start_from`.
+
+    A PDF heading is almost always its own block; when it is fused with its
+    first sentence (no blank line before the prose starts), a leading match
+    still counts, bounded so a short title cannot match deep inside a
+    paragraph that merely mentions it.
+    """
+    target = _normalize_heading_text(title)
+    if not target:
+        return None
+    for idx in range(start_from, len(blocks)):
+        candidate = _normalize_heading_text(blocks[idx])
+        if candidate.startswith(target) or target in candidate[: len(target) + 40]:
+            return idx
+    return None
+
+
 def _is_folio(text: str) -> bool:
     """A line that is only a number is a page number, not a heading.
 
@@ -285,10 +442,63 @@ def _is_page_furniture(block: dict, page_height: float) -> bool:
     in_margin = bottom <= margin or top >= page_height - margin
     if not in_margin:
         return False
-    text = " ".join(
-        _join_spans(line.get("spans", [])) for line in block.get("lines", [])
-    ).strip()
+    text = " ".join(_join_spans(line.get("spans", [])) for line in block.get("lines", [])).strip()
     return 0 < len(text) <= _FURNITURE_MAX_CHARS
+
+
+# A stacked fraction (numerator, root symbol, denominator) sits on one visual
+# row but PyMuPDF's layout segmenter gives each piece its own block, so
+# `Attention(...) = softmax(QKT` / `dk` / `)V (1)` render as three
+# disconnected paragraphs (#132). Ordinary prose blocks never share a
+# vertical span -- a new line always starts below the last one ends, e.g.
+# -6.4pt (no overlap) between two consecutive body paragraphs in that same
+# PDF -- so overlap between consecutive blocks is a layout signal for "same
+# row", never a claim about what the text says. 0.3 sits well clear of both
+# the real 0.0 (unrelated paragraphs) and 0.58 (the formula's own numerator
+# and denominator blocks) that bracket it in that document.
+_MIN_ROW_OVERLAP_FRAC = 0.3
+
+# A verso/recto running head prints two unrelated titles side by side in the
+# page margin, and they share a row exactly the way a split formula does --
+# found on the very page this merge was written for. A running head's two
+# halves sit ~97pt apart there; the formula's own pieces sit within 4.3pt of
+# each other (already touching or one point apart). 3x the body font size
+# (~29pt in that document) sits clear of both and scales with the page's own
+# type size rather than a fixed point value.
+_MAX_ROW_GAP_EM = 3.0
+
+
+def _merge_same_row_blocks(
+    blocks: list[tuple[str, tuple[float, float, float, float]]], body_font_size: float
+) -> list[str]:
+    """Reunite blocks PyMuPDF split even though they sit on one visual row."""
+    if not blocks:
+        return []
+    max_gap = _MAX_ROW_GAP_EM * (body_font_size or 10.0)
+    groups: list[list[str]] = [[blocks[0][0]]]
+    group_bbox = list(blocks[0][1])
+    for text, bbox in blocks[1:]:
+        overlap = min(group_bbox[3], bbox[3]) - max(group_bbox[1], bbox[1])
+        shorter = min(group_bbox[3] - group_bbox[1], bbox[3] - bbox[1]) or 1.0
+        gap = max(0.0, bbox[0] - group_bbox[2])
+        if overlap / shorter >= _MIN_ROW_OVERLAP_FRAC and gap <= max_gap:
+            groups[-1].append(text)
+            group_bbox = [
+                min(group_bbox[0], bbox[0]),
+                min(group_bbox[1], bbox[1]),
+                max(group_bbox[2], bbox[2]),
+                max(group_bbox[3], bbox[3]),
+            ]
+        else:
+            groups.append([text])
+            group_bbox = list(bbox)
+
+    def _flatten(text_parts: list[str]) -> str:
+        if len(text_parts) == 1:
+            return text_parts[0]
+        return " ".join(t.replace("\n", " ").strip() for t in text_parts)
+
+    return [_flatten(text_parts) for text_parts in groups]
 
 
 def _join_spans(spans: list[dict]) -> str:
@@ -418,26 +628,16 @@ class DocumentParser:
             sections: list[Section] = []
             raw_parts: list[str] = []
 
-            for i, (lv, ti, pg) in enumerate(toc):
-                # Up to the NEXT entry, whatever its level. Ending at the next
-                # same-or-higher level made a chapter span all its children and
-                # store their text as well as its own (#97). A parent whose
-                # first child opens on its own page therefore owns no whole page
-                # and gets empty text; that prose goes to the child.
-                next_page = toc[i + 1][2] if i + 1 < len(toc) else total_pages + 1
-                page_end = min(next_page - 1, total_pages)
+            # Filtered blocks for a page, computed once and shared: when two
+            # TOC entries start on the same physical page, both need this
+            # page's block list to find where each of them actually begins.
+            page_block_cache: dict[int, list[str]] = {}
 
-                texts: list[str] = []
-                # Index into `texts` at which each page after the first starts,
-                # so a per-chunk page can be recovered later. Without it every
-                # chunk in the section can only claim the section's start page.
-                page_start_blocks: list[int] = []
-
-                for page_offset, pn in enumerate(range(max(0, pg - 1), page_end)):
-                    if page_offset > 0:
-                        page_start_blocks.append(len(texts))
+            def _page_blocks(pn: int) -> list[str]:
+                if pn not in page_block_cache:
                     page_obj = doc[pn]
                     page_height = float(page_obj.rect.height) or 1.0
+                    raw_blocks: list[tuple[str, tuple[float, float, float, float]]] = []
                     for block in page_obj.get_text("dict")["blocks"]:  # type: ignore[arg-type]
                         if block.get("type") != 0:
                             continue
@@ -453,7 +653,61 @@ class DocumentParser:
                                 continue
                             block_lines.append(line_text)
                         if block_lines:
-                            texts.append("\n".join(block_lines))
+                            bbox = block.get("bbox") or (0.0, 0.0, 0.0, 0.0)
+                            raw_blocks.append(("\n".join(block_lines), tuple(bbox)))
+                    page_block_cache[pn] = _merge_same_row_blocks(raw_blocks, body_avg)
+                return page_block_cache[pn]
+
+            # First unclaimed block index per page, 0-based. Only ever
+            # nonzero for a page more than one TOC entry starts on -- the
+            # entry processed first claims a prefix of it, so the next
+            # sibling on that page must not repeat that prefix.
+            page_cursor: dict[int, int] = {}
+
+            for i, (lv, ti, pg) in enumerate(toc):
+                # Up to the NEXT entry, whatever its level. Ending at the next
+                # same-or-higher level made a chapter span all its children and
+                # store their text as well as its own (#97).
+                next_page = toc[i + 1][2] if i + 1 < len(toc) else total_pages + 1
+                page_end = min(next_page - 1, total_pages)
+                # True when the next TOC entry opens on this same page (a
+                # child, or an unrelated sibling in a dense layout): there is
+                # no whole page left for us, only whatever of this one page
+                # comes before that next entry's own heading.
+                shares_start_page = page_end < pg
+
+                texts: list[str] = []
+                # Index into `texts` at which each page after the first starts,
+                # so a per-chunk page can be recovered later. Without it every
+                # chunk in the section can only claim the section's start page.
+                page_start_blocks: list[int] = []
+
+                first_page_idx = max(0, pg - 1)
+                first_blocks = _page_blocks(first_page_idx)
+                cursor = page_cursor.get(first_page_idx, 0)
+                own_start = _find_heading_block(first_blocks, ti, cursor)
+                if own_start is None:
+                    own_start = cursor
+                if shares_start_page:
+                    next_title = toc[i + 1][1]
+                    own_end = _find_heading_block(first_blocks, next_title, own_start)
+                    if own_end is None:
+                        # Can't locate the sibling's own heading text on this
+                        # page (font/case mismatch, or the fixture never
+                        # prints headings at all): take the rest of the page
+                        # rather than duplicate it -- an empty later sibling
+                        # is the same shape of loss the old code already had,
+                        # never worse.
+                        own_end = len(first_blocks)
+                else:
+                    own_end = len(first_blocks)
+                page_cursor[first_page_idx] = max(page_cursor.get(first_page_idx, 0), own_end)
+                texts.extend(first_blocks[own_start:own_end])
+
+                if not shares_start_page:
+                    for pn in range(first_page_idx + 1, page_end):
+                        page_start_blocks.append(len(texts))
+                        texts.extend(_page_blocks(pn))
 
                 # Blocks are the layout's own paragraphs; a PDF text layer is
                 # hard-wrapped, so joining lines alone leaves no boundary and
@@ -473,9 +727,7 @@ class DocumentParser:
                 raw_parts.append(text)
                 sections.append(
                     Section(
-                        heading=_usable_heading(
-                            ti, doc[max(0, pg - 1)], body_avg, text
-                        ),
+                        heading=_usable_heading(ti, doc[max(0, pg - 1)], body_avg, text),
                         level=lv,
                         text=text,
                         page_start=pg,

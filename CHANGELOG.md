@@ -17,6 +17,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **yt-dlp runs as `python -m yt_dlp`.** The console script records the build machine's interpreter path, and on Windows that path is compiled into an `.exe` no installed copy can use.
 - **What a desktop bundle ships is decided once, in `scripts/desktop/`.** The macOS scripts use the same dependency profile, prunes and import check as Windows and Linux.
 
+## [0.12.11] - 2026-09-18
+
+### Fixed
+- **Citation clicks could land on the wrong page.** The PDF viewer searched with a page prop fixed at mount, so any citation clicked after the first fell back to a full-document scan and stopped at the first coincidental match (a table-of-contents heading) instead of the cited page.
+- **A blank line in EPUB alt text dropped the image entirely.** 113 of 161 figures in a real O'Reilly EPUB were affected; whitespace is now collapsed before the alt text reaches the markdown image syntax.
+- **HTML comments used as hydration boundaries corrupted markdown.** A `<!--$-->` marker was read as literal content and wrapped adjacent links in bogus inline-math delimiters; comments are now stripped before serialization.
+- **"Open full note" did nothing on an unedited existing note.** The composer treated "nothing to save" as "no note exists" and silently closed instead of navigating.
+
+## [0.12.10] - 2026-09-18
+
+### Added
+- **O'Reilly Learning books ingest from their URL for subscribers.** Paste a book or chapter link; the session cookie is stored owner-only in `DATA_DIR`, and a book missing any chapter fails rather than ingesting as complete.
+- **EPUB figures render in the reader**, served by `GET /documents/{id}/asset/{path}` (images only), and EPUB covers come from the archive's declared cover.
+- **Key Points and Detailed summaries are assembled from section summaries** without an LLM call; Regenerate still asks the LLM. The detailed summary keeps every authored section whole and omits only publisher boilerplate.
+
+### Fixed
+- **An EPUB chapter the book's TOC lists once is served as one chapter** instead of one per sub-heading; files the TOC points into several times (Gutenberg) still split.
+
 ## [0.12.8] - 2026-09-14
 
 ### Added

@@ -46,7 +46,10 @@ async def _seed_due_card(factory) -> None:
     async with factory() as session:
         session.add(
             FlashcardModel(
-                id="card-due", question="q", answer="a", source_excerpt="s",
+                id="card-due",
+                question="q",
+                answer="a",
+                source_excerpt="s",
                 due_date=_naive(2),
             )
         )
@@ -57,20 +60,30 @@ async def _seed_weak_concept(factory) -> None:
     async with factory() as session:
         session.add(
             ConceptModel(
-                id=str(uuid.uuid4()), slug="btree-splits", label="btree splits",
-                mastery=0.2, status="confirmed",
+                id=str(uuid.uuid4()),
+                slug="btree-splits",
+                label="btree splits",
+                mastery=0.2,
+                status="confirmed",
             )
         )
         session.add(
             FlashcardModel(
-                id="card-weak", question="q", answer="a", source_excerpt="s",
+                id="card-weak",
+                question="q",
+                answer="a",
+                source_excerpt="s",
                 concept_slug="btree-splits",
             )
         )
         session.add_all(
             ReviewEventModel(
-                id=str(uuid.uuid4()), session_id="s1", flashcard_id="card-weak",
-                rating="again", is_correct=False, reviewed_at=_naive(1),
+                id=str(uuid.uuid4()),
+                session_id="s1",
+                flashcard_id="card-weak",
+                rating="again",
+                is_correct=False,
+                reviewed_at=_naive(1),
             )
             for _ in range(2)
         )

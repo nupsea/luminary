@@ -39,8 +39,17 @@ async def test_db(tmp_path, monkeypatch):
 
 async def _add_concept(factory, cid, slug, label="L", kind="concept", status="proposed"):
     async with factory() as s:
-        s.add(ConceptModel(id=cid, slug=slug, label=label, kind=kind,
-                           origin="document", status=status, mastery=0.0))
+        s.add(
+            ConceptModel(
+                id=cid,
+                slug=slug,
+                label=label,
+                kind=kind,
+                origin="document",
+                status=status,
+                mastery=0.0,
+            )
+        )
         await s.commit()
 
 
@@ -68,9 +77,19 @@ async def test_merge_reassigns_cards_and_deletes_source(test_db):
     await _add_concept(factory, "src", "snapshots")
     await _add_concept(factory, "tgt", "manifests")
     async with factory() as s:
-        s.add(FlashcardModel(id="f1", document_id="d1", chunk_id=None, concept_id="src",
-                             mapping_status="mapped", source="document", question="Q",
-                             answer="A", source_excerpt="e"))
+        s.add(
+            FlashcardModel(
+                id="f1",
+                document_id="d1",
+                chunk_id=None,
+                concept_id="src",
+                mapping_status="mapped",
+                source="document",
+                question="Q",
+                answer="A",
+                source_excerpt="e",
+            )
+        )
         await s.commit()
 
     transport = ASGITransport(app=app)
@@ -87,20 +106,63 @@ async def test_merge_reassigns_cards_and_deletes_source(test_db):
 async def test_concepts_for_note_unions_engagement_and_lexical(test_db):
     factory = test_db
     async with factory() as s:
-        s.add(NoteModel(id="n1", content="We discuss caching strategies at length.",
-                        title="Notes on caching"))
+        s.add(
+            NoteModel(
+                id="n1",
+                content="We discuss caching strategies at length.",
+                title="Notes on caching",
+            )
+        )
         # lexical: label appears in the note text
-        s.add(ConceptModel(id="c_cache", slug="caching", label="caching", kind="concept",
-                           origin="document", status="proposed", mastery=10.0))
+        s.add(
+            ConceptModel(
+                id="c_cache",
+                slug="caching",
+                label="caching",
+                kind="concept",
+                origin="document",
+                status="proposed",
+                mastery=10.0,
+            )
+        )
         # engagement: mapped via a card, label NOT in the note text
-        s.add(ConceptModel(id="c_snap", slug="snapshots", label="Snapshots", kind="concept",
-                           origin="document", status="proposed", mastery=5.0))
-        s.add(FlashcardModel(id="f1", document_id="d1", chunk_id=None, note_id="n1",
-                             concept_id="c_snap", mapping_status="mapped", source="note",
-                             question="Q", answer="A", source_excerpt="e"))
+        s.add(
+            ConceptModel(
+                id="c_snap",
+                slug="snapshots",
+                label="Snapshots",
+                kind="concept",
+                origin="document",
+                status="proposed",
+                mastery=5.0,
+            )
+        )
+        s.add(
+            FlashcardModel(
+                id="f1",
+                document_id="d1",
+                chunk_id=None,
+                note_id="n1",
+                concept_id="c_snap",
+                mapping_status="mapped",
+                source="note",
+                question="Q",
+                answer="A",
+                source_excerpt="e",
+            )
+        )
         # unrelated concept -- must NOT appear
-        s.add(ConceptModel(id="c_other", slug="kafka", label="Kafka", kind="concept",
-                           origin="document", status="proposed", mastery=0.0))
+        s.add(
+            ConceptModel(
+                id="c_other",
+                slug="kafka",
+                label="Kafka",
+                kind="concept",
+                origin="document",
+                status="proposed",
+                mastery=0.0,
+            )
+        )
         await s.commit()
 
     transport = ASGITransport(app=app)
@@ -130,8 +192,8 @@ async def test_apply_overrides_survives_reparse(test_db):
             if row:
                 await s.delete(row)
         await s.commit()
-    await _add_concept(factory, "n1", "caching", label="cache")        # fresh proposal
-    await _add_concept(factory, "n2", "stale-thing", label="Stale")    # fresh proposal
+    await _add_concept(factory, "n1", "caching", label="cache")  # fresh proposal
+    await _add_concept(factory, "n2", "stale-thing", label="Stale")  # fresh proposal
 
     async with factory() as s:
         applied = await svc.apply_overrides(s)
@@ -139,11 +201,15 @@ async def test_apply_overrides_survives_reparse(test_db):
     assert applied == 2
 
     async with factory() as s:
-        caching = (await s.execute(
-            select(ConceptModel).where(ConceptModel.slug == "caching")
-        )).scalars().first()
-        stale = (await s.execute(
-            select(ConceptModel).where(ConceptModel.slug == "stale-thing")
-        )).scalars().first()
+        caching = (
+            (await s.execute(select(ConceptModel).where(ConceptModel.slug == "caching")))
+            .scalars()
+            .first()
+        )
+        stale = (
+            (await s.execute(select(ConceptModel).where(ConceptModel.slug == "stale-thing")))
+            .scalars()
+            .first()
+        )
     assert caching is not None and caching.label == "Caching"  # rename re-applied
     assert stale is None  # reject re-applied -> stays gone

@@ -7,10 +7,13 @@ Sanitization removes script, iframe, and on* attributes; preserves prose element
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import math
 from collections import Counter
+from collections.abc import Callable
 from functools import lru_cache
+from urllib.parse import unquote
 
 import bleach
 import ebooklib
@@ -45,30 +48,51 @@ _ALLOWED_TAGS = [
     "blockquote",
     "figure",
     "figcaption",
+    "img",
     "a",
     "span",
     "div",
+    "section",
+    "aside",
     "br",
     "hr",
 ]
 
-# Allow only safe, non-event attributes on whitelisted tags
-_ALLOWED_ATTRIBUTES: dict[str, list[str]] = {
-    "a": ["href", "title"],
-    "td": ["colspan", "rowspan"],
-    "th": ["colspan", "rowspan", "scope"],
-    "table": ["summary"],
-    "p": ["class"],
-    "div": ["class"],
-    "span": ["class"],
-    "pre": ["class"],
-    "code": ["class"],
-    "h1": ["id"],
-    "h2": ["id"],
-    "h3": ["id"],
-    "h4": ["id"],
-    "h5": ["id"],
-    "h6": ["id"],
+# Allow safe, non-event attributes on whitelisted tags
+_ALLOWED_ATTRIBUTES: dict[str, list[str] | Callable[[str, str, str], bool]] = {
+    "a": lambda _tag, name, value: (
+        name in {"title", "id", "class", "name"}
+        or (name == "href" and not value.strip().lower().startswith("data:"))
+    ),
+    "img": lambda _tag, name, value: (
+        name in {"alt", "title", "width", "height", "class", "loading"}
+        or (name == "src" and _is_inline_image(value))
+    ),
+    "figure": ["class", "id", "data-type"],
+    "figcaption": ["class", "id"],
+    "td": ["colspan", "rowspan", "class"],
+    "th": ["colspan", "rowspan", "scope", "class"],
+    "table": ["summary", "class"],
+    "thead": ["class"],
+    "tbody": ["class"],
+    "tr": ["class"],
+    "ol": ["class", "start", "type"],
+    "ul": ["class"],
+    "li": ["class"],
+    "blockquote": ["class", "id"],
+    "p": ["class", "id", "data-type"],
+    "div": ["class", "id", "data-type"],
+    "section": ["class", "id", "data-type"],
+    "aside": ["class", "id", "data-type"],
+    "span": ["class", "id", "data-type"],
+    "pre": ["class", "id", "data-type"],
+    "code": ["class", "id", "data-type"],
+    "h1": ["id", "class"],
+    "h2": ["id", "class"],
+    "h3": ["id", "class"],
+    "h4": ["id", "class"],
+    "h5": ["id", "class"],
+    "h6": ["id", "class"],
 }
 
 
@@ -84,6 +108,25 @@ def _extract_chapter_title(soup: BeautifulSoup) -> str:
     return ""
 
 
+_INLINE_IMAGE_PREFIXES = (
+    "data:image/png;",
+    "data:image/jpeg;",
+    "data:image/gif;",
+    "data:image/webp;",
+    "data:image/svg+xml;",
+)
+
+
+def _is_inline_image(src: str) -> bool:
+    """Only images this service inlined from the EPUB itself may render.
+
+    `data:` is an allowed protocol so inlined figures survive bleach, which also
+    let `<a href="data:text/html,...">` through; and a remote `src` in a book
+    would fetch from the network every time a chapter opens.
+    """
+    return src.strip().lower().startswith(_INLINE_IMAGE_PREFIXES)
+
+
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 
 
@@ -91,18 +134,20 @@ def _split_soup_on_headings(soup: BeautifulSoup) -> list[dict]:
     """Split one document into a unit per heading, keeping fragments well-formed.
 
     Splits the children of the element holding most headings; deeper-nested
-    headings are sub-headings of their block, not split points.
+    headings are sub-headings of their block, not split points. Any split that
+    would leave text out of every unit keeps the document whole.
     """
     root = soup.body or soup
+    whole = [
+        {
+            "title": _extract_chapter_title(soup),
+            "html": str(soup),
+            "word_count": _count_words(soup),
+        }
+    ]
     headings = root.find_all(_HEADING_TAGS)
     if not headings:
-        return [
-            {
-                "title": _extract_chapter_title(soup),
-                "html": str(soup),
-                "word_count": _count_words(soup),
-            }
-        ]
+        return whole
 
     counts = Counter(id(h.parent) for h in headings)
     dominant = counts.most_common(1)[0][0]
@@ -115,6 +160,9 @@ def _split_soup_on_headings(soup: BeautifulSoup) -> list[dict]:
             units.append(current)
             continue
         if current is None:
+            # Skip empty whitespace text before the first heading
+            if isinstance(child, str) and not child.strip():
+                continue
             # Front matter ahead of the first heading keeps its own unit.
             current = {"title": "", "nodes": []}
             units.append(current)
@@ -130,7 +178,29 @@ def _split_soup_on_headings(soup: BeautifulSoup) -> list[dict]:
                 "word_count": _count_words(BeautifulSoup(html, "html.parser")),
             }
         )
+    # Units are cut from one container. When the headings sit in a wrapper such
+    # as <header>, the chapter body lies outside it and would never be shown.
+    if sum(u["word_count"] for u in out) < _count_words(root):
+        return whole
     return out
+
+
+def _top_level_toc_entries(book: epub.EpubBook) -> Counter[str]:
+    """How many top-level TOC entries point into each document, by file name.
+
+    Heading levels cannot say what a chapter is: a Gutenberg file with one <h1>
+    title over <h2> chapters has the same shape as a technical chapter with <h2>
+    sections. The book's own TOC can -- Moby-Dick lists 135 chapters as anchors
+    inside a few files, a technical book lists one entry per chapter file.
+    """
+    entries: Counter[str] = Counter()
+    for entry in book.toc or []:
+        link = entry[0] if isinstance(entry, tuple) else entry
+        href = getattr(link, "href", "") or ""
+        name = unquote(href.split("#", 1)[0]).rsplit("/", 1)[-1]
+        if name:
+            entries[name] += 1
+    return entries
 
 
 def _count_words(soup: BeautifulSoup) -> int:
@@ -156,8 +226,8 @@ class EpubService:
         for tag in soup.find_all("head"):
             tag.decompose()
 
-        # Remove dangerous tags by name
-        for tag_name in ("script", "style", "iframe", "noscript", "object", "embed", "link", "img"):
+        # Remove dangerous tags by name (images are preserved and inlined)
+        for tag_name in ("script", "style", "iframe", "noscript", "object", "embed", "link"):
             for tag in soup.find_all(tag_name):
                 tag.decompose()
 
@@ -170,6 +240,7 @@ class EpubService:
             inner,
             tags=_ALLOWED_TAGS,
             attributes=_ALLOWED_ATTRIBUTES,
+            protocols=["http", "https", "mailto", "data"],
             strip=True,
             strip_comments=True,
         )
@@ -183,6 +254,7 @@ class EpubService:
         list so they cannot disagree about what chapter N is.
         """
         book = epub.read_epub(file_path, options={"ignore_ncx": False})
+        toc_entries = _top_level_toc_entries(book)
         units: list[dict] = []
 
         for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
@@ -194,7 +266,20 @@ class EpubService:
             except (UnicodeDecodeError, AttributeError):
                 html_str = ""
             soup = BeautifulSoup(html_str, "html.parser")
-            for unit in _split_soup_on_headings(soup):
+            # A file the TOC lists as exactly one chapter is read as one, so its
+            # sections are not each served as a chapter of their own. A file the
+            # TOC does not list keeps the heading split.
+            if toc_entries.get(item.get_name().rsplit("/", 1)[-1]) == 1:
+                file_units = [
+                    {
+                        "title": _extract_chapter_title(soup),
+                        "html": str(soup.body or soup),
+                        "word_count": _count_words(soup),
+                    }
+                ]
+            else:
+                file_units = _split_soup_on_headings(soup)
+            for unit in file_units:
                 # Skip near-empty items with no discernible title (cover pages)
                 if not unit["title"] and unit["word_count"] < 10:
                     continue
@@ -238,7 +323,38 @@ class EpubService:
             raise IndexError(f"chapter_index {chapter_index} out of range (0-{len(units) - 1})")
 
         unit = units[chapter_index]
-        clean_html = self.sanitize_html(unit["html"])
+        html_content = unit["html"]
+
+        # Resolve embedded EPUB images into inline base64 data URIs so diagrams render
+        if "<img" in html_content.lower():
+            try:
+                book = epub.read_epub(file_path, options={"ignore_ncx": True})
+                images: dict[str, tuple[str, bytes]] = {}
+                for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
+                    raw_name = item.file_name
+                    base_name = raw_name.split("/")[-1]
+                    media_type = item.media_type or "image/png"
+                    images[raw_name] = (media_type, item.content)
+                    images[base_name] = (media_type, item.content)
+
+                soup = BeautifulSoup(html_content, "html.parser")
+                for img in soup.find_all("img"):
+                    src = img.get("src", "")
+                    if not src:
+                        continue
+                    clean_src = unquote(src).lstrip("./")
+                    base = clean_src.split("/")[-1]
+                    img_data = images.get(clean_src) or images.get(base)
+                    if img_data:
+                        mime, content = img_data
+                        b64 = base64.b64encode(content).decode("ascii")
+                        img["src"] = f"data:{mime};base64,{b64}"
+                        img["loading"] = "lazy"
+                html_content = str(soup)
+            except Exception as exc:
+                logger.warning("Could not inline images for chapter %d: %s", chapter_index, exc)
+
+        clean_html = self.sanitize_html(html_content)
         logger.info(
             "EPUB chapter %d rendered: %d words, title=%r",
             chapter_index,

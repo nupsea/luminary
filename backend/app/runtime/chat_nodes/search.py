@@ -217,8 +217,12 @@ async def search_node(state: ChatState) -> dict:
         retriever = get_retriever()
         chunks: list[ScoredChunk]
         chunks, image_ids = await retriever.retrieve_with_images(
-            q, effective_doc_ids, k=k, rerank=rerank,
-            date_from=date_from, date_to=date_to,
+            q,
+            effective_doc_ids,
+            k=k,
+            rerank=rerank,
+            date_from=date_from,
+            date_to=date_to,
         )
         logger.info(
             "[perf] search_node retrieve_with_images took %.2fs (%d chunks)",
@@ -240,11 +244,7 @@ async def search_node(state: ChatState) -> dict:
         section_summary_map = await _fetch_section_summaries(pairs) if pairs else {}
 
         # Context Expansion: batch fetch neighbors for all chunks to avoid looping db sessions
-        chunk_keys = [
-            (c.document_id, c.chunk_index)
-            for c in chunks
-            if hasattr(c, "chunk_index")
-        ]
+        chunk_keys = [(c.document_id, c.chunk_index) for c in chunks if hasattr(c, "chunk_index")]
         neighbors_map = await _fetch_neighbor_chunks_batch(chunk_keys)
         retrieved_keys = set(chunk_keys)
 
@@ -265,9 +265,7 @@ async def search_node(state: ChatState) -> dict:
             # mid-idea still gets the prose either side of it. What stops is
             # expanding into material the model is already being shown.
             neighbors = [
-                (idx, text)
-                for idx, text in neighbors
-                if (c.document_id, idx) not in retrieved_keys
+                (idx, text) for idx, text in neighbors if (c.document_id, idx) not in retrieved_keys
             ]
             # Sort and combine neighbors with the current chunk
             all_parts = [(c.chunk_index, c.text), *neighbors]
@@ -320,7 +318,6 @@ async def search_node(state: ChatState) -> dict:
     # context. Skip the cap when routing deliberately narrowed to a doc set --
     # there the target doc SHOULD dominate.
     if scope == "all" and chunks_dicts and not narrowed:
-
         chunks_dicts = _cap_per_document(chunks_dicts, max_per_doc=2)
 
     logger.info("search_node: returning %d chunks, %d image_ids", len(chunks_dicts), len(image_ids))

@@ -44,13 +44,17 @@ async def _weakest_first(session: AsyncSession, concept_ids: list[str]) -> list[
 async def resolve_daily(session: AsyncSession, limit: int = _DAILY_LIMIT) -> list[str]:
     """Lumen's cross-collection pick: weakest/coldest tracked concepts."""
     rows = (
-        await session.execute(
-            select(ConceptModel.id)
-            .where(ConceptModel.status != "candidate")
-            .order_by(ConceptModel.last_reviewed.is_(None).desc(), ConceptModel.mastery.asc())
-            .limit(limit)
+        (
+            await session.execute(
+                select(ConceptModel.id)
+                .where(ConceptModel.status != "candidate")
+                .order_by(ConceptModel.last_reviewed.is_(None).desc(), ConceptModel.mastery.asc())
+                .limit(limit)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows)
 
 
@@ -72,13 +76,17 @@ async def resolve_doc(session: AsyncSession, document_id: str) -> list[str]:
 
 async def _collection_document_ids(session: AsyncSession, collection_id: str) -> list[str]:
     rows = (
-        await session.execute(
-            select(CollectionMemberModel.member_id).where(
-                CollectionMemberModel.collection_id == collection_id,
-                CollectionMemberModel.member_type == "document",
+        (
+            await session.execute(
+                select(CollectionMemberModel.member_id).where(
+                    CollectionMemberModel.collection_id == collection_id,
+                    CollectionMemberModel.member_type == "document",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows)
 
 
@@ -94,13 +102,17 @@ async def resolve_collection(session: AsyncSession, collection_id: str) -> list[
 async def resolve_note(session: AsyncSession, note_id: str) -> list[str]:
     """Concepts a note's already-mapped cards point at (generation wired later)."""
     rows = (
-        await session.execute(
-            select(FlashcardModel.concept_id).where(
-                FlashcardModel.note_id == note_id,
-                FlashcardModel.concept_id.is_not(None),
+        (
+            await session.execute(
+                select(FlashcardModel.concept_id).where(
+                    FlashcardModel.note_id == note_id,
+                    FlashcardModel.concept_id.is_not(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return await _weakest_first(session, list({r for r in rows if r}))
 
 

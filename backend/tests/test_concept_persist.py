@@ -41,11 +41,23 @@ def _state():
         "lateral_edges": [(0, 1, 0.6)],
         "hierarchy": {
             "concepts": [
-                {"label": "iceberg", "sun": "iceberg", "entities": ["iceberg", "parquet"],
-                 "document_ids": ["d1"], "salience": 5.0, "centroid": cen},
-                {"label": "spark", "sun": "spark", "entities": ["spark"],
-                 "document_ids": ["d1"], "salience": 3.0, "centroid": cen,
-                 "status": "candidate"},
+                {
+                    "label": "iceberg",
+                    "sun": "iceberg",
+                    "entities": ["iceberg", "parquet"],
+                    "document_ids": ["d1"],
+                    "salience": 5.0,
+                    "centroid": cen,
+                },
+                {
+                    "label": "spark",
+                    "sun": "spark",
+                    "entities": ["spark"],
+                    "document_ids": ["d1"],
+                    "salience": 3.0,
+                    "centroid": cen,
+                    "status": "candidate",
+                },
             ],
         },
     }

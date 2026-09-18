@@ -198,8 +198,12 @@ async def test_a_first_batch_is_checked_against_itself(test_db):
     )
     async with factory() as session:
         stored = (
-            await session.execute(
-                select(FlashcardModel).where(FlashcardModel.document_id == doc_id)
+            (
+                await session.execute(
+                    select(FlashcardModel).where(FlashcardModel.document_id == doc_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert len(stored) == 1

@@ -29,7 +29,7 @@ import {
   settleIntoView,
 } from "@/lib/citation"
 
-type DocumentImage = components["schemas"]["ImageItem"]
+type DocumentImage = components["schemas"]["ImageItem"] & { section_id?: string | null }
 
 /**
  * The box a citation is centred within.
@@ -259,7 +259,10 @@ const LazySection = memo(({
         ) : (
           // `prose` sets an absolute font-size, so size must be handed to
           // this element rather than inherited.
-          <MarkdownRenderer className={cn(spec.family, "text-[length:var(--reader-size)]")}>
+          <MarkdownRenderer
+            documentId={documentId}
+            className={cn(spec.family, "text-[length:var(--reader-size)]")}
+          >
             {highlighted}
           </MarkdownRenderer>
         )}
@@ -327,12 +330,36 @@ function imagesForSection(
   section: SectionContentItem,
   images: DocumentImage[],
 ): DocumentImage[] {
-  if (!section.page_start) return []
-  const end = section.page_end || section.page_start
-  return images.filter((img) => {
-    const page = imageDisplayPage(img)
-    return page >= section.page_start && page <= end
-  })
+  // 1. Direct section binding (works for EPUBs, web articles, notes, any non-paginated format)
+  const bySection = images.filter((img) => img.section_id && img.section_id === section.section_id)
+  if (bySection.length > 0) {
+    return bySection
+  }
+
+  // 2. Paginated formats (e.g. PDF) with page_start
+  if (section.page_start) {
+    const end = section.page_end || section.page_start
+    return images.filter((img) => {
+      const page = imageDisplayPage(img)
+      return page >= section.page_start && page <= end
+    })
+  }
+
+  // 3. Match image filename or figure reference in section body if present (e.g. web articles)
+  if (section.content) {
+    const content = section.content.toLowerCase()
+    return images.filter((img) => {
+      const filename = img.path.split("/").pop()?.toLowerCase()
+      if (filename && content.includes(filename)) return true
+      if (img.description && img.description.length > 15) {
+        const snippet = img.description.slice(0, 40).toLowerCase()
+        if (content.includes(snippet)) return true
+      }
+      return false
+    })
+  }
+
+  return []
 }
 
 /** Normalize whitespace for fuzzy matching: collapse runs to single space, trim. */

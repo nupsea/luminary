@@ -194,8 +194,6 @@ def local_inference_support() -> HostSupport:
 
     ram = host_ram_gb()
     if 0 < ram < _STANDARD_MIN_RAM_GB:
-        return HostSupport(
-            False, "under_memory_floor", f"{where}, {ram}GB", UNSUPPORTED_MESSAGE
-        )
+        return HostSupport(False, "under_memory_floor", f"{where}, {ram}GB", UNSUPPORTED_MESSAGE)
 
     return HostSupport(True, None, where, None)

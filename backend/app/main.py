@@ -45,6 +45,7 @@ from app.routers.mastery import router as mastery_router
 from app.routers.model_lab import router as model_lab_router
 from app.routers.monitoring import router as monitoring_router
 from app.routers.notes import router as notes_router
+from app.routers.oreilly import router as oreilly_router
 from app.routers.pomodoro import router as pomodoro_router
 from app.routers.progress import router as progress_router
 from app.routers.qa import router as qa_router
@@ -220,7 +221,6 @@ async def lifespan(app: FastAPI):
     # Load persisted LLM settings into cache so cloud mode is active from first request,
     # not only after the frontend hits GET /settings/llm.
     try:
-
         async with get_session_factory()() as _settings_db:
             await load_llm_settings(_settings_db)
         logger.info("LLM settings loaded from DB")
@@ -290,7 +290,6 @@ async def lifespan(app: FastAPI):
     import sys
 
     if "pytest" not in sys.modules:
-
         # Chained, not two tasks: keep-warm gates on what warm-up measured, so
         # it cannot start until warm-up has produced that number. On a host
         # where a reload is cheap the loop returns immediately.
@@ -309,6 +308,7 @@ async def lifespan(app: FastAPI):
             try:
                 await asyncio.sleep(20)
                 from app.services.notes_service import backfill_missing_descriptions
+
                 await backfill_missing_descriptions()
             except Exception as exc:
                 logger.warning("Description backfill failed (non-fatal): %s", exc)
@@ -367,9 +367,7 @@ async def lifespan(app: FastAPI):
 
                 repaired = await resummarize_documents_missing_summaries()
                 if repaired:
-                    logger.info(
-                        "Section summary backfill: repaired %d document(s)", repaired
-                    )
+                    logger.info("Section summary backfill: repaired %d document(s)", repaired)
             except Exception as exc:
                 logger.warning("Section summary backfill failed (non-fatal): %s", exc)
 
@@ -483,9 +481,7 @@ _mode = get_settings().LUMINARY_MODE
 # (a "host:*" pattern would fail its wildcard assertion at import). Skipped under
 # pytest, where the ASGI transport invents its own Host values.
 if "pytest" not in sys.modules:
-    app.add_middleware(
-        TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "::1"]
-    )
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "::1"])
 # public is single-origin (SPA + API on one port), so CORS is unnecessary; full
 # serves the frontend from Vite on a different port and needs it.
 if _mode == "full":
@@ -526,6 +522,7 @@ ROUTER_REGISTRY = {
     "model_lab": model_lab_router,
     "monitoring": monitoring_router,
     "notes": notes_router,
+    "oreilly": oreilly_router,
     "pomodoro": pomodoro_router,
     "progress": progress_router,
     "qa": qa_router,

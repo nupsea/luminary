@@ -57,9 +57,7 @@ def test_migration_survives_a_child_deleted_by_an_earlier_group(client):
     _add_member(client, b2, "doc-beta-2")
 
     resp = client.post("/collections/migrate-naming")
-    assert resp.status_code == 200, (
-        f"migration returned {resp.status_code}: {resp.text[:300]}"
-    )
+    assert resp.status_code == 200, f"migration returned {resp.status_code}: {resp.text[:300]}"
     body = resp.json()
     assert "renamed" in body and "merged" in body
 

@@ -632,5 +632,3 @@ async def patch_retrieval_settings(
 ) -> RetrievalSettingsResponse:
     await set_rerank_enabled(db, body.rerank_enabled)
     return RetrievalSettingsResponse(rerank_enabled=await get_rerank_enabled(db))
-
-

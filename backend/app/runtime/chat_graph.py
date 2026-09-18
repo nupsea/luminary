@@ -103,9 +103,7 @@ async def _resolve_targeted_document(question: str) -> str | None:
     """
     try:
         async with get_session_factory()() as session:
-            rows = await session.execute(
-                select(DocumentModel.id, DocumentModel.title)
-            )
+            rows = await session.execute(select(DocumentModel.id, DocumentModel.title))
             docs = [(row.id, row.title) for row in rows]
     except Exception:
         logger.warning("Failed to fetch documents for query routing", exc_info=True)
@@ -114,15 +112,15 @@ async def _resolve_targeted_document(question: str) -> str | None:
     # Clean the question for matching
     cleaned_q = question.lower()
     # Normalize punctuation/whitespaces
-    cleaned_q = re.sub(r'[^\w\s]', ' ', cleaned_q)
-    cleaned_q = re.sub(r'\s+', ' ', cleaned_q).strip()
+    cleaned_q = re.sub(r"[^\w\s]", " ", cleaned_q)
+    cleaned_q = re.sub(r"\s+", " ", cleaned_q).strip()
 
     matched_doc_id = None
     max_match_len = 0
 
     _GENERIC = {"all", "doc", "docs", "book", "books", "notes", "summary", "summarize", "library"}
-    _EXTS = ('.pdf', '.docx', '.txt', '.md', '.epub')
-    _SEPARATORS = (':', ' - ', ' – ')
+    _EXTS = (".pdf", ".docx", ".txt", ".md", ".epub")
+    _SEPARATORS = (":", " - ", " – ")
 
     q_words = cleaned_q.split()
 
@@ -147,7 +145,7 @@ async def _resolve_targeted_document(question: str) -> str | None:
         patterns = [t_clean]
         for prefix in ("the ", "a ", "an "):
             if t_clean.startswith(prefix):
-                core = t_clean[len(prefix):]
+                core = t_clean[len(prefix) :]
                 if len(core) >= 3:
                     patterns.append(core)
                 break
@@ -248,8 +246,7 @@ async def classify_node(state: ChatState) -> dict:
         # the user gets, and a route that looks wrong needs this line to be
         # readable from a log rather than inferred from its absence.
         logger.info(
-            "classify_node: LLM fallback SKIPPED (%s) -- heuristic intent=%s at "
-            "%.2f stands",
+            "classify_node: LLM fallback SKIPPED (%s) -- heuristic intent=%s at %.2f stands",
             why,
             intent,
             confidence,

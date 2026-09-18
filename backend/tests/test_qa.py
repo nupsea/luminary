@@ -281,9 +281,7 @@ _TIME_MACHINE_GROUNDING = [
 
 def test_drop_ungrounded_keeps_verbatim_excerpt():
     """A quote copied from the grounding is what a citation is supposed to be."""
-    citations = [
-        {"excerpt": "on a raised place in the corner of this was the Time Machine"}
-    ]
+    citations = [{"excerpt": "on a raised place in the corner of this was the Time Machine"}]
     assert _drop_ungrounded_citations(citations, _TIME_MACHINE_GROUNDING) == citations
 
 
@@ -321,8 +319,7 @@ def test_drop_ungrounded_drops_source_text_absent_from_the_grounding():
     citations = [
         {
             "excerpt": (
-                "You can move about in all directions of space but cannot move "
-                "about in time."
+                "You can move about in all directions of space but cannot move about in time."
             )
         }
     ]
@@ -332,9 +329,7 @@ def test_drop_ungrounded_drops_source_text_absent_from_the_grounding():
 def test_drop_ungrounded_tolerates_repunctuation_and_ellipsis():
     """Models re-punctuate and stitch quotes; a contiguous run still identifies
     the passage, and demanding an exact string would drop real citations."""
-    citations = [
-        {"excerpt": "came the possibility of losing my own age ... left helpless"}
-    ]
+    citations = [{"excerpt": "came the possibility of losing my own age ... left helpless"}]
     assert len(_drop_ungrounded_citations(citations, _TIME_MACHINE_GROUNDING)) == 1
 
 
@@ -420,9 +415,7 @@ def test_marker_citation_quote_only_locates_never_supplies_text():
 
 def test_marker_citation_naming_a_nonexistent_source_is_dropped():
     """`[S9]` when 2 passages were shown claims a source that does not exist."""
-    resolved, unresolved = _resolve_marker_citations(
-        [{"source": "S9"}], _MARKER_CHUNKS, {}
-    )
+    resolved, unresolved = _resolve_marker_citations([{"source": "S9"}], _MARKER_CHUNKS, {})
     assert resolved == []
     assert unresolved == 1
 
@@ -430,9 +423,7 @@ def test_marker_citation_naming_a_nonexistent_source_is_dropped():
 def test_marker_citation_accepts_bare_and_bracketed_forms():
     """Small models write S1, 1, and [S1] interchangeably."""
     for form in ("S1", "1", "[S1]", " s1 "):
-        resolved, unresolved = _resolve_marker_citations(
-            [{"source": form}], _MARKER_CHUNKS, {}
-        )
+        resolved, unresolved = _resolve_marker_citations([{"source": form}], _MARKER_CHUNKS, {})
         assert unresolved == 0, form
         assert resolved[0]["chunk_id"] == "c1", form
 
@@ -449,9 +440,7 @@ def test_legacy_excerpt_citation_passes_through_untouched():
 def test_marker_citation_is_not_mistaken_for_a_placeholder():
     """A marker citation carries neither title nor excerpt until it is resolved,
     which is exactly the shape the placeholder guard drops."""
-    full_text = "An answer." + json.dumps(
-        {"citations": [{"source": "S1"}], "confidence": "high"}
-    )
+    full_text = "An answer." + json.dumps({"citations": [{"source": "S1"}], "confidence": "high"})
     _, citations, _ = _split_response(full_text)
     assert citations == [{"source": "S1"}]
 
@@ -1032,9 +1021,7 @@ async def test_fill_citation_locations_reads_section_and_page_from_the_chunk_row
             "c2": ChunkLocation(None, None, None, None, None),
         }
 
-    monkeypatch.setattr(
-        "app.repos.document_repo.fetch_chunk_locations", fake_locations
-    )
+    monkeypatch.setattr("app.repos.document_repo.fetch_chunk_locations", fake_locations)
     citations = [
         {"chunk_id": "c1", "section_heading": "", "page": 0},
         {"chunk_id": "c2", "section_heading": "", "page": 0},
@@ -1275,28 +1262,42 @@ def test_citation_cap_matches_the_sources_panel():
         }
         for i in range(1, 13)
     ]
-    resolved, _ = _resolve_marker_citations(
-        [{"source": f"S{i}"} for i in range(1, 13)], many, {}
-    )
+    resolved, _ = _resolve_marker_citations([{"source": f"S{i}"} for i in range(1, 13)], many, {})
     # The resolver dedupes; the cap itself is applied where both paths merge.
     assert len(resolved) == 12
     assert len(resolved[:MAX_CITATIONS]) == 5
 
 
 _SCORED_CHUNKS = [
-    {"chunk_id": "hi", "document_id": "d1", "text": "Strongly relevant passage.",
-     "section_heading": "A", "page": 1, "score": 0.030},
-    {"chunk_id": "mid", "document_id": "d1", "text": "Moderately relevant passage.",
-     "section_heading": "B", "page": 2, "score": 0.020},
-    {"chunk_id": "weak", "document_id": "d1", "text": "Barely related passage.",
-     "section_heading": "C", "page": 3, "score": 0.004},
+    {
+        "chunk_id": "hi",
+        "document_id": "d1",
+        "text": "Strongly relevant passage.",
+        "section_heading": "A",
+        "page": 1,
+        "score": 0.030,
+    },
+    {
+        "chunk_id": "mid",
+        "document_id": "d1",
+        "text": "Moderately relevant passage.",
+        "section_heading": "B",
+        "page": 2,
+        "score": 0.020,
+    },
+    {
+        "chunk_id": "weak",
+        "document_id": "d1",
+        "text": "Barely related passage.",
+        "section_heading": "C",
+        "page": 3,
+        "score": 0.004,
+    },
 ]
 
 
 def _resolve_and_gate(sources):
-    resolved, _ = _resolve_marker_citations(
-        [{"source": s} for s in sources], _SCORED_CHUNKS, {}
-    )
+    resolved, _ = _resolve_marker_citations([{"source": s} for s in sources], _SCORED_CHUNKS, {})
     return _gate_and_rank_citations(resolved)
 
 
@@ -1326,13 +1327,17 @@ def test_gate_always_keeps_the_single_best_source():
 
 def test_gate_caps_at_max_citations():
     many = [
-        {"chunk_id": f"c{i}", "document_id": "d1", "text": f"Passage {i}.",
-         "section_heading": "H", "page": i, "score": 0.030}
+        {
+            "chunk_id": f"c{i}",
+            "document_id": "d1",
+            "text": f"Passage {i}.",
+            "section_heading": "H",
+            "page": i,
+            "score": 0.030,
+        }
         for i in range(1, 13)
     ]
-    resolved, _ = _resolve_marker_citations(
-        [{"source": f"S{i}"} for i in range(1, 13)], many, {}
-    )
+    resolved, _ = _resolve_marker_citations([{"source": f"S{i}"} for i in range(1, 13)], many, {})
     assert len(_gate_and_rank_citations(resolved)) == 5
 
 
@@ -1500,9 +1505,7 @@ async def test_no_context_reason_names_the_document_when_scoped(test_db):
     doc_id = str(uuid.uuid4())
     await _insert_doc(factory, tmp_path, doc_id, title="the_odyssey")
 
-    code, msg = await QAService()._no_context_reason(
-        "single", [doc_id], retrieval_failed=False
-    )
+    code, msg = await QAService()._no_context_reason("single", [doc_id], retrieval_failed=False)
 
     assert code == "no_match_in_document"
     assert "the_odyssey" in msg
@@ -1598,15 +1601,17 @@ async def test_sources_are_emitted_before_the_first_token(test_db, monkeypatch):
         patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
         patch("app.services.qa.get_llm_service", return_value=mock_llm),
     ):
-        events = [
-            e async for e in QAService().stream_answer("q?", [doc_id], "single", None)
-        ]
+        events = [e async for e in QAService().stream_answer("q?", [doc_id], "single", None)]
 
     payloads = [json.loads(e[len("data: ") :]) for e in events if e.startswith("data: ")]
     kinds = [
-        "sources" if p.get("type") == "sources" else
-        "token" if "token" in p else
-        "done" if p.get("done") else "other"
+        "sources"
+        if p.get("type") == "sources"
+        else "token"
+        if "token" in p
+        else "done"
+        if p.get("done")
+        else "other"
         for p in payloads
     ]
     assert "sources" in kinds, f"no sources event was emitted; got {kinds}"
@@ -1663,9 +1668,7 @@ async def test_receipt_reports_engine_latency_and_what_was_sent(test_db):
         patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
         patch("app.services.qa.get_llm_service", return_value=mock_llm),
     ):
-        events = [
-            e async for e in QAService().stream_answer("q?", [doc_id], "single", None)
-        ]
+        events = [e async for e in QAService().stream_answer("q?", [doc_id], "single", None)]
 
     final = json.loads(events[-1][len("data: ") :])
     receipt = final["receipt"]
@@ -1697,9 +1700,7 @@ async def test_receipt_ttft_is_null_when_no_model_was_called(test_db):
     mock_graph = _make_mock_graph(result)
 
     with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
-        events = [
-            e async for e in QAService().stream_answer("q?", [doc_id], "single", None)
-        ]
+        events = [e async for e in QAService().stream_answer("q?", [doc_id], "single", None)]
 
     final = json.loads(events[-1][len("data: ") :])
     assert final["receipt"]["ttft_seconds"] is None

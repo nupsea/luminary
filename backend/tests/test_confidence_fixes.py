@@ -136,9 +136,7 @@ async def test_library_summary_missing_falls_through_to_search(test_db):
     # summary warms in the background, but the question still gets a real answer now.
     # intent='factual' is the fallthrough signal _route_after_strategy re-routes to
     # search_node.
-    assert result == {"intent": "factual"}, (
-        f"Expected fallthrough to search, got {result!r}"
-    )
+    assert result == {"intent": "factual"}, f"Expected fallthrough to search, got {result!r}"
     # Background generation must still be fired.
     assert mock_create_task.call_count >= 1
 

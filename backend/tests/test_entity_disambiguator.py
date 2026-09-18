@@ -132,7 +132,7 @@ def test_unversioned_library_does_not_merge_with_versioned():
 
 
 def test_possessive_does_not_merge_with_possessor():
-    """"ulysses' son" is Telemachus, not Ulysses -- no merge either direction."""
+    """ "ulysses' son" is Telemachus, not Ulysses -- no merge either direction."""
     for son in ["ulysses' son", "ulysses’ son", "ulysses's son"]:
         entities = [("ulysses", "PERSON")] * 5 + [(son, "PERSON")] * 2
         names = {t[0] for t in canonicalize_batch(entities, {})}

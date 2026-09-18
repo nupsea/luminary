@@ -24,13 +24,13 @@ ContentType = Literal[
 # Written alongside content_type, which stays authoritative until the wire moves.
 
 Form = Literal[
-    "prose",        # continuous long-form read start to finish
-    "article",      # one self-contained piece, shallow headings
-    "reference",    # manual or textbook: numbered sections, admonitions, code
-    "paper",        # abstract, method, results, references
-    "dialogue",     # speaker turns: chat, interview, meeting, talk transcript
-    "script",       # play or screenplay: scenes and stage directions
-    "entries",      # independent delimited units: clippings, journal, notes
+    "prose",  # continuous long-form read start to finish
+    "article",  # one self-contained piece, shallow headings
+    "reference",  # manual or textbook: numbered sections, admonitions, code
+    "paper",  # abstract, method, results, references
+    "dialogue",  # speaker turns: chat, interview, meeting, talk transcript
+    "script",  # play or screenplay: scenes and stage directions
+    "entries",  # independent delimited units: clippings, journal, notes
     "source_code",  # a program file
 ]
 

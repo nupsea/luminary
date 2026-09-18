@@ -124,9 +124,7 @@ async def check_answer(
     checker is down would empty the deck instead of labelling it."""
     if not passage.strip() or not answer.strip():
         return FACTUALITY_UNVERIFIABLE
-    prompt = _PROMPT.format(
-        passage=passage[:_MAX_PASSAGE_CHARS], question=question, answer=answer
-    )
+    prompt = _PROMPT.format(passage=passage[:_MAX_PASSAGE_CHARS], question=question, answer=answer)
     try:
         raw = await llm.generate(
             prompt,

@@ -139,9 +139,7 @@ class TestLexicalAndExcerptDeduplication:
         c2 = {
             "question": "How does multi-version concurrency control reduce read contention?",
             "answer": "By allowing readers to access snapshot versions without locks.",
-            "source_excerpt": (
-                "MVCC allows concurrent reads by providing transaction snapshots."
-            ),
+            "source_excerpt": ("MVCC allows concurrent reads by providing transaction snapshots."),
         }
         assert _is_lexical_duplicate(c2, [c1]) is False
 

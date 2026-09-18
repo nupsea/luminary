@@ -401,20 +401,30 @@ async def test_generate_technical_backfills_gated_cards(test_db):
 
     first = json.dumps(
         [
-            {"question": "What does the ** operator do in Python?",
-             "answer": "It raises the left operand to the power of the right operand.",
-             "source_excerpt": "def add(a, b):",
-             "flashcard_type": "definition", "bloom_level": 2},
-            {"question": "What is the output of print(2 ** 3)?", "answer": "8",
-             "flashcard_type": "trace", "bloom_level": 4},
+            {
+                "question": "What does the ** operator do in Python?",
+                "answer": "It raises the left operand to the power of the right operand.",
+                "source_excerpt": "def add(a, b):",
+                "flashcard_type": "definition",
+                "bloom_level": 2,
+            },
+            {
+                "question": "What is the output of print(2 ** 3)?",
+                "answer": "8",
+                "flashcard_type": "trace",
+                "bloom_level": 4,
+            },
         ]
     )
     second = json.dumps(
         [
-            {"question": "How does floor division // differ from / in Python?",
-             "answer": "// discards the fractional part and returns an integer-valued result.",
-             "source_excerpt": "def add(a, b):",
-             "flashcard_type": "definition", "bloom_level": 2},
+            {
+                "question": "How does floor division // differ from / in Python?",
+                "answer": "// discards the fractional part and returns an integer-valued result.",
+                "source_excerpt": "def add(a, b):",
+                "flashcard_type": "definition",
+                "bloom_level": 2,
+            },
         ]
     )
     seq_llm = _SequenceLLMService([first, second])

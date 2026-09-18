@@ -114,9 +114,7 @@ _LEARNER_RECORD_TABLES: tuple[type, ...] = (
 class DocumentDeletionService:
     """Orchestrates the multi-system cascade for deleting a single document."""
 
-    async def delete_sqlite_cascade(
-        self, session: AsyncSession, doc: DocumentModel
-    ) -> None:
+    async def delete_sqlite_cascade(self, session: AsyncSession, doc: DocumentModel) -> None:
         """Delete the document row + every child row keyed by document_id.
 
         Caller owns the session (so this can run inside the existing transaction
@@ -166,14 +164,10 @@ class DocumentDeletionService:
         # FK relationship to DocumentModel uses a different column name in some
         # historical migrations; safer to spell them out.
         await session.execute(
-            delete(ReadingPositionModel).where(
-                ReadingPositionModel.document_id == document_id
-            )
+            delete(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
         )
         await session.execute(
-            delete(StudySessionModel).where(
-                StudySessionModel.document_id == document_id
-            )
+            delete(StudySessionModel).where(StudySessionModel.document_id == document_id)
         )
         # Chat sessions hold their scope as a JSON array, so no document_id column
         # exists for the loop above to match. Leaving the id behind is not cosmetic:
@@ -247,9 +241,7 @@ class DocumentDeletionService:
         )
         return counts
 
-    async def count_anchored_rows(
-        self, session: AsyncSession, document_id: str
-    ) -> dict[str, int]:
+    async def count_anchored_rows(self, session: AsyncSession, document_id: str) -> dict[str, int]:
         """What a re-parse would strand, so the user can decide before it runs.
 
         These rows are kept, but they point at section/chunk ids that the rebuild

@@ -72,9 +72,7 @@ async def test_retrieve_with_hyde_passes_augmented_query_to_searches():
 
     with (
         patch("app.services.llm.get_llm_service", return_value=mock_llm),
-        patch.object(
-            retriever, "vector_search", return_value=[_make_chunk("c1")]
-        ) as vec_mock,
+        patch.object(retriever, "vector_search", return_value=[_make_chunk("c1")]) as vec_mock,
         patch.object(
             retriever, "keyword_search", new=AsyncMock(return_value=[_make_chunk("c2")])
         ) as kw_mock,
@@ -106,17 +104,11 @@ async def test_retrieve_without_hyde_uses_original_query():
 
     with (
         patch("app.services.llm.get_llm_service", return_value=mock_llm),
-        patch.object(
-            retriever, "vector_search", return_value=[_make_chunk("c1")]
-        ) as vec_mock,
-        patch.object(
-            retriever, "keyword_search", new=AsyncMock(return_value=[_make_chunk("c2")])
-        ),
+        patch.object(retriever, "vector_search", return_value=[_make_chunk("c1")]) as vec_mock,
+        patch.object(retriever, "keyword_search", new=AsyncMock(return_value=[_make_chunk("c2")])),
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
-        await retriever.retrieve(
-            "What happened?", document_ids=["doc-1"], k=5, graph_expand=False
-        )
+        await retriever.retrieve("What happened?", document_ids=["doc-1"], k=5, graph_expand=False)
 
     mock_llm.generate.assert_not_called()
     assert vec_mock.call_args[0][0] == "What happened?"
@@ -132,12 +124,8 @@ async def test_retrieve_with_hyde_falls_back_when_llm_fails():
 
     with (
         patch("app.services.llm.get_llm_service", return_value=mock_llm),
-        patch.object(
-            retriever, "vector_search", return_value=[_make_chunk("c1")]
-        ) as vec_mock,
-        patch.object(
-            retriever, "keyword_search", new=AsyncMock(return_value=[_make_chunk("c2")])
-        ),
+        patch.object(retriever, "vector_search", return_value=[_make_chunk("c1")]) as vec_mock,
+        patch.object(retriever, "keyword_search", new=AsyncMock(return_value=[_make_chunk("c2")])),
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
         results = await retriever.retrieve(

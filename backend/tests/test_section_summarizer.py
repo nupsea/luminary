@@ -306,12 +306,14 @@ async def test_generate_replaces_rather_than_appends(test_db):
 
     async with factory() as session:
         rows = (
-            await session.execute(
-                select(SectionSummaryModel).where(
-                    SectionSummaryModel.document_id == doc_id
+            (
+                await session.execute(
+                    select(SectionSummaryModel).where(SectionSummaryModel.document_id == doc_id)
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert len(rows) == 4, f"second run must replace the first, got {len(rows)} rows"
 
 

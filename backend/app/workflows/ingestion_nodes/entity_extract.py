@@ -228,7 +228,6 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
     with trace_ingestion_node("entity_extract", state):
         entity_count = 0
         try:
-
             if not _get_settings().GLINER_ENABLED:
                 logger.info(
                     "entity_extract_node: skipped (GLINER_ENABLED=false)",
@@ -236,9 +235,6 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 )
                 await _update_stage(doc_id, "complete")
                 return {**state, "status": "complete"}
-
-
-
 
             extractor = _ner_module.get_entity_extractor()
             # Cap NER at 500 chunks — sufficient for graph coverage, avoids multi-hour
@@ -309,8 +305,6 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             # FTS5 indexed text and the embedding input. Idempotent: every reindex
             # overwrites entities_text rather than appending.
             if chunk_to_entities:
-
-
                 async with get_session_factory()() as update_session:
                     for chunk in chunks:
                         cid = chunk["id"]
@@ -362,4 +356,3 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
 # (tests check the same registry).
 # _run_objective_extraction lives in ingestion_nodes/chunk.py (its only
 # call site) and is re-exported via that module.
-

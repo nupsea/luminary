@@ -22,9 +22,7 @@ class CollectionRepo:
     # -- single-row reads --------------------------------------------------
 
     async def get_or_404(self, collection_id: str) -> CollectionModel:
-        return await get_or_404(
-            self.session, CollectionModel, collection_id, name="Collection"
-        )
+        return await get_or_404(self.session, CollectionModel, collection_id, name="Collection")
 
     async def find_by_auto_document_id(self, document_id: str) -> CollectionModel | None:
         result = await self.session.execute(
@@ -36,9 +34,7 @@ class CollectionRepo:
 
     async def list_all(self) -> Sequence[CollectionModel]:
         result = await self.session.execute(
-            select(CollectionModel).order_by(
-                CollectionModel.sort_order, CollectionModel.name
-            )
+            select(CollectionModel).order_by(CollectionModel.sort_order, CollectionModel.name)
         )
         return result.scalars().all()
 
@@ -66,9 +62,7 @@ class CollectionRepo:
 
     async def child_ids(self, parent_id: str) -> list[str]:
         result = await self.session.execute(
-            select(CollectionModel.id).where(
-                CollectionModel.parent_collection_id == parent_id
-            )
+            select(CollectionModel.id).where(CollectionModel.parent_collection_id == parent_id)
         )
         return [row[0] for row in result.all()]
 
@@ -136,9 +130,7 @@ class CollectionRepo:
         child_ids = await self.child_ids(collection_id)
         for child_id in child_ids:
             await self.session.execute(
-                delete(CollectionMemberModel).where(
-                    CollectionMemberModel.collection_id == child_id
-                )
+                delete(CollectionMemberModel).where(CollectionMemberModel.collection_id == child_id)
             )
         await self.session.execute(
             delete(CollectionMemberModel).where(
@@ -208,14 +200,12 @@ class CollectionRepo:
         await self.session.execute(stmt)
         await self.session.commit()
 
-    async def members_of(
-        self, collection_id: str
-    ) -> list[tuple[str, str]]:
+    async def members_of(self, collection_id: str) -> list[tuple[str, str]]:
         """Return list of (member_id, member_type) for a collection."""
         result = await self.session.execute(
-            select(
-                CollectionMemberModel.member_id, CollectionMemberModel.member_type
-            ).where(CollectionMemberModel.collection_id == collection_id)
+            select(CollectionMemberModel.member_id, CollectionMemberModel.member_type).where(
+                CollectionMemberModel.collection_id == collection_id
+            )
         )
         return [(mid, mtype) for mid, mtype in result.all()]
 

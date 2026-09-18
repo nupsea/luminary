@@ -12,7 +12,7 @@ Every rule here comes from a measured failure, named at the rule.
 import logging
 import re
 
-from bs4 import NavigableString, Tag
+from bs4 import Comment, NavigableString, Tag
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,12 @@ class MarkdownSerializer:
     # -- inline ---------------------------------------------------------------
 
     def _inline(self, node) -> str:
+        # Comment is a NavigableString subclass, so it must be checked first --
+        # an HTML comment is never content. article_extractor.py strips
+        # comments before calling in, but this walker should not depend on
+        # that upstream cleanup to stay correct on its own.
+        if isinstance(node, Comment):
+            return ""
         if isinstance(node, NavigableString):
             return _collapse(str(node))
         if not isinstance(node, Tag):
@@ -140,6 +146,8 @@ class MarkdownSerializer:
         return out
 
     def _block(self, node, depth: int = 0) -> list[str]:
+        if isinstance(node, Comment):
+            return []
         if isinstance(node, NavigableString):
             text = _clean(str(node))
             return [text] if text else []

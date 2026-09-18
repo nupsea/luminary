@@ -7,6 +7,7 @@ Three AC-driven unit/integration tests:
   3. batch_accept_suggestions stores lower-case collection names
 """
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
@@ -93,6 +94,56 @@ async def test_suggest_tags_returns_normalized_slugs(test_db):
     # Ensure no un-normalized originals leak through
     assert "Machine Learning" not in tags
     assert "Science/Cell_Division" not in tags
+
+
+@pytest.mark.unstable  # POST /notes schedules a real embed/graph task, like the dedup test above
+@pytest.mark.asyncio
+async def test_create_note_returns_before_tagger_resolves(test_db):
+    """POST /notes must not await the tagger inline (regression).
+
+    `create_note` used to await `suggest_tags()` before responding, so a busy
+    LLM -- e.g. a background ingestion job holding the only model slot --
+    hung every note save, and the "Open full note" navigation gated on that
+    save, for as long as the queue was busy. A tagger that never resolves
+    must not stop the request from completing; tagging happens in the
+    background instead (`auto_tag_and_store_note`).
+    """
+    from app.services import note_tagger as tagger_module
+    from app.services.notes_service import auto_tag_and_store_note
+
+    never_resolves: asyncio.Future = asyncio.get_event_loop().create_future()
+
+    class HangingTagger:
+        async def suggest_tags(self, content: str) -> list[str]:
+            return await never_resolves  # never completes during this test
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with patch.object(tagger_module, "get_note_tagger", return_value=HangingTagger()):
+            resp = await asyncio.wait_for(
+                client.post(
+                    "/notes",
+                    json={
+                        "content": "Some content long enough to trigger tagging.",
+                        "tags": [],
+                        "document_id": None,
+                    },
+                ),
+                timeout=2.0,
+            )
+        note_id = resp.json()["id"]
+        never_resolves.cancel()  # unwind the still-pending background task
+
+        assert resp.status_code == 201
+        assert resp.json()["tags"] == []
+
+        # The background helper itself still tags the note once the model answers.
+        mock_tagger = AsyncMock()
+        mock_tagger.suggest_tags = AsyncMock(return_value=["Reinforcement Learning"])
+        with patch.object(tagger_module, "get_note_tagger", return_value=mock_tagger):
+            await auto_tag_and_store_note(note_id, "Some content long enough to trigger tagging.")
+
+        reread = (await client.get(f"/notes/{note_id}")).json()
+    assert reread["tags"] == ["reinforcement-learning"]
 
 
 # AC10: duplicate note creation within 5s window returns existing note

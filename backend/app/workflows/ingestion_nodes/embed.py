@@ -117,7 +117,9 @@ async def embed_node(state: IngestionState) -> IngestionState:
             if written != len(chunks):
                 logger.warning(
                     "embed integrity: doc=%s vectors=%d != chunks=%d, retrying upsert",
-                    doc_id, written, len(chunks),
+                    doc_id,
+                    written,
+                    len(chunks),
                 )
                 # Re-encodes rather than keeping every vector alive for a path
                 # that almost never runs. Holding them to save this retry is what

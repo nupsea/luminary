@@ -254,8 +254,11 @@ class TestGenreWiring:
         # "Neuromancer" trips no keyword, but the legacy path cannot tell an
         # epic from an essay at all -- it answers non-fiction for both.
         novel = self._doc(
-            content_type="book", title="Neuromancer", form="prose",
-            domain="general", register="narrative",
+            content_type="book",
+            title="Neuromancer",
+            form="prose",
+            domain="general",
+            register="narrative",
         )
         assert _infer_genre(novel) == "narrative"
 

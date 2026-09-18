@@ -34,10 +34,7 @@ _BLOOM_LEVEL_INSTRUCTIONS: dict[int, str] = {
         "Ask how two parts of this material relate, or why the text chose one "
         "approach over another."
     ),
-    5: (
-        "Ask where this approach breaks down, or what it costs, and why that "
-        "trade-off was made."
-    ),
+    5: ("Ask where this approach breaks down, or what it costs, and why that trade-off was made."),
     6: (
         "Ask the reader to put together something the text does not state "
         "outright, using what it does say."

@@ -91,19 +91,25 @@ async def list_sessions(
         if not ids:
             return []
         sess_rows = (
-            await db.execute(select(ChatSessionModel).where(ChatSessionModel.id.in_(ids)))
-        ).scalars().all()
+            (await db.execute(select(ChatSessionModel).where(ChatSessionModel.id.in_(ids))))
+            .scalars()
+            .all()
+        )
         # preserve FTS ordering
         order = {sid: i for i, sid in enumerate(ids)}
         sessions = sorted(sess_rows, key=lambda s: order.get(s.id, 999))
     else:
         sessions = (
-            await db.execute(
-                select(ChatSessionModel)
-                .order_by(ChatSessionModel.last_message_at.desc())
-                .limit(limit)
+            (
+                await db.execute(
+                    select(ChatSessionModel)
+                    .order_by(ChatSessionModel.last_message_at.desc())
+                    .limit(limit)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     out: list[dict] = []
     for s in sessions:
@@ -115,7 +121,7 @@ async def list_sessions(
                 .limit(1)
             )
         ).scalar_one_or_none()
-        preview = (last.content[:140] if last else "")
+        preview = last.content[:140] if last else ""
         out.append(
             {
                 "id": s.id,
@@ -135,20 +141,22 @@ async def list_sessions(
 
 async def get_session(db: AsyncSession, session_id: str) -> ChatSessionModel | None:
     return (
-        await db.execute(
-            select(ChatSessionModel).where(ChatSessionModel.id == session_id)
-        )
+        await db.execute(select(ChatSessionModel).where(ChatSessionModel.id == session_id))
     ).scalar_one_or_none()
 
 
 async def get_messages(db: AsyncSession, session_id: str) -> list[ChatMessageModel]:
     return (
-        await db.execute(
-            select(ChatMessageModel)
-            .where(ChatMessageModel.session_id == session_id)
-            .order_by(ChatMessageModel.created_at.asc())
+        (
+            await db.execute(
+                select(ChatMessageModel)
+                .where(ChatMessageModel.session_id == session_id)
+                .order_by(ChatMessageModel.created_at.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
 
 async def rename_session(
@@ -168,9 +176,7 @@ async def rename_session(
     await db.refresh(sess)
     # keep FTS title column in sync
     await db.execute(
-        text(
-            "UPDATE chat_messages_fts SET title = :t WHERE session_id = :sid"
-        ),
+        text("UPDATE chat_messages_fts SET title = :t WHERE session_id = :sid"),
         {"t": sess.title, "sid": sess.id},
     )
     await db.commit()
@@ -198,16 +204,12 @@ async def delete_session(db: AsyncSession, session_id: str) -> bool:
     if sess is None:
         return False
     # Service-level cascade -- SQLite FKs may not enforce ON DELETE
-    await db.execute(
-        delete(ChatMessageModel).where(ChatMessageModel.session_id == session_id)
-    )
+    await db.execute(delete(ChatMessageModel).where(ChatMessageModel.session_id == session_id))
     await db.execute(
         text("DELETE FROM chat_messages_fts WHERE session_id = :sid"),
         {"sid": session_id},
     )
-    await db.execute(
-        delete(ChatSessionModel).where(ChatSessionModel.id == session_id)
-    )
+    await db.execute(delete(ChatSessionModel).where(ChatSessionModel.id == session_id))
     await db.commit()
     return True
 

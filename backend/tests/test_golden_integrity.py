@@ -59,8 +59,8 @@ _MIN_ROWS_TO_GATE = 20
 # Datasets under that floor, with what they actually hold. Shrink by adding rows,
 # never by lowering the floor.
 _TOO_SMALL_TO_GATE = {
-    "code": 5,        # generator accepted 5 of 12 attempted
-    "thoughts": 4,    # source is 2,944 chars -- one content chunk exists to sample
+    "code": 5,  # generator accepted 5 of 12 attempted
+    "thoughts": 4,  # source is 2,944 chars -- one content chunk exists to sample
     "conversation": 18,
 }
 
@@ -209,6 +209,10 @@ def test_a_realigned_row_must_say_why_it_was_safe():
     rows = [{"provenance": provenance.REALIGNED}]
 
     assert provenance.violations(rows, meta) != []
-    assert provenance.violations(
-        [{"provenance": provenance.REALIGNED, "provenance_reason": "hint was not verbatim"}], meta
-    ) == []
+    assert (
+        provenance.violations(
+            [{"provenance": provenance.REALIGNED, "provenance_reason": "hint was not verbatim"}],
+            meta,
+        )
+        == []
+    )

@@ -80,9 +80,7 @@ class SmartTagNormalizerService:
         suggestion_rows = await session.execute(
             select(TagMergeSuggestionModel.tag_a_id, TagMergeSuggestionModel.tag_b_id)
         )
-        suggested_pairs: set[frozenset[str]] = {
-            frozenset([a, b]) for a, b in suggestion_rows.all()
-        }
+        suggested_pairs: set[frozenset[str]] = {frozenset([a, b]) for a, b in suggestion_rows.all()}
 
         # Embed display_names using the synchronous EmbeddingService in a thread
         from app.services.embedder import get_embedding_service  # noqa: PLC0415

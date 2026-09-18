@@ -89,7 +89,7 @@ async def search(
 
     When ``graph_expand`` is true (default), entities detected in the query
     are resolved to canonical labels via Kuzu's alias graph and appended to
-    the query. Deterministic and local-first per I-16; pairs with 
+    the query. Deterministic and local-first per I-16; pairs with
     index-time entity injection.
 
     When ``rerank`` is true, the top-N RRF candidates (``rerank_depth``,

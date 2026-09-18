@@ -55,9 +55,7 @@ def _parse_concept_extract(raw: str) -> tuple[str, list[dict]]:
     return "", []
 
 
-def _parse_llm_response(
-    raw: str, document_id: str, *, expect: str | None = None
-) -> list[dict]:
+def _parse_llm_response(raw: str, document_id: str, *, expect: str | None = None) -> list[dict]:
     """Extract flashcards from the LLM response, whichever shape it arrived in.
 
     Handles clean arrays, `{"flashcards": [...]}` objects, markdown fences,
@@ -76,9 +74,7 @@ def _parse_llm_response(
     separately from the repairs, because nothing had to be rewritten.
     """
     shape = top_level_shape(raw)
-    attempts = (
-        (_from_object, _from_array) if shape == "object" else (_from_array, _from_object)
-    )
+    attempts = (_from_object, _from_array) if shape == "object" else (_from_array, _from_object)
 
     first_repairs: frozenset[str] = frozenset()
     for i, attempt in enumerate(attempts):
@@ -270,10 +266,17 @@ _MIN_EXCERPT_TOKENS = 2
 
 # Curly quotes, dashes and ellipses differ between a model's output and the text
 # it was given, and none of those differences mean the quote is invented.
-_QUOTE_CHARS = str.maketrans({
-    "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
-    "\u2013": "-", "\u2014": "-", "\u2026": "...",
-})
+_QUOTE_CHARS = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2026": "...",
+    }
+)
 
 
 # Markdown emphasis renders away, so a model quoting a bolded sentence returns the

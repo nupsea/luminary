@@ -353,9 +353,7 @@ async def test_llm_service_applies_the_gate_so_callers_do_not(admission_settings
     with patch("litellm.acompletion", side_effect=fake_acompletion):
         first = asyncio.create_task(svc.complete(_msg("interactive"), model=LOCAL))
         await interactive_started.wait()
-        second = asyncio.create_task(
-            svc.complete(_msg("background"), model=LOCAL, background=True)
-        )
+        second = asyncio.create_task(svc.complete(_msg("background"), model=LOCAL, background=True))
         await asyncio.sleep(0.4)
 
         assert events == ["interactive"]

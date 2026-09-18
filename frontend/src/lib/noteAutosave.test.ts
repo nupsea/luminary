@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  buildPatchPayload,
   createNoteAutosaver,
   EMPTY_DRAFT,
+  resolveFinalizedNote,
   type AutosaveStatus,
   type NoteDraft,
 } from "./noteAutosave"
@@ -174,5 +176,41 @@ describe("createNoteAutosaver", () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(patch).toHaveBeenCalledTimes(1)
     expect(patch.mock.calls[0][1].tags).toEqual(["ml"])
+  })
+})
+
+describe("buildPatchPayload", () => {
+  it("includes tags by default", () => {
+    const payload = buildPatchPayload(draft("body", { tags: ["ml"] }), false)
+    expect(payload.tags).toEqual(["ml"])
+  })
+
+  it("omits tags entirely when preserveTags is set (regression)", () => {
+    // A surface with no tag UI (the note composer) only ever knows a stale
+    // snapshot of a note's tags -- auto-tagging or an edit made elsewhere
+    // lands after that. Sending that stale array back, even as [], used to
+    // overwrite real tags the next time this surface autosaved.
+    const payload = buildPatchPayload(draft("body", { tags: [] }), true)
+    expect("tags" in payload).toBe(false)
+  })
+})
+
+describe("resolveFinalizedNote", () => {
+  // #137: opening an existing note and clicking "Open full note" without
+  // editing anything flushed nothing (flush() only reports a dirty save), so
+  // the composer treated the note as missing, closed, and never navigated.
+  it("prefers a freshly flushed save", () => {
+    const flushed = makeNote("id-1", "edited")
+    const openNote = makeNote("id-1", "as loaded")
+    expect(resolveFinalizedNote(flushed, openNote)).toBe(flushed)
+  })
+
+  it("falls back to the loaded note when nothing was dirty to flush", () => {
+    const openNote = makeNote("id-1", "unedited")
+    expect(resolveFinalizedNote(null, openNote)).toBe(openNote)
+  })
+
+  it("stays null for a fresh draft that was never saved and never existed", () => {
+    expect(resolveFinalizedNote(null, null)).toBeNull()
   })
 })

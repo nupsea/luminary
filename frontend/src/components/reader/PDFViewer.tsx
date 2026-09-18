@@ -274,6 +274,19 @@ interface PDFViewerProps {
   initialSearch?: string // prefilled search query
   /** The cited passage as words, drawn on whichever page contains it. */
   citationWords?: string[]
+  /**
+   * The page that citation actually names, when it has one.
+   *
+   * `initialPage` is fixed at mount (a deep-link's page); a citation clicked
+   * later in the same session changes `citationWords` but not `initialPage`,
+   * so the locate-on-click effect below was searching with a stale or absent
+   * preferred page and falling through to a full-document scan every time.
+   * That scan takes the *first* page with any run of the words at all, and a
+   * heading recurs verbatim in the table of contents -- so a citation to real
+   * prose on page 517 was landing on the four-word ToC entry on page 14
+   * instead, because the scan reached it first.
+   */
+  citationPage?: number | null
   annotations?: AnnotationItem[]
   highlightsVisible?: boolean
   onPageChange?: (page: number) => void
@@ -288,7 +301,7 @@ type LoadStatus = "loading" | "error" | "ready"
 const EMPTY_WORDS: string[] = []
 
 export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
-  function PDFViewer({ documentId, sections, pageLabels, initialPage, initialSearch, citationWords = EMPTY_WORDS, annotations = [], highlightsVisible = true, onPageChange }, ref) {
+  function PDFViewer({ documentId, sections, pageLabels, initialPage, initialSearch, citationWords = EMPTY_WORDS, citationPage = null, annotations = [], highlightsVisible = true, onPageChange }, ref) {
     const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null)
     // Read inside the page-render closure, which is not re-created per prop change.
     const citationWordsRef = useRef<string[]>(citationWords)
@@ -762,7 +775,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       let cancelled = false
       void locateCitationPage(citationWords, {
         pageCount: pdfDoc.numPages,
-        preferredPage: initialPage ?? null,
+        preferredPage: citationPage ?? initialPage ?? null,
         isCancelled: () => cancelled,
         getPageText: async (n) => {
           const page = await pdfDoc.getPage(n)
@@ -776,7 +789,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     // goToPage is a stable declaration recreated each render; adding it would
     // re-run the scan on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pdfDoc, citationWords, initialPage])
+    }, [pdfDoc, citationWords, citationPage, initialPage])
 
     /** The sheet a typed entry names, or null if it names nothing.
      *

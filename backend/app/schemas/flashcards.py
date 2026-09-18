@@ -21,9 +21,7 @@ def _validate_model_id(value: str | None) -> str | None:
     if value is None or value == "":
         return None
     if not _MODEL_ID_RE.match(value):
-        raise ValueError(
-            "model must look like 'provider/name', e.g. ollama/qwen3.5:4b"
-        )
+        raise ValueError("model must look like 'provider/name', e.g. ollama/qwen3.5:4b")
     return value
 
 

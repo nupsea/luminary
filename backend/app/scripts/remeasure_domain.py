@@ -71,9 +71,7 @@ async def _read(doc: DocumentModel, session) -> tuple[str, list[dict], int, str]
         from app.services.parser import DocumentParser  # noqa: PLC0415
 
         path = Path(doc.file_path)
-        parsed = await asyncio.to_thread(
-            DocumentParser().parse, path, path.suffix.lstrip(".")
-        )
+        parsed = await asyncio.to_thread(DocumentParser().parse, path, path.suffix.lstrip("."))
         sections = [{"heading": s.heading} for s in parsed.sections]
         return parsed.raw_text, sections, parsed.word_count, path.suffix.lstrip(".")
     except Exception as exc:  # noqa: BLE001
@@ -109,9 +107,7 @@ async def main(apply: bool) -> int:
                 measured: bool | None = True
             else:
                 measured = await detect_technical_content(text) if has_text else None
-            register = (
-                doc.register or (await detect_register(text) if has_text else None)
-            )
+            register = doc.register or (await detect_register(text) if has_text else None)
 
             after = DocumentProfile.from_legacy(doc.content_type, measured).domain
             if after == before and register == doc.register and form == doc.form:
@@ -146,8 +142,11 @@ async def main(apply: bool) -> int:
     verb = "changed" if apply else "would change"
     logger.info("%d document(s) %s", len(changed), verb)
     if undecided:
-        logger.info("%d still undecided (the probe did not answer): %s",
-                    len(undecided), ", ".join(t[:30] for t in undecided[:5]))
+        logger.info(
+            "%d still undecided (the probe did not answer): %s",
+            len(undecided),
+            ", ".join(t[:30] for t in undecided[:5]),
+        )
     if changed and apply:
         logger.info("")
         logger.info("Entities are NOT re-extracted by this script. To apply the new")
@@ -159,8 +158,7 @@ async def main(apply: bool) -> int:
                 continue
             logger.info("  # %s", title[:60])
             logger.info(
-                "  uv run python -m app.scripts.reindex_entities"
-                " --document-id %s --rebuild-graph",
+                "  uv run python -m app.scripts.reindex_entities --document-id %s --rebuild-graph",
                 doc_id,
             )
     elif changed:

@@ -128,7 +128,10 @@ async def test_collection_and_source_lookups(repo: NoteRepo) -> None:
     repo.stage(_make_note(id="n1"))
     repo.session.add(
         CollectionMemberModel(
-            id="m1", collection_id="c1", member_id="n1", member_type="note",
+            id="m1",
+            collection_id="c1",
+            member_id="n1",
+            member_type="note",
             added_at=datetime.now(UTC),
         )
     )

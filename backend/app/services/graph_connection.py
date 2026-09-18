@@ -76,6 +76,7 @@ def _open_database(db_path: str) -> kuzu.Database:
 
 class ThreadSafeKuzuConnection:
     """Thread-safe proxy wrapper for kuzu.Connection to serialize all executions."""
+
     def __init__(self, conn: kuzu.Connection, lock: threading.RLock) -> None:
         self._conn = conn
         self._lock = lock

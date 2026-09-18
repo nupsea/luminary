@@ -58,8 +58,8 @@ _SEPARATE_EXCERPTS = (
 
 
 FLASHCARD_SYSTEM = (
-    _SEPARATE_EXCERPTS +
-    "You are a learning assistant that writes flashcards for active recall. Each card is a "
+    _SEPARATE_EXCERPTS
+    + "You are a learning assistant that writes flashcards for active recall. Each card is a "
     "self-contained question testing understanding of exactly one idea, plus the shortest "
     "complete answer -- both grounded only in the provided text.\n"
     "QUESTION: match it to the knowledge type -- causal knowledge asks why or what causes; a "
@@ -147,6 +147,7 @@ def bloom_from(item: dict) -> int | None:
         return int(raw)
     return None
 
+
 # The user-side flashcard prompt as a contract plus its compensations. Rendering
 # it reproduces FLASHCARD_USER_TMPL exactly today: both accommodations still
 # apply, because nothing has measured that any model can go without them. The
@@ -207,9 +208,11 @@ FLASHCARD_USER_SPEC = PromptSpec(
     ),
 )
 
+
 def flashcard_user_tmpl() -> str:
     """The user prompt, rendered for the model that will generate the cards."""
     return render_for(FLASHCARD_USER_SPEC, "generation") + "\nText:\n{text}\n\nJSON object:"
+
 
 NOTES_CONCEPT_EXTRACT_SPEC = PromptSpec(
     task="concepts",
@@ -246,8 +249,10 @@ NOTES_CONCEPT_EXTRACT_SPEC = PromptSpec(
     ),
 )
 
+
 def notes_concept_extract_system() -> str:
     return render_for(NOTES_CONCEPT_EXTRACT_SPEC, "generation")
+
 
 NOTES_CONCEPT_EXTRACT_TMPL = (
     "Identify the domain and extract up to {max_concepts} learnable concepts from these notes.\n\n"
@@ -325,8 +330,7 @@ _BOOK_CONTENT_GUIDELINE = (
 )
 
 TECH_FLASHCARD_SYSTEM = (
-    _SEPARATE_EXCERPTS +
-    "You are a technical learning assistant writing flashcards. "
+    _SEPARATE_EXCERPTS + "You are a technical learning assistant writing flashcards. "
     # No taxonomy name and no level annotations (I-28). The type is a shape the
     # model can act on; the level it maps to is derived in code (TYPE_TO_BLOOM)
     # and is none of the model's business.
@@ -444,9 +448,7 @@ _GENRE_STRATEGY = {
         "Ask about cause and consequence, what a character wanted, or what a choice cost. "
         "Never ask which words the text used or which example illustrated a point."
     ),
-    "non-fiction": (
-        "Ask what a claim asserts, why it holds, and what it rules out."
-    ),
+    "non-fiction": ("Ask what a claim asserts, why it holds, and what it rules out."),
     "technical": (
         "Ask the invariant, the failure mode, when one option beats another, and what a "
         "parameter controls. Where the text gives syntax, a signature or a formula, quote "
@@ -464,9 +466,7 @@ _GENRE_STRATEGY = {
 }
 
 
-def _infer_genre(
-    doc: DocumentModel | None, *, has_speakers: bool | None = None
-) -> str:
+def _infer_genre(doc: DocumentModel | None, *, has_speakers: bool | None = None) -> str:
     """What kind of card this document wants.
 
     `DocumentProfile.card_genre` decides it for any measured document. The

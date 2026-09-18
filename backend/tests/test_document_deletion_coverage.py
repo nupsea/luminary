@@ -55,8 +55,7 @@ def test_declared_tables_still_exist_and_are_document_scoped():
 
     for cls in declared - {CollectionMemberModel}:
         assert cls in with_doc_id, (
-            f"{cls.__name__} is declared in the deletion cascade but has no "
-            f"document_id column"
+            f"{cls.__name__} is declared in the deletion cascade but has no document_id column"
         )
 
 

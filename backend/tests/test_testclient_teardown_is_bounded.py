@@ -92,9 +92,7 @@ def test_the_bound_is_what_makes_it_early(monkeypatch):
     test is measuring nothing.
     """
     original = _installed_join().__globals__["_original_shutdown_default_executor"]
-    monkeypatch.setattr(
-        asyncio.base_events.BaseEventLoop, "shutdown_default_executor", original
-    )
+    monkeypatch.setattr(asyncio.base_events.BaseEventLoop, "shutdown_default_executor", original)
 
     elapsed = _exit_seconds_with_executor_work_in_flight()
 

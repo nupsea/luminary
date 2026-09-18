@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 import httpx
-from bs4 import BeautifulSoup, NavigableString
+from bs4 import BeautifulSoup, Comment, NavigableString
 
 from app.config import get_settings
 from app.full_extras import require_extra
@@ -372,6 +372,16 @@ class ArticleExtractor:
         self._inline_svg_to_img(soup, doc_id, protected)
         self._promote_figcaptions(soup)
         self._protect_code_blocks(soup, protected)
+        # Some site builders (Framer, at least) plant bare `<!--$-->` markers as
+        # their own hydration boundaries around ordinary rich-text spans. bs4's
+        # Comment is a NavigableString subclass, so left in the tree its `$` /
+        # `/$` text reads as content to every downstream walker -- both
+        # serializers wrapped the very link it straddled in bogus inline-math
+        # delimiters: `$[3 to 329 seconds](https://...)/$`. Stripped only after
+        # code blocks are protected, so a code sample that quotes an HTML
+        # comment verbatim already carries it as an opaque token by this point.
+        for comment in soup.find_all(string=lambda s: isinstance(s, Comment)):
+            comment.extract()
         self._protect_math(soup, protected)
         self._flatten_inline_formatting(soup)
         return str(soup), protected
@@ -533,9 +543,7 @@ class ArticleExtractor:
         charge us for every nav logo and share widget trafilatura correctly
         removes, and a warning that cries wolf is not a warning.
         """
-        return [
-            _describe_block(body) for token, body in protected.items() if token not in markdown
-        ]
+        return [_describe_block(body) for token, body in protected.items() if token not in markdown]
 
     def _extraction_report(self, markdown: str, dropped: list[str], notes: list[str]) -> dict:
         """What arrived, and what did not.

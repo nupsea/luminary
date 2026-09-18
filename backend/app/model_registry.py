@@ -434,9 +434,7 @@ def _resolve_chat_model() -> tuple[str, str | None]:
         if not candidates:
             return configured, None
         why = "does not fit this host" if not fits_host(profile) else "cannot read figures"
-        return candidates[0].id, (
-            f"this profile keeps one model resident and {configured} {why}"
-        )
+        return candidates[0].id, (f"this profile keeps one model resident and {configured} {why}")
 
     # Room for two. On a host large enough to hold the strongest text model
     # *alongside* a reader, use it -- that is what the extra memory is for, and
@@ -488,11 +486,7 @@ def default_chat_model() -> str:
 
 def _text_rank(model_id: str) -> int:
     """Where a model sits in the measured text order; unranked models sort last."""
-    return (
-        TEXT_PREFERENCE.index(model_id)
-        if model_id in TEXT_PREFERENCE
-        else len(TEXT_PREFERENCE)
-    )
+    return TEXT_PREFERENCE.index(model_id) if model_id in TEXT_PREFERENCE else len(TEXT_PREFERENCE)
 
 
 # Vision quality is measured, not inferred from the capability list, and it does

@@ -50,9 +50,7 @@ async def _create_session(client: AsyncClient, **overrides) -> dict:
 async def test_patch_model_updates_session(test_db) -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         sess = await _create_session(client)
-        resp = await client.patch(
-            f"/chat/sessions/{sess['id']}", json={"model": "openai/gpt-4o"}
-        )
+        resp = await client.patch(f"/chat/sessions/{sess['id']}", json={"model": "openai/gpt-4o"})
         assert resp.status_code == 200
         assert resp.json()["model"] == "openai/gpt-4o"
 
@@ -101,9 +99,7 @@ async def test_patch_model_missing_session_404(test_db) -> None:
 @pytest.mark.asyncio
 async def test_get_session_returns_scope_docs_model(test_db) -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        sess = await _create_session(
-            client, scope="all", document_ids=[], model=None
-        )
+        sess = await _create_session(client, scope="all", document_ids=[], model=None)
         detail = await client.get(f"/chat/sessions/{sess['id']}")
         assert detail.status_code == 200
         body = detail.json()

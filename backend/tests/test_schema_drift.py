@@ -89,9 +89,7 @@ async def test_a_model_change_with_no_revision_is_detected(tmp_path):
     table.append_column(col)
     try:
         diffs = await _diff_for_migrated(tmp_path / "canary")
-        assert any("drift_canary" in str(d) for d in diffs), (
-            f"drift went undetected; got {diffs}"
-        )
+        assert any("drift_canary" in str(d) for d in diffs), f"drift went undetected; got {diffs}"
     finally:
         table._columns.remove(col)
 
@@ -105,9 +103,7 @@ async def test_fts_tables_are_not_dropped(tmp_path):
         await create_all_tables(engine)
 
         def _unfiltered(sync_conn) -> list:
-            ctx = MigrationContext.configure(
-                sync_conn, opts={"target_metadata": Base.metadata}
-            )
+            ctx = MigrationContext.configure(sync_conn, opts={"target_metadata": Base.metadata})
             return compare_metadata(ctx, Base.metadata)
 
         async with engine.connect() as conn:

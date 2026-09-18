@@ -42,14 +42,20 @@ async def _doc(factory, doc_id, headings):
     async with factory() as s:
         s.add(
             DocumentModel(
-                id=doc_id, title="Test Doc", format="pdf", content_type="application/pdf",
+                id=doc_id,
+                title="Test Doc",
+                format="pdf",
+                content_type="application/pdf",
                 file_path="/x",
             )
         )
         for i, (h, lvl) in enumerate(headings):
             s.add(
                 SectionModel(
-                    id=f"{doc_id}-s{i}", document_id=doc_id, heading=h, level=lvl,
+                    id=f"{doc_id}-s{i}",
+                    document_id=doc_id,
+                    heading=h,
+                    level=lvl,
                     section_order=i,
                 )
             )
@@ -61,22 +67,44 @@ def test_is_junk_heading():
         "Through firsthand experience working with data across organizations, tools, and "
         "industries we have uncovered a better way to develop and deliver analytics."
     )
-    for junk in ["Index", "  ", "Table of Contents", "Copyright © 2020 O'Reilly", "ISBN 978-1",
-                 "Get the developer newsletter", "Bibliography", "About the Author", "...",
-                 "1", "18", "a", long_sentence]:  # bare list-markers + paragraph
+    for junk in [
+        "Index",
+        "  ",
+        "Table of Contents",
+        "Copyright © 2020 O'Reilly",
+        "ISBN 978-1",
+        "Get the developer newsletter",
+        "Bibliography",
+        "About the Author",
+        "...",
+        "1",
+        "18",
+        "a",
+        long_sentence,
+    ]:  # bare list-markers + paragraph
         assert is_junk_heading(junk), junk
-    for keep in ["I. A SCANDAL IN BOHEMIA", "CHAPTER I — Down the Rabbit-Hole",
-                 "Replication", "Introduction to Distributed Systems", "Embrace change"]:
+    for keep in [
+        "I. A SCANDAL IN BOHEMIA",
+        "CHAPTER I — Down the Rabbit-Hole",
+        "Replication",
+        "Introduction to Distributed Systems",
+        "Embrace change",
+    ]:
         assert not is_junk_heading(keep), keep
 
 
 async def test_clean_doc_uses_top_level_sections_minus_junk(test_db):
     await _doc(
-        test_db, "d1",
+        test_db,
+        "d1",
         [
-            ("Table of Contents", 1), ("Chapter 1: Foundations", 1),
-            ("1.1 sub", 2), ("Chapter 2: Replication", 1), ("Chapter 3: Partitioning", 1),
-            ("Index", 1), ("Copyright", 1),
+            ("Table of Contents", 1),
+            ("Chapter 1: Foundations", 1),
+            ("1.1 sub", 2),
+            ("Chapter 2: Replication", 1),
+            ("Chapter 3: Partitioning", 1),
+            ("Index", 1),
+            ("Copyright", 1),
         ],
     )
     transport = ASGITransport(app=app)
@@ -109,10 +137,15 @@ async def test_ddia_like_uses_chapter_headings_not_outline(test_db):
 
 async def test_sections_search_returns_subsections(test_db):
     await _doc(
-        test_db, "bk",
+        test_db,
+        "bk",
         [
-            ("Index", 1), ("Chapter 1. Reliability", 2), ("Hardware Faults", 2),
-            ("Software Errors", 2), ("Chapter 2. Scalability", 2), ("Describing Load", 2),
+            ("Index", 1),
+            ("Chapter 1. Reliability", 2),
+            ("Hardware Faults", 2),
+            ("Software Errors", 2),
+            ("Chapter 2. Scalability", 2),
+            ("Describing Load", 2),
         ],
     )
     transport = ASGITransport(app=app)
@@ -132,14 +165,28 @@ async def test_due_cards_filter_by_section(test_db):
         for sec, ch in [("s1", "c1"), ("s2", "c2")]:
             s.add(SectionModel(id=sec, document_id="d", heading=sec, level=1, section_order=0))
             s.add(ChunkModel(id=ch, document_id="d", text="t", chunk_index=0, section_id=sec))
-        s.add(FlashcardModel(
-            id="f1", document_id="d", chunk_id="c1", question="q1", answer="a", source_excerpt="e",
-            due_date=past,
-        ))
-        s.add(FlashcardModel(
-            id="f2", document_id="d", chunk_id="c2", question="q2", answer="a", source_excerpt="e",
-            due_date=past,
-        ))
+        s.add(
+            FlashcardModel(
+                id="f1",
+                document_id="d",
+                chunk_id="c1",
+                question="q1",
+                answer="a",
+                source_excerpt="e",
+                due_date=past,
+            )
+        )
+        s.add(
+            FlashcardModel(
+                id="f2",
+                document_id="d",
+                chunk_id="c2",
+                question="q2",
+                answer="a",
+                source_excerpt="e",
+                due_date=past,
+            )
+        )
         await s.commit()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

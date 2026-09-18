@@ -211,7 +211,13 @@ class EngagementService:
         return xp
 
     async def award_note_xp(self, note_id: str, tag_count: int) -> int:
-        """Award XP for creating a note. Bonus for 2+ tags."""
+        """Award XP for creating a note. Bonus for 2+ tags.
+
+        `tag_count` is whatever the caller supplied explicitly. A note saved
+        with none is tagged in the background (`auto_tag_and_store_note`),
+        which awards the same bonus itself via `award_note_tag_bonus` once
+        tags actually land, so this never blocks on the tagger's LLM call.
+        """
         xp = _NOTE_XP
         if tag_count >= 2:
             xp += _NOTE_TAG_BONUS
@@ -219,6 +225,15 @@ class EngagementService:
         await self._check_achievements()
         await self._session.flush()
         return xp
+
+    async def award_note_tag_bonus(self, note_id: str, tag_count: int) -> int:
+        """Award the 2+ tags bonus for a note auto-tagged after creation."""
+        if tag_count < 2:
+            return 0
+        await self._add_xp("note_tagged", _NOTE_TAG_BONUS, {"note_id": note_id, "tags": tag_count})
+        await self._check_achievements()
+        await self._session.flush()
+        return _NOTE_TAG_BONUS
 
     async def award_focus_session_xp(self, session_id: str) -> int:
         """Award XP for completing a focus session."""
@@ -327,31 +342,33 @@ class EngagementService:
 
         if key.startswith("cards_"):
             result = await self._session.execute(
-                select(func.count()).select_from(XPLedgerModel).where(
-                    XPLedgerModel.action == "flashcard_review"
-                )
+                select(func.count())
+                .select_from(XPLedgerModel)
+                .where(XPLedgerModel.action == "flashcard_review")
             )
             return result.scalar() or 0
 
         if key.startswith("notes_"):
             result = await self._session.execute(
-                select(func.count()).select_from(XPLedgerModel).where(
-                    XPLedgerModel.action == "note_created"
-                )
+                select(func.count())
+                .select_from(XPLedgerModel)
+                .where(XPLedgerModel.action == "note_created")
             )
             return result.scalar() or 0
 
         if key == "focus_10":
             result = await self._session.execute(
-                select(func.count()).select_from(FocusSessionModel).where(
-                    FocusSessionModel.completed.is_(True)
-                )
+                select(func.count())
+                .select_from(FocusSessionModel)
+                .where(FocusSessionModel.completed.is_(True))
             )
             return result.scalar() or 0
 
         if key == "focus_50min":
             result = await self._session.execute(
-                select(func.count()).select_from(FocusSessionModel).where(
+                select(func.count())
+                .select_from(FocusSessionModel)
+                .where(
                     FocusSessionModel.completed.is_(True),
                     FocusSessionModel.planned_duration_minutes >= 50,
                 )
@@ -375,16 +392,18 @@ class EngagementService:
         achievements = []
         for ach in result.scalars().all():
             progress = await self._get_achievement_progress(ach.key)
-            achievements.append({
-                "key": ach.key,
-                "title": ach.title,
-                "description": ach.description,
-                "icon_name": ach.icon_name,
-                "category": ach.category,
-                "progress_current": progress,
-                "progress_target": ach.progress_target,
-                "unlocked_at": ach.unlocked_at.isoformat() if ach.unlocked_at else None,
-            })
+            achievements.append(
+                {
+                    "key": ach.key,
+                    "title": ach.title,
+                    "description": ach.description,
+                    "icon_name": ach.icon_name,
+                    "category": ach.category,
+                    "progress_current": progress,
+                    "progress_target": ach.progress_target,
+                    "unlocked_at": ach.unlocked_at.isoformat() if ach.unlocked_at else None,
+                }
+            )
         return achievements
 
     async def get_recent_achievements(self, days: int = 7) -> list[dict]:
@@ -500,9 +519,7 @@ class EngagementService:
         sessions = result.scalars().all()
         total = len(sessions)
         completed = sum(1 for s in sessions if s.completed)
-        total_minutes = sum(
-            (s.actual_duration_seconds or 0) / 60 for s in sessions if s.completed
-        )
+        total_minutes = sum((s.actual_duration_seconds or 0) / 60 for s in sessions if s.completed)
         avg_duration = total_minutes / completed if completed > 0 else 0
 
         return {

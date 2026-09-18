@@ -132,6 +132,7 @@ def _is_offline_error(exc: BaseException) -> bool:
         cur = cur.__cause__ or cur.__context__
     return False
 
+
 # Langfuse — optional LLM call observability
 
 _langfuse = None  # type: ignore[var-annotated]
@@ -313,9 +314,7 @@ class LLMService:
         )
         return local_model, None, True
 
-    def _resolve_model(
-        self, model: str | None, *, background: bool
-    ) -> tuple[str, str | None]:
+    def _resolve_model(self, model: str | None, *, background: bool) -> tuple[str, str | None]:
         if model is not None:
             return self._refuse_unsupported_local(model), None
         try:
@@ -391,8 +390,12 @@ class LLMService:
         )
 
         kwargs = self._build_kwargs(
-            effective_model, messages, settings,
-            override_key=override_key, timeout=timeout, num_ctx=num_ctx,
+            effective_model,
+            messages,
+            settings,
+            override_key=override_key,
+            timeout=timeout,
+            num_ctx=num_ctx,
         )
         if temperature is not None:
             kwargs["temperature"] = temperature
@@ -460,8 +463,12 @@ class LLMService:
             model, effective_model, settings
         )
         kwargs = self._build_kwargs(
-            effective_model, messages, settings,
-            override_key=override_key, timeout=timeout, num_ctx=num_ctx,
+            effective_model,
+            messages,
+            settings,
+            override_key=override_key,
+            timeout=timeout,
+            num_ctx=num_ctx,
         )
         if temperature is not None:
             kwargs["temperature"] = temperature

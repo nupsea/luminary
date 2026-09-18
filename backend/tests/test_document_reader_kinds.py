@@ -37,7 +37,7 @@ def _minimal_epub(path: Path) -> Path:
             'xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">x</dc:identifier>'
             "<dc:title>Kinds</dc:title><dc:language>en</dc:language></metadata>"
             '<manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>'
-            "</manifest><spine><itemref idref=\"c1\"/></spine></package>",
+            '</manifest><spine><itemref idref="c1"/></spine></package>',
         )
         z.writestr("c1.xhtml", _CHAPTER)
     return path

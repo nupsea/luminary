@@ -64,9 +64,7 @@ async def parse_node(state: IngestionState) -> IngestionState:
             if parsed.structure_type:
                 await _persist_structure_type(state["document_id"], parsed.structure_type)
             if parsed.extraction_report is not None:
-                await _persist_extraction_report(
-                    state["document_id"], parsed.extraction_report
-                )
+                await _persist_extraction_report(state["document_id"], parsed.extraction_report)
             return {
                 **state,
                 "parsed_document": {
@@ -170,7 +168,8 @@ async def classify_node(state: IngestionState) -> IngestionState:
         pd_provided = state.get("parsed_document")
         form = (
             classify_form(
-                pd_provided["raw_text"], pd_provided["sections"],
+                pd_provided["raw_text"],
+                pd_provided["sections"],
                 pd_provided["word_count"],
                 Path(state["file_path"]).suffix.lstrip("."),
                 Path(state["file_path"]).name,
@@ -178,9 +177,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
             if pd_provided
             else None
         )
-        await _persist_classification(
-            state["document_id"], provided, is_technical, register, form
-        )
+        await _persist_classification(state["document_id"], provided, is_technical, register, form)
         logger.info(
             "classify_node: skipping (user-provided content_type)",
             extra={"doc_id": state["document_id"], "content_type": provided},

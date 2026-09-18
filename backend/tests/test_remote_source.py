@@ -82,15 +82,17 @@ def serve(monkeypatch):
 
 
 def test_github_blob_url_is_rewritten_to_the_raw_file():
-    assert canonical_source_url(
-        "https://github.com/owner/repo/blob/main/paper.pdf"
-    ) == "https://raw.githubusercontent.com/owner/repo/main/paper.pdf"
+    assert (
+        canonical_source_url("https://github.com/owner/repo/blob/main/paper.pdf")
+        == "https://raw.githubusercontent.com/owner/repo/main/paper.pdf"
+    )
 
 
 def test_gitlab_blob_url_is_rewritten_to_the_raw_file():
-    assert canonical_source_url(
-        "https://gitlab.com/group/sub/project/-/blob/main/doc.pdf"
-    ) == "https://gitlab.com/group/sub/project/-/raw/main/doc.pdf"
+    assert (
+        canonical_source_url("https://gitlab.com/group/sub/project/-/blob/main/doc.pdf")
+        == "https://gitlab.com/group/sub/project/-/raw/main/doc.pdf"
+    )
 
 
 def test_an_ordinary_article_url_is_left_alone():
@@ -148,7 +150,8 @@ async def test_an_html_page_is_left_to_the_article_extractor(serve):
     serve(
         {
             "https://": httpx.Response(
-                200, content=b"<html><body><p>real prose</p></body></html>",
+                200,
+                content=b"<html><body><p>real prose</p></body></html>",
                 headers={"content-type": "text/html; charset=utf-8"},
             )
         }
@@ -177,8 +180,7 @@ async def test_a_word_document_is_refused_by_name(serve):
                 content=b"PK\x03\x04binary",
                 headers={
                     "content-type": (
-                        "application/vnd.openxmlformats-officedocument"
-                        ".wordprocessingml.document"
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     )
                 },
             )
@@ -296,8 +298,11 @@ async def test_ingest_url_still_creates_an_article_for_a_web_page(test_db, serve
                 format="md",
                 pages=1,
                 word_count=3,
-                sections=[Section(heading="A Real Article", level=1, text="a b c",
-                                  page_start=0, page_end=0)],
+                sections=[
+                    Section(
+                        heading="A Real Article", level=1, text="a b c", page_start=0, page_end=0
+                    )
+                ],
                 raw_text="a b c",
                 warnings=[],
             )

@@ -37,6 +37,7 @@ class _FakeSummary:
         self.unit_index = unit_index
         self.content = content
 
+
 # Shared fixture
 
 
@@ -458,9 +459,13 @@ async def test_enrich_stops_at_web_refs_max_sections(test_db, monkeypatch):
 
     async with factory() as session:
         rows = (
-            await session.execute(
-                select(WebReferenceModel).where(WebReferenceModel.document_id == doc_id)
+            (
+                await session.execute(
+                    select(WebReferenceModel).where(WebReferenceModel.document_id == doc_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert len({r.section_id for r in rows}) == 3
     get_settings.cache_clear()

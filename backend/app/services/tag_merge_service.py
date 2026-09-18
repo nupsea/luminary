@@ -98,9 +98,7 @@ class TagMergeService:
         # endpoint did this before the loop; preserved here for parity).
         session.expire_all()
 
-        notes_result = await session.execute(
-            select(NoteModel).where(NoteModel.id.in_(note_ids))
-        )
+        notes_result = await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids)))
         notes = list(notes_result.scalars().all())
 
         for note in notes:
@@ -160,12 +158,8 @@ class TagMergeService:
     ) -> None:
         session.add(TagAliasModel(alias=source_id, canonical_tag_id=target_id))
 
-    async def _delete_source_tag(
-        self, session: AsyncSession, source_id: str
-    ) -> None:
-        await session.execute(
-            delete(CanonicalTagModel).where(CanonicalTagModel.id == source_id)
-        )
+    async def _delete_source_tag(self, session: AsyncSession, source_id: str) -> None:
+        await session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
 
 
 def _replace_tag(current: list[str], source_id: str, target_id: str) -> list[str]:

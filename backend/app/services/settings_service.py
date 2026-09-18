@@ -418,8 +418,7 @@ def get_llm_error_message() -> str:
         )
     else:
         return (
-            "LLM service is unreachable. "
-            "Please check your internet connection or API key settings."
+            "LLM service is unreachable. Please check your internet connection or API key settings."
         )
 
 

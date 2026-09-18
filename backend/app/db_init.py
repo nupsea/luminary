@@ -265,9 +265,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         # Rename canonical_tags.note_count -> usage_count for existing DBs.
         # Fresh DBs created by Base.metadata.create_all already have the new
         # name; this only fires on the legacy schema. Idempotent via PRAGMA.
-        canonical_cols = (
-            await conn.execute(text("PRAGMA table_info(canonical_tags)"))
-        ).fetchall()
+        canonical_cols = (await conn.execute(text("PRAGMA table_info(canonical_tags)"))).fetchall()
         if any(c[1] == "note_count" for c in canonical_cols):
             await conn.execute(
                 text("ALTER TABLE canonical_tags RENAME COLUMN note_count TO usage_count")
@@ -476,9 +474,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 )
             )
             await conn.execute(text("DROP TABLE learning_goals"))
-            await conn.execute(
-                text("ALTER TABLE learning_goals_rebuild RENAME TO learning_goals")
-            )
+            await conn.execute(text("ALTER TABLE learning_goals_rebuild RENAME TO learning_goals"))
             logger.info("Migrated learning_goals: dropped NOT NULL on document_id")
 
         # migrate distinct group_name values into collections (idempotent).
@@ -535,10 +531,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
 
         # indexes for typed learning goal lookups.
         await conn.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS idx_learning_goals_status "
-                "ON learning_goals(status)"
-            )
+            text("CREATE INDEX IF NOT EXISTS idx_learning_goals_status ON learning_goals(status)")
         )
         await conn.execute(
             text(

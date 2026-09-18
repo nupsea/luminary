@@ -199,9 +199,7 @@ async def test_worker_retries_transient_llm_unavailable_then_succeeds(test_db, m
 
     async with factory() as session:
         j = (
-            await session.execute(
-                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
-            )
+            await session.execute(select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id))
         ).scalar_one_or_none()
 
     assert calls["n"] == 3
@@ -232,9 +230,7 @@ async def test_worker_exhausts_backoff_then_fails(test_db, monkeypatch):
 
     async with factory() as session:
         j = (
-            await session.execute(
-                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
-            )
+            await session.execute(select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id))
         ).scalar_one_or_none()
 
     assert calls["n"] == ew._LLM_RETRY_MAX_ATTEMPTS
@@ -277,9 +273,7 @@ async def test_an_uninstalled_model_skips_the_job_rather_than_failing_it(test_db
 
     async with factory() as session:
         j = (
-            await session.execute(
-                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
-            )
+            await session.execute(select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id))
         ).scalar_one()
 
     assert j.status == "skipped"
@@ -308,9 +302,7 @@ async def test_a_missing_model_outside_the_catalogue_still_names_itself(test_db,
 
     async with factory() as session:
         j = (
-            await session.execute(
-                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
-            )
+            await session.execute(select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id))
         ).scalar_one()
 
     assert j.status == "skipped"
@@ -325,9 +317,7 @@ async def test_skipped_jobs_are_requeued_when_a_component_arrives(test_db):
 
     async with factory() as session:
         job = (
-            await session.execute(
-                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
-            )
+            await session.execute(select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id))
         ).scalar_one()
         job.status = "skipped"
         job.error_message = "Needs the vision model"
@@ -338,9 +328,7 @@ async def test_skipped_jobs_are_requeued_when_a_component_arrives(test_db):
 
     async with factory() as session:
         j = (
-            await session.execute(
-                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
-            )
+            await session.execute(select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id))
         ).scalar_one()
 
     assert j.status == "pending"
@@ -357,9 +345,7 @@ async def test_startup_reclaims_skipped_jobs(test_db):
 
     async with factory() as session:
         job = (
-            await session.execute(
-                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
-            )
+            await session.execute(select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id))
         ).scalar_one()
         job.status = "skipped"
         await session.commit()
@@ -370,9 +356,7 @@ async def test_startup_reclaims_skipped_jobs(test_db):
 
     async with factory() as session:
         j = (
-            await session.execute(
-                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
-            )
+            await session.execute(select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id))
         ).scalar_one()
 
     assert j.status == "pending"

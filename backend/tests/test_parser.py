@@ -325,3 +325,44 @@ class TestEpubDocumentSplitting:
 
         out = _split_epub_document("<p>Only prose here.</p>", "Chapter File")
         assert out == [("Chapter File", "Only prose here.")]
+
+    def test_figure_caption_and_alt_text_survive(self):
+        from app.services.parser import _epub_text
+
+        raw = (
+            "<p>Introduction.</p>"
+            "<figure><img src='fig1.png' alt='Basic RAG Architecture' />"
+            "<figcaption>Figure 1-1. Basic RAG Architecture</figcaption></figure>"
+            "<p>Next paragraph.</p>"
+        )
+        text = _epub_text(raw)
+        assert "[Figure: Basic RAG Architecture]" in text
+        assert "Figure 1-1. Basic RAG Architecture" in text
+        assert "Introduction." in text
+        assert "Next paragraph." in text
+
+    def test_a_blank_line_inside_alt_text_does_not_break_the_image(self):
+        """An O'Reilly EPUB's auto-generated alt text carried a literal blank
+
+        line ("A close up of a sign\\n\\nDescription automatically generated").
+        CommonMark ends a paragraph at a blank line, so `![A close up of a
+        sign` and `Description ... generated](url)` landed as two stray
+        paragraphs of literal bracket text, with no image at all.
+        """
+        from app.services.parser import _epub_text
+
+        raw = (
+            "<figure><img src='fig.png' "
+            "alt='A close up of a sign\n\nDescription automatically generated' />"
+            "<figcaption>Figure 1-1. Tokenization example.</figcaption></figure>"
+        )
+        text = _epub_text(raw)
+        assert "![A close up of a sign Description automatically generated](fig.png)" in text
+
+    def test_a_blank_line_inside_a_bare_img_alt_does_not_break_the_image(self):
+        """Brackets the figure case above: a plain `<img>` outside any <figure>."""
+        from app.services.parser import _epub_text
+
+        raw = "<p>See below.</p><img src='fig.png' alt='Line one\n\nLine two' />"
+        text = _epub_text(raw)
+        assert "![Line one Line two](fig.png)" in text
