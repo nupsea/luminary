@@ -10,6 +10,14 @@ describe("the collection", () => {
     expect(QUOTES.length).toBeGreaterThanOrEqual(14)
   })
 
+  // Not yet >= 366: the collection grows by verified addition, one quote at a
+  // time (see quotes.ts's own header on why unverified attributions are
+  // dropped rather than shipped). This floor only rises, and only when a
+  // fresh batch has actually been checked against a primary source.
+  it("has grown past the original 27-entry set", () => {
+    expect(QUOTES.length).toBeGreaterThanOrEqual(44)
+  })
+
   it("attributes and sources every quote", () => {
     for (const q of QUOTES) {
       expect(q.text.length, `empty text: ${JSON.stringify(q)}`).toBeGreaterThan(10)

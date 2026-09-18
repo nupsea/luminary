@@ -29,6 +29,19 @@ _EXCALIDRAW_COMMENT_RE = re.compile(r"[ \t]*<!--\s*luminary:excalidraw=[^>]*-->"
 _LUMINARY_IMG_RE = re.compile(r"__LUMINARY_IMG__/([^/\s)\"']+)/([^\s)\"']+)")
 # ```mermaid ... ``` fenced block (whole block captured for replacement).
 _MERMAID_BLOCK_RE = re.compile(r"(?ms)^[ \t]*```mermaid[ \t]*\n(.*?)^[ \t]*```[ \t]*$")
+# Any markdown image, to inspect its alt text for a `|small|medium|large` size hint.
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
+
+# Kept in sync with `SIZE_STYLE` in frontend/src/components/blog/BlogPreview.tsx
+# so the in-app preview matches what actually publishes.
+_IMAGE_SIZE_STYLE = {
+    "small": (
+        "float:right;max-width:220px;width:100%;"
+        "margin:0.25rem 0 1.25rem 1.5rem;border-radius:0.5rem;"
+    ),
+    "medium": "display:block;max-width:480px;width:100%;margin:1.5rem auto;border-radius:0.5rem;",
+    "large": "display:block;max-width:800px;width:100%;margin:1.5rem auto;border-radius:0.5rem;",
+}
 
 
 @dataclass
@@ -247,6 +260,44 @@ def transform_note_to_blog(content: str, slug: str, kind: str = "blog") -> BlogD
         warnings.append(f"{asset_n} embedded {kind}(s) will be copied alongside the post")
 
     return BlogDraft(markdown=text.strip() + "\n", assets=assets, warnings=warnings)
+
+
+def _escape_html_attr(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def render_sized_images(markdown: str) -> str:
+    """Turn the editor's `![alt|small|medium|large]` size hint into an inline-
+    styled ``<img>``.
+
+    The hint only means something *inside* Luminary -- `MarkdownRenderer.tsx`
+    parses it client-side to cap a pasted image's on-screen size -- so plain
+    Markdown carries it as inert alt text. Every image, including ones tagged
+    `small` to sit beside the text like a card, published at full prose width
+    because nothing on the way out ever interpreted the hint. `small` floats
+    right so it reads as an aside instead of another full-width figure.
+    Astro's markdown pipeline renders raw HTML in `.md` files by default
+    (no site-side change needed); called once, at the point each post's final
+    body is written, never on the editable draft the publish/edit dialogs
+    hold -- their preview parses the same hint client-side instead, so the
+    dialog's live editing stays plain Markdown.
+    """
+
+    def _sub(match: re.Match[str]) -> str:
+        alt, url = match.group(1), match.group(2)
+        clean_alt, sep, size = alt.rpartition("|")
+        if not sep or size not in _IMAGE_SIZE_STYLE:
+            return match.group(0)
+        style = _IMAGE_SIZE_STYLE[size]
+        src, alt_attr = _escape_html_attr(url), _escape_html_attr(clean_alt)
+        return f'<img src="{src}" alt="{alt_attr}" style="{style}" />'
+
+    return _MD_IMAGE_RE.sub(_sub, markdown)
 
 
 # -- filesystem / git ------------------------------------------------------

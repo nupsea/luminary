@@ -59,6 +59,21 @@ class SuggestDescriptionResponse(BaseModel):
     description: str
 
 
+class RefineNoteRequest(BaseModel):
+    note_id: str
+    # The editable prompt shown to the user, defaulting client-side to
+    # `note_refiner.DEFAULT_REFINE_PROMPT`. Sent explicitly so the request is
+    # self-contained even if the user edits it.
+    instruction: str | None = None
+    # Per-request model override, same convention as flashcards' `model`
+    # field. None means "let the LLM service pick its configured default".
+    model: str | None = None
+
+
+class RefineNoteResponse(BaseModel):
+    refined_content: str
+
+
 class BlogPublishRequest(BaseModel):
     note_id: str
     slug: str

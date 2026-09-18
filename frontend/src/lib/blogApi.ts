@@ -106,6 +106,28 @@ export const createBlogDraft = (
 export const suggestBlogDescription = (noteId: string): Promise<{ description: string }> =>
   apiPost<{ description: string }>("/blog/suggest-description", { note_id: noteId })
 
+// Kept in sync with `DEFAULT_REFINE_PROMPT` in
+// backend/app/services/note_refiner.py -- this is what the user sees and can
+// edit; the backend default only covers a caller that omits `instruction`.
+export const DEFAULT_REFINE_PROMPT =
+  "Refine this note into a polished piece, in my own voice -- don't change " +
+  "what I'm saying or the order I say it in. Fix grammar, tighten sentences, " +
+  "and smooth transitions where the writing is rough, but keep my tone, my " +
+  "phrasing, and the analogies as I wrote them. Don't add new sections or a " +
+  "different ending, don't make it more formal or generic, and don't touch " +
+  "the images, quotes, or asides -- just carry them through exactly as placed."
+
+export const refineNote = (
+  noteId: string,
+  instruction: string,
+  model?: string,
+): Promise<{ refined_content: string }> =>
+  apiPost<{ refined_content: string }>("/blog/refine", {
+    note_id: noteId,
+    instruction,
+    model: model || undefined,
+  })
+
 export const publishBlog = (
   req: BlogPublishRequest,
   kind: BlogKind = "blog",
