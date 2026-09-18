@@ -28,6 +28,7 @@ import { appendCapture } from "@/lib/noteCapture"
 import {
   EMPTY_DRAFT,
   NEW_NOTE_KEY,
+  resolveFinalizedNote,
   useNoteAutosave,
   type NoteDraft,
 } from "@/lib/noteAutosave"
@@ -104,7 +105,7 @@ export function NoteComposer({
   const [notesLoading, setNotesLoading] = useState(false)
   const closingRef = useRef(false)
   const appliedCaptureRef = useRef<string | null>(null)
-  const [loaded, setLoaded] = useState<{ id: string; draft: NoteDraft } | null>(null)
+  const [loaded, setLoaded] = useState<{ id: string; draft: NoteDraft; note: Note } | null>(null)
   const editing = Boolean(noteId)
   // Derived, not reset: a stale load belongs to a note that is no longer open.
   const openNote = noteId && loaded?.id === noteId ? loaded : null
@@ -139,8 +140,11 @@ export function NoteComposer({
         setEditContent(draft.content)
         setEditTitle(draft.title)
         // The baseline is what was loaded, so opening a note is not an edit of
-        // it: bound to EMPTY_DRAFT the autosaver would patch on arrival.
-        setLoaded({ id: noteId, draft })
+        // it: bound to EMPTY_DRAFT the autosaver would patch on arrival. `note`
+        // is kept alongside it (not just its draft projection) because the
+        // autosaver's own `bind()` always resets its last-saved note to null --
+        // an unedited note is never dirty, so flush() never has one to return.
+        setLoaded({ id: noteId, draft, note })
       })
       .catch(() => {
         if (!cancelled) toast.error("Could not open that note")
@@ -221,6 +225,7 @@ export function NoteComposer({
       toast.error("Could not save note -- it stays open until saving works")
       return "stay"
     }
+    saved = resolveFinalizedNote(saved, openNote?.note ?? null)
     const id = savedNoteId() ?? draftId
     // Only a draft this composer created is discarded when it is left empty.
     // Emptying a note that already existed is an edit, never a deletion.

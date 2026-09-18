@@ -3,6 +3,7 @@ import {
   buildPatchPayload,
   createNoteAutosaver,
   EMPTY_DRAFT,
+  resolveFinalizedNote,
   type AutosaveStatus,
   type NoteDraft,
 } from "./noteAutosave"
@@ -191,5 +192,25 @@ describe("buildPatchPayload", () => {
     // overwrite real tags the next time this surface autosaved.
     const payload = buildPatchPayload(draft("body", { tags: [] }), true)
     expect("tags" in payload).toBe(false)
+  })
+})
+
+describe("resolveFinalizedNote", () => {
+  // #137: opening an existing note and clicking "Open full note" without
+  // editing anything flushed nothing (flush() only reports a dirty save), so
+  // the composer treated the note as missing, closed, and never navigated.
+  it("prefers a freshly flushed save", () => {
+    const flushed = makeNote("id-1", "edited")
+    const openNote = makeNote("id-1", "as loaded")
+    expect(resolveFinalizedNote(flushed, openNote)).toBe(flushed)
+  })
+
+  it("falls back to the loaded note when nothing was dirty to flush", () => {
+    const openNote = makeNote("id-1", "unedited")
+    expect(resolveFinalizedNote(null, openNote)).toBe(openNote)
+  })
+
+  it("stays null for a fresh draft that was never saved and never existed", () => {
+    expect(resolveFinalizedNote(null, null)).toBeNull()
   })
 })

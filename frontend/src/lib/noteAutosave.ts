@@ -121,6 +121,24 @@ export function buildPatchPayload(
   }
 }
 
+/**
+ * What "finalize" (Open full note / dismiss) should treat as the note, once
+ * flush() has run.
+ *
+ * flush() returns null whenever nothing was dirty this session -- true both
+ * for a fresh draft that was never touched and for an existing note that was
+ * opened and closed unedited, because `bind()` always resets the autosaver's
+ * own last-saved note to null (it has no fetched `Note` to remember, only a
+ * `NoteDraft` baseline). An unedited existing note is silence, not evidence
+ * it doesn't exist (#137): opening a note and immediately clicking "Open full
+ * note" flushed nothing, so the caller treated the note as missing and closed
+ * the composer without ever navigating to it. `openNote` names the note in
+ * that case; there is nothing to fall back to for a draft that never existed.
+ */
+export function resolveFinalizedNote(flushed: Note | null, openNote: Note | null): Note | null {
+  return flushed ?? openNote
+}
+
 export type NoteAutosaver = ReturnType<typeof createNoteAutosaver>
 
 export const NEW_NOTE_KEY = "__new__"
