@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  buildPatchPayload,
   createNoteAutosaver,
   EMPTY_DRAFT,
   type AutosaveStatus,
@@ -174,5 +175,21 @@ describe("createNoteAutosaver", () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(patch).toHaveBeenCalledTimes(1)
     expect(patch.mock.calls[0][1].tags).toEqual(["ml"])
+  })
+})
+
+describe("buildPatchPayload", () => {
+  it("includes tags by default", () => {
+    const payload = buildPatchPayload(draft("body", { tags: ["ml"] }), false)
+    expect(payload.tags).toEqual(["ml"])
+  })
+
+  it("omits tags entirely when preserveTags is set (regression)", () => {
+    // A surface with no tag UI (the note composer) only ever knows a stale
+    // snapshot of a note's tags -- auto-tagging or an edit made elsewhere
+    // lands after that. Sending that stale array back, even as [], used to
+    // overwrite real tags the next time this surface autosaved.
+    const payload = buildPatchPayload(draft("body", { tags: [] }), true)
+    expect("tags" in payload).toBe(false)
   })
 })

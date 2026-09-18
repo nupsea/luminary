@@ -173,7 +173,10 @@ export function NoteComposer({
     draft: {
       content: editContent,
       title: editTitle,
-      tags: [],
+      // The composer has no tag UI: send whatever the note already has,
+      // never an empty array, so a patch can't undo tags this surface
+      // didn't set (auto-tagging lands in the background after creation).
+      tags: openNote?.draft.tags ?? [],
       sourceDocIds: initialSourceDocIds ?? [],
     },
     enabled: open && !appendTarget,
@@ -183,6 +186,7 @@ export function NoteComposer({
       chunkId: chunkId ?? null,
     },
     onCreated: handleDraftCreated,
+    preserveTags: true,
   })
 
   const linkCompletion = useMemo<NoteLinkCompletionConfig>(
