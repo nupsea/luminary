@@ -79,7 +79,13 @@ def _epub_html_to_markdown(html_content: str) -> str:
             continue
         caption = fig.find(["figcaption", "h6", "h5", "p"])
         cap_text = caption.get_text().strip() if caption else ""
-        alt = (img.get("alt") if img else "") or ""
+        # A blank line inside `![...]` ends the paragraph there, per CommonMark --
+        # so an auto-generated alt text like "A close up of a sign\n\nDescription
+        # automatically generated" (seen verbatim on an O'Reilly EPUB) silently
+        # broke the image into two stray paragraphs of literal `![...]`/`](...)`
+        # text, with no <img> at all. Collapsed once here, before it ever reaches
+        # the bracket.
+        alt = _RE_WHITESPACE.sub(" ", (img.get("alt") if img else "") or "").strip()
         src = (img.get("src") if img else "") or ""
         lines = []
         if alt:
@@ -87,10 +93,11 @@ def _epub_html_to_markdown(html_content: str) -> str:
         if cap_text and cap_text != alt:
             lines.append(cap_text)
         caption_markdown = "\n".join(f"*{line}*" for line in lines) if lines else "*[Figure]*"
-        fig.replace_with(f"\n\n![{alt or cap_text or 'Figure'}]({src})\n{caption_markdown}\n\n")
+        bracket_text = alt or _RE_WHITESPACE.sub(" ", cap_text).strip() or "Figure"
+        fig.replace_with(f"\n\n![{bracket_text}]({src})\n{caption_markdown}\n\n")
 
     for img in soup.find_all("img"):
-        alt = img.get("alt", "") or img.get("title", "")
+        alt = _RE_WHITESPACE.sub(" ", img.get("alt", "") or img.get("title", "")).strip()
         src = img.get("src", "")
         label = f"\n*[Figure: {alt}]*\n" if alt else ""
         img.replace_with(f"\n\n![{alt or 'Figure'}]({src}){label}\n\n")
