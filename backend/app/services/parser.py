@@ -439,6 +439,61 @@ def _is_page_furniture(block: dict, page_height: float) -> bool:
     return 0 < len(text) <= _FURNITURE_MAX_CHARS
 
 
+# A stacked fraction (numerator, root symbol, denominator) sits on one visual
+# row but PyMuPDF's layout segmenter gives each piece its own block, so
+# `Attention(...) = softmax(QKT` / `dk` / `)V (1)` render as three
+# disconnected paragraphs (#132). Ordinary prose blocks never share a
+# vertical span -- a new line always starts below the last one ends, e.g.
+# -6.4pt (no overlap) between two consecutive body paragraphs in that same
+# PDF -- so overlap between consecutive blocks is a layout signal for "same
+# row", never a claim about what the text says. 0.3 sits well clear of both
+# the real 0.0 (unrelated paragraphs) and 0.58 (the formula's own numerator
+# and denominator blocks) that bracket it in that document.
+_MIN_ROW_OVERLAP_FRAC = 0.3
+
+# A verso/recto running head prints two unrelated titles side by side in the
+# page margin, and they share a row exactly the way a split formula does --
+# found on the very page this merge was written for. A running head's two
+# halves sit ~97pt apart there; the formula's own pieces sit within 4.3pt of
+# each other (already touching or one point apart). 3x the body font size
+# (~29pt in that document) sits clear of both and scales with the page's own
+# type size rather than a fixed point value.
+_MAX_ROW_GAP_EM = 3.0
+
+
+def _merge_same_row_blocks(
+    blocks: list[tuple[str, tuple[float, float, float, float]]], body_font_size: float
+) -> list[str]:
+    """Reunite blocks PyMuPDF split even though they sit on one visual row."""
+    if not blocks:
+        return []
+    max_gap = _MAX_ROW_GAP_EM * (body_font_size or 10.0)
+    groups: list[list[str]] = [[blocks[0][0]]]
+    group_bbox = list(blocks[0][1])
+    for text, bbox in blocks[1:]:
+        overlap = min(group_bbox[3], bbox[3]) - max(group_bbox[1], bbox[1])
+        shorter = min(group_bbox[3] - group_bbox[1], bbox[3] - bbox[1]) or 1.0
+        gap = max(0.0, bbox[0] - group_bbox[2])
+        if overlap / shorter >= _MIN_ROW_OVERLAP_FRAC and gap <= max_gap:
+            groups[-1].append(text)
+            group_bbox = [
+                min(group_bbox[0], bbox[0]),
+                min(group_bbox[1], bbox[1]),
+                max(group_bbox[2], bbox[2]),
+                max(group_bbox[3], bbox[3]),
+            ]
+        else:
+            groups.append([text])
+            group_bbox = list(bbox)
+
+    def _flatten(text_parts: list[str]) -> str:
+        if len(text_parts) == 1:
+            return text_parts[0]
+        return " ".join(t.replace("\n", " ").strip() for t in text_parts)
+
+    return [_flatten(text_parts) for text_parts in groups]
+
+
 def _join_spans(spans: list[dict]) -> str:
     """Rebuild a line's text from its spans, inferring word gaps from geometry.
 
@@ -575,7 +630,7 @@ class DocumentParser:
                 if pn not in page_block_cache:
                     page_obj = doc[pn]
                     page_height = float(page_obj.rect.height) or 1.0
-                    blocks: list[str] = []
+                    raw_blocks: list[tuple[str, tuple[float, float, float, float]]] = []
                     for block in page_obj.get_text("dict")["blocks"]:  # type: ignore[arg-type]
                         if block.get("type") != 0:
                             continue
@@ -591,8 +646,9 @@ class DocumentParser:
                                 continue
                             block_lines.append(line_text)
                         if block_lines:
-                            blocks.append("\n".join(block_lines))
-                    page_block_cache[pn] = blocks
+                            bbox = block.get("bbox") or (0.0, 0.0, 0.0, 0.0)
+                            raw_blocks.append(("\n".join(block_lines), tuple(bbox)))
+                    page_block_cache[pn] = _merge_same_row_blocks(raw_blocks, body_avg)
                 return page_block_cache[pn]
 
             # First unclaimed block index per page, 0-based. Only ever
