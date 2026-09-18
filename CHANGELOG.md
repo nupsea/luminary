@@ -4,6 +4,14 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.11] - 2026-09-18
+
+### Fixed
+- **Citation clicks could land on the wrong page.** The PDF viewer searched with a page prop fixed at mount, so any citation clicked after the first fell back to a full-document scan and stopped at the first coincidental match (a table-of-contents heading) instead of the cited page.
+- **A blank line in EPUB alt text dropped the image entirely.** 113 of 161 figures in a real O'Reilly EPUB were affected; whitespace is now collapsed before the alt text reaches the markdown image syntax.
+- **HTML comments used as hydration boundaries corrupted markdown.** A `<!--$-->` marker was read as literal content and wrapped adjacent links in bogus inline-math delimiters; comments are now stripped before serialization.
+- **"Open full note" did nothing on an unedited existing note.** The composer treated "nothing to save" as "no note exists" and silently closed instead of navigating.
+
 ## [0.12.10] - 2026-09-18
 
 ### Added
