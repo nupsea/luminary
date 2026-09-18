@@ -7,6 +7,7 @@ the DB. Only image_extract_handler (the enrichment job handler) touches SQLite.
 import asyncio
 import hashlib
 import logging
+import re
 import uuid
 from collections import deque
 from dataclasses import dataclass
@@ -30,6 +31,27 @@ from app.services import (
 )
 
 logger = logging.getLogger(__name__)
+
+_RE_EXTERNAL_SRC = re.compile(r"^(?:data:|https?://)", re.IGNORECASE)
+
+
+def _epub_item_filename(item_name: str) -> str | None:
+    """The name to store this EPUB-internal image under, or None.
+
+    `item_name` is `EpubItem.get_name()` -- the image's own path inside the
+    book's zip structure (e.g. "images/724c6e6d16-aien_0101.png"). Storing
+    under its own basename, rather than a synthetic `epub_N.png`, keeps a
+    stored image traceable to the book it came from instead of an arbitrary
+    extraction-order index. The extension is normalised to `.png` because
+    `_store_png` always re-encodes to PNG regardless of the source format.
+
+    None for anything that isn't a plain internal path (data URI, external
+    URL) -- `extract_images_epub` falls back to `epub_N.png` for those.
+    """
+    if not item_name or _RE_EXTERNAL_SRC.match(item_name):
+        return None
+    name = Path(item_name.split("?", 1)[0].split("#", 1)[0]).name
+    return f"{Path(name).stem}.png" if name else None
 
 
 @dataclass
@@ -551,6 +573,7 @@ def extract_images_epub(
         return []
 
     img_idx = 0
+    seen_filenames: set[str] = set()
     for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
         raw_bytes = item.get_content()
         try:
@@ -560,6 +583,16 @@ def extract_images_epub(
             outcome.skipped += 1
             continue
 
+        # The book's own name for this image, when it has one, so a stored
+        # image stays traceable to where it came from rather than an
+        # arbitrary extraction-order index. `epub_N.png` is a fallback only,
+        # for a name this book doesn't have or that collides with an earlier
+        # image's.
+        filename = _epub_item_filename(item.get_name())
+        if not filename or filename in seen_filenames:
+            filename = f"epub_{img_idx}.png"
+        seen_filenames.add(filename)
+
         stored = _store_png(
             img_pil,
             hashlib.sha256(raw_bytes).hexdigest(),
@@ -568,7 +601,7 @@ def extract_images_epub(
             doc_id,
             0,  # EPUB has no page numbers
             img_idx,
-            f"epub_{img_idx}.png",
+            filename,
             outcome,
         )
         if stored is not None:

@@ -211,7 +211,13 @@ class EngagementService:
         return xp
 
     async def award_note_xp(self, note_id: str, tag_count: int) -> int:
-        """Award XP for creating a note. Bonus for 2+ tags."""
+        """Award XP for creating a note. Bonus for 2+ tags.
+
+        `tag_count` is whatever the caller supplied explicitly. A note saved
+        with none is tagged in the background (`auto_tag_and_store_note`),
+        which awards the same bonus itself via `award_note_tag_bonus` once
+        tags actually land, so this never blocks on the tagger's LLM call.
+        """
         xp = _NOTE_XP
         if tag_count >= 2:
             xp += _NOTE_TAG_BONUS
@@ -219,6 +225,15 @@ class EngagementService:
         await self._check_achievements()
         await self._session.flush()
         return xp
+
+    async def award_note_tag_bonus(self, note_id: str, tag_count: int) -> int:
+        """Award the 2+ tags bonus for a note auto-tagged after creation."""
+        if tag_count < 2:
+            return 0
+        await self._add_xp("note_tagged", _NOTE_TAG_BONUS, {"note_id": note_id, "tags": tag_count})
+        await self._check_achievements()
+        await self._session.flush()
+        return _NOTE_TAG_BONUS
 
     async def award_focus_session_xp(self, session_id: str) -> int:
         """Award XP for completing a focus session."""

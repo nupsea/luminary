@@ -66,7 +66,7 @@ import { SummaryPanel } from "./SummaryPanel"
 import { ChatConversation } from "@/pages/Chat/ChatConversation"
 import { docThreadKey } from "@/store/chatThreads"
 import type { SourceCitation } from "@/components/SourceCitationChips"
-import { buildCitationTarget } from "@/lib/citation"
+import { buildCitationTarget, resolveInPlaceCitation } from "@/lib/citation"
 import type { AnnotationItem, DocumentDetail, SectionItem } from "./types"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
 
@@ -221,12 +221,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // citation. `savedCitationWords` is state in `Learning.tsx`, so its identity
   // changes only when a citation actually does.
   const [inPlaceCitation, setInPlaceCitation] =
-    useState<{ against: string[]; words: string[] } | null>(null)
+    useState<{ against: string[]; words: string[]; page: number | null } | null>(null)
   const [citationTrigger, setCitationTrigger] = useState(0)
-  const citationWords =
-    inPlaceCitation?.against === initialCitationWords
-      ? inPlaceCitation.words
-      : initialCitationWords
+  const { words: citationWords, page: citationPdfPage } =
+    resolveInPlaceCitation(inPlaceCitation, initialCitationWords)
   const focusOnCitation = citationOwnsScroll && !insightsRestored
   const insightsCollapsed = insights.collapsed || focusOnCitation
   const toggleInsights = useCallback(() => {
@@ -1046,7 +1044,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     closeReaderSearch()
     const target = buildCitationTarget(c)
     pushHistory()
-    setInPlaceCitation({ against: initialCitationWords, words: target.words })
+    setInPlaceCitation({ against: initialCitationWords, words: target.words, page: c.pdf_page_number ?? null })
     setCitationTrigger((n) => n + 1)
     if (doc?.format === "pdf" && c.pdf_page_number) {
       setLeftTab("pdfview")
@@ -1552,7 +1550,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             }
             return (
               <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-                <PDFViewer ref={pdfViewerRef} citationWords={citationWords} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} initialSearch={initialSearch} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
+                <PDFViewer ref={pdfViewerRef} citationWords={citationWords} citationPage={citationPdfPage} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} initialSearch={initialSearch} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
               </div>
             )
           })()}
