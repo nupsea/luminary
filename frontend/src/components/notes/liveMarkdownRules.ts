@@ -144,3 +144,13 @@ export function caretInTableRow(row: string, cellIndex: number): number {
 export function firstEditableLine(delimited: boolean): number {
   return delimited ? 1 : 0
 }
+
+/**
+ * Character offset on a landing line that keeps the caret's column from the
+ * line it left, clamped to the new line's length. Arrow-key vertical motion
+ * across a rendered block used to always land at the line's end, which reads
+ * as the caret "jumping" to an unrelated spot on every crossing.
+ */
+export function columnOffset(lineText: string, column: number): number {
+  return Math.min(Math.max(column, 0), lineText.length)
+}
