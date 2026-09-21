@@ -12,7 +12,7 @@ Usage::
     uv run python run_eval.py --dataset book --assert-thresholds
 
 Documents are auto-ingested on first run and their IDs cached in
-evals/golden/manifest.json.  Re-runs skip ingestion.
+evals/golden/manifest.json, a local cache that git ignores.  Re-runs skip ingestion.
 
 Most of the underlying machinery lives in ``evals.lib`` (S213). This file
 keeps the CLI shape and re-exports the original symbols for backwards
@@ -799,7 +799,7 @@ def main() -> None:
     source_to_doc_id: dict[str, str | None] = {}
     unique_sources = {row.get("source_file", "") for row in rows if row.get("source_file")}
     if unique_sources:
-        # Only where it matters: resolution reconciles the committed manifest
+        # Only where it matters: resolution reconciles the local manifest
         # against the backend, so it must not run against one that is absent.
         require_backend(args.backend_url)
     for src in unique_sources:

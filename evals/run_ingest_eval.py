@@ -21,7 +21,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sqlite3
 import sys
@@ -36,7 +35,7 @@ if str(REPO_ROOT / "backend") not in sys.path:
 from app.services.universal_parser import read_document_text  # noqa: E402
 from evals.generate_golden import strip_gutenberg_boilerplate  # noqa: E402
 from evals.lib.environment import capture as capture_environment  # noqa: E402
-from evals.lib.manifest import GOLDEN_DIR  # noqa: E402
+from evals.lib.manifest import load_manifest  # noqa: E402
 from evals.lib.scoring_history import append_history  # noqa: E402
 
 # Measured 2026-08-14 over the 12 manifest documents, boilerplate stripped:
@@ -108,7 +107,7 @@ def main() -> None:
         # design, and that is only visible when both groupings are printed.
         content_types = {r[0]: (r[3] or "?") for r in rows}
     else:
-        manifest = json.loads((GOLDEN_DIR / "manifest.json").read_text())
+        manifest = load_manifest()
         sources = manifest
         formats = {src: Path(src).suffix.lstrip(".") or "?" for src in manifest}
         content_types = {}
