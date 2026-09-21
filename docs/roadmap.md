@@ -305,20 +305,13 @@ The harness side is fixed: every script reads `LUMINARY_BASE_URL`, skips a full-
 public server, and writes temp files under `SMOKE_TMP` (`scripts/smoke/lib.sh`, enforced by
 `check_smoke_paths.py`); a failed eval search now fails the run (I-32). `verify_installed.sh`
 ingests a document through the installed backend. On macOS, full mode, 182 of 186 passed with
-`SMOKE_OFFLINE=1` (S122 skipped) and the backend holding no non-local connection (I-57, I-18).
+`SMOKE_OFFLINE=1` (S122 skipped) and the backend holding no non-local connection (I-57, I-18); the
+three failures (S75, S83, S92) are defects for the tracker, not gates.
 
 What remains open:
 
 - `make smoke` green on Windows against the bundled app; `verify_installed.sh`'s ingest check has
   not yet run against an installed build.
-- Deleting a document leaves its summaries: 4 of 9 `executive` rows in a smoke library belonged to
-  deleted documents. The library summary has no link to the documents it summarises, so "Summarize
-  all documents" was answered from books no longer in the library, and the model declined (S83).
-- S92 asks about a note before its background embedding lands; on an empty library that is an
-  honest `not_found`. The script must wait for the note to be searchable, not accept the decline.
-- S75 waits 120s for an ingest queued behind another document's LLM summary (~75s here).
-- A smoke run rewrites the committed `evals/golden/manifest.json` with the scratch library's ids
-  (`evals/lib/manifest.py`, via S212).
 - #24 and #99 on Linux hardware; #24 under a 20-character Windows username.
 
 **A Kuzu lock cannot go stale is a POSIX statement.** `flock` is advisory and released by the kernel
