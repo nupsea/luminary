@@ -42,6 +42,7 @@ from app.models import (
     ImageModel,
     LearningGoalModel,
     LearningObjectiveModel,
+    LibrarySummaryModel,
     MisconceptionModel,
     NoteModel,
     NoteSourceModel,
@@ -198,6 +199,12 @@ class DocumentDeletionService:
                 CollectionMemberModel.member_type == "document",
             )
         )
+        # The library summary carries no document_id, but it is built from every
+        # document. Serving the old one while a replacement generates is right after
+        # an ingest (one document short) and wrong after a delete: it presents a
+        # document the user removed as part of their library. The caller schedules
+        # the regeneration once the transaction commits.
+        await session.execute(delete(LibrarySummaryModel))
         await session.delete(doc)
 
     async def delete_derived_for_reparse(
