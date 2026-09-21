@@ -19,7 +19,10 @@ async def test_db(tmp_path, monkeypatch):
     from app.config import get_settings
 
     get_settings.cache_clear()
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    # A file, not :memory:. StaticPool gives every session the one connection, so
+    # closing the embed task POST /notes spawns rolls back a PATCH still in flight;
+    # that dropped the document's tags on a windows-host-policy run.
+    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path}/test.db")
     await create_all_tables(engine)
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
