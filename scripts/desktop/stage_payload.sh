@@ -21,8 +21,15 @@ if [ "$BUILD_SPA" = "1" ]; then
     (
         cd "$REPO_ROOT/frontend"
         [ -d node_modules ] || npm ci
-        VITE_LUMINARY_MODE=public VITE_API_BASE=/api npm run build
+        # Git Bash rewrites a /-leading env value into a Windows path on its way
+        # to node.exe: the Windows bundle shipped with "C:/Program Files/Git/api"
+        # as its API base and every request from the UI failed.
+        MSYS2_ENV_CONV_EXCL=VITE_API_BASE \
+            VITE_LUMINARY_MODE=public VITE_API_BASE=/api npm run build
     )
+    if grep -rqE '"[A-Za-z]:/[^"]*/api"' "$REPO_ROOT/frontend/dist/assets"; then
+        _die "SPA baked a drive-letter API base; VITE_API_BASE was path-converted"
+    fi
 fi
 [ -f "$REPO_ROOT/frontend/dist/index.html" ] || _die "frontend/dist/index.html missing; run with BUILD_SPA=1"
 
