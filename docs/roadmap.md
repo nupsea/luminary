@@ -73,7 +73,7 @@ decorates the first run waits until after 1.0. Your own server, sync, mobile, An
 encoder work are on the ladder, not after it.
 
 Feature rungs land on a suite with a live quarantine, so **a rung ships its smoke scripts with its
-endpoints (I-14) and adds nothing to the quarantine**. The quarantine grew once — 22 to 23 markers
+endpoints (`CLAUDE.md`) and adds nothing to the quarantine**. The quarantine grew once — 22 to 23 markers
 on 2026-09-18 (`fcfb4e5d`, a `POST /notes` case in `test_S201.py`) — so the gates rung moved up
 the ladder, ahead of capture, as this rule said it would.
 
