@@ -19,8 +19,7 @@
 #      activity, so a missing slice cannot be read as a measured zero
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 fail() {
   echo "FAIL: $1"

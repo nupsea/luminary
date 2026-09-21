@@ -15,8 +15,8 @@
 #      suspends), otherwise one slot held back for interactive work
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
 fail() {
   echo "FAIL: $1"

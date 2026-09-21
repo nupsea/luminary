@@ -4,8 +4,7 @@
 # with a collection_id.
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 echo "=== S169 Smoke Test: Collection-based flashcard generation ==="
 

@@ -2,8 +2,7 @@
 # Smoke test for S139: Prerequisites and FSRS-aware study path
 # Tests GET /study/start and GET /study/path endpoints
 set -euo pipefail
-BASE="http://localhost:7820"
-
+source "$(dirname "$0")/lib.sh"
 # Fetch first document ID
 DOCS=$(curl -sf "$BASE/documents?page_size=1" | python3 -c "
 import sys, json

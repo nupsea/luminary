@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S195 -- Chat: Bloom-progressive recommendations
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 # BSD mktemp only substitutes Xs at the END of a template, so
 # `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
@@ -9,7 +10,6 @@ set -euo pipefail
 SMOKE_TMPDIR=$(mktemp -d)
 trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
 
-BASE="http://localhost:7820"
 FAIL=0
 
 echo "=== S195 Smoke: Bloom-progressive chat suggestions ==="

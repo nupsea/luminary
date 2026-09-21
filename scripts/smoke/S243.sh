@@ -30,8 +30,7 @@
 # before any LLM call.
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 fail() {
   echo "FAIL: $1"

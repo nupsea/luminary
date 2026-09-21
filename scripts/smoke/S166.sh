@@ -3,8 +3,7 @@
 # Tests POST /notes/cluster, GET /notes/cluster/suggestions, accept, and reject
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 echo "=== S166 Smoke Test: Semantic note clustering ==="
 

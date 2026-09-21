@@ -2,8 +2,7 @@
 # Smoke test for S142: web-grounded chat
 # Verifies GET /settings/web-search and POST /qa with web_enabled=false both work.
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 # 1. Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")

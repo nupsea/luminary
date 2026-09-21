@@ -2,8 +2,8 @@
 # S106 smoke: create note with section_id, verify round-trip via GET /notes
 # Requires a running backend at localhost:7820
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 DOC_ID="smoke-doc-s106"
 SECTION_ID="smoke-section-001"
 

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S147: SelectionActionBar -- POST /annotations endpoint.
 set -euo pipefail
-BASE="http://localhost:7820"
-
+source "$(dirname "$0")/lib.sh"
 # 1. Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")
 if [ "$HTTP_HEALTH" != "200" ]; then

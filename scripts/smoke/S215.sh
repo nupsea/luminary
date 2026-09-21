@@ -7,6 +7,7 @@
 #   3. scores_history entries can persist citation_support_rate with eval_kind=citation.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"

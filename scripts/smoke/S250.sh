@@ -23,8 +23,8 @@
 # row whose absence check 2 is about. Check 7 sends one that validation rejects
 # before any write.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${BASE:-http://localhost:7820}"
 FAIL=0
 
 check() {

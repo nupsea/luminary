@@ -4,8 +4,7 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 # POST /summarize/all should return 200 regardless of library state
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \

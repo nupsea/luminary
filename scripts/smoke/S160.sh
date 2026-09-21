@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 # Fetch the document list to get a real document_id
 DOC_ID=$(curl -s "$BASE/documents?sort=newest&page=1&page_size=1" \

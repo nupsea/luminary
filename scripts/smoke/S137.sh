@@ -4,14 +4,13 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 # BSD mktemp only substitutes Xs at the END of a template, so
 # `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
 # once per machine and then failed "File exists" forever. One per-run directory
 # keeps the extensions -- uploads are validated on them -- and cleans up itself.
 SMOKE_TMPDIR=$(mktemp -d)
-
-BASE="http://localhost:7820"
 
 # 1. Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")

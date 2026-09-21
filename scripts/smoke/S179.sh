@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S179: Context-aware flashcard generation
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 echo "=== S179 Smoke: Context-aware flashcard generation ==="
 

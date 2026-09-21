@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # S104 smoke test: GET /settings/llm returns 200 with has_*_key booleans (no raw key in body)
 set -euo pipefail
-
-BASE_URL="${BASE_URL:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 echo "S104: GET /settings/llm returns 200..."
-BODY=$(curl -s -w "\n%{http_code}" "${BASE_URL}/settings/llm")
+BODY=$(curl -s -w "\n%{http_code}" "${BASE}/settings/llm")
 STATUS=$(echo "$BODY" | tail -1)
 RESPONSE=$(echo "$BODY" | head -1)
 

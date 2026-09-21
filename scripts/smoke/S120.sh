@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -e
-BASE=http://localhost:7820
-
+source "$(dirname "$0")/lib.sh"
 # 1. GET /documents/{unknown}/audio returns 404
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/documents/00000000-0000-0000-0000-000000000000/audio")
 [ "${STATUS}" = "404" ] || { echo "FAIL: expected 404 for unknown doc audio, got ${STATUS}"; exit 1; }

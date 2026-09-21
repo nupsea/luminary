@@ -10,8 +10,8 @@
 #   5. embedding_dim matches the width the stored vectors carry (I-9)
 
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
 fail() {
   echo "FAIL: $1"

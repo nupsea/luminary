@@ -4,10 +4,9 @@
 # 1. tsc compiles, 2. overlay module exists, 3. no inline mark injection remains,
 # 4. overlay container in JSX, 5. backend annotation endpoints still work.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-PORT="${LUMINARY_PORT:-7820}"
-BASE="http://localhost:$PORT"
 PASS=true
 
 echo "=== S205 Smoke Test ==="

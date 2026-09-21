@@ -2,8 +2,7 @@
 # Smoke test for S151: In-document Cmd+F search endpoint
 # Verifies that GET /documents/{id}/search is reachable and returns expected responses.
 set -euo pipefail
-
-BASE="${API_BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 echo "S151 smoke: GET /documents/nonexistent/search?q=hello returns 404"
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/documents/nonexistent-doc-s151/search?q=hello")

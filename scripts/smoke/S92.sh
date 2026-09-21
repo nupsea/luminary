@@ -3,8 +3,8 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 NOTE_ID=""
 
 cleanup() {
@@ -29,13 +29,13 @@ fi
 #    chat is served by `POST /qa`, which routes a notes-phrased question to the
 #    notes path through the intent classifier (I-26). The subject of this script
 #    is that notes reach chat as context, and that is where it happens now.
-HTTP_CODE=$(curl -s -o /tmp/s92_chat.txt -w "%{http_code}" -X POST "${BASE}/qa" \
+HTTP_CODE=$(curl -s -o $SMOKE_TMP/s92_chat.txt -w "%{http_code}" -X POST "${BASE}/qa" \
   -H "Content-Type: application/json" \
   -d '{"question":"what did I note about my reading","scope":"all"}')
 
 if [ "$HTTP_CODE" != "200" ]; then
   echo "FAIL: POST /qa returned ${HTTP_CODE} (expected 200)"
-  cat /tmp/s92_chat.txt
+  cat $SMOKE_TMP/s92_chat.txt
   exit 1
 fi
 
@@ -43,11 +43,11 @@ fi
 #    last `data:` line rather than the whole body.
 python3 -c "
 import json
-lines = [l[6:] for l in open('/tmp/s92_chat.txt') if l.startswith('data: ')]
+lines = [l[6:] for l in open('$SMOKE_TMP/s92_chat.txt') if l.startswith('data: ')]
 assert lines, 'no SSE data lines in the /qa response'
 final = json.loads(lines[-1])
 assert not final.get('error'), f\"/qa answered with {final['error']}\"
 assert final.get('answer'), 'POST /qa returned no answer for a notes-intent question'
-" || { echo 'FAIL: /qa returned no usable answer'; tail -c 400 /tmp/s92_chat.txt; exit 1; }
+" || { echo 'FAIL: /qa returned no usable answer'; tail -c 400 $SMOKE_TMP/s92_chat.txt; exit 1; }
 
 echo "PASS: S92 -- note created, /qa answers a notes-intent question"

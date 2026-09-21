@@ -2,6 +2,7 @@
 # Smoke test for S204: Notes from highlighted text sync state across all surfaces
 # Frontend-only fix (query invalidation) -- verify backend contract + tsc.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 # BSD mktemp only substitutes Xs at the END of a template, so
 # `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
@@ -11,8 +12,6 @@ SMOKE_TMPDIR=$(mktemp -d)
 trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-PORT="${LUMINARY_PORT:-7820}"
-BASE="http://localhost:$PORT"
 PASS=true
 
 echo "=== S204 Smoke Test ==="

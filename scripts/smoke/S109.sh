@@ -2,8 +2,7 @@
 # S109 smoke: GET /chat/explorations returns HTTP 200 JSON array
 # Uses a nonexistent doc_id -- graceful empty response is the expected result.
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 echo "S109 [1/2]: GET /chat/explorations with unknown doc returns 200 empty list..."
 RESP=$(curl -sf "${BASE}/chat/explorations?document_id=smoke-nonexistent-doc-s109")

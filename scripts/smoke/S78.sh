@@ -4,8 +4,7 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 # ---------------------------------------------------------------------------
 # Helper: POST /qa and check response
@@ -14,7 +13,7 @@ BASE="http://localhost:7820"
 qa_check() {
   local label="$1"
   local question="$2"
-  local tmp_file="/tmp/s78_qa_${RANDOM}.txt"
+  local tmp_file="$SMOKE_TMP/s78_qa_${RANDOM}.txt"
 
   echo "Testing $label ..."
   # 30s truncated the stream before its done event on a cold model load; a

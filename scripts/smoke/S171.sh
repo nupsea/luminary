@@ -4,8 +4,7 @@
 # and GET /notes/autocomplete endpoints.
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 echo "=== S171 Smoke Test: Note-to-note bidirectional links ==="
 

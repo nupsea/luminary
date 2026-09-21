@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # S110 smoke: reading progress upsert and reading_progress_pct in document detail
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 echo "S110 [1/4]: Find a document in the library..."
 DOC_ID=$(curl -sf "${BASE}/documents?page_size=1" | python3 -c "

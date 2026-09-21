@@ -6,12 +6,12 @@
 # Prerequisites: backend running on localhost:7820
 
 set -euo pipefail
-
-BASE_URL="${LUMINARY_BACKEND_URL:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
 echo "S130 smoke: GET /evals/results"
 
-response=$(curl -s -w "\n%{http_code}" "${BASE_URL}/evals/results")
+response=$(curl -s -w "\n%{http_code}" "${BASE}/evals/results")
 http_code=$(echo "$response" | tail -1)
 # `head -n -1` is GNU-only and errors on macOS; sed drops the last line portably.
 body=$(echo "$response" | sed '$d')

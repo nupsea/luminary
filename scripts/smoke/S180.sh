@@ -2,8 +2,8 @@
 # Smoke test for S180 -- Chat interface simplification
 # Verifies Chat-adjacent backend endpoints still respond (no backend changes in this story)
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${LUMINARY_API_BASE:-http://localhost:7820}"
 PASS=0
 FAIL=0
 

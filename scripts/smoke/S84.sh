@@ -8,8 +8,7 @@
 # 3. PATCH /notes/{id} — inline edit, verify updated content
 # 4. DELETE /notes/{id} — cleanup
 set -euo pipefail
-
-BASE="${BACKEND_URL:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 # ---- (1) GET /notes returns 200 ----
 STATUS=$(curl -so /dev/null -w "%{http_code}" "$BASE/notes")

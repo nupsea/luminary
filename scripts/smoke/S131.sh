@@ -6,12 +6,11 @@
 # Prerequisites: backend running on localhost:7820
 
 set -euo pipefail
-
-BASE_URL="${LUMINARY_BACKEND_URL:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 echo "S131 smoke: GET /documents/nonexistent-id/code_snippets expects 404"
 
-http_code=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/documents/nonexistent-id/code_snippets")
+http_code=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/documents/nonexistent-id/code_snippets")
 
 if [ "$http_code" != "404" ]; then
   echo "FAIL: expected HTTP 404 for nonexistent document, got $http_code"

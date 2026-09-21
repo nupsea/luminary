@@ -3,8 +3,7 @@
 # Tests GET /collections/{id}/health and POST /collections/{id}/health/archive-stale
 
 set -euo pipefail
-BASE="${BASE:-http://localhost:7820}"
-
+source "$(dirname "$0")/lib.sh"
 echo "=== S173 Smoke Test ==="
 
 # Create a collection

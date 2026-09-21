@@ -4,8 +4,8 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 NOTE_ID=""
 
 cleanup() {

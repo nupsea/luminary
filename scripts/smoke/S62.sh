@@ -2,8 +2,7 @@
 # Smoke test for S62: tag storage and filter
 # Tests PATCH /documents/{id}/tags and GET /documents?tag=X
 set -euo pipefail
-
-BASE="${BACKEND_URL:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 # Create a document via ingest (we need a real endpoint, use a tiny text file)
 INGEST_RESP=$(curl -sf -X POST "$BASE/documents/ingest" \

@@ -5,8 +5,8 @@
 #        POST /collections/{id}/notes, DELETE /collections/{id}/notes/{note_id},
 #        DELETE /collections/{id}
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 PASS=0
 FAIL=0
 

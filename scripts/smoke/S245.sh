@@ -9,10 +9,10 @@
 # Uploads a tiny unique text file twice and deletes it, so it leaves no residue
 # in the library it ran against.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 STAMP="s245_$(date +%s)_$$"
-TMP="$(mktemp -t s245).txt"
+TMP="$SMOKE_TMP/${STAMP}.txt"
 printf 'S245 duplicate-signal fixture %s\n' "$STAMP" > "$TMP"
 DOC_ID=""
 # Cleanup on EXIT, not at the end: `set -e` plus a curl timeout can kill this

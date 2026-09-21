@@ -9,8 +9,8 @@
 #   2. POST /study/sessions/{id}/end counts CARDS, not submissions: a card
 #      answered twice is one card reviewed at its latest score.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${BASE:-http://localhost:7820}"
 FAIL=0
 
 check() {
@@ -23,7 +23,7 @@ check() {
     fi
 }
 
-TMPFILE=$(mktemp /tmp/s247_XXXXXX)
+TMPFILE=$(mktemp $SMOKE_TMP/s247_XXXXXX)
 cleanup() { rm -f "$TMPFILE"; }
 trap cleanup EXIT
 

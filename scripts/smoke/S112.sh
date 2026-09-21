@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # S112 smoke: graph-flashcard entity-pairs preview and generate-from-graph endpoint
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 echo "S112 [1/3]: Find first ingested document..."
 DOC_ID=$(curl -sf "${BASE}/documents?sort=newest&page=1&page_size=1" | python3 -c "

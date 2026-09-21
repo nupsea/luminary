@@ -422,7 +422,7 @@ test-v2:
 	cd backend && uv run pytest tests/test_v2_pipeline.py -v -m slow --timeout=1800
 
 smoke:
-	@echo "Running smoke tests (requires backend on :7820)..."
+	@echo "Running smoke tests against $${LUMINARY_BASE_URL:-http://localhost:7820} (LUMINARY_BASE_URL to change)..."
 	bash scripts/smoke/all.sh
 
 # The suite cleans up after itself, including when it fails partway. This is for
@@ -463,7 +463,7 @@ docker-run-gpu: require-docker require-compose-release
 	docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up --build $(if $(DETACH),-d,)
 
 smoke-clean:
-	@echo "Removing smoke fixtures from the library (requires backend on :7820)..."
+	@echo "Removing smoke fixtures from the library at $${LUMINARY_BASE_URL:-http://localhost:7820}..."
 	bash scripts/smoke/clean.sh $(if $(SINCE),--since $(SINCE),) $(if $(DRY_RUN),--dry-run,)
 
 # Footprint + interactive-latency baseline. FILE= ingests and samples through it;

@@ -7,6 +7,7 @@
 #   4. TypeScript compilation passes
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 # BSD mktemp only substitutes Xs at the END of a template, so
 # `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
@@ -14,7 +15,6 @@ set -euo pipefail
 # keeps the extensions -- uploads are validated on them -- and cleans up itself.
 SMOKE_TMPDIR=$(mktemp -d)
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
 FAIL=0
 TMPFILE="$SMOKE_TMPDIR/smoke_s197.json"
 

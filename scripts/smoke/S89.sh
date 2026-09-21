@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S89: Notes markdown rendering -- @tailwindcss/typography and highlight.js
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 FRONTEND="$REPO_ROOT/frontend"

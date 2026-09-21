@@ -10,8 +10,7 @@
 # Requires the backend running on localhost:7820.
 
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 # 1. Backend health.
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")
@@ -21,25 +20,25 @@ if [ "$HTTP_HEALTH" != "200" ]; then
 fi
 
 # 2. graph_expand=true (default).
-HTTP_ON=$(curl -s -o /tmp/s225_on.json -w "%{http_code}" \
+HTTP_ON=$(curl -s -o $SMOKE_TMP/s225_on.json -w "%{http_code}" \
   "${BASE}/search?q=Holmes&graph_expand=true&limit=3")
 if [ "$HTTP_ON" != "200" ]; then
   echo "FAIL: /search?graph_expand=true returned ${HTTP_ON}"
-  cat /tmp/s225_on.json
+  cat $SMOKE_TMP/s225_on.json
   exit 1
 fi
-grep -q '"results"' /tmp/s225_on.json \
-  || { echo "FAIL: /search response missing 'results' key"; cat /tmp/s225_on.json; exit 1; }
+grep -q '"results"' $SMOKE_TMP/s225_on.json \
+  || { echo "FAIL: /search response missing 'results' key"; cat $SMOKE_TMP/s225_on.json; exit 1; }
 
 # 3. graph_expand=false (ablation mode).
-HTTP_OFF=$(curl -s -o /tmp/s225_off.json -w "%{http_code}" \
+HTTP_OFF=$(curl -s -o $SMOKE_TMP/s225_off.json -w "%{http_code}" \
   "${BASE}/search?q=Holmes&graph_expand=false&limit=3")
 if [ "$HTTP_OFF" != "200" ]; then
   echo "FAIL: /search?graph_expand=false returned ${HTTP_OFF}"
-  cat /tmp/s225_off.json
+  cat $SMOKE_TMP/s225_off.json
   exit 1
 fi
-grep -q '"results"' /tmp/s225_off.json \
-  || { echo "FAIL: /search response missing 'results' key"; cat /tmp/s225_off.json; exit 1; }
+grep -q '"results"' $SMOKE_TMP/s225_off.json \
+  || { echo "FAIL: /search response missing 'results' key"; cat $SMOKE_TMP/s225_off.json; exit 1; }
 
 echo "PASS: S225 -- /search accepts graph_expand=true|false"

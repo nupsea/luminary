@@ -2,6 +2,7 @@
 # Smoke test for S222: retrieval strategy ablation eval.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"

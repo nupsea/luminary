@@ -12,6 +12,7 @@
 #   4. append_history writes an entry whose eval_kind defaults to 'retrieval'.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"

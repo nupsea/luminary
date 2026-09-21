@@ -3,8 +3,8 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
 # 1. GET /graph with no doc_ids — must return 200 with nodes array
 BODY=$(curl -sf "${BASE}/graph?doc_ids=")

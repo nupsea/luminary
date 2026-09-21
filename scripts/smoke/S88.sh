@@ -15,6 +15,7 @@
 #
 # Does NOT run the slow pytest suite (that requires real ML).
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 

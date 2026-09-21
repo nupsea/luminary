@@ -2,6 +2,7 @@
 # Smoke test for S190 -- Tag search: type-ahead search in Notes sidebar
 # Frontend-only story, but verifies GET /tags/tree still returns 200 + array
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 # BSD mktemp only substitutes Xs at the END of a template, so
 # `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
@@ -9,8 +10,6 @@ set -euo pipefail
 # keeps the extensions -- uploads are validated on them -- and cleans up itself.
 SMOKE_TMPDIR=$(mktemp -d)
 trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
-
-BASE="http://localhost:7820"
 
 echo "--- S190 smoke: GET /tags/tree ---"
 TMPFILE="$SMOKE_TMPDIR/s190.json"

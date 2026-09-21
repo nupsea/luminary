@@ -2,6 +2,7 @@
 # Smoke test for S203: PDF Viewer in-page and cross-page text search
 # Frontend-only story -- verifies new files exist, Vitest passes, and tsc compiles.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PASS=true

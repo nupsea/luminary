@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S153: Bloom's taxonomy coverage audit endpoint
 set -euo pipefail
-BASE="http://localhost:7820"
-
+source "$(dirname "$0")/lib.sh"
 # Get first document ID from the library
 DOC_ID=$(curl -sf "${BASE}/documents" | python3 -c "
 import sys, json

@@ -7,8 +7,8 @@
 #   3. POST /documents/ingest-url with O'Reilly URL without cookies is refused 401
 #      (skipped when a session is stored)
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${BASE:-http://localhost:7820}"
 FAIL=0
 
 check() {

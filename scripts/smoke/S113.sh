@@ -11,8 +11,7 @@
 # Verifies: list, create with the typed shape, read back, progress, delete.
 # Requires: live backend at http://localhost:7820.
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 fail() { echo "    FAIL: $1"; exit 1; }
 

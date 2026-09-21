@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S168: Smart tag normalization endpoints
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 # Helpers
 check_status() {

@@ -13,8 +13,9 @@
 #   2. a wrong key is refused whatever the configuration
 #   3. where a key IS configured, the route works and reports its queue
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
-BASE="${BASE:-http://localhost:7820}"
 fail() { echo "FAIL: $1"; exit 1; }
 
 BODY=$(mktemp)

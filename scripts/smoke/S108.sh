@@ -3,6 +3,7 @@
 # Web Speech API is browser-only so runtime testing requires a browser;
 # this script verifies TypeScript types and build integrity.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
@@ -16,8 +17,8 @@ cd "${REPO_ROOT}/frontend"
 echo "PASS: tsc --noEmit"
 
 echo "S108 [2/2]: Vite build (no chunk warnings)..."
-npm run build 2>&1 | tee /tmp/s108-build.log
-if grep -q "chunk size warning" /tmp/s108-build.log; then
+npm run build 2>&1 | tee $SMOKE_TMP/s108-build.log
+if grep -q "chunk size warning" $SMOKE_TMP/s108-build.log; then
   echo "FAIL: chunk size warning in build output"
   exit 1
 fi

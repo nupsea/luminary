@@ -4,8 +4,7 @@
 # Requires: backend running at localhost:7820
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 # `all.sh` passes no arguments, so requiring one made this script a guaranteed
 # failure in the suite it belongs to. The id is still accepted as an override;
@@ -36,7 +35,7 @@ fi
 echo "S134 smoke test — document_id=$DOC_ID"
 
 # Check images endpoint responds 200
-STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:7820/documents/${DOC_ID}/images")
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/documents/${DOC_ID}/images")
 if [ "$STATUS" -ne 200 ]; then
   echo "FAIL: GET /documents/${DOC_ID}/images returned HTTP $STATUS (expected 200)"
   exit 1
@@ -49,9 +48,9 @@ echo "PASS: images endpoint returned HTTP 200"
 # broken feature. Look across the library instead, and say so plainly when
 # nothing has been through it rather than calling that a failure.
 python3 - <<'PYCHECK'
-import json, urllib.request
+import json, os, urllib.request
 
-BASE = "http://localhost:7820"
+BASE = os.environ["BASE"]
 
 
 def get(path):

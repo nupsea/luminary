@@ -15,6 +15,18 @@ async def test_health_returns_ok():
 
 
 @pytest.mark.asyncio
+async def test_health_reports_the_mode_the_app_mounted():
+    """The smoke harness skips scripts for surfaces a public-mode server does not
+    mount; it can only do that if the server says which mode it is in."""
+    from app.main import _mode
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/health")
+    assert response.json()["mode"] == _mode
+    assert _mode in ("full", "public")
+
+
+@pytest.mark.asyncio
 async def test_healthz_returns_ok_without_db():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/healthz")

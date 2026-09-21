@@ -3,8 +3,8 @@
 # with correct response shape (entities key present).
 # Note: this test requires a live server at localhost:7820.
 set -euo pipefail
-BASE="http://localhost:7820"
-
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 echo "S136 smoke: GET /graph/entities/nonexistent_doc?type=COMPONENT returns 200"
 resp=$(curl -sf "${BASE}/graph/entities/nonexistent_doc_id?type=COMPONENT")
 echo "Response: $resp"

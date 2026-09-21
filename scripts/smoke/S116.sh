@@ -3,8 +3,8 @@
 # Calls GET /study/section-heatmap with a nonexistent document_id.
 # Endpoint must return HTTP 200 with {"heatmap": {}}.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 DOC_ID="smoke-test-nonexistent"
 
 echo "S116 smoke: GET /study/section-heatmap?document_id=${DOC_ID}"

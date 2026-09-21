@@ -3,6 +3,7 @@
 # Verifies TypeScript compiles and the frontend builds without errors.
 # Runtime dialog behaviour requires a browser and cannot be verified headlessly.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 FRONTEND_DIR="$(cd "$(dirname "$0")/../../frontend" && pwd)"
 

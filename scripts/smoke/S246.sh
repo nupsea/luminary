@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S246: GET /settings/llm/routing -- where each unit of work runs
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 echo "=== S246 Smoke: LLM routing report ==="
 

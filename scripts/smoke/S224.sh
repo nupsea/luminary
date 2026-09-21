@@ -13,10 +13,9 @@
 # The CLI invocation runs against the same DATA_DIR as the live backend.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-BASE="http://localhost:7820"
-
 # 1. Backend health -- ensures the database/schema is up to date with S224.
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")
 if [ "$HTTP_HEALTH" != "200" ]; then

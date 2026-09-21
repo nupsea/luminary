@@ -3,8 +3,8 @@
 # Tests: GET /tags/tree, GET /tags/autocomplete, PUT /tags/{id} rename,
 #        POST /tags/merge, TagAliasModel cleanup, 422 on self-merge
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 PASS=0
 FAIL=0
 

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S118: GET /study/due-count endpoint
 set -euo pipefail
-
-BASE="${API_BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 status=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/study/due-count")
 if [ "$status" != "200" ]; then

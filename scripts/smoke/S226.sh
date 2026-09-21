@@ -14,6 +14,7 @@
 # This is a pure-Python smoke check -- it does NOT require a running backend.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT/evals"

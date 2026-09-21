@@ -3,8 +3,8 @@
 # Verifies that GET /feynman/sessions endpoint is reachable (HTTP 200).
 # Model explanation streaming and diff view are covered by backend/frontend unit tests.
 set -euo pipefail
-
-BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
   "${BASE}/feynman/sessions?document_id=smoke-check")

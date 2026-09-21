@@ -4,6 +4,7 @@
 #   1. Backend unit tests for context_packer pass (token budget + accuracy)
 #   2. Frontend tsc --noEmit passes (lazy import type safety)
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 

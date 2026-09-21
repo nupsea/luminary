@@ -4,6 +4,7 @@
 # Verifies TypeScript compilation passes (no regressions in Chat.tsx).
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 FAIL=0
 

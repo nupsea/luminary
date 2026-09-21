@@ -18,8 +18,7 @@
 # recomputes verdicts from the document's own chunks and writes no cards.
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 fail() {
   echo "FAIL: $1"
@@ -50,12 +49,12 @@ print('  ' + ', '.join(f'{s} {r[s]}' for s in states))
 " || fail "grounding summary does not add up"
 
 curl -s -X POST "${BASE}/flashcards/grounding/audit" \
-  -H 'Content-Type: application/json' -d '{}' > /tmp/s235_first.json
+  -H 'Content-Type: application/json' -d '{}' > $SMOKE_TMP/s235_first.json
 curl -s -X POST "${BASE}/flashcards/grounding/audit" \
   -H 'Content-Type: application/json' -d '{}' | python3 -c "
 import sys, json
 second = json.load(sys.stdin)
-first = json.load(open('/tmp/s235_first.json'))
+first = json.load(open('$SMOKE_TMP/s235_first.json'))
 assert second['changed'] == 0, \
     f'a second audit changed {second[\"changed\"]} verdicts -- it is not deterministic'
 for key in ('verified', 'unsupported', 'unverifiable'):
@@ -63,5 +62,5 @@ for key in ('verified', 'unsupported', 'unverifiable'):
 print('  a second audit changes nothing')
 " || fail "the audit is not idempotent"
 
-rm -f /tmp/s235_first.json
+rm -f $SMOKE_TMP/s235_first.json
 echo "PASS: S235 -- card grounding is stored, reported by state, and stable"

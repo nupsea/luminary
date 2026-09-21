@@ -13,15 +13,15 @@
 # real dev port to match every other smoke in scripts/smoke/.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 EVALS_DIR="${REPO_ROOT}/evals"
 
 # 0. Backend health
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")
 if [ "$HTTP_HEALTH" != "200" ]; then
-  echo "FAIL: backend not healthy (got ${HTTP_HEALTH}). Start the backend on :7820."
+  echo "FAIL: backend not healthy (got ${HTTP_HEALTH}). Start the backend, or set LUMINARY_BASE_URL."
   exit 1
 fi
 

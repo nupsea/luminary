@@ -17,8 +17,7 @@
 # Requires a running backend at localhost:7820.
 # smoke-expects-absent: /code/execute
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 fail() {
   echo "FAIL: $1"

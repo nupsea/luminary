@@ -558,7 +558,9 @@ probe_router = APIRouter()
 
 @probe_router.get("/health")
 async def health():
-    return {"status": "ok", "version": _APP_VERSION}
+    # `mode` decides which surfaces are mounted; the smoke harness reads it to
+    # skip scripts for surfaces this server does not serve.
+    return {"status": "ok", "version": _APP_VERSION, "mode": _mode}
 
 
 @probe_router.get("/healthz")

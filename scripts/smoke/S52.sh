@@ -4,6 +4,7 @@
 # Requires backend dev dependencies installed (uv sync).
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 BACKEND_DIR="$(cd "$(dirname "$0")/../../backend" && pwd)"
 

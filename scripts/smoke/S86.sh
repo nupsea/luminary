@@ -3,9 +3,10 @@
 # Ingests a small TXT file with known entity variants, waits for completion,
 # then asserts GET /graph/{doc_id} returns at least 1 entity node.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
-BASE="http://localhost:7820"
-FIXTURE="/tmp/s86_smoke_fixture.txt"
+FIXTURE="$SMOKE_TMP/s86_smoke_fixture.txt"
 
 # Create a minimal fixture with known entity variants
 cat > "$FIXTURE" <<'FIXTURE_EOF'

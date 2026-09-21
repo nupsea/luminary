@@ -6,8 +6,8 @@
 #   3. TypeScript compilation passes
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
 FAIL=0
 
 echo "=== S200 Smoke: PDF Viewer links and rendering ==="

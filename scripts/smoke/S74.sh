@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S74: LLM provider mode — Private/Cloud settings with encrypted API keys
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 BACKEND_DIR="$(cd "$(dirname "$0")/../../backend" && pwd)"
 

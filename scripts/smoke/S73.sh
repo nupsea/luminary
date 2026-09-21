@@ -18,6 +18,7 @@
 #   2. the AVOID block survives
 #   3. no taxonomy term has crept back in
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$(cd "$SCRIPT_DIR/../../backend" && pwd)"

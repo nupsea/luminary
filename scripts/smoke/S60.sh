@@ -3,8 +3,7 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 # 1. GET /sections/<nonexistent-id> — must return 200 with empty array (no 404/500)
 BODY=$(curl -sf "${BASE}/sections/nonexistent-id-smoke-s60")

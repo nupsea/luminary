@@ -8,8 +8,8 @@
 # Note: frontend routing changes are not verifiable via curl; verified via tsc + manual check.
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
 echo "=== S177 Smoke: Progress tab / Admin route ==="
 

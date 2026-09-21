@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test for S167 - Tag co-occurrence graph: GET /tags/graph shape, cache, and content.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 PASS=0
 FAIL=0
 

@@ -4,11 +4,10 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 # GET /study/due with a nonexistent document_id -- must return 200 and an array (empty is fine)
-HTTP_CODE=$(curl -s -o /tmp/s95_due_resp.json -w "%{http_code}" \
+HTTP_CODE=$(curl -s -o $SMOKE_TMP/s95_due_resp.json -w "%{http_code}" \
   "${BASE}/study/due?document_id=nonexistent-doc-id")
 
 if [ "$HTTP_CODE" != "200" ]; then
@@ -17,7 +16,7 @@ if [ "$HTTP_CODE" != "200" ]; then
 fi
 
 # Verify body is a JSON array
-IS_ARRAY=$(python3 -c "import sys,json; d=json.load(open('/tmp/s95_due_resp.json')); print('yes' if isinstance(d, list) else 'no')")
+IS_ARRAY=$(python3 -c "import sys,json; d=json.load(open('$SMOKE_TMP/s95_due_resp.json')); print('yes' if isinstance(d, list) else 'no')")
 if [ "$IS_ARRAY" != "yes" ]; then
   echo "FAIL: GET /study/due response is not a JSON array"
   exit 1

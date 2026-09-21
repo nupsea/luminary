@@ -2,8 +2,9 @@
 # Smoke test for S181: Viz tab overhaul
 # Verifies the backend endpoints used by the Viz tab still respond correctly.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
-BASE="${BASE:-http://localhost:7820}"
 PASS=0
 FAIL=0
 
