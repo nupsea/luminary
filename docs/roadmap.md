@@ -251,15 +251,63 @@ offloaded, and a first run with the network blocked reached ready on CUDA. Measu
 ~85s against 0.5s warm, and how that splits between model load and runner start is unmeasured; a
 first run that looks hung for a minute and a half is a UX defect if it holds on a real model.
 
+**A real Windows first run found two defects CI passed, both fixed.** On an AWS g4dn.xlarge
+(Windows Server 2022, 16 GiB, run `35569901354` installer), the silent `/S` install put 38,269 files
+into `%LOCALAPPDATA%\Luminary` in under three minutes, bootstrapped WebView2, and reached `ready` 14s
+after launch. Then the UI failed every request and every ingest failed:
+
+- Git Bash rewrites a `/`-leading environment value on its way to a native exe, so the SPA was built
+  with `C:/Program Files/Git/api` as its API base. `stage_payload.sh` excludes `VITE_API_BASE` from
+  the conversion and fails the build if a drive-letter base is baked in (`977d5397`).
+- `base_env` cleared `USERNAME`; `getpass.getuser()` has no fallback on Windows and torch calls it
+  while importing `torch._dynamo`, so every embed failed and each retry died on "Artifact of
+  type=precompile already registered" (`0313221f`).
+
+Both are verified in the installed app: welcome screen, embedding warmup, a `.txt` ingested and found
+by search. **`verify_installed.sh` waits only for the shell's `ready` line, which is why neither was
+caught**; it should reach the API through the SPA's base and ingest one document.
+
+The same run closed or narrowed the rest:
+
+- **#139 verified on Windows**: 16,864,800,768 bytes of RAM, `host-support` answers `supported`.
+  Not re-run on the 16 GiB Linux box that reported it.
+- **#24 on Windows**: done except a long username. The deepest installed path is 200 characters
+  under `Administrator`, so a 20-character name reaches 207 of 260; computed, not installed.
+  Force-killing the shell took Ollama and the backend with it, so the Job Object holds on a real
+  install. Linux hardware not run.
+- **#99 on Windows**: `render_page` works through WebView2 (vercel.com/blog 22.6s, a Wikipedia
+  article 4.0s, both returning the rendered document). Neither page needed script to show its
+  content, so the case the feature exists for is not yet demonstrated. WebKitGTK not run.
+- **The T4 was unusable to the app.** The data-center driver runs in TCC mode, which Vulkan cannot
+  see, and `nvidia-smi -dm 0` is not supported there; Ollama reported 0 B VRAM and ran on the CPU.
+  A consumer GeForce card in WDDM mode is the test Windows GPU support still needs.
+
+**`make smoke` on Windows is not green, and the gate as written cannot run.** The bundled app is
+public mode on an ephemeral port and every smoke script hardcodes `localhost:7820` in full mode, so
+the run used a from-source full-mode backend against the app's own Ollama. On a rerun of the first
+pass's failures, what still fails is the harness or the host, not the app:
+
+| Class | Scripts | Cause |
+|---|---|---|
+| No Node on the box | S105, S106, S108, S109, S191, S196, S198, S200, S203, S204, S205, S207, S220 | `npx`/`tsc` steps |
+| Windows curl | S121 | `-F file=@/dev/null` cannot be opened by the mingw curl; a real empty file returns 200 |
+| GNU `mktemp` | S245 | `mktemp -t s245` has no `X`s |
+| CPU-only LLM | S62, S63, S77 | TTFT 351s, 625s per answer |
+| `/search` timeouts | S212 | see below |
+
+Every `/tmp`-path and cp1252 failure passed once the box had `PYTHONUTF8=1` and `C:\tmp`
+junctioned to Git Bash's `/tmp`; the scripts still assume both. **S212's numbers are not retrieval
+measurements.** `run_eval.search_chunks` turns a failed request into an empty list, which scores as a
+miss: `book_alice` read HR@5 0.0000 with the backend busy, and passed once it was idle, while
+`book_time_machine` then read 0.35 with 22 of 40 searches past the 30s timeout. An uncomputed search
+must fail the run, not lower the score. Why some searches exceed 30s on a 4-vCPU host is unmeasured.
+
 What remains open:
 
-- **#139**: the same box, 16 GiB, was refused as `under_memory_floor` (`"Linux/x86_64, 15GB"`).
-  All five RAM readers truncated a figure Linux and Windows have already reduced by firmware and
-  kernel reservations; they now round up (I-56). Fixed and tested, not yet re-run on a 16 GiB box.
-- **#24**: a first run with no terminal on a real Windows machine, and an install path long enough
-  to hit `MAX_PATH`. The same first run on real Linux hardware.
-- **#99**: article rendering through WebView2 and WebKitGTK, now that a shell exists there.
-- `make smoke` green on Windows.
+- A smoke mode that targets the bundled app (base URL and mode from the environment), then
+  `make smoke` green on Windows.
+- `verify_installed.sh` driving the SPA's API base and one ingest.
+- #24 and #99 on Linux hardware; #24 under a 20-character Windows username.
 
 **A Kuzu lock cannot go stale is a POSIX statement.** `flock` is advisory and released by the kernel
 when the holder dies, which is why this repo forbids a lockfile or any lock-clearing logic. Windows
