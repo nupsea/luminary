@@ -11,7 +11,7 @@ This file is a table of contents. The system of record is `docs/`.
 | Before you… | Read |
 |---|---|
 | proposing or scoping work | `docs/roadmap.md` — the only doc carrying status |
-| any backend change | `docs/invariants.md` (57 hard rules, each from a real incident) |
+| any backend change | `docs/invariants.md` (43 hard rules, each from a real incident) |
 | a structural change | `docs/architecture.md` (6-layer rule, stores, directories) |
 | writing backend code | `docs/patterns.md` (accumulated codebase patterns) |
 | a schema change | I-23, then the `alembic-migration` skill |
@@ -55,7 +55,7 @@ from this repo. The full set is in `docs/invariants.md`.
 - **Nothing the system supplies may satisfy a check on the system's output.** Prompt examples,
   placeholders and defaults are not evidence; a verification the product can pass with its own
   text verifies nothing. `.claude/rules/common/product-integrity.md`.
-- **`uv` only.** Never `pip`, never `poetry`. Add packages with `uv add`. (I-15)
+- **`uv` only.** Never `pip`, never `poetry`. Add packages with `uv add`; a hook blocks the others.
 - **All LLM calls go through LiteLLM.** Never a provider SDK directly.
 - **Services and repos raise `LuminaryError` subclasses, never `HTTPException`.** One handler
   in `main.py` maps them.
