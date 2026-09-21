@@ -28,21 +28,7 @@ if [ -z "$DOC_ID" ]; then
 fi
 echo "Document ID: $DOC_ID"
 
-# Poll GET /documents/{id} until stage=complete or timeout
-MAX_WAIT=120
-ELAPSED=0
-STAGE=""
-while [ "$STAGE" != "complete" ] && [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
-  sleep 5
-  ELAPSED=$((ELAPSED + 5))
-  STAGE=$(curl -s "${BASE}/documents/${DOC_ID}" | python3 -c "import sys, json; print(json.load(sys.stdin).get('stage', ''))" 2>/dev/null || echo "")
-  echo "  stage=${STAGE} (${ELAPSED}s)"
-done
-
-if [ "$STAGE" != "complete" ]; then
-  echo "FAIL: document did not reach stage=complete within ${MAX_WAIT}s (last stage: ${STAGE})"
-  exit 1
-fi
+smoke_wait_complete "$DOC_ID" || exit 1
 
 # GET /summarize/{id}/sections — must be HTTP 200 with a JSON array
 HTTP_CODE=$(curl -s -o $SMOKE_TMP/s75_sections.json -w "%{http_code}" \

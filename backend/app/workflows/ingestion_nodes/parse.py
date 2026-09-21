@@ -131,6 +131,11 @@ async def classify_node(state: IngestionState) -> IngestionState:
     # Fast-path: content_type was provided by the user — skip all heuristics and LLM.
     # Classification only runs for legacy paths where content_type is unknown.
     provided = state.get("content_type")
+    if provided not in ("audio", "video"):
+        # Set before the domain and register probes, which are background LLM calls
+        # that queue behind other documents' summaries: left at "parsing", an 11 KB
+        # text file reported parsing for three minutes while it waited (#142).
+        await _update_stage(state["document_id"], "classifying")
     if provided is not None:
         if provided == "technical":
             pd = state.get("parsed_document")
@@ -185,7 +190,6 @@ async def classify_node(state: IngestionState) -> IngestionState:
         return {**state, "is_technical": is_technical, "status": "chunking"}
     with trace_ingestion_node("classify", state):
         try:
-            await _update_stage(state["document_id"], "classifying")
             pd = state["parsed_document"]
             if pd is None:
                 return {**state, "content_type": "notes", "status": "chunking"}

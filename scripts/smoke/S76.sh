@@ -31,21 +31,7 @@ if [ -z "$DOC_ID" ]; then
 fi
 echo "Document ID: $DOC_ID"
 
-# Poll GET /documents/{id} until stage=complete or timeout
-MAX_WAIT=180
-ELAPSED=0
-STAGE=""
-while [ "$STAGE" != "complete" ] && [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
-  sleep 5
-  ELAPSED=$((ELAPSED + 5))
-  STAGE=$(curl -s "${BASE}/documents/${DOC_ID}" | python3 -c "import sys, json; print(json.load(sys.stdin).get('stage', ''))" 2>/dev/null || echo "")
-  echo "  stage=${STAGE} (${ELAPSED}s)"
-done
-
-if [ "$STAGE" != "complete" ]; then
-  echo "FAIL: document did not reach stage=complete within ${MAX_WAIT}s (last stage: ${STAGE})"
-  exit 1
-fi
+smoke_wait_complete "$DOC_ID" || exit 1
 
 # POST /summarize/{id} with mode=executive and force_refresh=true
 # The streaming response is SSE; collect all data lines and check for non-empty token content.

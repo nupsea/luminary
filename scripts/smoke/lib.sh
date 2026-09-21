@@ -61,6 +61,34 @@ smoke_requires_internet() {
     fi
 }
 
+# smoke_wait_complete <document_id>: poll until ingestion reaches stage=complete.
+# Fails at once on stage=error or a document the backend no longer has. The
+# deadline is long because ingestion makes background LLM calls that queue behind
+# earlier scripts' summaries on the one serving slot, so its duration depends on
+# what ran before it, not on the document (#142). SMOKE_INGEST_TIMEOUT overrides.
+smoke_wait_complete() {
+    local doc_id="$1" limit="${SMOKE_INGEST_TIMEOUT:-600}" elapsed=0 code stage=""
+    while [ "$elapsed" -lt "$limit" ]; do
+        sleep 5
+        elapsed=$((elapsed + 5))
+        code="$(curl -s -o "$SMOKE_TMP/wait_$doc_id.json" -w '%{http_code}' \
+            "$BASE/documents/$doc_id" || true)"
+        if [ "$code" = "404" ]; then
+            echo "FAIL: document $doc_id is gone (404) while waiting for ingestion"
+            return 1
+        fi
+        stage="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("stage", ""))' \
+            "$SMOKE_TMP/wait_$doc_id.json" 2>/dev/null || true)"
+        echo "  stage=${stage} (${elapsed}s)"
+        case "$stage" in
+            complete) return 0 ;;
+            error) echo "FAIL: ingestion of $doc_id ended in stage=error"; return 1 ;;
+        esac
+    done
+    echo "FAIL: $doc_id did not reach stage=complete within ${limit}s (last stage: ${stage})"
+    return 1
+}
+
 # smoke_require_mode <full|public>: skip this script on a server in the other mode.
 # An unreachable server is a failure, never a skip.
 smoke_require_mode() {

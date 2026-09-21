@@ -429,6 +429,60 @@ async def test_classify_node_resolves_merged_technical_choice(test_db):
         assert row.content_type == "tech_book"
 
 
+async def test_classify_node_reports_classifying_while_its_probes_wait(test_db, monkeypatch):
+    """The domain and register probes queue behind other documents' LLM work, so
+    the stage must say what ingestion is waiting on: left at "parsing", an 11 KB
+    file reported parsing for three minutes (#142)."""
+    from app.workflows.ingestion import classify_node
+    from app.workflows.ingestion_nodes import parse as parse_module
+
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Chapter",
+                format="txt",
+                content_type="notes",
+                word_count=0,
+                page_count=0,
+                file_path="/tmp/chapter.txt",
+                stage="parsing",
+            )
+        )
+        await session.commit()
+
+    seen: list[str] = []
+
+    async def _probe(_text: str) -> None:
+        async with factory() as session:
+            seen.append((await session.get(DocumentModel, doc_id)).stage)
+
+    monkeypatch.setattr(parse_module, "detect_technical_content", _probe)
+    monkeypatch.setattr(parse_module, "detect_register", _probe)
+
+    state: IngestionState = {
+        "document_id": doc_id,
+        "file_path": "/tmp/chapter.txt",
+        "format": "txt",
+        "parsed_document": {
+            "title": "Chapter",
+            "format": "txt",
+            "pages": 1,
+            "word_count": 12,
+            "sections": [],
+            "raw_text": "A chapter of prose long enough to be probed for its subject.",
+        },
+        "content_type": "notes",
+        "chunks": None,
+        "status": "classifying",
+        "error": None,
+    }
+    await classify_node(state)
+    assert seen and set(seen) == {"classifying"}
+
+
 async def test_classify_node_technical_without_structure_is_article(test_db):
     from app.workflows.ingestion import classify_node
 
