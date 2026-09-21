@@ -383,7 +383,7 @@ stop:
 # ("files": []), so a bare `tsc --noEmit` resolves zero files and always passes.
 lint:
 	cd backend && uv run ruff check .
-	cd frontend && npx tsc -b --noEmit
+	cd frontend && ./node_modules/.bin/tsc -b --noEmit
 	cd frontend && npm run lint
 	python3 scripts/check_manifest_schema.py
 	python3 scripts/check_manifest_coverage.py
@@ -796,14 +796,18 @@ endif
 	python3 scripts/check_public_surface_calls.py
 	python3 scripts/check_smoke_paths.py
 	bash scripts/check_powershell.sh
-	cd frontend && npm run build
+	# `npm run build` is `tsc -b && vite build`, so this is also the typecheck. Vite
+	# only warns past chunkSizeWarningLimit (2000 kB; largest chunk 1820 kB), so the
+	# warning is made fatal here rather than scrolling past.
+	cd frontend && out="$$(npm run build 2>&1)"; rc=$$?; printf '%s\n' "$$out"; \
+		[ $$rc -eq 0 ] || exit $$rc; \
+		! printf '%s' "$$out" | grep -q 'Some chunks are larger than' \
+		|| { echo 'FAIL: a chunk exceeds chunkSizeWarningLimit'; exit 1; }
 	python3 scripts/check_public_bundle_excludes_full.py
-	cd frontend && npx tsc -b --noEmit
 	cd frontend && npm run lint
 	# The frontend suite was never wired into a gate: 59 files of pure-logic
 	# tests ran only when someone typed `npm test`, so a broken helper reached
 	# master green. It costs ~1s.
-	cd frontend && npm test
 	cd frontend && npm test
 	@echo "CI passed."
 

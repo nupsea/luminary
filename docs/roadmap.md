@@ -285,33 +285,35 @@ The same run closed or narrowed the rest:
 **`make smoke` on Windows is not green, and the gate as written cannot run.** The bundled app is
 public mode on an ephemeral port and every smoke script hardcodes `localhost:7820` in full mode, so
 the run used a from-source full-mode backend against the app's own Ollama. On a rerun of the first
-pass's failures, what still fails is the harness or the host, not the app:
+pass's failures, what still fails is the host, not the app:
 
 | Class | Scripts | Cause |
 |---|---|---|
-| No Node on the box | S105, S106, S108, S109, S191, S196, S198, S200, S203, S204, S205, S207, S220 | `npx`/`tsc` steps |
-| Windows curl | S121 | `-F file=@/dev/null` cannot be opened by the mingw curl; a real empty file returns 200 |
-| GNU `mktemp` | S245 | `mktemp -t s245` has no `X`s |
 | CPU-only LLM | S62, S63, S77 | TTFT 351s, 625s per answer |
 | `/search` timeouts | S212 | see below |
 
-Every `/tmp`-path and cp1252 failure passed once the box had `PYTHONUTF8=1` and `C:\tmp`
-junctioned to Git Bash's `/tmp`; the scripts still assume both. **S212's numbers are not retrieval
+The harness failures from that run are fixed. Thirteen scripts ran `npx`/`tsc`/`vitest`, which a
+machine with only the installed app does not have; `make ci` already builds, type-checks and tests
+the frontend, so smoke no longer does, and `check_smoke_paths.py` rejects a script that runs the
+frontend toolchain. S121 uploads a real empty file rather than `/dev/null`, and S245 no longer uses
+`mktemp -t`. **S212's numbers are not retrieval
 measurements.** `run_eval.search_chunks` turns a failed request into an empty list, which scores as a
 miss: `book_alice` read HR@5 0.0000 with the backend busy, and passed once it was idle, while
 `book_time_machine` then read 0.35 with 22 of 40 searches past the 30s timeout. Why some searches exceed 30s on a 4-vCPU host is unmeasured.
 
 The harness side is fixed: every script reads `LUMINARY_BASE_URL`, skips a full-only surface on a
 public server, and writes temp files under `SMOKE_TMP` (`scripts/smoke/lib.sh`, enforced by
-`check_smoke_paths.py`); a failed eval search now fails the run (I-32). `verify_installed.sh`
-ingests a document through the installed backend. On macOS, full mode, 182 of 186 passed with
-`SMOKE_OFFLINE=1` (S122 skipped) and the backend holding no non-local connection (I-57, I-18); the
-three failures (S75, S83, S92) are defects for the tracker, not gates.
+`check_smoke_paths.py`); a failed eval search now fails the run (I-32). On macOS, full mode, 182 of
+186 passed with `SMOKE_OFFLINE=1` (S122 skipped) and the backend holding no non-local connection
+(I-57, I-18); the three failures are #140, #141 and #142, not gates.
+
+**`verify_installed.sh` ingests a document through each installed build, and has run green.** Run
+`35654900886`: the AppImage and the `.deb` each ingested and found the document by vector search in
+4s and 3s, the Windows setup in 8s.
 
 What remains open:
 
-- `make smoke` green on Windows against the bundled app; `verify_installed.sh`'s ingest check has
-  not yet run against an installed build.
+- `make smoke` green on Windows against the bundled app.
 - #24 and #99 on Linux hardware; #24 under a 20-character Windows username.
 
 **A Kuzu lock cannot go stale is a POSIX statement.** `flock` is advisory and released by the kernel

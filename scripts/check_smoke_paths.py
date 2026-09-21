@@ -35,6 +35,9 @@ suite run against the dev backend and the bundled app alike:
 - each script sources it, and none defines its own base or names port 7820 --
   nine spellings of the base URL once made the suite unpointable at anything else;
 - none writes to a literal `/tmp`, which native Windows Python cannot open;
+- none runs the frontend toolchain (`npx`, `npm`, `tsc`, `vitest`): a machine with
+  only the installed app has no Node, and `make ci` already builds, type-checks and
+  tests the frontend -- thirteen scripts failed that way on the first Windows run;
 - a script that calls a route public mode does not mount declares
   `smoke_require_mode full`, so it is reported as skipped against the bundled app
   rather than failed -- and a script that declares it without needing it is
@@ -67,6 +70,7 @@ _BUILTINS = {"/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"}
 
 _SOURCES_LIB = 'source "$(dirname "$0")/lib.sh"'
 _REQUIRES_FULL = re.compile(r"^\s*smoke_require_mode full\s*$", re.M)
+_FRONTEND_TOOLCHAIN = re.compile(r"\b(?:npx|npm|tsc|vitest)\b|node_modules")
 _OWN_BASE = re.compile(r"^\s*(?:export\s+)?(?:BASE|BASE_URL|API|API_BASE)=", re.M)
 # Public mode mounts the whole API under this prefix (main.py `_API_PREFIX`).
 _PUBLIC_PREFIX = "/api"
@@ -88,6 +92,8 @@ def hygiene_violations(text: str) -> list[str]:
         found.append("names port 7820; use $BASE")
     if any("/tmp/" in line or line.rstrip().endswith("/tmp") for line in code):
         found.append("writes to a literal /tmp; use $SMOKE_TMP or mktemp")
+    if any(_FRONTEND_TOOLCHAIN.search(line) for line in code):
+        found.append("runs the frontend toolchain; that belongs in `make ci`, not smoke")
     return found
 
 

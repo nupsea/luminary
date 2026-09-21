@@ -48,17 +48,6 @@ BODY2=$(cat "$TMPFILE2")
 echo "  normalize-apply response: ${BODY2:0:200}"
 rm -f "$TMPFILE2"
 
-# 3. TypeScript compiles
-echo "  Checking tsc..."
-cd "$(dirname "$0")/../../frontend"
-npx tsc --noEmit > /dev/null 2>&1 && {
-  echo "  PASS: tsc --noEmit"
-  PASS=$((PASS + 1))
-} || {
-  echo "  FAIL: tsc --noEmit"
-  FAIL=$((FAIL + 1))
-}
-
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] && exit 0 || exit 1

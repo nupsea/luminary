@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test for S204: Notes from highlighted text sync state across all surfaces
-# Frontend-only fix (query invalidation) -- verify backend contract + tsc.
+# Frontend-only fix (query invalidation) -- verify the backend contract and the invalidation keys.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
@@ -15,15 +15,6 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PASS=true
 
 echo "=== S204 Smoke Test ==="
-
-# 1. TypeScript compilation
-echo "--- Check 1: tsc --noEmit ---"
-if (cd "$REPO_ROOT/frontend" && npx tsc --noEmit 2>&1); then
-  echo "PASS: tsc --noEmit exits 0"
-else
-  echo "FAIL: tsc --noEmit had errors"
-  PASS=false
-fi
 
 # 2. Verify POST /notes returns full NoteResponse with id, tags, collections
 #    (`collection_ids` became `collections`, a list of {id,name,color} objects;
