@@ -176,5 +176,6 @@ def test_run_eval_ablation_produces_one_metric_set_per_arm(monkeypatch):
         "recall_50": 1.0,
         "recall_100": 1.0,
         "recall_200": 1.0,
+        "search_failures": 0,
     }
     assert store_rows[0][0] == "ablation"

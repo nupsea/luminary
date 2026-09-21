@@ -31,7 +31,7 @@ from evals.lib.summary_metrics import (  # noqa: E402
     compute_theme_coverage,
     judge_hallucination_counts,
 )
-from evals.run_eval import search_chunks  # noqa: E402
+from evals.run_eval import SearchFailedError, search_chunks  # noqa: E402
 
 THRESHOLDS = {
     "theme_coverage": 0.70,
@@ -193,7 +193,14 @@ def main() -> None:
             continue
         theme = compute_theme_coverage(summary, row["expected_themes"])
         concision = compute_conciseness_pct(summary, row["target_length_chars"])
-        grounding = _grounding_for(args.backend_url, doc_id, summary)
+        try:
+            grounding = _grounding_for(args.backend_url, doc_id, summary)
+        except SearchFailedError as exc:
+            # Partial grounding would score the summary's claims against passages
+            # that were never retrieved, and read as hallucination.
+            failed_docs.append(str(exc)[:80])
+            print(f"WARNING: grounding {exc}, continuing", file=sys.stderr)
+            continue
         graded.append({"answer": summary, "contexts": grounding})
         if args.skip_judge:
             no_hallucination = None

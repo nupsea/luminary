@@ -73,7 +73,7 @@ from evals.lib.retrieval_metrics import (  # noqa: E402
     compute_mrr,
     compute_ndcg_10,
     compute_recall_at,
-    count_boundary_misses,
+    count_search_failures,
 )
 from evals.lib.runners import GenerationEval, NliFaithfulnessEval  # noqa: E402
 from evals.lib.schemas import RetrievalGoldenEntry  # noqa: E402
@@ -284,6 +284,10 @@ def store_results(backend_url: str, dataset: str, model: str, metrics: dict) -> 
 # ---------------------------------------------------------------------------
 
 
+class SearchFailedError(RuntimeError):
+    """A /search request got no usable response, so the row measured nothing."""
+
+
 def search_chunks(
     backend_url: str,
     question: str,
@@ -359,9 +363,21 @@ def search_chunks(
             all_matches.extend(group.get("matches", []))
         all_matches.sort(key=lambda m: m.get("global_rank", float("inf")))
         return [m.get("text", "") for m in all_matches[: limit or 10]]
-    except Exception as exc:
-        print(f"  WARNING: /search failed: {exc}", file=sys.stderr)
-        return []
+    except (httpx.HTTPError, ValueError) as exc:
+        # An empty list here would be indistinguishable from a search that found
+        # nothing, and would score as a miss.
+        raise SearchFailedError(f"/search failed: {type(exc).__name__}: {exc}") from exc
+
+
+def _search_row(
+    backend_url: str, question: str, document_id: str | None, **kwargs
+) -> tuple[list[str], bool]:
+    """`search_chunks` for one golden row: (chunks, failed), reporting the failure."""
+    try:
+        return search_chunks(backend_url, question, document_id, **kwargs), False
+    except SearchFailedError as exc:
+        print(f"  WARNING: {exc}", file=sys.stderr)
+        return [], True
 
 
 def post_qa(backend_url: str, question: str, model: str, document_id: str | None) -> dict:
@@ -443,9 +459,11 @@ def print_ablation_table(dataset: str, model: str, ablation_metrics: dict) -> No
     for strategy, metrics in ablation_metrics.items():
         if strategy == "rrf-pool":
             continue
-        # Indexed, not .get(_, 0.0): a metric that could not be computed must
-        # raise here rather than print a plausible 0.0000 that reads as a
-        # measured collapse.
+        # Indexed, not .get(_, 0.0): a missing key must raise here rather than
+        # print a plausible 0.0000 that reads as a measured collapse.
+        if metrics["search_failures"]:
+            print(f"  {strategy:<18} not computed: {metrics['search_failures']} searches failed")
+            continue
         print(
             f"  {strategy:<18} "
             f"{metrics['hit_rate_5']:>9.4f} "
@@ -457,9 +475,12 @@ def print_ablation_table(dataset: str, model: str, ablation_metrics: dict) -> No
     if pool:
         print(f"  {'-' * 52}")
         print("  L1 pool recall (raw RRF, no rerank):")
-        for key in sorted(pool, key=lambda s: int(s.rsplit("_", 1)[1])):
-            depth = key.rsplit("_", 1)[1]
-            print(f"  {'recall@' + depth:<18} {pool[key]:>9.4f}")
+        if pool["search_failures"]:
+            print(f"  not computed: {pool['search_failures']} searches failed")
+        else:
+            depths = sorted(int(k.removeprefix("recall_")) for k in pool if k.startswith("recall_"))
+            for depth in depths:
+                print(f"  {'recall@' + str(depth):<18} {pool[f'recall_{depth}']:>9.4f}")
     print(f"{'=' * 56}\n")
 
 
@@ -824,7 +845,7 @@ def main() -> None:
                 print(
                     f"  [{label} {i}/{len(rows)}] Searching: {question[:60]}..."
                 )
-                chunks = search_chunks(
+                chunks, failed = _search_row(
                     args.backend_url,
                     question,
                     doc_id,
@@ -850,6 +871,7 @@ def main() -> None:
                         "ground_truths": [ground_truth],
                         "context_hint": context_hint,
                         "relevance": row.get("relevance") or [],
+                        "search_failed": failed,
                     }
                 )
             ablation_metrics[label] = arm_metrics(samples)
@@ -869,7 +891,7 @@ def main() -> None:
                 source_file = row.get("source_file", "")
                 doc_id = row.get("source_document_id") or source_to_doc_id.get(source_file)
                 print(f"  [rrf-pool@{pool_limit} {i}/{len(rows)}] Searching: {question[:60]}...")
-                chunks = search_chunks(
+                chunks, failed = _search_row(
                     args.backend_url,
                     question,
                     doc_id,
@@ -883,10 +905,16 @@ def main() -> None:
                         "contexts": chunks or [""],
                         "context_hint": row.get("context_hint", ""),
                         "relevance": row.get("relevance") or [],
+                        "search_failed": failed,
                     }
                 )
+            pool_failures = count_search_failures(pool_samples)
             ablation_metrics["rrf-pool"] = {
-                f"recall_{d}": compute_recall_at(pool_samples, d) for d in recall_depths
+                **{
+                    f"recall_{d}": None if pool_failures else compute_recall_at(pool_samples, d)
+                    for d in recall_depths
+                },
+                "search_failures": pool_failures,
             }
 
         metrics = {"ablation_metrics": ablation_metrics}
@@ -894,9 +922,10 @@ def main() -> None:
         # run is a measurement of the live pipeline too, not automatically green.
         shipped = ablation_metrics.get("rrf+rerank") or ablation_metrics.get("rrf") or {}
         gate = thresholds_for_dataset(dataset_label)
-        passed = (
-            shipped.get("hit_rate_5", 0.0) >= gate["hit_rate_5"]
-            and shipped.get("mrr", 0.0) >= gate["mrr"]
+        # An arm whose searches failed measured nothing, so it cannot pass.
+        passed = all(
+            shipped.get(key) is not None and shipped[key] >= gate[key]
+            for key in ("hit_rate_5", "mrr")
         )
         history_model = args.model or args.judge_model or "no-llm"
         _lib_append_history(dataset_label, history_model, metrics, passed, eval_kind="ablation")
@@ -929,7 +958,7 @@ def main() -> None:
         search_doc_id = None if args.unscoped else doc_id
 
         print(f"  [{i}/{len(rows)}] Searching: {question[:60]}...")
-        chunks = search_chunks(
+        chunks, search_failed = _search_row(
             args.backend_url,
             question,
             search_doc_id,
@@ -969,9 +998,13 @@ def main() -> None:
             "relevance": row.get("relevance") or [],
             "qa_response": qa_resp,
             "qa_not_found": not_found,
+            "search_failed": search_failed,
         }
 
-    # /search alone parallelises fine. /qa does NOT: a local Ollama serves one
+    # Parallel /search requests still queue on the backend's single worker, and
+    # each request's timeout includes that wait: a 4-vCPU Windows host timed out
+    # 22 of 40 at six workers. Those rows now fail the run rather than score as
+    # misses. /qa is worse: a local Ollama serves one
     # generation at a time, so concurrent /qa requests queue and the waiting one
     # blows past its timeout (empty answer). Concurrency here buys no throughput,
     # only dropped answers — run generation rows sequentially. (A hosted
@@ -985,9 +1018,16 @@ def main() -> None:
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         samples = list(pool.map(_process_row, enumerate(rows, start=1)))
 
-    hr5 = compute_hit_rate_5(samples)
-    mrr = compute_mrr(samples)
-    ndcg10 = compute_ndcg_10(samples)
+    retrieval = arm_metrics(samples)
+    hr5 = retrieval["hit_rate_5"]
+    mrr = retrieval["mrr"]
+    ndcg10 = retrieval["ndcg_10"]
+    if retrieval["search_failures"]:
+        print(
+            f"ERROR: {retrieval['search_failures']} of {len(samples)} searches failed; "
+            "HR@5, MRR and nDCG@10 are not computed for this run.",
+            file=sys.stderr,
+        )
 
     # An empty answer is either a decline (not_found — a real product outcome)
     # or a genuine failure (timeout/error). Count them apart so the UI never
@@ -1072,7 +1112,8 @@ def main() -> None:
         "ndcg_10": ndcg10,
         # Misses that are chunk splits rather than absent passages. A chunking
         # change moves HR@5 through this number without retrieval changing.
-        "boundary_misses": count_boundary_misses(samples),
+        "boundary_misses": retrieval["boundary_misses"],
+        "search_failures": retrieval["search_failures"],
         **ragas_scores,
         "citation_support_rate": citation_support_rate,
         "rerank": args.rerank,
