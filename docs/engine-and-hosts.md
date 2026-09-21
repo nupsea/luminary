@@ -70,7 +70,7 @@ states the verdict wherever the user is. It refuses on three grounds:
 |---|---|
 | `intel_mac` | no lancedb wheel for a native install; Docker on macOS never reaches Metal. ~6 tok/s, ~121s per question |
 | `no_accelerator` / `container_without_accelerator` | a CPU-only host or container |
-| `under_memory_floor` | under `memory_profile._STANDARD_MIN_RAM_GB` (16). Docker Desktop presents a 16 GB Mac as ~7 GB. Currently also refuses a 16 GiB Linux box (#139) |
+| `under_memory_floor` | under `memory_profile._STANDARD_MIN_RAM_GB` (16). Docker Desktop presents a 16 GB Mac as ~7 GB. Reported RAM is rounded up (I-56), so a 16 GiB Linux box is not refused |
 
 - **The check is the accelerator, never the install method.** Refusing containers would refuse Linux
   with the NVIDIA container toolkit, the fastest way to run this app. `test_host_support.py` fails CI

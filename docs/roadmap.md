@@ -30,7 +30,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 |---|---|
 | Frontend lint as a CI gate, `apiClient` used everywhere | `Makefile` `ci` target, `frontend/eslint.config.js` |
 | Six-layer architecture, stores, surface modes | `architecture.md` |
-| The 55 hard invariants | `invariants.md` |
+| The 56 hard invariants | `invariants.md` |
 | Backend implementation patterns | `patterns.md` |
 | Ingestion + reading (all 4 reader phases) | `universal-reader.md` |
 | Hybrid retrieval: RRF, cross-encoder rerank | `retrieval-funnel.md` |
@@ -254,9 +254,8 @@ first run that looks hung for a minute and a half is a UX defect if it holds on 
 What remains open:
 
 - **#139**: the same box, 16 GiB, was refused as `under_memory_floor` (`"Linux/x86_64, 15GB"`).
-  All three RAM detectors (backend, `install.sh`, `supervisor.rs`) truncate a figure Linux has
-  already reduced by firmware and kernel reservations. The fix must keep refusing Docker Desktop's
-  7 GB VM.
+  All five RAM readers truncated a figure Linux and Windows have already reduced by firmware and
+  kernel reservations; they now round up (I-56). Fixed and tested, not yet re-run on a 16 GiB box.
 - **#24**: a first run with no terminal on a real Windows machine, and an install path long enough
   to hit `MAX_PATH`. The same first run on real Linux hardware.
 - **#99**: article rendering through WebView2 and WebKitGTK, now that a shell exists there.

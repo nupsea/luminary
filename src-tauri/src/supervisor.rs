@@ -433,8 +433,11 @@ fn env_file_value(data_dir: &Path, key: &str) -> Option<String> {
 }
 
 /// Physical RAM in GB, or `None` if the kernel will not say.
+/// Rounded up, as every RAM reader in the repo is (I-56): Linux and Windows
+/// report installed RAM minus firmware and kernel reservations, so a 16 GiB
+/// machine reads 15.x and truncating it fell under the 16GB band.
 fn total_memory_gb() -> Option<u64> {
-    luminary_host::total_memory_bytes().map(|bytes| bytes / 1_073_741_824)
+    luminary_host::total_memory_bytes().map(|bytes| bytes.div_ceil(1_073_741_824))
 }
 
 /// How many requests the bundled Ollama serves concurrently (I-31).

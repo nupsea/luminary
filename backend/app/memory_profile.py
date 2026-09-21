@@ -103,6 +103,21 @@ PROFILE_MIN_RAM_GB: dict[MemoryProfile, int] = {
 }
 
 
+def whole_gb(total_bytes: int) -> int:
+    """Installed RAM in GB from what the OS reports, rounded UP (I-56).
+
+    Linux (`MemTotal`) and Windows (`TotalPhys`) report installed RAM minus what
+    firmware and the kernel reserve, so the figure is always a little under the
+    installed size and never over it. Truncating read a 16 GiB Linux box as 15
+    and refused it as under the 16GB floor (#139). macOS reports `hw.memsize`,
+    the exact installed figure, which rounds up to itself.
+
+    The two cases that bracket it: that 16 GiB box reports 15.x and is 16; Docker
+    Desktop's VM on a 16GB Mac reports ~7.7 and is 8, still under the floor.
+    """
+    return -(-total_bytes // 1024**3)
+
+
 @functools.lru_cache(maxsize=1)
 def host_ram_gb() -> int:
     """Physical RAM in whole GB, or 0 when it cannot be read.
@@ -113,7 +128,7 @@ def host_ram_gb() -> int:
     try:
         import psutil  # noqa: PLC0415
 
-        return int(psutil.virtual_memory().total / (1024**3))
+        return whole_gb(psutil.virtual_memory().total)
     except Exception:
         logger.warning("could not read host memory; assuming a small machine")
         return 0

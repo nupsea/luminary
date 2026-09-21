@@ -186,6 +186,35 @@ def test_the_desktop_shell_agrees_about_the_residency_band():
     )
 
 
+def test_every_ram_reader_rounds_up(sh, ps1):
+    """Five sites turn reported bytes into GB, and all five must round up (I-56).
+
+    Linux and Windows report installed RAM minus firmware and kernel reservations,
+    so a truncating reader puts a 16GB machine at 15 -- under the floor it names as
+    supported (#139). Each site was truncating; fixing one would leave the others
+    disagreeing about the same machine, which I-39 forbids.
+    """
+    rust = _SUPERVISOR.read_text(encoding="utf-8")
+    start = rust.index("fn total_memory_gb")
+    rust_body = rust[start : rust.index("\n}\n", start)]
+    bootstrap = _BOOTSTRAP.read_text(encoding="utf-8")
+    mem_gb = sh[sh.index("_mem_gb() {") : sh.index("\n}\n", sh.index("_mem_gb() {"))]
+
+    for name, text, rounded_up, truncating in (
+        ("supervisor.rs", rust_body, "div_ceil(1_073_741_824)", "/ 1_073_741_824"),
+        ("install.sh (macOS)", mem_gb, "(_b + 1073741823) / 1073741824", "_b / 1073741824"),
+        ("install.sh (Linux)", mem_gb, "(_k + 1048575) / 1048576", "_k / 1048576"),
+        ("install.ps1", ps1, "[math]::Ceiling((Get-CimInstance", "[math]::Floor((Get-CimInstance"),
+        ("bootstrap.sh", bootstrap, "+ 1073741823) / 1073741824", "hw.memsize) / 1073741824"),
+    ):
+        assert rounded_up in text, f"{name} no longer rounds reported RAM up"
+        assert truncating not in text, f"{name} truncates reported RAM again"
+
+    assert memory_profile.whole_gb(16 * 1024**3 - 1) == 16
+    assert memory_profile.whole_gb(16 * 1024**3) == 16
+    assert memory_profile.whole_gb(16 * 1024**3 + 1) == 17
+
+
 def test_the_serving_width_band_agrees_across_every_install_path(sh, ps1):
     """One RAM boundary for `OLLAMA_NUM_PARALLEL`, in four languages.
 

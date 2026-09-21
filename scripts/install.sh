@@ -200,10 +200,12 @@ fi
 _mem_gb() {
     if [ "$OS" = "Darwin" ]; then
         _b="$(sysctl -n hw.memsize 2>/dev/null || echo 0)"
-        echo $(( _b / 1073741824 ))
+        echo $(( (_b + 1073741823) / 1073741824 ))
     elif [ -r /proc/meminfo ]; then
+        # Rounded up, as every RAM reader here is (I-56): MemTotal is installed
+        # RAM minus firmware and kernel reservations, so a 16 GiB box reads 15.x.
         _k="$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0)"
-        echo $(( _k / 1048576 ))
+        echo $(( (_k + 1048575) / 1048576 ))
     else
         echo 0
     fi

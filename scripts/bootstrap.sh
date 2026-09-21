@@ -266,7 +266,7 @@ DEFAULT_CHAT_MODEL="qwen3.5:4b"
 # a small Mac pulled 9.67GB the backend then refuses to load.
 LARGE_TEXT_MIN_RAM_GB=26
 
-MEM_GB=$(( $(sysctl -n hw.memsize) / 1073741824 ))
+MEM_GB=$(( ($(sysctl -n hw.memsize) + 1073741823) / 1073741824 ))
 # `low` is the backend's canonical name for the small profile; `public` is this
 # script's. Accept both, then validate -- an unrecognised value used to fall into
 # the `*)` arm, take standard knobs, and be written to .env verbatim, where the
