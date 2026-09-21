@@ -1,6 +1,6 @@
 """EntityExtractor: GLiNER-based zero-shot named entity recognition.
 
-Loads `NER_MODEL` on first use and caches to DATA_DIR/models/gliner/.
+Loads `NER_MODEL` on first use from DATA_DIR/models/gliner/, which setup fills.
 Extracts entities from chunk texts with custom entity types, then applies layered
 post-extraction filters to remove pronouns, possessive phrases, generic geographic
 terms, bare-number dates, and other common noise patterns from literary/prose text.
@@ -31,6 +31,7 @@ from collections import Counter
 from pathlib import Path
 
 from app.config import get_settings
+from app.services import model_prefetch
 from app.services.model_loading import MODEL_LOAD_LOCK, offline_model_load
 from app.types import is_technical_content
 
@@ -417,7 +418,15 @@ class EntityExtractor:
         )
 
     def _load_model(self):
-        """Lazy-load the GLiNER model, caching to DATA_DIR/models/gliner/."""
+        """Lazy-load the GLiNER model from DATA_DIR/models/gliner/."""
+        if self._model is None:
+            # Cache-only: setup downloads the checkpoint and its tokenizer base
+            # (model_prefetch). `local_files_only=True` alone is not cache-only here:
+            # GLiNER loads the tokenizer through a bare `AutoTokenizer.from_pretrained`,
+            # which still calls huggingface.co unless the hub is forced offline --
+            # process-wide, so no other model's download may still be running.
+            model_prefetch.require_snapshot(self._model_dir, self._model_id)
+            model_prefetch.wait_for_downloads()
         # The lock must span the construction itself, not just the None check --
         # see app/services/model_loading.py.
         with MODEL_LOAD_LOCK:
@@ -428,34 +437,13 @@ class EntityExtractor:
             from gliner import GLiNER  # noqa: PLC0415
 
             logger.info("Loading GLiNER model", extra={"model_id": self._model_id})
-            # Try loading locally first to prevent blocking name resolution attempts offline.
-            # `local_files_only=True` alone does not achieve that: GLiNER forwards it to
-            # its own checkpoint but loads the tokenizer through a bare
-            # `AutoTokenizer.from_pretrained`, which still reaches for huggingface.co and
-            # raises when the network is down rather than absent.
-            try:
-                with offline_model_load():
-                    self._model = GLiNER.from_pretrained(
-                        self._model_id,
-                        cache_dir=str(self._model_dir),
-                        local_files_only=True,
-                    )
-                logger.info("Loaded GLiNER model (local cache)")
-            except Exception as local_exc:
-                logger.debug(
-                    "GLiNER local load failed (local_files_only=True), trying online download: %s",
-                    local_exc,
+            with offline_model_load():
+                self._model = GLiNER.from_pretrained(
+                    self._model_id,
+                    cache_dir=str(self._model_dir),
+                    local_files_only=True,
                 )
-                try:
-                    self._model = GLiNER.from_pretrained(
-                        self._model_id,
-                        cache_dir=str(self._model_dir),
-                        local_files_only=False,
-                    )
-                    logger.info("GLiNER model loaded (downloaded)")
-                except Exception:
-                    logger.exception("Failed to load GLiNER model")
-                    raise
+            logger.info("Loaded GLiNER model from the local cache")
             type(self)._last_used = time.monotonic()
             return self._model
 

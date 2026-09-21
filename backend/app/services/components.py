@@ -235,6 +235,24 @@ def catalogue() -> tuple[Component, ...]:
 _MODEL_ID_PREFIX = "model:"
 
 
+def _whisper_cached() -> bool:
+    from app.services.audio_transcriber import weights_cached  # noqa: PLC0415
+
+    return weights_cached()
+
+
+def _whisper_fetch() -> None:
+    from app.services.audio_transcriber import fetch_weights  # noqa: PLC0415
+
+    fetch_weights()
+
+
+# A python_extra whose package runs a model: (weights on disk?, download them).
+# The download belongs to the install, which the user asked for; the model's
+# loader never fetches, so it cannot reach the network from a transcription.
+_EXTRA_WEIGHTS = {"transcription": (_whisper_cached, _whisper_fetch)}
+
+
 def get_component(component_id: str) -> Component | None:
     for comp in catalogue():
         if comp.id == component_id:
@@ -406,6 +424,8 @@ async def component_status() -> list[dict]:
         elif comp.kind == "python_extra":
             activate_extras()
             installed = importlib.util.find_spec(comp.ref) is not None
+            if installed and (weights := _EXTRA_WEIGHTS.get(comp.id)):
+                installed = weights[0]()
         elif comp.kind == "engine_runner":
             installed = (engine_lib_dir() / comp.ref).is_dir()
         else:
@@ -559,6 +579,14 @@ async def install_python_extra(comp: Component) -> AsyncIterator[dict]:
     if importlib.util.find_spec(comp.ref) is None:
         yield {"state": "failed", "detail": f"{comp.ref} still not importable after install"}
         return
+
+    if weights := _EXTRA_WEIGHTS.get(comp.id):
+        yield {"state": "downloading", "detail": f"Downloading the {comp.label} model"}
+        try:
+            await asyncio.to_thread(weights[1])
+        except Exception as exc:
+            yield {"state": "failed", "detail": f"model download failed: {str(exc)[:300]}"}
+            return
     yield {"state": "ready", "detail": comp.label}
 
 

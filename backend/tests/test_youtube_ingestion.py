@@ -19,6 +19,16 @@ from app.main import app  # noqa: F401 (used via ASGITransport)
 from app.models import DocumentModel
 from app.services.youtube_downloader import is_youtube_url
 
+
+@pytest.fixture(autouse=True)
+def _transcription_installed(monkeypatch):
+    """Pin Speech to text as installed, weights included, so these tests exercise
+    yt-dlp and ffmpeg rather than whatever this machine has downloaded."""
+    from app.services import components
+
+    monkeypatch.setitem(components._EXTRA_WEIGHTS, "transcription", (lambda: True, lambda: None))
+
+
 # Shared DB fixture
 
 

@@ -9,15 +9,14 @@ Kept separate so retriever.py stays focused on the orchestration logic.
 import asyncio
 import logging
 from collections import defaultdict
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import bindparam, text
 
-from app import config as _config_module  # indirect: get_settings is patched
 from app.database import get_session_factory
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services import llm as _llm_module  # indirect: get_llm_service is patched
+from app.services import model_prefetch
 from app.services import ner as _ner_module  # indirect: get_entity_extractor is patched
 from app.services.entity_disambiguator import find_canonical
 from app.services.fts_query import (  # noqa: F401  re-exported for retriever.py
@@ -33,14 +32,6 @@ _DIVERSITY_THRESHOLD = 0.6
 
 # Score multiplier for neighbour chunks added by context expansion.
 _EXPANSION_SCORE_FACTOR = 0.75
-
-# Cross-encoder reranker. Direct query/chunk semantic scoring
-# complements RRF: when question phrasing diverges from answer phrasing, a
-# cross-encoder still surfaces chunks that contain the answer fact. Local-first
-# per I-16 -- runs on CPU, ~80MB model, no external service. The model is
-# loaded lazily on first use; failures fail-soft to the original RRF order so
-# a missing model never breaks /search.
-_RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 # HyDE (Hypothetical Document Embeddings) prompt -- generates a brief, plausible
 # answer to the user's question so retrieval can match on the *answer's*
@@ -266,17 +257,25 @@ async def _expand_context(
 
 
 class _CrossEncoderReranker:
-    """Lazy singleton wrapping the sentence-transformers CrossEncoder.
+    """Lazy singleton wrapping the sentence-transformers CrossEncoder (RERANK_MODEL).
 
-    Held at module level so the (slow) model load happens once per process.
-    The model file is cached under ``$DATA_DIR/models/ms-marco-minilm`` -- same
-    pattern as the embedder so all ML weights live under one folder.
+    Direct query/chunk scoring complements RRF: when question phrasing diverges
+    from answer phrasing, a cross-encoder still surfaces the chunk holding the
+    answer. Runs on CPU (I-16). Any load failure fails soft to the RRF order, so
+    a missing model never breaks /search.
     """
 
     def __init__(self) -> None:
         self._model: Any = None
 
     def _load(self) -> None:
+        if self._model is not None:
+            return
+        spec = model_prefetch.spec_for("reranker")
+        cache_dir = model_prefetch.cache_dir(spec)
+        # Cache-only: setup downloads it (model_prefetch). A download from here
+        # would run on the search path, once per query while offline.
+        model_prefetch.require_snapshot(cache_dir, spec.repo_id)
         # The lock must span the construction itself, not just the None check --
         # see app/services/model_loading.py.
         with MODEL_LOAD_LOCK:
@@ -284,29 +283,13 @@ class _CrossEncoderReranker:
                 return
             from sentence_transformers import CrossEncoder  # noqa: PLC0415
 
-            settings = _config_module.get_settings()
-            model_name = settings.RERANK_MODEL or _RERANK_MODEL
-            # Per-model cache subdir so switching models never mixes weights.
-            slug = model_name.rsplit("/", 1)[-1].lower()
-            cache_dir = Path(settings.DATA_DIR).expanduser() / "models" / slug
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            # Cache-first, matching embedder/GLiNER/Whisper: without local_files_only
-            # the hub is contacted on every load, so with no internet this stalls on a
-            # network timeout before falling back -- on the chat path.
-            try:
-                self._model = CrossEncoder(
-                    model_name,
-                    cache_folder=str(cache_dir),
-                    device="cpu",
-                    local_files_only=True,
-                )
-            except Exception as local_exc:
-                logger.debug(
-                    "Reranker local load failed (local_files_only=True), trying online: %s",
-                    local_exc,
-                )
-                self._model = CrossEncoder(model_name, cache_folder=str(cache_dir), device="cpu")
-            logger.info("Loaded cross-encoder reranker %s", model_name)
+            self._model = CrossEncoder(
+                spec.repo_id,
+                cache_folder=str(cache_dir),
+                device="cpu",
+                local_files_only=True,
+            )
+            logger.info("Loaded cross-encoder reranker %s", spec.repo_id)
 
     def score(self, query: str, texts: list[str]) -> list[float]:
         self._load()

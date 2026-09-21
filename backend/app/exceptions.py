@@ -48,6 +48,16 @@ class DependencyUnavailable(LuminaryError):
     status_code = 503
 
 
+class ModelNotDownloaded(DependencyUnavailable):
+    """A local model's weights are not on disk.
+
+    Loaders never fetch weights themselves: a loader that falls back to a
+    download contacts huggingface.co from the request path, on every request
+    while the network refuses it. Weights arrive only through an explicit
+    provisioning step -- setup, or a component install.
+    """
+
+
 class LocalInferenceRefused(DependencyUnavailable):
     """A local model call on a host that cannot run one at a usable speed.
 

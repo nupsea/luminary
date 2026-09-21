@@ -32,6 +32,15 @@ class _OverlapDetector:
         return object()
 
 
+@pytest.fixture(autouse=True)
+def _weights_on_disk(monkeypatch):
+    """Construction is stubbed below, so the cache check must not depend on
+    which models this machine's shared test cache happens to hold."""
+    from app.services import model_prefetch
+
+    monkeypatch.setattr(model_prefetch, "require_snapshot", lambda root, repo_id: None)
+
+
 @pytest.fixture
 def detector(monkeypatch):
     import sentence_transformers
