@@ -299,8 +299,7 @@ Every `/tmp`-path and cp1252 failure passed once the box had `PYTHONUTF8=1` and 
 junctioned to Git Bash's `/tmp`; the scripts still assume both. **S212's numbers are not retrieval
 measurements.** `run_eval.search_chunks` turns a failed request into an empty list, which scores as a
 miss: `book_alice` read HR@5 0.0000 with the backend busy, and passed once it was idle, while
-`book_time_machine` then read 0.35 with 22 of 40 searches past the 30s timeout. An uncomputed search
-must fail the run, not lower the score. Why some searches exceed 30s on a 4-vCPU host is unmeasured.
+`book_time_machine` then read 0.35 with 22 of 40 searches past the 30s timeout. Why some searches exceed 30s on a 4-vCPU host is unmeasured.
 
 The harness side is fixed: every script reads `LUMINARY_BASE_URL`, skips a full-only surface on a
 public server, and writes temp files under `SMOKE_TMP` (`scripts/smoke/lib.sh`, enforced by
