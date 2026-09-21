@@ -245,8 +245,11 @@ fn boot(app: AppHandle, sup: Arc<Supervisor>) {
     }
 
     progress(&app, "ready", "Ready");
+    let url = format!("http://127.0.0.1:{port}");
+    // A contract, not a courtesy: verify_installed.sh reads this line to reach the
+    // installed backend and ingest a document through it.
+    logging::write("shell", &format!("backend: {url}"));
     if let Some(window) = app.get_webview_window("main") {
-        let url = format!("http://127.0.0.1:{port}");
         // Navigating to the backend's own origin keeps the SPA and the API
         // same-origin, so neither CORS nor TrustedHostMiddleware needs relaxing.
         grant_spa_render(&app, port);

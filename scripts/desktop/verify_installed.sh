@@ -4,10 +4,11 @@
 #   scripts/desktop/verify_installed.sh <installed-executable> [deadline-seconds]
 #
 # Passes when the shell logs `ready`, which it reaches only after both children
-# were spawned and the backend accepted a connection, and the app is still
-# running shortly after. Fails on the shell's failure line, on its warning that
-# the bundled engine did not start, or when the app exits or the deadline passes
-# first. SCREENSHOT=<file.png> captures the screen once it is ready (Linux needs
+# were spawned and the backend accepted a connection, the app is still running
+# shortly after, and a document ingested through it is found by vector search.
+# Fails on the shell's failure line, on its warning that the bundled engine did
+# not start, on a failed ingest, or when the app exits or a deadline passes first.
+# The check document is deleted again, so this is safe against a real library. SCREENSHOT=<file.png> captures the screen once it is ready (Linux needs
 # ImageMagick's `import` and a display, e.g. under xvfb-run).
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -15,6 +16,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 EXE="${1:?usage: verify_installed.sh <installed-executable> [deadline-seconds]}"
 DEADLINE="${2:-600}"
 SCREENSHOT="${SCREENSHOT:-}"
+# On a fresh install the first ingest waits for setup to finish downloading the embedder.
+INGEST_DEADLINE="${INGEST_DEADLINE:-600}"
 
 # Kept in step with log_dir() in src-tauri/src/logging.rs.
 case "$DESKTOP_OS" in
@@ -29,6 +32,60 @@ mkdir -p "$BUILD_DIR"
 before=0
 [ -f "$LOG" ] && before="$(wc -l < "$LOG")"
 this_launch() { [ -f "$LOG" ] && tail -n +"$((before + 1))" "$LOG"; }
+
+json_field() { sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"; }
+
+# `ready` means the backend accepted a connection, not that it can do its job: on
+# the first real Windows install every ingest failed while this still passed. So
+# ingest one document through the installed backend, wait for it to finish, and
+# find it by vector search, which needs the embedder the ingest path loads.
+check_ingest() {
+    local backend api dir doc_id status stage waited
+    backend="$(this_launch | sed -n 's/.*\[shell\] backend: \(http[^ ]*\).*/\1/p' | tail -1)"
+    [ -n "$backend" ] || { _warn "the shell never logged its backend address"; return 1; }
+    api="$backend/api"
+    dir="$(mktemp -d)"
+    # The mingw curl in Git Bash cannot open an MSYS path handed to it inside -F.
+    command -v cygpath >/dev/null 2>&1 && dir="$(cygpath -m "$dir")"
+    local token="install-check-$(date +%s)-$$"
+    printf '%s\nThe quartermaster counted brass lanterns along the lighthouse stairs.\n' \
+        "$token" > "$dir/install-check.txt"
+
+    _step "Ingesting a document through $api"
+    status="$(curl -s -m 120 -o "$dir/ingest.json" -w '%{http_code}' \
+        -F "file=@$dir/install-check.txt;filename=$token.txt" "$api/documents/ingest")"
+    doc_id="$(json_field document_id < "$dir/ingest.json")"
+    if [ "$status" != 200 ] || [ -z "$doc_id" ]; then
+        _warn "ingest returned HTTP $status: $(head -c 300 "$dir/ingest.json")"
+        return 1
+    fi
+
+    stage=""
+    for waited in $(seq 1 "$INGEST_DEADLINE"); do
+        curl -s -m 10 "$api/documents/$doc_id/status" > "$dir/status.json" || true
+        stage="$(json_field stage < "$dir/status.json")"
+        case "$stage" in complete | error) break ;; esac
+        sleep 1
+    done
+
+    local result=1
+    local search="$api/search?q=brass%20lanterns%20lighthouse&document_id=$doc_id&strategy=vector&limit=5"
+    case "$stage" in
+        complete)
+            if curl -s -m 120 "$search" | grep -q "$token"; then
+                _info "ingested in ${waited}s and found by vector search"
+                result=0
+            else
+                _warn "ingest completed in ${waited}s but vector search did not find the document"
+            fi ;;
+        error) _warn "ingest failed: $(json_field error_message < "$dir/status.json")" ;;
+        *) _warn "ingest still '${stage:-unknown}' after ${INGEST_DEADLINE}s" ;;
+    esac
+
+    curl -s -m 30 -X DELETE "$api/documents/$doc_id" >/dev/null || _warn "could not delete $doc_id"
+    rm -rf "$dir"
+    return "$result"
+}
 
 _step "Launching $EXE"
 "$EXE" >"$BUILD_DIR/installed-app.out" 2>&1 &
@@ -54,6 +111,7 @@ case "$result" in
         # that dies right after accepting its first connection to be seen dying.
         sleep 20
         kill -0 "$APP" 2>/dev/null || { _warn "the app exited after reporting ready"; FAILED=1; }
+        [ "$FAILED" = 0 ] && { check_ingest || FAILED=1; }
         ;;
     failed) _warn "the shell reported a startup failure"; FAILED=1 ;;
     exited) _warn "the app exited before it was ready"; FAILED=1 ;;
