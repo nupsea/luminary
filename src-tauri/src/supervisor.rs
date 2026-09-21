@@ -50,9 +50,12 @@ const PATH_SEPARATOR: &str = ":";
 ///
 /// Windows CPython does not start without `SystemRoot`: it is how every DLL
 /// search and the temp directory are resolved. `USERPROFILE` is what `Path.home()`
-/// reads there, the way `HOME` is on unix.
+/// reads there, the way `HOME` is on unix. `getpass.getuser()` has no fallback on
+/// Windows once `USERNAME` is gone, and torch calls it while importing
+/// `torch._dynamo`: without it every embed failed and a retried import then died
+/// on "Artifact of type=precompile already registered" (unix falls back to pwd).
 #[cfg(windows)]
-const INHERITED_ENV: &[&str] = &["SystemRoot", "USERPROFILE", "TEMP", "TMP"];
+const INHERITED_ENV: &[&str] = &["SystemRoot", "USERPROFILE", "USERNAME", "TEMP", "TMP"];
 #[cfg(not(windows))]
 const INHERITED_ENV: &[&str] = &["HOME"];
 
