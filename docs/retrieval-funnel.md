@@ -18,6 +18,9 @@ L3  final re-ordering      (not built) MMR diversity, dedup, listwise polish
 - **L1 (recall).** `HybridRetriever.retrieve` fans out to the legs and fuses
   with RRF (`rrf_merge`). Graph is not a separate ranked leg: it contributes by
   expanding the vector query with canonical entities/aliases (`_graph_expand`).
+  It runs only while GLiNER is resident and never loads it, so after the
+  reaper's 180s idle release a search does not expand. Measured to add nothing
+  on the shipped funnel (roadmap, 0.15.0).
   L1's metric is HR@depth of the fused pool -- if the answer chunk is not in the
   pool, nothing downstream can recover it.
 - **L2 (precision).** `_rerank_candidates` re-scores the top-`depth` RRF

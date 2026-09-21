@@ -265,10 +265,8 @@ What remains open:
 when the holder dies, which is why this repo forbids a lockfile or any lock-clearing logic. Windows
 locks are mandatory and a handle can outlive an abrupt termination, so the same relaunch raises
 `PermissionError: [WinError 32]`. Do not port the graph store on that argument alone — 2,583 lines
-and 163 Cypher statements across 26 node and edge types, for a retrieval arm whose contribution has
-never been measured. What this rung ships is the measurement: the `--no-graph` retrieval ablation on
-the golden corpus, recorded with its provenance, so 0.15.0 decides port-or-delete on a number.
-Deleting the arm would answer the Windows lock too.
+and 163 Cypher statements across 26 node and edge types. The retrieval arm is now measured (0.15.0,
+below): it contributes nothing, so the port-or-delete question is about the store's other readers.
 
 **On a host that cannot run a local model, the chosen mode decides what runs, and the app says so.**
 Local, Hybrid and Cloud are one stored setting, asked once at first launch for every install path and
@@ -326,14 +324,25 @@ search's semantic arm is never scored on a query with no lexical overlap (#100).
 are generated from section summaries rather than text, so they presuppose framings the document never
 makes, and the ungrounded answer that follows renders like a grounded one (#66).
 
-**The graph store's fate is decided here, on the number 0.13.0 records.** Three claims about the arm
-point the same way and none of them is a measurement: `RELATED_TO` is empty library-wide, 11.1% of
-co-occurrence edges pair an entity with itself, and #65 says the store diverges from SQLite with
-nothing reconciling it. If the `--no-graph` ablation shows the arm contributes nothing to RRF,
-removing it retires 2,583 lines, closes #65 and answers Windows mandatory locking at once. If it
-contributes, the port to SQLite relational edges is justified by that number and belongs in this
-rung, where the other store work already is. **Decide on the ablation, not on the anecdotes** — an
-arm that looks broken in three places can still be carrying recall.
+**Query-time graph expansion buys no retrieval quality.** `run_eval.py --ablation`, 2026-09-21, dev
+library, GLiNER held resident and the arms confirmed to diverge before and after each dataset. On the
+shipped funnel (rrf+rerank) HR@5 is identical with and without expansion on all five sets (book 40,
+paper 40, legal/play/study 60 rows) and MRR moves by at most 0.003 in both directions, under one
+question. Unreranked, no set moves by more than one question, in both directions. Measured: the
+`_graph_expand` alias tokens on `/search`. Not measured: the chat `graph` node, which routes
+relationship questions to Kuzu and not to `/search`.
+
+**Expansion is also dormant in the shipped app.** `_graph_expand` skips when GLiNER is not loaded
+(`retriever_strategies.py:370`), only startup warmup and ingestion load it, and the reaper releases it
+after `NER_IDLE_RELEASE_SECONDS=180`. A user's search therefore expands only in the three minutes after
+launch or an ingest. Given the ablation, the fix is to remove expansion from `/search`, not to keep
+GLiNER resident for it.
+
+**The store's fate is not settled by that number.** 28 modules read the graph store: the chat `graph`
+node, graph flashcards, concepts, mastery, study paths and prerequisite extraction among them. Retiring
+expansion removes one reader. Port-or-delete for the rest is decided here on what those features
+deliver, alongside #65 (writes diverge from SQLite with nothing reconciling) and the Windows lock.
+`RELATED_TO` is empty library-wide and 11.1% of co-occurrence edges pair an entity with itself.
 
 **The last of the document-model work belongs here.** `form`, `domain` and `register` are written at ingest
 by `_persist_classification` and `DocumentProfile` owns the policy, so what remains is retiring the legacy
