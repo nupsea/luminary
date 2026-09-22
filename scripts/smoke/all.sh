@@ -11,6 +11,11 @@ FAIL=0
 SKIP=0
 SKIPPED=()
 
+# A hang detector, not a latency bound: without it one stream that never closes
+# stalls the whole run with no verdict.
+SCRIPT_TIMEOUT="${SMOKE_SCRIPT_TIMEOUT:-1800}"
+SMOKE_TIMED_OUT=124
+
 # Recorded before anything runs so clean.sh has a window to delete within, and
 # kept afterwards so `make smoke-clean` can still tidy up after a run that died
 # partway. Fixture titles alone are not safe to match on -- see clean.sh.
@@ -24,6 +29,27 @@ if [ -z "$MODE" ]; then
   exit 1
 fi
 
+# run_capped <script>: its exit status, or SMOKE_TIMED_OUT once SCRIPT_TIMEOUT
+# passes. Job control gives the script its own process group, so the kill takes
+# its curl and python children with it.
+run_capped() {
+  local flag="$SMOKE_TMP/.timed-out" pid dog status=0
+  rm -f "$flag"
+  set -m
+  bash "$1" < /dev/null &
+  pid=$!
+  ( sleep "$SCRIPT_TIMEOUT"; touch "$flag"; kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" ) &
+  dog=$!
+  set +m
+  wait "$pid" || status=$?
+  kill -TERM -- "-$dog" 2>/dev/null || kill -TERM "$dog" 2>/dev/null || true
+  wait "$dog" 2>/dev/null || true
+  if [ -f "$flag" ]; then
+    status=$SMOKE_TIMED_OUT
+  fi
+  return "$status"
+}
+
 echo "=== Luminary Smoke Tests ==="
 echo "Backend: $BASE ($MODE mode)"
 echo ""
@@ -31,7 +57,7 @@ echo ""
 for script in "$SMOKE_DIR"/S*.sh; do
   name="$(basename "$script")"
   status=0
-  bash "$script" || status=$?
+  run_capped "$script" || status=$?
   if [ "$status" -eq 0 ]; then
     echo "  [PASS] $name"
     PASS=$((PASS + 1))
@@ -39,6 +65,9 @@ for script in "$SMOKE_DIR"/S*.sh; do
     echo "  [SKIP] $name"
     SKIP=$((SKIP + 1))
     SKIPPED+=("${name%.sh}")
+  elif [ "$status" -eq "$SMOKE_TIMED_OUT" ]; then
+    echo "  [FAIL] $name (no verdict after ${SCRIPT_TIMEOUT}s; killed)"
+    FAIL=$((FAIL + 1))
   else
     echo "  [FAIL] $name"
     FAIL=$((FAIL + 1))
