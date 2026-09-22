@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 
 from app.services.content_classifier import classify_content, classify_form
-from app.services.llm_admission import ingest_critical
+from app.services.llm_admission import awaited
 from app.telemetry import trace_ingestion_node
 from app.types import TECHNICAL_CONTENT_TYPES, DocumentProfile, register_for_form
 from app.workflows.ingestion_nodes._shared import (
@@ -217,7 +217,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
                         f"Document snippet (first 2000 chars):\n{snippet}\n\n"
                         "Reply with exactly one word from the list above."
                     )
-                    with ingest_critical():
+                    with awaited():
                         llm_result = await get_llm_service().generate(prompt, background=True)
                     llm_type = str(llm_result).strip().lower().split()[0]
                     _valid_types = {

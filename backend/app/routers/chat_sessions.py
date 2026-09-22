@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.services import chat_sessions as svc
+from app.services.llm_admission import awaited
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,8 @@ async def rename_session(
     model_touched = "model" in req.model_fields_set
     sess = None
     if req.auto_from_message is not None:
-        new_title = await svc.infer_title(req.auto_from_message)
+        with awaited():
+            new_title = await svc.infer_title(req.auto_from_message)
         sess = await svc.rename_session(db, session_id, title=new_title, auto=True)
     elif req.title is not None:
         sess = await svc.rename_session(db, session_id, title=req.title, auto=False)

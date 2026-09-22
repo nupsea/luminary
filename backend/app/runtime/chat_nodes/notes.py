@@ -29,6 +29,7 @@ from app.services import (
 )
 from app.services.intent import notes_subject_is_generic
 from app.services.llm import LLMUnavailableError
+from app.services.llm_admission import awaited
 from app.services.settings_service import get_llm_error_message
 from app.types import ChatState
 
@@ -184,7 +185,10 @@ async def notes_gap_node(state: ChatState) -> dict:
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
     try:
-        report = await _gap_detector_module.get_gap_detector().detect_gaps(note_ids, document_id)
+        with awaited():
+            report = await _gap_detector_module.get_gap_detector().detect_gaps(
+                note_ids, document_id
+            )
         card: dict = {
             "type": "gap_result",
             "gaps": report["gaps"],

@@ -20,7 +20,7 @@ from typing import Any, TypedDict
 
 from app.database import get_session_factory
 from app.services.background import task_registry
-from app.services.llm_admission import ingest_critical
+from app.services.llm_admission import awaited
 from app.services.parser import DocumentParser
 from app.types import ContentType  # noqa: F401  re-exported via app.workflows.ingestion
 
@@ -225,7 +225,7 @@ async def detect_technical_content(raw_text: str) -> bool | None:
         "Reply with exactly one word: yes or no."
     )
     try:
-        with ingest_critical():
+        with awaited():
             raw = await get_llm_service().generate(prompt, background=True)
     except Exception as exc:
         logger.warning("domain detection failed (non-fatal): %s", exc)
@@ -266,7 +266,7 @@ async def detect_register(raw_text: str) -> str | None:
         "Reply with exactly one word: story or explain."
     )
     try:
-        with ingest_critical():
+        with awaited():
             raw = await get_llm_service().generate(prompt, background=True)
     except Exception as exc:
         logger.warning("register detection failed (non-fatal): %s", exc)

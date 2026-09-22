@@ -38,6 +38,7 @@ from app.schemas.blog import (
     SuggestDescriptionResponse,
 )
 from app.services import blog_service
+from app.services.llm_admission import awaited
 from app.services.note_refiner import RefineDroppedContentError, get_note_refiner
 
 logger = logging.getLogger(__name__)
@@ -170,19 +171,20 @@ async def suggest_description(
 
     body = blog_service.transform_note_to_blog(note.content, "preview").markdown
     try:
-        raw = await get_llm_service().complete(
-            messages=[
-                {"role": "system", "content": _DESC_SYSTEM},
-                {"role": "user", "content": f"Post content:\n{body[:2000]}\n\nDescription:"},
-            ],
-            temperature=0.4,
-            max_tokens=60,
-            # The payload is the user's own note. Hybrid mode would otherwise
-            # route a click-triggered call to the cloud provider; note content
-            # stays on the machine regardless of what the user is about to
-            # publish from it.
-            background=True,
-        )
+        with awaited():
+            raw = await get_llm_service().complete(
+                messages=[
+                    {"role": "system", "content": _DESC_SYSTEM},
+                    {"role": "user", "content": f"Post content:\n{body[:2000]}\n\nDescription:"},
+                ],
+                temperature=0.4,
+                max_tokens=60,
+                # The payload is the user's own note. Hybrid mode would otherwise
+                # route a click-triggered call to the cloud provider; note content
+                # stays on the machine regardless of what the user is about to
+                # publish from it.
+                background=True,
+            )
     except LLMUnavailableError as exc:
         raise HTTPException(status_code=503, detail="LLM unavailable") from exc
     desc = re.sub(r'^["\']|["\']$', "", raw.strip()).strip()
@@ -198,7 +200,8 @@ async def refine_note(
     from app.services.llm import LLMUnavailableError  # noqa: PLC0415
 
     try:
-        refined = await get_note_refiner().refine(note.content, req.instruction, req.model)
+        with awaited():
+            refined = await get_note_refiner().refine(note.content, req.instruction, req.model)
     except LLMUnavailableError as exc:
         raise HTTPException(status_code=503, detail="LLM unavailable") from exc
     except RefineDroppedContentError as exc:

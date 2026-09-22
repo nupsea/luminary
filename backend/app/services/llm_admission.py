@@ -32,6 +32,7 @@ and holding one back would make hybrid mode slower for no reason.
 import asyncio
 import contextlib
 import contextvars
+import itertools
 import logging
 import time
 import weakref
@@ -78,11 +79,9 @@ _STALE_INTERACTIVE_SECONDS = 180.0
 # ingestion yields to a user who is actually being served.
 _MAX_DEFER_CEILING_SECONDS = 600.0
 
-# Set only around a call that gates a document reaching `complete`. Scoped to the
-# call, never to the ingestion task: work that task spawns inherits its context.
-_ingest_critical: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "llm_ingest_critical", default=False
-)
+# Set only around a call someone is waiting on. Scoped to the call, never to a
+# task or a request: background work they spawn inherits their context.
+_awaited: contextvars.ContextVar[bool] = contextvars.ContextVar("llm_awaited", default=False)
 
 
 @dataclass
@@ -97,7 +96,11 @@ class AdmissionState:
     # stops holding a slot instead of wedging every background call behind it.
     background_activity: list[list[float]] = field(default_factory=list)
     background_waiting: int = 0
-    critical_waiting: int = 0
+    # Background callers not yet admitted, as (priority, arrival) tickets. Admission
+    # goes in ticket order: polling alone admits whichever waiter wakes first, so one
+    # call behind twenty could wait indefinitely.
+    queue: list[tuple[int, int]] = field(default_factory=list)
+    arrivals: itertools.count = field(default_factory=itertools.count)
     last_interactive_end: float = 0.0
     # How long the most recent interactive call ran. The deferral bound is
     # wall-clock, and 60s was calibrated where a call takes seconds; on a CPU-only
@@ -234,22 +237,30 @@ def _held_for_interactive(state: AdmissionState, reserve: int) -> bool:
     return state.live_background() >= reserve and under_interactive_pressure()
 
 
-def _held_for_background(state: AdmissionState, width: int, critical: bool) -> bool:
+def _held_for_background(state: AdmissionState, width: int, ticket: tuple[int, int]) -> bool:
     # Never more background calls than serving slots, pressure or not: the excess
     # queues inside the runtime, and a question arriving later waits behind all of
     # it (I-31). Measured: four queued there ahead of a /qa that then timed out.
-    if state.live_background() >= width:
-        return True
-    return not critical and state.critical_waiting > 0
+    free = width - state.live_background()
+    return sum(other < ticket for other in state.queue) >= free
 
 
-async def _wait_for_slot(state: AdmissionState, critical: bool) -> None:
+async def _wait_for_slot(state: AdmissionState, awaited: bool) -> None:
+    ticket = (0 if awaited else 1, next(state.arrivals))
+    state.queue.append(ticket)
+    try:
+        await _wait_in_queue(state, ticket)
+    finally:
+        state.queue.remove(ticket)
+
+
+async def _wait_in_queue(state: AdmissionState, ticket: tuple[int, int]) -> None:
     reserve = background_reserve()
     width = enrichment_concurrency()
     forced = False
 
     def held() -> bool:
-        if _held_for_background(state, width, critical):
+        if _held_for_background(state, width, ticket):
             return True
         return not forced and _held_for_interactive(state, reserve)
 
@@ -259,7 +270,6 @@ async def _wait_for_slot(state: AdmissionState, critical: bool) -> None:
     max_defer = _max_defer_seconds(state)
     started = time.monotonic()
     state.background_waiting += 1
-    state.critical_waiting += critical
     state.deferred_calls += 1
     try:
         while held():
@@ -278,7 +288,6 @@ async def _wait_for_slot(state: AdmissionState, critical: bool) -> None:
             await asyncio.sleep(_POLL_SECONDS)
     finally:
         state.background_waiting -= 1
-        state.critical_waiting -= critical
         state.deferred_seconds += time.monotonic() - started
 
 
@@ -300,17 +309,18 @@ async def interactive_call():
 
 
 @contextlib.contextmanager
-def ingest_critical():
+def awaited():
     """Admit background calls made inside ahead of other background work.
 
-    For the calls a document waits on before it reaches `complete` (#142): without
-    it, a two-line note queued behind other documents' enrichment for minutes.
+    For a background call someone is waiting on: a request's own LLM call, or one
+    a document needs before it reaches `complete` (#142). `background=True` still
+    decides routing; this decides only its place in the queue.
     """
-    token = _ingest_critical.set(True)
+    token = _awaited.set(True)
     try:
         yield
     finally:
-        _ingest_critical.reset(token)
+        _awaited.reset(token)
 
 
 @asynccontextmanager
@@ -318,7 +328,7 @@ async def background_call():
     """Hold a background call until the runtime has room for it."""
     state = _state()
     if admission_enabled():
-        await _wait_for_slot(state, _ingest_critical.get())
+        await _wait_for_slot(state, _awaited.get())
     entry = [time.monotonic()]
     state.background_activity.append(entry)
     try:
