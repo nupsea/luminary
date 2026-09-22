@@ -1,10 +1,16 @@
 """Local scores_history.jsonl append helper."""
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCORES_HISTORY_PATH = Path(__file__).resolve().parent.parent / "scores_history.jsonl"
+# LUMINARY_EVAL_STATE_DIR keeps a harness run (smoke S212 against a scratch
+# backend) out of the developer's history and manifest.
+_STATE_DIR = os.environ.get("LUMINARY_EVAL_STATE_DIR")
+SCORES_HISTORY_PATH = (
+    Path(_STATE_DIR) if _STATE_DIR else Path(__file__).resolve().parent.parent
+) / "scores_history.jsonl"
 
 
 def append_history(

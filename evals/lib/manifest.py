@@ -6,6 +6,7 @@ rewrote it (#143). Stale entries re-resolve by filename in `ensure_ingested`.
 """
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -21,7 +22,9 @@ _USABLE_STAGES = frozenset(
 )
 
 GOLDEN_DIR = Path(__file__).resolve().parent.parent / "golden"
-MANIFEST_PATH = GOLDEN_DIR / "manifest.json"
+# Maps source files to one database's document ids (#143); see scoring_history.
+_STATE_DIR = os.environ.get("LUMINARY_EVAL_STATE_DIR")
+MANIFEST_PATH = (Path(_STATE_DIR) if _STATE_DIR else GOLDEN_DIR) / "manifest.json"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 

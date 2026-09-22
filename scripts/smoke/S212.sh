@@ -14,6 +14,10 @@
 
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+
+# Its manifest and history describe this server, not the developer's library.
+export LUMINARY_EVAL_STATE_DIR="$SMOKE_TMP/eval-state"
+mkdir -p "$LUMINARY_EVAL_STATE_DIR"
 # run_eval.py reads which rerank arm ships from /evals/environment, which public
 # mode does not mount; without it the eval refuses rather than guess the arm.
 # smoke-calls: /evals/environment

@@ -35,7 +35,7 @@ if str(REPO_ROOT / "backend") not in sys.path:
 from app.services.universal_parser import read_document_text  # noqa: E402
 from evals.generate_golden import strip_gutenberg_boilerplate  # noqa: E402
 from evals.lib.environment import capture as capture_environment  # noqa: E402
-from evals.lib.manifest import load_manifest  # noqa: E402
+from evals.lib.manifest import load_manifest, lookup_document_by_filename  # noqa: E402
 from evals.lib.scoring_history import append_history  # noqa: E402
 
 # Measured 2026-08-14 over the 12 manifest documents, boilerplate stripped:
@@ -108,6 +108,11 @@ def main() -> None:
         content_types = {r[0]: (r[3] or "?") for r in rows}
     else:
         manifest = load_manifest()
+        # The manifest is a per-database cache (#143); an id this database lacks
+        # is re-resolved by filename, as ensure_ingested does, not reported empty.
+        for src, doc_id in list(manifest.items()):
+            if not con.execute("SELECT 1 FROM documents WHERE id = ?", (doc_id,)).fetchone():
+                manifest[src] = lookup_document_by_filename(args.backend_url, src) or doc_id
         sources = manifest
         formats = {src: Path(src).suffix.lstrip(".") or "?" for src in manifest}
         content_types = {}
