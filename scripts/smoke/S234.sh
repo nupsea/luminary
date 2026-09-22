@@ -34,7 +34,7 @@ expect_status() {
 HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")
 expect_status "backend healthy" 200 "$HTTP"
 
-curl -s "${BASE}/openapi.json" | python3 -c "
+smoke_openapi | python3 -c "
 import sys, json
 schemas = json.load(sys.stdin)['components']['schemas']
 for name in ('FlashcardGenerateRequest', 'GenerateTechnicalRequest'):

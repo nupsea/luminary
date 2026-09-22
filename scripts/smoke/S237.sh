@@ -31,7 +31,7 @@ fail() {
 HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")
 [ "$HTTP" = "200" ] || fail "backend not healthy (HTTP $HTTP)"
 
-curl -s "${BASE}/openapi.json" | python3 -c "
+smoke_openapi | python3 -c "
 import sys, json
 props = json.load(sys.stdin)['components']['schemas']['FlashcardResponse']['properties']
 for name in ('grounding', 'factuality'):

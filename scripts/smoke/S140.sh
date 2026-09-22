@@ -37,7 +37,7 @@ case "$HTTP" in
     fail "an unsandboxed code executor answers on /code/execute (HTTP $HTTP)" ;;
 esac
 
-curl -s "${BASE}/openapi.json" | python3 -c "
+smoke_openapi | python3 -c "
 import sys, json
 paths = json.load(sys.stdin)['paths']
 served = [p for p in paths if p.startswith('/code/') or p == '/code']

@@ -5,9 +5,7 @@ set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
 # Ingest a minimal document that contains Gutenberg boilerplate mixed with content
-INGEST_RESP=$(curl -sf -X POST "$BASE/documents/ingest" \
-  -F "file=@/dev/stdin;filename=smoke_s82.txt;type=text/plain" \
-  -F "content_type=book" <<- 'EOF'
+cat > "$SMOKE_TMP/smoke_s82.txt" <<- 'EOF'
 Chapter 1: The Adventure Begins
 
 Sherlock Holmes sat in his armchair, fingers steepled beneath his chin,
@@ -29,7 +27,9 @@ This eBook is for the use of anyone anywhere in the United States.
 Terms of Use: distribution, reproduction, and electronic work are
 subject to the Archive Foundation agreement.
 EOF
-)
+INGEST_RESP=$(curl -sf -X POST "$BASE/documents/ingest" \
+  -F "file=@$SMOKE_TMP/smoke_s82.txt;filename=smoke_s82.txt;type=text/plain" \
+  -F "content_type=book")
 
 DOC_ID=$(echo "$INGEST_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['document_id'])")
 

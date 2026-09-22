@@ -25,7 +25,7 @@ echo "PASS: POST /notes → id=$NOTE_ID"
 # ---- (3) PATCH /notes/{id} updates the note ----
 PATCHED=$(curl -sf -X PATCH "$BASE/notes/$NOTE_ID" \
   -H "Content-Type: application/json" \
-  -d '{"content": "S84 smoke test note — edited"}')
+  -d '{"content": "S84 smoke test note \u2014 edited"}')
 python3 -c "
 import sys, json
 note = json.loads('$PATCHED')

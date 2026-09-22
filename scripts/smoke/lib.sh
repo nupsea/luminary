@@ -103,3 +103,22 @@ smoke_require_mode() {
         exit "$SMOKE_SKIP"
     fi
 }
+
+# smoke_openapi: the API schema on stdout, its paths relative to $BASE. FastAPI
+# serves it at the origin's root, not under /api, and in public mode every path in
+# it carries the /api prefix, so `$BASE/openapi.json` is a 404 against the bundled
+# app and the paths a script indexes by would not match. Fetched once per run.
+smoke_openapi() {
+    local cache="$SMOKE_TMP/openapi.json" origin="${BASE%/api}" prefix=""
+    [ "$origin" != "$BASE" ] && prefix="/api"
+    if [ ! -s "$cache" ]; then
+        curl -sf --max-time 60 "$origin/openapi.json" | python3 -c '
+import json, sys
+spec, prefix = json.load(sys.stdin), sys.argv[1]
+if prefix:
+    spec["paths"] = {k[len(prefix):] if k.startswith(prefix + "/") else k: v
+                     for k, v in spec.get("paths", {}).items()}
+json.dump(spec, sys.stdout)' "$prefix" > "$cache" || { rm -f "$cache"; return 1; }
+    fi
+    cat "$cache"
+}

@@ -53,7 +53,7 @@ for field in ('mode_chosen', 'offer_dismissed', 'keyring_available'):
 print('ok')
 ")"
 
-check "a dismissal can be recorded" "ok" "$(curl -s "$BASE/openapi.json" | python3 -c "
+check "a dismissal can be recorded" "ok" "$(smoke_openapi | python3 -c "
 import sys, json
 spec = json.load(sys.stdin)
 props = spec['components']['schemas']['LLMSettingsPatch']['properties']

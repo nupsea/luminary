@@ -78,12 +78,7 @@ check "GET /flashcards/decks returns 200 with list" \
   "assert isinstance(d, list)"
 
 # AC: Verify FlashcardResponse schema includes section_heading via OpenAPI
-TMPFILE=$(mktemp $SMOKE_TMP/s188_XXXXXX)
-HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/openapi.json")
-BODY=$(cat "$TMPFILE")
-rm -f "$TMPFILE"
-
-if [ "$HTTP_CODE" = "200" ]; then
+if BODY=$(smoke_openapi); then
   if echo "$BODY" | python3 -c "
 import sys, json
 spec = json.load(sys.stdin)
@@ -99,7 +94,7 @@ assert 'bloom_level' in fr, 'bloom_level not in FlashcardResponse'
     FAIL=$((FAIL + 1))
   fi
 else
-  echo "FAIL: Could not fetch openapi.json (HTTP $HTTP_CODE)"
+  echo "FAIL: could not fetch the OpenAPI schema"
   FAIL=$((FAIL + 1))
 fi
 

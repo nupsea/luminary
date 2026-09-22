@@ -14,6 +14,10 @@
 
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+# run_eval.py reads which rerank arm ships from /evals/environment, which public
+# mode does not mount; without it the eval refuses rather than guess the arm.
+# smoke-calls: /evals/environment
+smoke_require_mode full
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 EVALS_DIR="${REPO_ROOT}/evals"

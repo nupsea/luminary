@@ -21,6 +21,11 @@ being read. `make smoke` catches that class by running it.
 It catches drift, not behaviour. A script whose endpoint still exists but whose
 assertions are wrong is `make smoke`'s job.
 
+A script that reaches a route through a tool rather than curl (S212 runs
+`run_eval.py`) declares it, so the mode check sees it:
+
+    # smoke-calls: /evals/environment
+
 A script that asserts an endpoint stays *gone* declares it:
 
     # smoke-expects-absent: /code/execute
@@ -38,6 +43,11 @@ suite run against the dev backend and the bundled app alike:
 - none runs the frontend toolchain (`npx`, `npm`, `tsc`, `vitest`): a machine with
   only the installed app has no Node, and `make ci` already builds, type-checks and
   tests the frontend -- thirteen scripts failed that way on the first Windows run;
+- none uploads from stdin (`-F file=@/dev/stdin`), which curl.exe cannot open, and
+  none puts non-ASCII in a curl data argument, which Windows re-encodes to its ANSI
+  code page before curl sees it -- both failed silently on the second Windows run;
+- none reads `$BASE/openapi.json`: the schema is at the origin's root and its paths
+  carry `/api` in public mode, so scripts use `smoke_openapi`;
 - a script that calls a route public mode does not mount declares
   `smoke_require_mode full`, so it is reported as skipped against the bundled app
   rather than failed -- and a script that declares it without needing it is
@@ -61,6 +71,8 @@ SMOKE = REPO / "scripts" / "smoke"
 # `curl ... "${BASE}/documents/${DOC_ID}/sections"`. Both brace styles appear.
 _CALL = re.compile(r"\$\{?BASE\}?\"?(/[A-Za-z0-9_${}/.-]*)")
 _EXPECTS_ABSENT = re.compile(r"^#\s*smoke-expects-absent:\s*(\S+)", re.M)
+# A route the script reaches through a tool rather than curl, e.g. run_eval.py.
+_DECLARED_CALL = re.compile(r"^#\s*smoke-calls:\s*(\S+)", re.M)
 
 _SHELL_VAR = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*")
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
@@ -71,6 +83,10 @@ _BUILTINS = {"/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"}
 _SOURCES_LIB = 'source "$(dirname "$0")/lib.sh"'
 _REQUIRES_FULL = re.compile(r"^\s*smoke_require_mode full\s*$", re.M)
 _FRONTEND_TOOLCHAIN = re.compile(r"\b(?:npx|npm|tsc|vitest)\b|node_modules")
+# Native curl.exe on Windows cannot open /dev/stdin, so `-F file=@/dev/stdin` exits 26.
+_STDIN_UPLOAD = re.compile(r"@(?:/dev/stdin|-)(?:[;\"\']|$)")
+_SCHEMA_UNDER_BASE = re.compile(r"\$\{?BASE\}?/openapi\.json")
+_CURL_DATA = re.compile(r"(?:^|\s)(?:-d|--data(?:-raw|-binary)?)\s")
 _OWN_BASE = re.compile(r"^\s*(?:export\s+)?(?:BASE|BASE_URL|API|API_BASE)=", re.M)
 # Public mode mounts the whole API under this prefix (main.py `_API_PREFIX`).
 _PUBLIC_PREFIX = "/api"
@@ -94,6 +110,15 @@ def hygiene_violations(text: str) -> list[str]:
         found.append("writes to a literal /tmp; use $SMOKE_TMP or mktemp")
     if any(_FRONTEND_TOOLCHAIN.search(line) for line in code):
         found.append("runs the frontend toolchain; that belongs in `make ci`, not smoke")
+    if any(_STDIN_UPLOAD.search(line) for line in code):
+        found.append("uploads from stdin, which curl.exe cannot read; write to $SMOKE_TMP")
+    if any(_SCHEMA_UNDER_BASE.search(line) for line in code):
+        found.append("reads $BASE/openapi.json, a 404 on the bundled app; use smoke_openapi")
+    if any(_CURL_DATA.search(line) and not line.isascii() for line in code):
+        found.append(
+            "passes non-ASCII in a curl data argument, which Windows re-encodes to its"
+            " ANSI code page; escape it as \\uXXXX in the JSON"
+        )
     return found
 
 
@@ -178,7 +203,7 @@ def main() -> int:
         hygiene += [(script.name, v) for v in hygiene_violations(text)]
         absent = {p.rstrip("/") for p in _EXPECTS_ABSENT.findall(text)}
         full_only: list[str] = []
-        for raw in _CALL.findall(text):
+        for raw in _CALL.findall(text) + _DECLARED_CALL.findall(text):
             path = normalise(raw)
             if path == "/":
                 continue
