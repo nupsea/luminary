@@ -112,7 +112,12 @@ smoke_openapi() {
     local cache="$SMOKE_TMP/openapi.json" origin="${BASE%/api}" prefix=""
     [ "$origin" != "$BASE" ] && prefix="/api"
     if [ ! -s "$cache" ]; then
-        curl -sf --max-time 60 "$origin/openapi.json" | python3 -c '
+        # MSYS_NO_PATHCONV: Git Bash on Windows rewrites a bare argv that looks like
+        # a POSIX path before handing it to a native exe, so "/api" arrived as
+        # "C:/Program Files/Git/api" and the strip below silently matched nothing --
+        # every path stayed prefixed and every script indexing by "/foo" got a
+        # KeyError. Env vars get the same rewrite, so this must be an argv, not export.
+        curl -sf --max-time 60 "$origin/openapi.json" | MSYS_NO_PATHCONV=1 python3 -c '
 import json, sys
 spec, prefix = json.load(sys.stdin), sys.argv[1]
 if prefix:
