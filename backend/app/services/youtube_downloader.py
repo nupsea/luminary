@@ -62,11 +62,20 @@ async def fetch_metadata(url: str) -> dict:
         "--",
         url,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
     )
-    stdout, _ = await proc.communicate()
+    stdout, stderr = await proc.communicate()
     if proc.returncode != 0:
-        raise RuntimeError(f"yt-dlp metadata fetch failed (exit {proc.returncode})")
+        # yt-dlp's own ERROR line says why ("Sign in to confirm you're not a bot",
+        # "Video unavailable"); the exit code alone gave the user nothing to act on.
+        errors = [
+            line.removeprefix("ERROR:").strip()
+            for line in stderr.decode(errors="replace").splitlines()
+            if line.startswith("ERROR:")
+        ]
+        # First sentence only: the rest is yt-dlp's command-line advice.
+        reason = errors[-1].split(". ")[0][:300] if errors else f"exit {proc.returncode}"
+        raise RuntimeError(f"YouTube could not be read: {reason}")
     return json.loads(stdout.decode())
 
 
