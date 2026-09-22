@@ -21,6 +21,16 @@ export PYTHONUTF8=1
 # all.sh counts this exit code as a skip, not a failure.
 SMOKE_SKIP=77
 
+# Under `set -e` a failed command exits with no message: a curl --max-time
+# inside $(...) left only a bare [FAIL]. Name the command, line and exit code.
+set -E
+smoke_on_err() {
+  local code=$1 hint=""
+  [ "$code" -eq 28 ] && hint=" (curl: timed out)"
+  echo "FAIL: exit $code$hint at $(basename "$2"):$3: $4" >&2
+}
+trap 'smoke_on_err $? "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND"' ERR
+
 # One temp dir per run; write under $SMOKE_TMP or `mktemp`, never a literal /tmp,
 # which native Windows Python cannot open. `cygpath -m` gives a C:/... all tools read.
 if [ -z "${SMOKE_TMP:-}" ]; then

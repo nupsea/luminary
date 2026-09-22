@@ -14,7 +14,7 @@ SKIPPED=()
 # A hang detector, not a latency bound: without it one stream that never closes
 # stalls the whole run with no verdict.
 SCRIPT_TIMEOUT="${SMOKE_SCRIPT_TIMEOUT:-1800}"
-SMOKE_TIMED_OUT=124
+TIMED_OUT=0
 
 # Recorded before anything runs so clean.sh has a window to delete within, and
 # kept afterwards so `make smoke-clean` can still tidy up after a run that died
@@ -29,23 +29,48 @@ if [ -z "$MODE" ]; then
   exit 1
 fi
 
-# run_capped <script>: its exit status, or SMOKE_TIMED_OUT once SCRIPT_TIMEOUT
-# passes. Job control gives the script its own process group, so the kill takes
-# its curl and python children with it.
+# What was still running when a script ran out of time, and in what state.
+smoke_dump_group() {
+  command -v pgrep >/dev/null 2>&1 || return 0
+  local pids
+  pids="$(pgrep -g "$1" | tr '\n' ',')"
+  [ -n "$pids" ] && ps -o pid,stat,etime,command -p "${pids%,}" | cut -c1-200
+}
+
+# run_capped <script>: its exit status; sets TIMED_OUT=1 when the watchdog killed
+# it. Job control gives the script its own process group, so the kill takes its
+# curl and python children with it. The flag is per script, so a watchdog that
+# fires late can never mark a different script.
 run_capped() {
-  local flag="$SMOKE_TMP/.timed-out" pid dog status=0
-  rm -f "$flag"
+  local flag pid dog status=0
+  TIMED_OUT=0
   set -m
   bash "$1" < /dev/null &
   pid=$!
-  ( sleep "$SCRIPT_TIMEOUT"; touch "$flag"; kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" ) &
-  dog=$!
   set +m
+  flag="$SMOKE_TMP/.timed-out.$pid"
+  # The trap takes the pending sleep with it: a watchdog outliving its script
+  # would later fire at whatever reused that process group.
+  (
+    nap() { sleep "$1" & naps=$!; wait "$naps"; }
+    trap 'kill "$naps" 2>/dev/null; exit 0' TERM
+    nap "$SCRIPT_TIMEOUT"
+    touch "$flag"
+    smoke_dump_group "$pid" || true
+    kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid"
+    # bash defers TERM until its current child exits, then runs the next line.
+    nap 5
+    kill -KILL -- "-$pid" 2>/dev/null || true
+  ) &
+  dog=$!
   wait "$pid" || status=$?
-  kill -TERM -- "-$dog" 2>/dev/null || kill -TERM "$dog" 2>/dev/null || true
+  # Once it has fired, let the watchdog reach its KILL: the script can exit on
+  # TERM and leave children behind in its group.
+  [ -f "$flag" ] || kill -TERM "$dog" 2>/dev/null || true
   wait "$dog" 2>/dev/null || true
   if [ -f "$flag" ]; then
-    status=$SMOKE_TIMED_OUT
+    TIMED_OUT=1
+    rm -f "$flag"
   fi
   return "$status"
 }
@@ -58,16 +83,16 @@ for script in "$SMOKE_DIR"/S*.sh; do
   name="$(basename "$script")"
   status=0
   run_capped "$script" || status=$?
-  if [ "$status" -eq 0 ]; then
+  if [ "$TIMED_OUT" -eq 1 ]; then
+    echo "  [FAIL] $name (no verdict after ${SCRIPT_TIMEOUT}s; killed)"
+    FAIL=$((FAIL + 1))
+  elif [ "$status" -eq 0 ]; then
     echo "  [PASS] $name"
     PASS=$((PASS + 1))
   elif [ "$status" -eq "$SMOKE_SKIP" ]; then
     echo "  [SKIP] $name"
     SKIP=$((SKIP + 1))
     SKIPPED+=("${name%.sh}")
-  elif [ "$status" -eq "$SMOKE_TIMED_OUT" ]; then
-    echo "  [FAIL] $name (no verdict after ${SCRIPT_TIMEOUT}s; killed)"
-    FAIL=$((FAIL + 1))
   else
     echo "  [FAIL] $name"
     FAIL=$((FAIL + 1))
