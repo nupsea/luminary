@@ -343,6 +343,26 @@ learner record stay local in every mode and are reported as such by `llm_routing
 hosted embedder is a full re-embed behind I-9, not a setting, and routing extraction or reranking to a
 provider would put document text rather than a question on the wire.
 
+**Carried to 0.13.1** (0.13.0 shipped with the Linux T4 first run, `make ci`, `verify-dock` and
+`verify-citation` green; these were not run or not fixed):
+
+- A first run of the 0.13.0 installer on a real Windows machine, and `make smoke` there. CI installs
+  it, ingests and searches (`desktop-installers.yml`); nothing has run the app past that.
+- `make smoke` against the bundled macOS app, and the 0.13.0 DMG on a cleared data directory.
+- SIGTERM never drains the tree on Linux or macOS: the shell has no signal handler, so
+  `Supervisor::shutdown` (`src-tauri/src/supervisor.rs:190`) runs only on a window close
+  (`src-tauri/src/main.rs:421`). On the Linux box a SIGTERMed shell left `llama-server` behind.
+- Evals: `eval-ingest` reports a document this database lacks as "no chunks stored"
+  (`evals/run_ingest_eval.py:115`); `eval-summary` replays stored summaries unless asked to refresh
+  (`evals/run_summary_eval.py`, the `eval-summary` target); the flashcard judge's atomicity read
+  1.0000 unverified, and a factuality outside its enum raises (`evals/lib/flashcard_metrics.py:189`).
+- Flashcard factuality 0.78 and clarity 2.88, under their floors; predates 0.13.0, a product project.
+- Ask answers a question whose premise the text does not hold with a bare "not found" (the Odyssey:
+  "Mercury's plan" is Jove's), though the passage that corrects it was retrieved.
+- Web articles keep Wikipedia's `[edit]` links in the chunk text.
+- YouTube ingest unverified this release: YouTube refused the test machine as a bot, and the Linux
+  box has no ffmpeg. `make measure-ttft`, both arms, not run.
+
 **Exit gate.** First run completes with no terminal on a Windows and a Linux machine that has never
 seen Luminary; each host's verdict names the accelerator it actually has, proven by a platform-pinned
 test and a Windows CI job; a 16 GB host is not refused (#139); `make smoke` green on Windows. Then

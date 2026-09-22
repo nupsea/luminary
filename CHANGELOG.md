@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Questions and new documents waited minutes behind background enrichment.** Background LLM calls are now capped at the serving width and admitted in arrival order, and calls a user or a new document is waiting on go first (#142).
 - **`make smoke` rewrote the committed golden manifest** (#143); it is now a local cache.
 - **The answer receipt named the cloud model when the local model had answered.** A routed cloud call that fell back to the local model because the provider was unreachable was reported as `engine: cloud`; the receipt and the stored history now name the model that served the answer.
+- **The reader could not reach past the 200th section of a long document.** Citations, search hits and contents entries there opened the book at its first page, and scrolling stopped on a spinner.
+- **Audio added without a content type was stored with no transcript** and reported complete.
+- **A Wikipedia link could not be added**: a pre-check the site refused aborted the ingest before the article extractor ran.
+- **A YouTube link that could not be read said only "exit 1"**; it now carries YouTube's reason.
 - **A failed eval search scored as a miss** instead of failing the run.
 - **Notes editor**: caret jumps and dead mouse selection near rendered blocks, runaway drag-selection redraws, and scroll position lost when toggling split preview.
 
