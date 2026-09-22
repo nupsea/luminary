@@ -239,3 +239,29 @@ async def test_a_transcript_gets_sections_so_the_reader_can_show_it(test_db, mon
     # about what the document contains.
     assert all(c.section_id is not None for c in chunks)
     assert {c.section_id for c in chunks} == {s.id for s in sections}
+
+
+@pytest.mark.parametrize(
+    ("ext", "expected"), [("wav", "audio"), ("mp3", "audio"), ("mp4", "video")]
+)
+async def test_media_without_a_content_type_reaches_transcription(test_db, ext, expected):
+    """An upload that leaves content_type to the pipeline must still be transcribed.
+
+    classify_node labelled every media file `notes` (there is no text before
+    transcription), transcribe_node passed `notes` through, and the file completed
+    with zero chunks. The UI hid it by sending detect-type's answer; the API did not.
+    """
+    from app.workflows.ingestion_nodes.parse import classify_node
+
+    state = {
+        "document_id": f"media-{ext}",
+        "file_path": f"/tmp/talk.{ext}",
+        "format": ext,
+        "content_type": None,
+        "parsed_document": None,
+        "chunks": None,
+        "status": "classifying",
+        "error": None,
+    }
+    result = await classify_node(state)
+    assert result["content_type"] == expected

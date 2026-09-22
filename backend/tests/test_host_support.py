@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.host_support import UNSUPPORTED_MESSAGE, local_inference_support
+from app.host_support import UNSUPPORTED_MESSAGE, has_nvidia_accelerator, local_inference_support
 
 
 @pytest.fixture
@@ -79,6 +79,48 @@ def test_a_gpu_does_not_excuse_too_little_memory(host):
     assert v.supported is False
     assert v.reason == "under_memory_floor"
     assert "7GB" in v.detail
+
+
+_GIB = 1024**3
+
+
+@pytest.mark.parametrize(
+    ("reported_bytes", "supported"),
+    [
+        # A 16 GiB Linux box: MemTotal is installed RAM minus firmware and kernel
+        # reservations. The AWS g4dn.xlarge that found #139 read "15GB" and was
+        # refused; its exact MemTotal was not captured, so this is 16 GiB less a
+        # typical ~450 MiB reservation.
+        (16 * _GIB - 450 * 1024**2, True),
+        # macOS reports hw.memsize, the exact installed figure.
+        (16 * _GIB, True),
+        # Docker Desktop's VM on a 16GB Mac: ~7.7 GiB is 8, still under the floor.
+        (int(7.7 * _GIB), False),
+        # The floor's edge from below: 15 GiB exactly is 15, not 16.
+        (15 * _GIB, False),
+    ],
+)
+def test_the_floor_reads_the_bytes_the_os_reports(monkeypatch, reported_bytes, supported):
+    """The other memory tests inject whole GB, so none of them ever ran the
+    bytes-to-GB conversion -- which is where #139 was (I-56)."""
+    from types import SimpleNamespace
+
+    from app import memory_profile
+
+    monkeypatch.delenv("LUMINARY_HOST_SUPPORTED", raising=False)
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("platform.machine", lambda: "x86_64")
+    monkeypatch.setattr("app.host_support._in_container", lambda: False)
+    monkeypatch.setattr("app.host_support._has_accelerator", lambda: True)
+    monkeypatch.setattr("psutil.virtual_memory", lambda: SimpleNamespace(total=reported_bytes))
+    memory_profile.reset_cache()
+    try:
+        v = local_inference_support()
+    finally:
+        memory_profile.reset_cache()
+    assert v.supported is supported, v.detail
+    if not supported:
+        assert v.reason == "under_memory_floor"
 
 
 def test_unreadable_memory_is_not_by_itself_a_refusal(host):
@@ -186,6 +228,43 @@ def test_nvidia_smi_on_path_is_enough_when_the_driver_is_elsewhere(probe, monkey
         "shutil.which", lambda name: r"C:\nv\nvidia-smi.exe" if name == "nvidia-smi" else None
     )
     assert probe().supported is True
+
+
+# `has_nvidia_accelerator` is the narrower probe the CUDA-pack offer gates on
+# (docs/lighter-install-plan.md Phase 3): the download is NVIDIA-only, so an AMD
+# driver -- which `_has_accelerator` correctly accepts for "run inference at
+# all" -- must not make this one say yes. Fired on purpose in both directions.
+
+
+def test_has_nvidia_accelerator_is_false_for_an_amd_only_driver(monkeypatch, tmp_path):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    monkeypatch.setenv("SYSTEMROOT", str(tmp_path))
+    (tmp_path / "System32").mkdir()
+    (tmp_path / "System32" / "amdhip64.dll").write_bytes(b"")
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+
+    assert has_nvidia_accelerator() is False
+
+
+def test_has_nvidia_accelerator_is_true_for_the_nvidia_driver(monkeypatch, tmp_path):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    monkeypatch.setenv("SYSTEMROOT", str(tmp_path))
+    (tmp_path / "System32").mkdir()
+    (tmp_path / "System32" / "nvcuda.dll").write_bytes(b"")
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+
+    assert has_nvidia_accelerator() is True
+
+
+def test_has_nvidia_accelerator_is_false_on_darwin_even_for_apple_silicon(monkeypatch):
+    # Apple Silicon is Metal; no Mac has shipped an NVIDIA GPU since 2021.
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    monkeypatch.setattr("platform.machine", lambda: "arm64")
+
+    assert has_nvidia_accelerator() is False
 
 
 def test_docker_alone_never_decides_it():

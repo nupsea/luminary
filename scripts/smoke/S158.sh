@@ -3,8 +3,7 @@
 # Verifies that GET /qa/history returns HTTP 200 (QA endpoint reachable).
 # Transparency SSE event behaviour is covered by backend unit tests.
 set -euo pipefail
-
-BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 # `GET /qa/history` is gone: conversation history moved into the request
 # (`QARequest.messages`, a sliding window the client owns), so there is no

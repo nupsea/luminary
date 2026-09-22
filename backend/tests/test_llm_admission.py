@@ -549,3 +549,180 @@ async def test_an_interactive_call_records_how_long_it_ran(admission_settings):
         await asyncio.sleep(0.05)
 
     assert state.last_interactive_seconds >= 0.05
+
+
+@pytest.mark.asyncio
+async def test_background_never_exceeds_the_serving_width(admission_settings):
+    """With no question in flight, extra background calls queue here, not in Ollama."""
+    admission_settings(OLLAMA_NUM_PARALLEL=1, LLM_ADMISSION_GRACE_SECONDS=0.0)
+    release = asyncio.Event()
+    first_admitted = asyncio.Event()
+    second_admitted = asyncio.Event()
+
+    async def background(flag: asyncio.Event):
+        async with llm_admission.background_call():
+            flag.set()
+            await release.wait()
+
+    tasks = [
+        asyncio.create_task(background(first_admitted)),
+        asyncio.create_task(background(second_admitted)),
+    ]
+    await asyncio.wait_for(first_admitted.wait(), timeout=1.0)
+    await asyncio.sleep(0.4)
+
+    assert second_admitted.is_set() is False
+    assert llm_admission.paused_for_interaction() is False
+
+    release.set()
+    await asyncio.wait_for(asyncio.gather(*tasks), timeout=2.0)
+    assert second_admitted.is_set() is True
+
+
+@pytest.mark.asyncio
+async def test_the_defer_bound_never_forces_past_the_width(admission_settings):
+    admission_settings(
+        OLLAMA_NUM_PARALLEL=1,
+        LLM_ADMISSION_GRACE_SECONDS=0.0,
+        LLM_ADMISSION_MAX_DEFER_SECONDS=0.2,
+    )
+    release_background = asyncio.Event()
+    release_chat = asyncio.Event()
+    first_admitted = asyncio.Event()
+    second_admitted = asyncio.Event()
+
+    async def background(flag: asyncio.Event, release: asyncio.Event):
+        async with llm_admission.background_call():
+            flag.set()
+            await release.wait()
+
+    async def chatting():
+        async with llm_admission.interactive_call():
+            await release_chat.wait()
+
+    first = asyncio.create_task(background(first_admitted, release_background))
+    await asyncio.wait_for(first_admitted.wait(), timeout=1.0)
+    chat = asyncio.create_task(chatting())
+    await asyncio.sleep(0)
+    second = asyncio.create_task(background(second_admitted, asyncio.Event()))
+    await asyncio.sleep(0.6)
+
+    assert second_admitted.is_set() is False
+
+    release_background.set()
+    await asyncio.wait_for(second_admitted.wait(), timeout=2.0)
+    assert llm_admission.admission_stats()["forced_admissions"] == 1
+
+    release_chat.set()
+    second.cancel()
+    await asyncio.gather(first, chat, second, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_an_awaited_call_is_admitted_ahead_of_other_background(
+    admission_settings,
+):
+    admission_settings(OLLAMA_NUM_PARALLEL=1, LLM_ADMISSION_GRACE_SECONDS=0.0)
+    release = asyncio.Event()
+    holding = asyncio.Event()
+    order: list[str] = []
+
+    async def holder():
+        async with llm_admission.background_call():
+            holding.set()
+            await release.wait()
+
+    async def background(name: str, critical: bool):
+        if critical:
+            with llm_admission.awaited():
+                async with llm_admission.background_call():
+                    order.append(name)
+        else:
+            async with llm_admission.background_call():
+                order.append(name)
+
+    hold = asyncio.create_task(holder())
+    await holding.wait()
+    garnish = asyncio.create_task(background("garnish", critical=False))
+    await asyncio.sleep(0.3)
+    probe = asyncio.create_task(background("probe", critical=True))
+    await asyncio.sleep(0.3)
+
+    release.set()
+    await asyncio.wait_for(asyncio.gather(hold, garnish, probe), timeout=2.0)
+    assert order == ["probe", "garnish"]
+
+
+@pytest.mark.asyncio
+async def test_background_waiters_are_admitted_in_arrival_order(admission_settings):
+    """Polling alone admits whichever waiter wakes first; one call can wait for ever."""
+    admission_settings(OLLAMA_NUM_PARALLEL=1, LLM_ADMISSION_GRACE_SECONDS=0.0)
+    release = asyncio.Event()
+    holding = asyncio.Event()
+    order: list[int] = []
+
+    async def holder():
+        async with llm_admission.background_call():
+            holding.set()
+            await release.wait()
+
+    async def background(n: int):
+        async with llm_admission.background_call():
+            order.append(n)
+            await asyncio.sleep(0.05)
+
+    hold = asyncio.create_task(holder())
+    await holding.wait()
+    waiters = []
+    for n in range(6):
+        waiters.append(asyncio.create_task(background(n)))
+        await asyncio.sleep(0.03)
+
+    release.set()
+    await asyncio.wait_for(asyncio.gather(hold, *waiters), timeout=5.0)
+    assert order == list(range(6))
+
+
+@pytest.mark.asyncio
+async def test_a_request_waiting_on_suggest_tags_runs_its_call_as_awaited(monkeypatch):
+    """A request's own background-routed call must not queue behind enrichment."""
+    from app.routers import notes as notes_router
+    from app.services import note_tagger
+
+    seen: list[bool] = []
+
+    class _Tagger:
+        async def suggest_tags(self, content: str) -> list[str]:
+            seen.append(llm_admission._awaited.get())
+            return ["x"]
+
+    class _Note:
+        content = "a note long enough to be tagged by the model"
+
+    class _Repo:
+        async def get_or_404(self, note_id):
+            return _Note()
+
+    monkeypatch.setattr(note_tagger, "get_note_tagger", lambda: _Tagger())
+    await notes_router.suggest_tags("n1", repo=_Repo())
+
+    assert seen == [True]
+    assert llm_admission._awaited.get() is False
+
+
+@pytest.mark.asyncio
+async def test_a_background_stream_nobody_closed_does_not_wedge_the_gate(
+    admission_settings, monkeypatch
+):
+    admission_settings(OLLAMA_NUM_PARALLEL=1, LLM_ADMISSION_GRACE_SECONDS=0.0)
+    monkeypatch.setattr(llm_admission, "_MAX_DEFER_CEILING_SECONDS", 0.3)
+
+    abandoned = llm_admission.background_call()
+    await abandoned.__aenter__()
+
+    started = time.monotonic()
+    async with llm_admission.background_call():
+        waited = time.monotonic() - started
+
+    assert 0.2 <= waited < 2.0
+    await abandoned.__aexit__(None, None, None)

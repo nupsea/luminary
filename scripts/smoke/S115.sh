@@ -2,8 +2,7 @@
 # Smoke test for S115: Study session analytics
 # Calls GET /study/sessions and asserts HTTP 200 with a non-empty body.
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 echo "S115 smoke: GET /study/sessions"
 RESPONSE=$(curl -sf -w "\n%{http_code}" "${BASE}/study/sessions?page=1&page_size=5")

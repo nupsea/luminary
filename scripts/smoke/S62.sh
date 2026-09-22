@@ -2,12 +2,12 @@
 # Smoke test for S62: tag storage and filter
 # Tests PATCH /documents/{id}/tags and GET /documents?tag=X
 set -euo pipefail
-
-BASE="${BACKEND_URL:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 # Create a document via ingest (we need a real endpoint, use a tiny text file)
+echo "Tag smoke test document for S62." > "$SMOKE_TMP/smoke_s62.txt"
 INGEST_RESP=$(curl -sf -X POST "$BASE/documents/ingest" \
-  -F "file=@/dev/stdin;filename=smoke_s62.txt" <<< "Tag smoke test document for S62.")
+  -F "file=@$SMOKE_TMP/smoke_s62.txt;filename=smoke_s62.txt")
 DOC_ID=$(echo "$INGEST_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['document_id'])")
 echo "Created document: $DOC_ID"
 

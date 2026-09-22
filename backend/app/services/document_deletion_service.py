@@ -42,6 +42,7 @@ from app.models import (
     ImageModel,
     LearningGoalModel,
     LearningObjectiveModel,
+    LibrarySummaryModel,
     MisconceptionModel,
     NoteModel,
     NoteSourceModel,
@@ -198,6 +199,9 @@ class DocumentDeletionService:
                 CollectionMemberModel.member_type == "document",
             )
         )
+        # The library summary describes every document, so a delete drops it (#140).
+        # The caller schedules the regeneration once the transaction commits.
+        await session.execute(delete(LibrarySummaryModel))
         await session.delete(doc)
 
     async def delete_derived_for_reparse(

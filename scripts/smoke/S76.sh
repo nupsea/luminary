@@ -8,8 +8,8 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 FIXTURE="backend/tests/fixtures/art_of_unix_ch1.txt"
 
 if [ ! -f "$FIXTURE" ]; then
@@ -31,40 +31,26 @@ if [ -z "$DOC_ID" ]; then
 fi
 echo "Document ID: $DOC_ID"
 
-# Poll GET /documents/{id} until stage=complete or timeout
-MAX_WAIT=180
-ELAPSED=0
-STAGE=""
-while [ "$STAGE" != "complete" ] && [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
-  sleep 5
-  ELAPSED=$((ELAPSED + 5))
-  STAGE=$(curl -s "${BASE}/documents/${DOC_ID}" | python3 -c "import sys, json; print(json.load(sys.stdin).get('stage', ''))" 2>/dev/null || echo "")
-  echo "  stage=${STAGE} (${ELAPSED}s)"
-done
-
-if [ "$STAGE" != "complete" ]; then
-  echo "FAIL: document did not reach stage=complete within ${MAX_WAIT}s (last stage: ${STAGE})"
-  exit 1
-fi
+smoke_wait_complete "$DOC_ID" || exit 1
 
 # POST /summarize/{id} with mode=executive and force_refresh=true
 # The streaming response is SSE; collect all data lines and check for non-empty token content.
 echo "Requesting executive summary (force_refresh=true)..."
-HTTP_CODE=$(curl -s -o /tmp/s76_summary.txt -w "%{http_code}" \
+HTTP_CODE=$(curl -s -o $SMOKE_TMP/s76_summary.txt -w "%{http_code}" \
   -X POST "${BASE}/summarize/${DOC_ID}" \
   -H "Content-Type: application/json" \
   -d '{"mode": "executive", "force_refresh": true}')
 
 if [ "$HTTP_CODE" != "200" ]; then
   echo "FAIL: POST /summarize/${DOC_ID} returned ${HTTP_CODE} (expected 200)"
-  cat /tmp/s76_summary.txt
+  cat $SMOKE_TMP/s76_summary.txt
   exit 1
 fi
 
 # Check that the response contains at least one non-empty token event
 HAS_CONTENT=$(python3 -c "
 import json, sys
-content = open('/tmp/s76_summary.txt').read()
+content = open('$SMOKE_TMP/s76_summary.txt').read()
 lines = [l for l in content.split('\n') if l.startswith('data: ')]
 tokens = []
 for line in lines:
@@ -79,13 +65,13 @@ print('yes' if tokens else 'no')
 
 if [ "$HAS_CONTENT" != "yes" ]; then
   echo "FAIL: streaming response contains no non-empty token events"
-  cat /tmp/s76_summary.txt
+  cat $SMOKE_TMP/s76_summary.txt
   exit 1
 fi
 echo "PASS: POST /summarize/${DOC_ID} returned HTTP 200 with non-empty content"
 
 # GET /summarize/{id}/cached — assert 'executive' key is present
-HTTP_CODE=$(curl -s -o /tmp/s76_cached.json -w "%{http_code}" \
+HTTP_CODE=$(curl -s -o $SMOKE_TMP/s76_cached.json -w "%{http_code}" \
   "${BASE}/summarize/${DOC_ID}/cached")
 
 if [ "$HTTP_CODE" != "200" ]; then
@@ -98,14 +84,14 @@ fi
 # the endpoint was returning it.
 HAS_EXECUTIVE=$(python3 -c "
 import json
-data = json.load(open('/tmp/s76_cached.json'))
+data = json.load(open('$SMOKE_TMP/s76_cached.json'))
 summaries = data.get('summaries', {})
 print('yes' if summaries.get('executive', {}).get('content') else 'no')
 " 2>/dev/null || echo "no")
 
 if [ "$HAS_EXECUTIVE" != "yes" ]; then
   echo "FAIL: GET /summarize/${DOC_ID}/cached does not contain 'executive' key"
-  cat /tmp/s76_cached.json
+  cat $SMOKE_TMP/s76_cached.json
   exit 1
 fi
 

@@ -24,6 +24,7 @@ import { moveBlockOrLineSpec } from "./markdownEditorCommands"
 import {
   caretInTableRow,
   clickedSourceLine,
+  columnOffset,
   firstEditableLine,
   hidesBlock,
   hidesMark,
@@ -175,6 +176,7 @@ function RenderedBlockContent({
 
 class RenderedBlock extends WidgetType {
   private root: Root | null = null
+  private endDrag: (() => void) | null = null
   readonly source: string
   readonly delimited: boolean
   private readonly onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
@@ -219,10 +221,47 @@ class RenderedBlock extends WidgetType {
       if (target?.closest("button, a")) return
       event.preventDefault()
       const anchor = this.caretFor(view, host, event, target)
-      if (anchor !== null) view.dispatch({ selection: { anchor } })
+      if (anchor === null) return
       view.focus()
+      if (event.shiftKey) {
+        view.dispatch({ selection: { anchor: view.state.selection.main.anchor, head: anchor } })
+        return
+      }
+      view.dispatch({ selection: { anchor } })
+      this.startDrag(view, anchor)
     })
     return host
+  }
+
+  /**
+   * `ignoreEvent` hides a drag that starts on a widget from CodeMirror's own
+   * selection tracking; this replicates it. One dispatch per frame, as CodeMirror
+   * does: faster dispatches outrun layout and draw the selection off the widget.
+   */
+  private startDrag(view: EditorView, anchor: number) {
+    this.endDrag?.()
+    let frame = 0
+    let pending: { x: number; y: number } | null = null
+    const flush = () => {
+      frame = 0
+      if (!pending) return
+      const head = view.posAtCoords(pending)
+      pending = null
+      if (head !== null) view.dispatch({ selection: { anchor, head } })
+    }
+    const onMove = (event: MouseEvent) => {
+      pending = { x: event.clientX, y: event.clientY }
+      if (!frame) frame = requestAnimationFrame(flush)
+    }
+    const onUp = () => this.endDrag?.()
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+    this.endDrag = () => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+      this.endDrag = null
+    }
   }
 
   updateDOM(dom: HTMLElement, view: EditorView): boolean {
@@ -242,6 +281,7 @@ class RenderedBlock extends WidgetType {
   }
 
   destroy(dom: HTMLElement) {
+    this.endDrag?.()
     const root = this.root
     this.root = null
     // Unmounting inside CodeMirror's update would unmount a React tree while
@@ -528,6 +568,7 @@ function stepInto(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -
   const { doc } = view.state
   const head = view.state.selection.main.head
   const line = doc.lineAt(head)
+  const column = head - line.from
   const target = line.number + dir
   if (target < 1 || target > doc.lines) return false
   const edge = doc.line(target)
@@ -556,7 +597,8 @@ function stepInto(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -
       const cellPos = caretInTableRow(targetLine.text, 0)
       anchor = targetLine.from + cellPos
     } else {
-      anchor = targetLine.to
+      // Keep the caret's column rather than jumping to the line's end.
+      anchor = targetLine.from + columnOffset(targetLine.text, column)
     }
   })
   if (anchor === null) return false

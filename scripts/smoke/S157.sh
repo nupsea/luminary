@@ -3,8 +3,7 @@
 # Verifies that GET /qa/history returns a 200 response (chat QA endpoint is reachable).
 # Full citation chip behaviour is tested in Vitest unit tests.
 set -euo pipefail
-
-BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 # `GET /qa/history` is gone: conversation history moved into the request
 # (`QARequest.messages`, a sliding window the client owns), so there is no

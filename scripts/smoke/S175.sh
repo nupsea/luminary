@@ -3,8 +3,7 @@
 # Tests that notes can be linked to multiple source documents via NoteSourceModel pivot.
 
 set -euo pipefail
-BASE="${BASE:-http://localhost:7820}"
-
+source "$(dirname "$0")/lib.sh"
 echo "=== S175 Smoke Test ==="
 
 # Use two fake but stable document IDs for smoke (no real docs needed -- pivot has no FK to docs)

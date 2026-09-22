@@ -19,6 +19,16 @@ from app.main import app  # noqa: F401 (used via ASGITransport)
 from app.models import DocumentModel
 from app.services.youtube_downloader import is_youtube_url
 
+
+@pytest.fixture(autouse=True)
+def _transcription_installed(monkeypatch):
+    """Pin Speech to text as installed, weights included, so these tests exercise
+    yt-dlp and ffmpeg rather than whatever this machine has downloaded."""
+    from app.services import components
+
+    monkeypatch.setitem(components._EXTRA_WEIGHTS, "transcription", (lambda: True, lambda: None))
+
+
 # Shared DB fixture
 
 
@@ -449,3 +459,25 @@ async def test_download_omits_the_flag_when_ffmpeg_is_not_found(monkeypatch, tmp
     await yt.download_audio("https://youtu.be/x", tmp_path / "out")
 
     assert "--ffmpeg-location" not in captured
+
+
+async def test_metadata_failure_names_yt_dlps_reason(monkeypatch):
+    """The exit code alone left the user nothing to act on; yt-dlp's ERROR line does."""
+    import app.services.youtube_downloader as yt
+
+    class _Proc:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", (
+                b"WARNING: [youtube] x: HTTP Error 429: Too Many Requests\n"
+                b"ERROR: [youtube] x: Sign in to confirm you\xe2\x80\x99re not a bot.\n"
+            )
+
+    async def _fake_exec(*args, **kwargs):
+        return _Proc()
+
+    monkeypatch.setattr(yt.asyncio, "create_subprocess_exec", _fake_exec)
+
+    with pytest.raises(RuntimeError, match="not a bot"):
+        await yt.fetch_metadata("https://youtu.be/x")

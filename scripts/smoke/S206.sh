@@ -2,6 +2,7 @@
 # Smoke test for S206: Flashcard search FTS5 fix
 # Full user journey: create card -> keyword search -> find it
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 # BSD mktemp only substitutes Xs at the END of a template, so
 # `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
@@ -10,7 +11,6 @@ set -euo pipefail
 SMOKE_TMPDIR=$(mktemp -d)
 trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
 
-BASE="${LUMINARY_URL:-http://localhost:7820}"
 KEYWORD="s206smokezyxwv"
 
 echo "=== S206 Smoke Test ==="

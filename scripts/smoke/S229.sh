@@ -10,8 +10,8 @@
 #      clean JSON
 
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
 fail() {
   echo "FAIL: $1"

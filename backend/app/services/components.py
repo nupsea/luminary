@@ -41,10 +41,12 @@ from app.model_registry import (
     default_vision_model,
     profile_for,
 )
+from app.paths import engine_source_path
+from app.services.component_download import install_archive_subset
 
 logger = logging.getLogger(__name__)
 
-Kind = str  # "ollama_model" | "tool"
+Kind = str  # "ollama_model" | "python_extra" | "tool" | "engine_runner"
 
 
 @dataclass(frozen=True)
@@ -92,6 +94,46 @@ def _registry_licence(model_id: str) -> str:
     return profile.licence if profile is not None else "See the model's own licence"
 
 
+def engine_source() -> dict | None:
+    """The archive the staged engine came from, or None if there is nothing to offer."""
+    path = engine_source_path()
+    try:
+        source = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        logger.warning("could not read the engine source at %s", path, exc_info=True)
+        return None
+    required = ("url", "sha256", "runner", "member_prefix", "archive_bytes", "asset")
+    if any(not source.get(key) for key in required):
+        logger.warning("engine source at %s is missing one of %s", path, required)
+        return None
+    return source
+
+
+def engine_lib_dir() -> Path:
+    """The relocated engine's runners. Keep in step with `engine_dir` and
+    `OLLAMA_LIBRARY_DIR` in `src-tauri/src/stage.rs`."""
+    return Path(get_settings().DATA_DIR).expanduser() / "engine" / "ollama" / "lib" / "ollama"
+
+
+def _engine_runner_component(source: dict) -> Component:
+    return Component(
+        id="cuda_runner",
+        label="NVIDIA GPU acceleration",
+        description=(
+            "Runs local models on an NVIDIA graphics card through CUDA, which is "
+            "faster than the Vulkan support that is already built in."
+        ),
+        kind="engine_runner",
+        ref=source["runner"],
+        size_bytes=int(source["archive_bytes"]),
+        # Fetched from Ollama's release on request, like ffmpeg: never redistributed.
+        licence="NVIDIA CUDA EULA (not distributed with Luminary)",
+        enables=("Faster local chat", "Faster flashcard generation", "Faster summaries"),
+    )
+
+
 def catalogue() -> tuple[Component, ...]:
     """What the user can install, resolved against the registry *now*.
 
@@ -104,7 +146,7 @@ def catalogue() -> tuple[Component, ...]:
     model knobs in a fixture was still asserting against a catalogue built
     before the pin.
     """
-    return (
+    entries = (
         Component(
             id="chat_model",
             label="Chat model",
@@ -158,6 +200,15 @@ def catalogue() -> tuple[Component, ...]:
             enables=("MP4 ingestion", "YouTube transcription"),
         ),
     )
+    # Only where the stage recorded an archive, and only to an NVIDIA host.
+    source = engine_source()
+    if source is None:
+        return entries
+    from app.host_support import has_nvidia_accelerator  # noqa: PLC0415
+
+    if not has_nvidia_accelerator():
+        return entries
+    return (*entries, _engine_runner_component(source))
 
 
 # The id a registry model gets when it is not one of the catalogue's current
@@ -168,6 +219,23 @@ def catalogue() -> tuple[Component, ...]:
 # `qwen2.5vl:7b` missing and its install button pulled the generalist, after
 # which `requeue_skipped_jobs()` skipped the job again, forever.
 _MODEL_ID_PREFIX = "model:"
+
+
+def _whisper_cached() -> bool:
+    from app.services.audio_transcriber import weights_cached  # noqa: PLC0415
+
+    return weights_cached()
+
+
+def _whisper_fetch() -> None:
+    from app.services.audio_transcriber import fetch_weights  # noqa: PLC0415
+
+    fetch_weights()
+
+
+# A python_extra whose package runs a model: (weights on disk?, download them).
+# The install downloads; the loader never does.
+_EXTRA_WEIGHTS = {"transcription": (_whisper_cached, _whisper_fetch)}
 
 
 def get_component(component_id: str) -> Component | None:
@@ -329,20 +397,38 @@ async def _installed_ollama_models() -> set[str]:
     return {m.get("name", "") for m in data.get("models", [])}
 
 
+def _installed_locally(comp) -> bool:
+    if comp.kind == "python_extra":
+        activate_extras()
+        installed = importlib.util.find_spec(comp.ref) is not None
+        if installed and (weights := _EXTRA_WEIGHTS.get(comp.id)):
+            installed = weights[0]()
+        return installed
+    if comp.kind == "engine_runner":
+        return (engine_lib_dir() / comp.ref).is_dir()
+    return resolve_tool(comp.ref) is not None
+
+
+def _probe_catalogue() -> tuple[list, dict[str, bool]]:
+    comps = catalogue()
+    local = {c.id: _installed_locally(c) for c in comps if c.kind != "ollama_model"}
+    return comps, local
+
+
 async def component_status() -> list[dict]:
     installed_models = await _installed_ollama_models()
+    # Off the loop (I-2): the Whisper weights probe imports faster_whisper, which
+    # pulls in transformers and torch; on the loop it stalled every request 10-16s.
+    comps, local_installed = await asyncio.to_thread(_probe_catalogue)
 
     out = []
-    for comp in catalogue():
+    for comp in comps:
         if comp.kind == "ollama_model":
             # Ollama reports tags as "name:tag"; a bare ref means ":latest".
             ref = comp.ref if ":" in comp.ref else f"{comp.ref}:latest"
             installed = ref in installed_models or comp.ref in installed_models
-        elif comp.kind == "python_extra":
-            activate_extras()
-            installed = importlib.util.find_spec(comp.ref) is not None
         else:
-            installed = resolve_tool(comp.ref) is not None
+            installed = local_installed[comp.id]
 
         out.append(
             {
@@ -492,7 +578,48 @@ async def install_python_extra(comp: Component) -> AsyncIterator[dict]:
     if importlib.util.find_spec(comp.ref) is None:
         yield {"state": "failed", "detail": f"{comp.ref} still not importable after install"}
         return
+
+    if weights := _EXTRA_WEIGHTS.get(comp.id):
+        yield {"state": "downloading", "detail": f"Downloading the {comp.label} model"}
+        try:
+            await asyncio.to_thread(weights[1])
+        except Exception as exc:
+            yield {"state": "failed", "detail": f"model download failed: {str(exc)[:300]}"}
+            return
     yield {"state": "ready", "detail": comp.label}
+
+
+async def install_engine_runner(comp: Component) -> AsyncIterator[dict]:
+    """Fetch an accelerator runner out of the release archive, beside the shipped ones."""
+    source = engine_source()
+    if source is None:
+        yield {"state": "failed", "detail": "this build has no downloadable engine runner"}
+        return
+
+    lib = engine_lib_dir()
+    if not lib.is_dir():
+        # The shell creates this on first launch; missing means the engine never started.
+        yield {
+            "state": "failed",
+            "detail": f"the engine is not prepared at {lib}; restart Luminary and try again",
+        }
+        return
+
+    downloads = Path(get_settings().DATA_DIR).expanduser() / "downloads"
+    async for event in install_archive_subset(
+        url=source["url"],
+        sha256=source["sha256"],
+        archive_path=downloads / source["asset"],
+        member_prefix=source["member_prefix"],
+        target=lib / comp.ref,
+        total_bytes=int(source["archive_bytes"]),
+        label=comp.label,
+    ):
+        if event["state"] != "ready":
+            yield event
+            continue
+        # Ollama enumerates runners at start.
+        yield {**event, "detail": f"{comp.label} installed. Restart Luminary to use it."}
 
 
 async def install_component(component_id: str) -> AsyncIterator[dict]:
@@ -508,6 +635,11 @@ async def install_component(component_id: str) -> AsyncIterator[dict]:
 
     if comp.kind == "python_extra":
         async for event in install_python_extra(comp):
+            yield event
+        return
+
+    if comp.kind == "engine_runner":
+        async for event in install_engine_runner(comp):
             yield event
         return
 
@@ -528,6 +660,10 @@ async def remove_component(component_id: str) -> None:
         raise ValueError(f"unknown component: {component_id}")
     if comp.kind == "ollama_model":
         await remove_ollama_model(comp.ref)
+        return
+    if comp.kind == "engine_runner":
+        # Holds only what was unpacked into it.
+        await asyncio.to_thread(shutil.rmtree, engine_lib_dir() / comp.ref, True)
         return
     if comp.kind == "python_extra":
         # Deliberately not implemented: pip --target has no uninstall, and

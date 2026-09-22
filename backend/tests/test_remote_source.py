@@ -215,6 +215,24 @@ async def test_an_unreachable_url_raises_rather_than_falling_through(serve):
         await fetch_remote_document("https://example.com/gone.pdf")
 
 
+async def test_a_refused_sniff_leaves_the_page_to_the_article_extractor(serve):
+    """Wikimedia answers this client 403 and the extractor's own fetch 200.
+
+    Raising here aborted the ingest before the extractor ever ran, so a Wikipedia
+    link could not be added from a home connection.
+    """
+    serve({"https://": httpx.Response(403)})
+
+    assert await fetch_remote_document("https://en.wikipedia.org/wiki/Spaced_repetition") is None
+
+
+async def test_a_missing_page_still_fails_the_request(serve):
+    serve({"https://": httpx.Response(404)})
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await fetch_remote_document("https://example.com/typo")
+
+
 # End to end through the endpoint
 
 

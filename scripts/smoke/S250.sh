@@ -17,12 +17,14 @@
 #   5. in private mode the routing report names nothing leaving the machine,
 #      which is what the offer says about the arm the reader is already on
 #   6. work that is not routable is on-device in every mode
+#   7. PATCH /settings/llm refuses a mode that is not Local, Hybrid or Cloud
 #
-# Non-destructive: reads only. Nothing here writes a setting -- a PATCH would
-# create the very row whose absence check 2 is about.
+# Non-destructive. Nothing here writes a setting -- a PATCH would create the very
+# row whose absence check 2 is about. Check 7 sends one that validation rejects
+# before any write.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${BASE:-http://localhost:7820}"
 FAIL=0
 
 check() {
@@ -51,7 +53,7 @@ for field in ('mode_chosen', 'offer_dismissed', 'keyring_available'):
 print('ok')
 ")"
 
-check "a dismissal can be recorded" "ok" "$(curl -s "$BASE/openapi.json" | python3 -c "
+check "a dismissal can be recorded" "ok" "$(smoke_openapi | python3 -c "
 import sys, json
 spec = json.load(sys.stdin)
 props = spec['components']['schemas']['LLMSettingsPatch']['properties']
@@ -99,6 +101,10 @@ if not any(not w['routable'] for w in report['work']):
     raise SystemExit
 print('ok')
 ")"
+
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "$BASE/settings/llm" \
+    -H "Content-Type: application/json" -d '{"mode": "turbo"}')
+check "an unknown mode is refused, not stored" "422" "$HTTP"
 
 if [ "$FAIL" -eq 0 ]; then
     echo "S250: all smoke checks passed"

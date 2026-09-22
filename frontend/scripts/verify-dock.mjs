@@ -438,7 +438,8 @@ if (paraCount) {
       // Start on Sections, so the jump to the source has somewhere to move from.
       const sectionsTab = page.getByRole("button", { name: "Sections", exact: true })
       if (await sectionsTab.count()) await sectionsTab.first().click()
-      const practiceTab = page.getByRole("button", { name: "Practice", exact: true })
+      // The panel tab, not a section row's Practice button, which starts a Feynman session.
+      const practiceTab =page.locator("button[aria-pressed]").filter({ hasText: /^Practice$/ })
       if (await practiceTab.count()) await practiceTab.first().click()
       await page.waitForTimeout(2000)
 
@@ -457,7 +458,7 @@ if (paraCount) {
           .locator('[data-testid="docked-session-history"] input[type="checkbox"]')
           .count()
         const reported = await fetch(
-          `${API}/study/sessions?document_id=${docId}&page=1&page_size=50`,
+          `${API}/study/sessions?document_id=${practicable.id}&page=1&page_size=50`,
         )
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null)
@@ -536,7 +537,7 @@ if (paraCount) {
         // the running card had replaced.
         await page.goto(`${APP}/library?doc=${practicable.id}`, { waitUntil: "domcontentloaded" })
         await page.waitForTimeout(3000)
-        const toPractice = page.getByRole("button", { name: "Practice", exact: true })
+        const toPractice = page.locator("button[aria-pressed]").filter({ hasText: /^Practice$/ })
         if (await toPractice.count()) await toPractice.first().click()
         await page.waitForTimeout(2000)
         const startExplain = page.locator('[data-testid="start-explain"]')
@@ -764,7 +765,7 @@ if (paraCount) {
       if (ranSessionId !== null) {
         await page.goto(`${APP}/library?doc=${practicable.id}`, { waitUntil: "domcontentloaded" })
         await page.waitForTimeout(3000)
-        const backToPractice = page.getByRole("button", { name: "Practice", exact: true })
+        const backToPractice = page.locator("button[aria-pressed]").filter({ hasText: /^Practice$/ })
         if (await backToPractice.count()) await backToPractice.first().click()
         await page.waitForTimeout(2000)
         // The model that writes the cards is nameable from here. "Auto" follows

@@ -13,8 +13,9 @@
 #   2. a wrong key is refused whatever the configuration
 #   3. where a key IS configured, the route works and reports its queue
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
-BASE="${BASE:-http://localhost:7820}"
 fail() { echo "FAIL: $1"; exit 1; }
 
 BODY=$(mktemp)
@@ -34,7 +35,7 @@ if [ "$STATUS_NONE" = "403" ]; then
   grep -q "disabled" "$BODY" \
     || fail "403 without saying admin routes are disabled: $(head -c 200 "$BODY")"
   echo "  no key: admin routes disabled (403), which is the closed default"
-  echo "SKIP: ADMIN_KEY is not configured, so the reindex path itself is not exercised"
+  echo "  NOT EXERCISED: ADMIN_KEY is not configured, so the reindex path itself is not run"
   echo "S170 smoke: all checks passed"
   exit 0
 fi

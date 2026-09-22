@@ -1,6 +1,12 @@
-"""Manifest helpers: maps source_file -> document_id and ingestion plumbing."""
+"""Manifest helpers: maps source_file -> document_id and ingestion plumbing.
+
+The manifest is a local, untracked cache. A document id belongs to one database,
+so a committed copy described one machine and every run against another backend
+rewrote it (#143). Stale entries re-resolve by filename in `ensure_ingested`.
+"""
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -16,7 +22,9 @@ _USABLE_STAGES = frozenset(
 )
 
 GOLDEN_DIR = Path(__file__).resolve().parent.parent / "golden"
-MANIFEST_PATH = GOLDEN_DIR / "manifest.json"
+# Maps source files to one database's document ids (#143); see scoring_history.
+_STATE_DIR = os.environ.get("LUMINARY_EVAL_STATE_DIR")
+MANIFEST_PATH = (Path(_STATE_DIR) if _STATE_DIR else GOLDEN_DIR) / "manifest.json"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
@@ -64,7 +72,7 @@ def is_document_alive(backend_url: str, doc_id: str) -> bool:
 
     Raises BackendUnreachableError when the backend cannot be reached. The
     caller drops manifest entries for documents the backend says are gone, and
-    the manifest is committed: treating "cannot connect" as "not there" rewrote
+    the manifest persists between runs: treating "cannot connect" as "not there" rewrote
     the goldens on a transient failure, after which the run scored 0.00 rather
     than reporting that nothing had been queried.
     """

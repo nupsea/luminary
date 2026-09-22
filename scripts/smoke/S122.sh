@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-API="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
+# A 200 queues a real download from youtube.com.
+smoke_requires_internet
 
 echo "S122: checking /documents/ingest-url endpoint exists..."
 resp=$(curl -s -o /dev/null -w "%{http_code}" \
-  -X POST "${API}/documents/ingest-url" \
+  -X POST "${BASE}/documents/ingest-url" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"}')
 

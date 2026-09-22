@@ -3,8 +3,7 @@
 # Verifies that POST /study/teachback returns 404 for an unknown flashcard_id
 # (i.e. the endpoint is reachable and returns the expected status for bad input).
 set -euo pipefail
-
-BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
   -X POST "${BASE}/study/teachback" \

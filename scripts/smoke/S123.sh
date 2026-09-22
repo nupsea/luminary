@@ -2,8 +2,7 @@
 # Smoke test for S123: EPUB and Kindle ingestion
 # Calls localhost:7820 over real HTTP. No mocking.
 set -euo pipefail
-
-BASE_URL="${BASE_URL:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 echo "S123 smoke: Kindle My Clippings.txt ingest"
 
@@ -30,21 +29,21 @@ The universe is governed by scientific laws.
 CLIPPINGS
 
 # POST to ingest-kindle
-HTTP_STATUS=$(curl -s -o /tmp/s123_response.json -w "%{http_code}" \
-  -X POST "${BASE_URL}/documents/ingest-kindle" \
+HTTP_STATUS=$(curl -s -o $SMOKE_TMP/s123_response.json -w "%{http_code}" \
+  -X POST "${BASE}/documents/ingest-kindle" \
   -F "file=@${TMPFILE};filename=My Clippings.txt;type=text/plain")
 
 
 if [ "$HTTP_STATUS" != "200" ]; then
   echo "FAIL: ingest-kindle returned HTTP $HTTP_STATUS"
-  cat /tmp/s123_response.json
+  cat $SMOKE_TMP/s123_response.json
   exit 1
 fi
 
-BOOK_COUNT=$(python3 -c "import json,sys; d=json.load(open('/tmp/s123_response.json')); print(d.get('book_count',0))")
+BOOK_COUNT=$(python3 -c "import json,sys; d=json.load(open('$SMOKE_TMP/s123_response.json')); print(d.get('book_count',0))")
 if [ "$BOOK_COUNT" -lt 1 ]; then
   echo "FAIL: book_count=$BOOK_COUNT, expected >= 1"
-  cat /tmp/s123_response.json
+  cat $SMOKE_TMP/s123_response.json
   exit 1
 fi
 

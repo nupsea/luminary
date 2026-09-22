@@ -20,8 +20,8 @@
 # that actually stopped the backend would take every later script with it, and
 # the accepting path is covered by tests/test_shutdown_endpoint.py.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${BASE:-http://localhost:7820}"
 FAIL=0
 
 check() {

@@ -45,6 +45,12 @@ def spa_dist() -> Path:
     return app_root() / "frontend" / "dist"
 
 
+def engine_source_path() -> Path:
+    """Written by `scripts/desktop/stage_ollama.sh`. Absent (source checkout, macOS)
+    means no downloadable runner to offer, never an error."""
+    return app_root() / "ollama" / "engine-source.json"
+
+
 def alembic_ini() -> Path:
     return backend_root() / "alembic.ini"
 

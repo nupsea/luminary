@@ -79,19 +79,38 @@ def compute_hit_rate_5(samples: list[dict]) -> float:
     return hits / len(samples)
 
 
-def arm_metrics(samples: list[dict]) -> dict[str, float | int]:
+def count_search_failures(samples: list[dict]) -> int:
+    """Samples whose /search request failed, marked ``search_failed`` by the caller."""
+    return sum(1 for s in samples if s.get("search_failed"))
+
+
+def arm_metrics(samples: list[dict]) -> dict[str, float | int | None]:
     """Every metric one ablation arm reports.
 
     boundary_misses belongs in this set rather than at the call site. An arm is
     what a retrieval change is chosen on, and HR@5 alone cannot say whether an
     arm missed because ranking failed or because the chunker split the hint --
     the second moves with chunk size and is not a funnel property at all.
+
+    One failed search leaves every rate uncomputed (None), never a score over
+    the rest: a timed-out request scored as a miss once read HR@5 0.0000 on a
+    loaded host and 0.35 on the same corpus idle, and neither was retrieval.
     """
+    failures = count_search_failures(samples)
+    if failures:
+        return {
+            "hit_rate_5": None,
+            "mrr": None,
+            "ndcg_10": None,
+            "boundary_misses": None,
+            "search_failures": failures,
+        }
     return {
         "hit_rate_5": compute_hit_rate_5(samples),
         "mrr": compute_mrr(samples),
         "ndcg_10": compute_ndcg_10(samples),
         "boundary_misses": count_boundary_misses(samples),
+        "search_failures": 0,
     }
 
 

@@ -3,8 +3,8 @@
 # Tests GET /graph/{doc_id}?include_notes=true/false and GET /graph?include_notes=true
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
 echo "=== S172 Smoke Test: Note nodes in Viz graph ==="
 

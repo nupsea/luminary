@@ -4,8 +4,8 @@ import { useEffect, useState } from "react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { apiGet } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
+import { modelUnavailableMessage } from "@/lib/engineModes"
 import { cn } from "@/lib/utils"
-import { useAppStore } from "@/store"
 
 import { ConversationNotes } from "./ConversationNotes"
 import { ReferencesPanel } from "./ReferencesPanel"
@@ -39,7 +39,6 @@ export function SummaryPanel({ documentId, contentType, form }: SummaryPanelProp
   ]
 
   const [activeTab, setActiveTab] = useState<PanelTab>(summaryTabs[0]?.mode as PanelTab)
-  const llmMode = useAppStore((s) => s.llmMode)
   const [summaries, setSummaries] = useState<SummaryMap>({})
   const [streaming, setStreaming] = useState<StreamingMap>({})
   const [summaryError, setSummaryError] = useState<string | null>(null)
@@ -116,11 +115,9 @@ export function SummaryPanel({ documentId, contentType, form }: SummaryPanelProp
               }
               if (payload["error"] === "llm_unavailable") {
                 setSummaryError(
-                  typeof payload["message"] === "string"
-                    ? payload["message"]
-                    : (llmMode === "private"
-                        ? "Ollama is not running. Start it with: ollama serve"
-                        : "LLM service is unreachable. Please check your internet connection or settings.")
+                  modelUnavailableMessage(
+                    typeof payload["message"] === "string" ? payload["message"] : null,
+                  ),
                 )
               }
               if (payload["done"] === true) {
@@ -134,11 +131,7 @@ export function SummaryPanel({ documentId, contentType, form }: SummaryPanelProp
       }
     } catch {
       setStreaming((s) => ({ ...s, [mode]: false }))
-      setSummaryError(
-        llmMode === "private"
-          ? "Ollama is not running. Start it with: ollama serve"
-          : "LLM service is unreachable. Please check your internet connection or settings."
-      )
+      setSummaryError(modelUnavailableMessage(null))
     }
   }
 

@@ -71,43 +71,9 @@ done < <(find "$STAGE" -type l)
 [ "$bad" = 0 ] && _pass "symlinks are relative and resolve"
 
 _step "4. Native imports (unsigned surface)"
-"$PY" -I - <<'PYEOF'
-import importlib, importlib.util, sys
-
-# Everything the shipped bundle must be able to import.
-required = ["numpy", "scipy", "sklearn", "torch", "onnxruntime", "transformers",
-            "sentence_transformers", "gliner", "lancedb", "pyarrow",
-            "kuzu", "fitz", "PIL", "litellm", "langgraph", "keyring",
-            "fastapi", "uvicorn", "alembic", "sqlalchemy", "aiosqlite",
-            "yt_dlp", "trafilatura", "tree_sitter", "cloudscraper", "pip"]
-
-# Packages that must NOT be here. `av` and its dependants carry libx264/libx265
-# (GPL-2.0-or-later) inside their wheels, and Luminary ships Apache-2.0 -- they
-# are installed after the fact as the `transcription` component, never bundled.
-# `optimum`/`onnx` are simply unused; they cost ~49MB when they crept in.
-# NOT sympy, though it is 72MB and arrives only as a torch dependency: `import
-# torch` does not load it, but `import transformers` pulls `torch.fx`, which
-# does. Dropping it from the shipping set broke transformers, sentence_transformers
-# and gliner at once -- this check is what caught it.
-forbidden = ["av", "faster_whisper", "ctranslate2", "optimum", "onnx"]
-
-bad = []
-for m in required:
-    try:
-        importlib.import_module(m)
-    except Exception as e:
-        bad.append(f"missing {m}: {type(e).__name__}: {e}")
-for m in forbidden:
-    if importlib.util.find_spec(m) is not None:
-        bad.append(f"{m} must not ship in the bundle")
-
-print(f"    {len(required) - len([b for b in bad if b.startswith('missing')])}"
-      f"/{len(required)} required present, {len(forbidden)} excluded")
-if bad:
-    print("\n".join("    " + b for b in bad), file=sys.stderr)
-    sys.exit(1)
-PYEOF
-[ $? -eq 0 ] && _pass "dependency set is exactly as shipped" || _fail "dependency set is wrong"
+# The list is shared with the Windows and Linux verifiers.
+"$PY" -I "$REPO_ROOT/scripts/desktop/verify_imports.py" \
+    && _pass "dependency set is exactly as shipped" || _fail "dependency set is wrong"
 
 _step "5. Backend imports through the .pth"
 # This single import transitively proves: _luminary.pth resolved, the backend
@@ -171,6 +137,14 @@ if newer="$(find "$STAGE" -type f -newer "$STAGE/surface-manifest.json" ! -path 
     [ -z "$newer" ] && _pass "stage untouched by the boot test" \
         || { _fail "files written inside the stage during boot:"; echo "$newer" >&2; }
 fi
+
+_step "9. Stage size"
+# Reported, never gated, and there is deliberately no path-length step here.
+# The two budgets in scripts/desktop/lib.sh exist for Windows: NSIS cannot pack
+# past ~2GB, and MAX_PATH is 260. A DMG has neither ceiling and APFS takes
+# paths far longer than anything we stage, so a budget here would be a number
+# with no failure case behind it. macOS still gets the payload prunes.
+_pass "$(du -sm "$STAGE" | cut -f1)MB (no budget on macOS -- reported so growth is visible)"
 
 echo
 [ "$FAILED" = 0 ] && printf '\033[1;32mstage verified\033[0m\n' || printf '\033[1;31mstage verification FAILED\033[0m\n'

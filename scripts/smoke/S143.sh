@@ -2,8 +2,7 @@
 # Smoke test for S143: learning objectives tracking.
 # Verifies GET /documents/{id}/progress returns 200 with expected schema.
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 # 1. Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")
@@ -32,7 +31,7 @@ rm -f "${TMPFILE}"
 
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: no documents ingested yet"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 # 3. GET /documents/{id}/progress must return 200 with required fields

@@ -41,7 +41,7 @@ Output: `evals/golden/NAME.jsonl` (verified pairs, persona-tagged) and
 ## 2. Ingest the corpus
 
 Retrieval/topic metrics need the document indexed in the backend. The runners
-auto-ingest on first use and cache the doc id in `evals/golden/manifest.json`,
+auto-ingest on first use and cache the doc id in `evals/golden/manifest.json` (local, untracked),
 so this usually happens automatically. To do it explicitly, drop the file in the
 library or let `make eval-d2l` ingest it on first run.
 

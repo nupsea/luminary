@@ -2,14 +2,14 @@
 # Smoke test for S187: Chat document-aware contextual recommendations
 # smoke-expects-absent: /chat/confusion-signals
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
 PASS=0
 FAIL=0
 
 check() {
   local desc="$1" url="$2" expected_status="$3" body_check="${4:-}"
-  TMPFILE=$(mktemp /tmp/s187_XXXXXX)
+  TMPFILE=$(mktemp $SMOKE_TMP/s187_XXXXXX)
   HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$url")
   BODY=$(cat "$TMPFILE")
   rm -f "$TMPFILE"
@@ -49,7 +49,7 @@ check "GET /chat/suggestions with an unknown document_id returns no pills" \
   "assert d.get('suggestions') == []"
 
 # AC7: GET /chat/confusion-signals should return 404 (endpoint removed)
-TMPFILE=$(mktemp /tmp/s187_XXXXXX)
+TMPFILE=$(mktemp $SMOKE_TMP/s187_XXXXXX)
 HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/chat/confusion-signals")
 rm -f "$TMPFILE"
 if [ "$HTTP_CODE" = "404" ] || [ "$HTTP_CODE" = "405" ]; then

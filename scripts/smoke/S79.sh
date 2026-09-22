@@ -4,9 +4,9 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
-TMP_FILE="/tmp/s79_qa.txt"
+TMP_FILE="$SMOKE_TMP/s79_qa.txt"
 
 echo "POSTing question to /qa ..."
 START_TIME=$(date +%s)

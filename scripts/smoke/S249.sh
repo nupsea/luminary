@@ -18,8 +18,8 @@
 #
 # Non-destructive: every call names a document id that does not exist.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${BASE:-http://localhost:7820}"
 FAIL=0
 
 check() {
@@ -35,7 +35,7 @@ check() {
 HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/health")
 check "backend healthy" "200" "$HTTP"
 
-check "the delete contract carries both counts" "ok" "$(curl -s "$BASE/openapi.json" | python3 -c "
+check "the delete contract carries both counts" "ok" "$(smoke_openapi | python3 -c "
 import sys, json
 spec = json.load(sys.stdin)
 delete = spec['paths']['/flashcards/document/{document_id}']['delete']

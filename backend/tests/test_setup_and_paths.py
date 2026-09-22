@@ -658,3 +658,31 @@ def test_unknown_component_is_reported_not_raised():
     events = asyncio.run(_run())
     assert events == [{"state": "failed", "detail": "unknown component: nope"}]
     assert get_component("nope") is None
+
+
+async def test_component_probes_run_off_the_event_loop(monkeypatch):
+    """The Whisper weights probe imports faster_whisper, torch and transformers.
+
+    Run on the loop it stalled every request, /health included, 10-16s at start-up.
+    """
+    import threading
+
+    loop_thread = threading.get_ident()
+    probed_on: list[int] = []
+
+    def probe() -> bool:
+        probed_on.append(threading.get_ident())
+        return True
+
+    async def no_models() -> set[str]:
+        return set()
+
+    monkeypatch.setattr(components_module, "_installed_ollama_models", no_models)
+    monkeypatch.setattr(components_module.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(components_module, "_EXTRA_WEIGHTS", {"transcription": (probe, None)})
+
+    status = await components_module.component_status()
+
+    assert probed_on, "the weights probe never ran, so this test checked nothing"
+    assert loop_thread not in probed_on
+    assert next(c for c in status if c["id"] == "transcription")["installed"] is True

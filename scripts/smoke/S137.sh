@@ -4,14 +4,13 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 # BSD mktemp only substitutes Xs at the END of a template, so
 # `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
 # once per machine and then failed "File exists" forever. One per-run directory
 # keeps the extensions -- uploads are validated on them -- and cleans up itself.
 SMOKE_TMPDIR=$(mktemp -d)
-
-BASE="http://localhost:7820"
 
 # 1. Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")
@@ -98,20 +97,8 @@ fi
 cleanup_doc() { curl -s -o /dev/null -X DELETE "${BASE}/documents/${DOC_ID}" || true; rm -rf "$SMOKE_TMPDIR"; }
 trap cleanup_doc EXIT
 
-# Ingestion is asynchronous: /documents/ingest answers `{"document_id", "status":
-# "processing"}` and the pipeline runs behind it. A fixed `sleep 3` was a guess
-# that passed or failed with the machine; poll the stage instead.
 echo "Ingested document id=${DOC_ID}, waiting for stage=complete..."
-for _ in $(seq 1 60); do
-  STAGE=$(curl -s "${BASE}/documents/${DOC_ID}" \
-    | python3 -c "import json,sys; print(json.load(sys.stdin).get('stage',''))" 2>/dev/null || echo "")
-  [ "$STAGE" = "complete" ] && break
-  sleep 2
-done
-if [ "$STAGE" != "complete" ]; then
-  echo "FAIL: document did not reach stage=complete (last stage: ${STAGE:-unknown})"
-  exit 1
-fi
+smoke_wait_complete "$DOC_ID"
 
 # 3. POST /flashcards/generate-technical
 RESULT_TMPFILE=$(mktemp)

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S72: Monitoring tab — Arize Phoenix distributed tracing link
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 BACKEND_DIR="$(cd "$(dirname "$0")/../../backend" && pwd)"
 

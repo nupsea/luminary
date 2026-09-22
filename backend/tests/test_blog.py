@@ -78,6 +78,31 @@ def test_transform_drops_links_strips_diagrams_registers_assets():
     assert draft.warnings  # note-link + mermaid + image notices
 
 
+def test_render_sized_images_floats_small_leaves_others_alone():
+    md = (
+        "before\n\n"
+        '![Pasted Image|small](/blog/p/asset1.png)\n\n'
+        '![Pasted Image|medium](/blog/p/asset2.png)\n\n'
+        "![diagram](/blog/p/diagram1.svg)\n\n"
+        "![no size hint](/blog/p/asset3.png)\n"
+    )
+    out = blog_service.render_sized_images(md)
+
+    assert "![Pasted Image|small]" not in out
+    assert '<img src="/blog/p/asset1.png" alt="Pasted Image" style="float:right' in out
+    assert '<img src="/blog/p/asset2.png" alt="Pasted Image" style="display:block' in out
+    # untouched: no recognised size suffix
+    assert "![diagram](/blog/p/diagram1.svg)" in out
+    assert "![no size hint](/blog/p/asset3.png)" in out
+
+
+def test_render_sized_images_escapes_html_special_chars():
+    md = '![Alt & <text>|small](/blog/p/a.png?x=1&y="2")\n'
+    out = blog_service.render_sized_images(md)
+    assert "alt=\"Alt &amp; &lt;text&gt;\"" in out
+    assert "&amp;y=" in out
+
+
 async def test_push_and_ahead_count(tmp_path):
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "--bare", "-q", str(origin)], check=True)
@@ -224,6 +249,40 @@ def test_publish_flow_writes_commits_no_push(client, blog_repo):
         },
     )
     assert resp2.status_code == 409
+
+
+def test_publish_applies_image_size_hint_to_written_file(client, blog_repo):
+    """The `|small` hint means nothing to plain Markdown; publish must convert
+    it to an inline-styled <img> so the actual .md file on disk floats the
+    image instead of rendering it at full prose width."""
+    note_id = client.post(
+        "/notes", json={"content": "# Card Post\n\nSome text.\n", "tags": []}
+    ).json()["id"]
+    draft = client.post("/blog/draft", json={"note_id": note_id}).json()
+
+    body = (
+        "Some text before.\n\n"
+        f"![Pasted Image|small](/blog/{draft['slug']}/hero-card.png)\n\n"
+        "More text after.\n"
+    )
+    resp = client.post(
+        "/blog/publish",
+        json={
+            "note_id": note_id,
+            "slug": draft["slug"],
+            "title": draft["title"],
+            "description": "A short description.",
+            "pub_date": draft["pub_date"],
+            "markdown": body,
+            "overwrite": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    written = (blog_repo / "src/content/blog" / f"{draft['slug']}.md").read_text()
+    assert "![Pasted Image|small]" not in written
+    assert f'<img src="/blog/{draft["slug"]}/hero-card.png"' in written
+    assert "float:right" in written
 
 
 def test_posts_list_get_update_delete_lifecycle(client, blog_repo):
@@ -442,6 +501,99 @@ def test_suggest_description_keeps_note_content_local(client, monkeypatch):
     resp = client.post("/blog/suggest-description", json={"note_id": note_id})
     assert resp.status_code == 200
     assert seen["background"] is True
+
+
+# -- POST /blog/refine -------------------------------------------------------
+
+
+def test_refine_keeps_note_content_local(client, monkeypatch):
+    """Same privacy requirement as suggest-description: a click-triggered call
+    over the user's own note must never route to the cloud provider in hybrid
+    mode."""
+    seen: dict = {}
+
+    class _FakeLLM:
+        async def complete(self, **kwargs):
+            seen.update(kwargs)
+            return "Refined body."
+
+    from app.services import llm as llm_module
+
+    monkeypatch.setattr(llm_module, "get_llm_service", lambda: _FakeLLM())
+    note_id = client.post("/notes", json={"content": "# Draft\n\nrough text", "tags": []}).json()[
+        "id"
+    ]
+
+    resp = client.post("/blog/refine", json={"note_id": note_id})
+    assert resp.status_code == 200
+    assert resp.json()["refined_content"] == "Refined body."
+    assert seen["background"] is True
+
+
+def test_refine_sends_custom_instruction_when_given(client, monkeypatch):
+    seen: dict = {}
+
+    class _FakeLLM:
+        async def complete(self, **kwargs):
+            seen.update(kwargs)
+            return "Refined body."
+
+    from app.services import llm as llm_module
+
+    monkeypatch.setattr(llm_module, "get_llm_service", lambda: _FakeLLM())
+    note_id = client.post("/notes", json={"content": "rough text", "tags": []}).json()["id"]
+
+    resp = client.post(
+        "/blog/refine", json={"note_id": note_id, "instruction": "Make it punchier."}
+    )
+    assert resp.status_code == 200
+    user_msg = seen["messages"][1]["content"]
+    assert "Make it punchier." in user_msg
+    assert "rough text" in user_msg
+
+
+def test_refine_forwards_model_override_when_given(client, monkeypatch):
+    seen: dict = {}
+
+    class _FakeLLM:
+        async def complete(self, **kwargs):
+            seen.update(kwargs)
+            return "Refined body."
+
+    from app.services import llm as llm_module
+
+    monkeypatch.setattr(llm_module, "get_llm_service", lambda: _FakeLLM())
+    note_id = client.post("/notes", json={"content": "rough text", "tags": []}).json()["id"]
+
+    resp = client.post(
+        "/blog/refine", json={"note_id": note_id, "model": "ollama/qwen3.5:4b"}
+    )
+    assert resp.status_code == 200
+    assert seen["model"] == "ollama/qwen3.5:4b"
+
+
+def test_refine_rejects_output_that_drops_an_image_reference(client, monkeypatch):
+    """A grammar/structure pass must never lose the images the author placed.
+    Silently publishing that would strip a picture without telling anyone --
+    reject the output and leave the original note alone."""
+
+    class _FakeLLM:
+        async def complete(self, **kwargs):
+            return "Refined body with no images at all."
+
+    from app.services import llm as llm_module
+
+    monkeypatch.setattr(llm_module, "get_llm_service", lambda: _FakeLLM())
+    note_id = client.post(
+        "/notes",
+        json={
+            "content": "Body ![Pasted Image](__LUMINARY_IMG__/notes/abc.png) more text.",
+            "tags": [],
+        },
+    ).json()["id"]
+
+    resp = client.post("/blog/refine", json={"note_id": note_id})
+    assert resp.status_code == 502
 
 
 # -- GET /blog/drafts -------------------------------------------------------

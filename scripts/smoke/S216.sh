@@ -5,6 +5,7 @@
 # history persistence, and run_summary_eval.py CLI help.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"

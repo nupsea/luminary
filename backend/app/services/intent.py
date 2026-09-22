@@ -101,6 +101,102 @@ _NOTES_KWS: frozenset[str] = frozenset(
     }
 )
 
+# Words that phrase a notes question rather than name what it is about.
+_NOTES_FRAME_WORDS: frozenset[str] = frozenset(
+    {
+        "what",
+        "whats",
+        "what's",
+        "did",
+        "do",
+        "does",
+        "have",
+        "has",
+        "had",
+        "i",
+        "i've",
+        "ive",
+        "me",
+        "my",
+        "mine",
+        "note",
+        "noted",
+        "notes",
+        "noting",
+        "wrote",
+        "write",
+        "written",
+        "writing",
+        "jotted",
+        "about",
+        "on",
+        "regarding",
+        "concerning",
+        "in",
+        "from",
+        "to",
+        "of",
+        "for",
+        "according",
+        "the",
+        "a",
+        "an",
+        "any",
+        "all",
+        "some",
+        "is",
+        "are",
+        "was",
+        "were",
+        "been",
+        "there",
+        "say",
+        "said",
+        "tell",
+        "show",
+        "list",
+        "give",
+        "can",
+        "could",
+        "you",
+        "please",
+    }
+)
+
+# Subjects that cover the notes as a whole: in a reading tool every note is a reading
+# note. "what did I note about my reading" leaves only "reading" (generic); "about my
+# reading of Hamlet" leaves "hamlet" (specific), which must still search (#141).
+_GENERIC_NOTE_SUBJECTS: frozenset[str] = frozenset(
+    {
+        "reading",
+        "read",
+        "readings",
+        "study",
+        "studying",
+        "studies",
+        "learning",
+        "anything",
+        "everything",
+        "stuff",
+        "things",
+        "lately",
+        "recently",
+        "recent",
+        "so",
+        "far",
+        "today",
+        "week",
+        "month",
+    }
+)
+
+
+def notes_subject_is_generic(question: str) -> bool:
+    """True when a notes question names no subject beyond the notes themselves."""
+    words = re.findall(r"[a-z0-9']+", question.lower())
+    return all(w in _NOTES_FRAME_WORDS or w in _GENERIC_NOTE_SUBJECTS for w in words)
+
+
 _SUMMARY_KWS: frozenset[str] = frozenset(
     {
         # Explicit summary requests

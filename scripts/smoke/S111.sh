@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # S111 smoke: annotation create, list, delete
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 echo "S111 [1/5]: Find a document..."
 DOC_ID=$(curl -sf "${BASE}/documents?page_size=1" | python3 -c "
@@ -13,7 +12,7 @@ print(docs[0]['id']) if docs else print('')
 
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: No documents in library"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 SEC_ID=$(curl -sf "${BASE}/documents/${DOC_ID}" | python3 -c "
@@ -25,7 +24,7 @@ print(secs[0]['id']) if secs else print('')
 
 if [ -z "$SEC_ID" ]; then
   echo "SKIP: Document has no sections"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 echo "S111 [2/5]: POST /annotations -> 201..."

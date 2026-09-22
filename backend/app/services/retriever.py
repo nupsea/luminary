@@ -12,6 +12,7 @@ from app.services import query_spellcorrect as _spellcorrect_module
 from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
+from app.services.llm_admission import awaited
 from app.services.retriever_strategies import (  # noqa: F401
     _GRAPH_EXPAND_MAX_TOKENS,
     _diversify,
@@ -540,7 +541,8 @@ class HybridRetriever:
         vector_query = await _graph_expand(query) if graph_expand and strategy == "rrf" else query
         keyword_query = query
         if hyde:
-            vector_query = await _hyde_expand(vector_query)
+            with awaited():
+                vector_query = await _hyde_expand(vector_query)
             keyword_query = vector_query
 
         with trace_retrieval("hybrid", query=query) as span:

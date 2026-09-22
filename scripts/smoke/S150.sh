@@ -2,8 +2,7 @@
 # Smoke test for S150: Passage clips CRUD
 # Calls localhost:7820/clips over real HTTP using curl.
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 echo "S150 smoke: POST /clips"
 CREATE=$(curl -sf -X POST "$BASE/clips" \

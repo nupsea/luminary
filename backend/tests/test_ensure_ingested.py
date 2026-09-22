@@ -175,3 +175,41 @@ def test_ensure_ingested_skips_incomplete_stage(tmp_path, monkeypatch):
 
     assert result == new_doc_id
     mock_ingest.assert_called_once()
+
+
+def test_eval_state_dir_keeps_a_harness_run_out_of_the_developer_manifest(tmp_path):
+    """Smoke S212 evaluates a scratch backend; its ids must not land in the local cache.
+
+    Unisolated, a smoke run rewrote the developer's manifest with the scratch
+    backend's ids, and the next `make eval-ingest` reported three documents with
+    no chunks stored.
+    """
+    import os  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+
+    probe = (
+        "import evals.lib.manifest as m, evals.lib.scoring_history as h;"
+        "print(m.MANIFEST_PATH); print(h.SCORES_HISTORY_PATH)"
+    )
+
+    def paths(env_extra: dict) -> list[str]:
+        env = {k: v for k, v in os.environ.items() if k != "LUMINARY_EVAL_STATE_DIR"}
+        env.update(env_extra)
+        out = subprocess.run(
+            [sys.executable, "-c", probe],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return out.stdout.split()
+
+    isolated = paths({"LUMINARY_EVAL_STATE_DIR": str(tmp_path)})
+    assert isolated == [str(tmp_path / "manifest.json"), str(tmp_path / "scores_history.jsonl")]
+
+    default = paths({})
+    assert default == [
+        str(REPO_ROOT / "evals" / "golden" / "manifest.json"),
+        str(REPO_ROOT / "evals" / "scores_history.jsonl"),
+    ]

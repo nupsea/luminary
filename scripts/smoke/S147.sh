@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S147: SelectionActionBar -- POST /annotations endpoint.
 set -euo pipefail
-BASE="http://localhost:7820"
-
+source "$(dirname "$0")/lib.sh"
 # 1. Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")
 if [ "$HTTP_HEALTH" != "200" ]; then
@@ -15,7 +14,7 @@ DOCS=$(curl -s "${BASE}/documents?sort=newest&page=1&page_size=1")
 DOC_COUNT=$(echo "${DOCS}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('items',[])))" 2>/dev/null || echo "0")
 if [ "${DOC_COUNT}" = "0" ]; then
   echo "SKIP: no documents ingested -- cannot test POST /annotations"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 DOC_ID=$(echo "${DOCS}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['items'][0]['id'])" 2>/dev/null)
@@ -26,7 +25,7 @@ SECTION_ID=$(echo "${DOC_DETAIL}" | python3 -c "import sys,json; d=json.load(sys
 
 if [ -z "${SECTION_ID}" ]; then
   echo "SKIP: document has no sections -- cannot test POST /annotations"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 # 4. POST /annotations should accept a highlight payload

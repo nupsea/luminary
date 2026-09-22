@@ -155,9 +155,34 @@ def _alembic_config(connection):
 
 
 def _upgrade_head(connection) -> None:
-    from alembic import command  # noqa: PLC0415
+    from alembic.migration import MigrationContext  # noqa: PLC0415
+    from alembic.script import ScriptDirectory  # noqa: PLC0415
 
-    command.upgrade(_alembic_config(connection), "head")
+    from alembic import command, util  # noqa: PLC0415
+
+    cfg = _alembic_config(connection)
+    script = ScriptDirectory.from_config(cfg)
+    context = MigrationContext.configure(connection)
+    current_heads = context.get_current_heads()
+    for head in current_heads:
+        try:
+            script.get_revision(head)
+        except util.CommandError:
+            heads = script.get_heads()
+            fallback_head = heads[0] if heads else None
+            logger.warning(
+                "Database revision %s not found in current scripts (switched branch?); "
+                "resetting alembic_version to %s",
+                head,
+                fallback_head,
+            )
+            if fallback_head:
+                connection.execute(
+                    text("UPDATE alembic_version SET version_num = :head"),
+                    {"head": fallback_head},
+                )
+            break
+    command.upgrade(cfg, "head")
 
 
 def _stamp_baseline(connection) -> None:

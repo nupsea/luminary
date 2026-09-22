@@ -2,8 +2,7 @@
 # Smoke test for S114 - Struggling Cards endpoint
 # Requires: live backend at http://localhost:7820
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 echo "=== S114 smoke: Struggling Cards ==="
 

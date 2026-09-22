@@ -4,15 +4,15 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 FAIL=0
 
 qa_check() {
   local label="$1"
   local question="$2"
   local scope="${3:-all}"
-  local tmp_file="/tmp/s80_qa_${RANDOM}.txt"
+  local tmp_file="$SMOKE_TMP/s80_qa_${RANDOM}.txt"
 
   echo "Testing $label ..."
   # 180s for the reason S78 and S79 carry: a bound on a local generation is a

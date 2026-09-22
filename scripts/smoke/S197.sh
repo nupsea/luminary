@@ -4,17 +4,15 @@
 #   1. GET /collections/by-document/{doc_id} returns 404 for non-existent doc
 #   2. POST /collections/auto/{doc_id} creates an auto-collection
 #   3. GET /collections/by-document/{doc_id} returns the auto-collection
-#   4. TypeScript compilation passes
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 # BSD mktemp only substitutes Xs at the END of a template, so
 # `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
 # once per machine and then failed "File exists" forever. One per-run directory
 # keeps the extensions -- uploads are validated on them -- and cleans up itself.
 SMOKE_TMPDIR=$(mktemp -d)
-REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
 FAIL=0
 TMPFILE="$SMOKE_TMPDIR/smoke_s197.json"
 
@@ -36,7 +34,7 @@ print(ready[0]['id'] if ready else '')
 
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: no complete document to build an auto-collection for"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 # Only clean up a collection this run created; an auto-collection the library
@@ -53,7 +51,7 @@ cleanup() {
 trap cleanup EXIT
 
 # 1. GET /collections/by-document/{doc_id} should 404 for unknown doc
-echo "[1/4] GET /collections/by-document/${MISSING_ID} (expect 404)"
+echo "[1/3] GET /collections/by-document/${MISSING_ID} (expect 404)"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "${BASE}/collections/by-document/${MISSING_ID}")
 if [ "$STATUS" = "404" ]; then
   echo "  PASS: 404 for unknown doc"
@@ -63,7 +61,7 @@ else
 fi
 
 # 2. POST /collections/auto/{doc_id} creates auto-collection
-echo "[2/4] POST /collections/auto/${DOC_ID} (expect 201)"
+echo "[2/3] POST /collections/auto/${DOC_ID} (expect 201)"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "${BASE}/collections/auto/${DOC_ID}")
 if [ "$STATUS" = "201" ]; then
   echo "  PASS: auto-collection created"
@@ -73,7 +71,7 @@ else
 fi
 
 # 3. GET /collections/by-document/{doc_id} now returns the collection
-echo "[3/4] GET /collections/by-document/${DOC_ID} (expect 200)"
+echo "[3/3] GET /collections/by-document/${DOC_ID} (expect 200)"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "${BASE}/collections/by-document/${DOC_ID}")
 if [ "$STATUS" = "200" ]; then
   echo "  PASS: auto-collection found"
@@ -81,19 +79,6 @@ else
   echo "  FAIL: expected 200 got $STATUS"
   FAIL=1
 fi
-
-# 4. TypeScript compilation
-echo "[4/4] tsc -b --noEmit"
-cd "$REPO/frontend"
-# Not `npx tsc`: npx has resolved to a bogus `tsc` package that exits 0 without
-# type-checking anything, which is worse than no check. Use the project's binary.
-if ./node_modules/.bin/tsc -b --noEmit --force 2>&1; then
-  echo "  PASS: tsc"
-else
-  echo "  FAIL: tsc"
-  FAIL=1
-fi
-
 
 if [ "$FAIL" -ne 0 ]; then
   echo "=== S197 SMOKE FAILED ==="

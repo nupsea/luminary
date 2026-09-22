@@ -15,8 +15,8 @@
 #      suspends), otherwise one slot held back for interactive work
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
 fail() {
   echo "FAIL: $1"
@@ -34,7 +34,7 @@ print(items[0]['id'] if items else '')
 
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: S231 -- library is empty, no document to poll"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 curl -s "${BASE}/documents/${DOC_ID}/status" | python3 -c "

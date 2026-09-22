@@ -467,8 +467,16 @@ async def resummarize_documents_missing_summaries(limit: int = 20) -> int:
     Bounded per boot, because each document is one LLM call per section and a
     library that has never been summarised must not turn startup into an hours
     long job that competes with the user's first question.
+
+    Does nothing on a host that refuses the background model under the current
+    mode: every call would be refused, and a mode change that lifts the refusal
+    runs this again.
     """
     from app.models import DocumentModel  # noqa: PLC0415
+    from app.services.llm_routing import refusal  # noqa: PLC0415
+
+    if refusal("background") is not None:
+        return 0
 
     async with get_session_factory()() as session:
         summarised = select(SectionSummaryModel.document_id).distinct().scalar_subquery()

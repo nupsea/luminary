@@ -5,8 +5,7 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 # POST /qa with a vague-reference question (scope=all skips rewriting per spec).
 # Must return HTTP 200 with Content-Type: text/event-stream.

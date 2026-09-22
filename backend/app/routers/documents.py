@@ -118,7 +118,7 @@ from app.services.remote_source import (
     UningestibleRemoteContent,
     fetch_remote_document,
 )
-from app.services.summarizer import PREGENERATE_MODES
+from app.services.summarizer import PREGENERATE_MODES, get_summarization_service
 from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
 from app.types import DocumentProfile
@@ -1771,6 +1771,13 @@ async def get_document_asset(document_id: str, asset_path: str) -> Response:
     raise HTTPException(status_code=404, detail="Asset not found")
 
 
+def _schedule_library_summary_refresh() -> None:
+    """Regenerate the library summary that deleting a document dropped (#140)."""
+    task = asyncio.create_task(get_summarization_service().refresh_library_summary())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 @router.post("/bulk-delete", status_code=200)
 async def bulk_delete_documents(body: BulkDeleteRequest):
     """Delete multiple documents and their derived data by ID list."""
@@ -1792,6 +1799,8 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
         await asyncio.to_thread(svc.delete_kuzu_nodes, document_id)
         svc.delete_filesystem_assets(document_id)
         deleted.append(document_id)
+    if deleted:
+        _schedule_library_summary_refresh()
     logger.info("Bulk deleted documents", extra={"count": len(deleted)})
     return {"deleted": deleted, "count": len(deleted)}
 
@@ -1911,6 +1920,7 @@ async def delete_document(document_id: str):
     await asyncio.to_thread(svc.delete_lancedb_vectors, document_id)
     await asyncio.to_thread(svc.delete_kuzu_nodes, document_id)
     svc.delete_filesystem_assets(document_id)
+    _schedule_library_summary_refresh()
     logger.info("Deleted document %s", document_id)
 
 

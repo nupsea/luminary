@@ -1,17 +1,15 @@
 import logging
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from app.config import get_settings
+from app.services import model_prefetch
 from app.services.model_loading import MODEL_LOAD_LOCK
 
 logger = logging.getLogger(__name__)
 
-# Switch to a faster, lighter model for local-first performance.
-# bge-small-en-v1.5 is ~133MB (vs ~2.2GB for bge-m3) and extremely fast on CPU.
-MODEL_NAME = "BAAI/bge-small-en-v1.5"
+# bge-small-en-v1.5 is ~133MB (vs ~2.2GB for bge-m3) and fast on CPU.
+MODEL_NAME = model_prefetch.EMBEDDER_REPO
 BATCH_SIZE = 128  # Larger batches are more efficient for lighter models
 
 # bge-*-en-v1.5 is asymmetric: the query gets an instruction, the passage does
@@ -27,46 +25,25 @@ class EmbeddingService:
         logger.info("EmbeddingService created")
 
     def _load_model(self) -> None:
+        if self._model is not None:
+            return
+        cache_dir = model_prefetch.cache_dir(model_prefetch.spec_for("embedder"))
+        # Cache-only: setup downloads it (model_prefetch), never this path.
+        model_prefetch.require_snapshot(cache_dir, MODEL_NAME)
         # The lock must span the construction itself, not just the None check --
         # see app/services/model_loading.py.
         with MODEL_LOAD_LOCK:
             if self._model is not None:
                 return
-            settings = get_settings()
-            cache_dir = Path(settings.DATA_DIR).expanduser() / "models" / "bge-small"
-            cache_dir.mkdir(parents=True, exist_ok=True)
+            from sentence_transformers import SentenceTransformer  # noqa: PLC0415
 
-            # Use SentenceTransformer directly. It is highly optimized for CPU batching
-            # and manages its own internal thread pool more effectively than a raw
-            # ONNX loop for this specific task.
-            from sentence_transformers import SentenceTransformer
-
-            # Try loading locally first to prevent blocking name resolution attempts offline
-            try:
-                self._model = SentenceTransformer(
-                    MODEL_NAME,
-                    cache_folder=str(cache_dir),
-                    device="cpu",
-                    local_files_only=True,
-                )
-                logger.info("Loaded %s via SentenceTransformer (local cache)", MODEL_NAME)
-            except Exception as local_exc:
-                logger.debug(
-                    "Could not load %s locally (local_files_only=True), trying online: %s",
-                    MODEL_NAME,
-                    local_exc,
-                )
-                try:
-                    self._model = SentenceTransformer(
-                        MODEL_NAME,
-                        cache_folder=str(cache_dir),
-                        device="cpu",
-                        local_files_only=False,
-                    )
-                    logger.info("Loaded %s via SentenceTransformer (downloaded)", MODEL_NAME)
-                except Exception:
-                    logger.exception("Failed to load embedding model")
-                    raise
+            self._model = SentenceTransformer(
+                MODEL_NAME,
+                cache_folder=str(cache_dir),
+                device="cpu",
+                local_files_only=True,
+            )
+            logger.info("Loaded %s from the local cache", MODEL_NAME)
 
     def encode(self, texts: list[str]) -> list[list[float]]:
         """Encode texts into float embeddings in batches of BATCH_SIZE."""

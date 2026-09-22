@@ -18,10 +18,12 @@ import logging
 import re
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import DateTime, delete, exists, func, insert, literal, select
 
 from app.database import get_session_factory
+from app.exceptions import DependencyUnavailable
 from app.models import (
     ChunkModel,
     DocumentModel,
@@ -425,18 +427,34 @@ class SummarizationService:
             )
             return result.scalar_one_or_none()
 
-    async def _store_summary(self, document_id: str, mode: str, content: str) -> str:
+    async def _store_summary(self, document_id: str, mode: str, content: str) -> str | None:
+        """Store a summary, or nothing if the document was deleted while it was generated.
+
+        Summarisation runs as a background task that deleting the document does not
+        cancel, so the existence check and the insert are one statement: a separate
+        check could pass just before the delete commits. Returns None when skipped.
+        """
         summary_id = str(uuid.uuid4())
+        row = select(
+            literal(summary_id),
+            literal(document_id),
+            literal(mode),
+            literal(content),
+            literal(datetime.now(UTC), DateTime),
+        ).where(exists().where(DocumentModel.id == document_id))
         async with get_session_factory()() as session:
-            session.add(
-                SummaryModel(
-                    id=summary_id,
-                    document_id=document_id,
-                    mode=mode,
-                    content=content,
+            result = await session.execute(
+                insert(SummaryModel).from_select(
+                    ["id", "document_id", "mode", "content", "created_at"], row
                 )
             )
             await session.commit()
+        if not result.rowcount:
+            logger.info(
+                "summary not stored: document was deleted",
+                extra={"document_id": document_id, "mode": mode},
+            )
+            return None
         return summary_id
 
     def _chunk_into_batches(self, chunks: list[ChunkModel]) -> list[list[ChunkModel]]:
@@ -780,7 +798,9 @@ class SummarizationService:
                 extra={"document_id": document_id, "mode": mode},
                 exc_info=exc,
             )
-            if isinstance(exc, ValueError):
+            if isinstance(exc, DependencyUnavailable):
+                msg = exc.detail
+            elif isinstance(exc, ValueError):
                 msg = "LLM provider not configured. Add your API key in Settings."
             elif isinstance(exc, LLMAuthenticationError):
                 msg = "LLM API key is invalid. Check your key in Settings."
@@ -955,11 +975,39 @@ class SummarizationService:
             )
             return result.scalar_one_or_none()
 
-    async def _store_library_summary(self, mode: str, content: str) -> str:
+    async def _store_library_summary(
+        self, mode: str, content: str, source_ids: list[str]
+    ) -> str | None:
+        """Store a library summary, or nothing if any source document was deleted meanwhile.
+
+        Deleting a document drops the cached library summary, so one generated
+        from it must not be written back afterwards. One statement for the same
+        reason as `_store_summary`. Returns None when skipped.
+        """
         summary_id = str(uuid.uuid4())
+        wanted = set(source_ids)
+        live = (
+            select(func.count())
+            .select_from(DocumentModel)
+            .where(DocumentModel.id.in_(wanted))
+            .scalar_subquery()
+        )
+        row = select(
+            literal(summary_id),
+            literal(mode),
+            literal(content),
+            literal(datetime.now(UTC), DateTime),
+        ).where(live == len(wanted))
         async with get_session_factory()() as session:
-            session.add(LibrarySummaryModel(id=summary_id, mode=mode, content=content))
+            result = await session.execute(
+                insert(LibrarySummaryModel).from_select(
+                    ["id", "mode", "content", "created_at"], row
+                )
+            )
             await session.commit()
+        if not result.rowcount:
+            logger.info("library summary not stored: a source document was deleted")
+            return None
         return summary_id
 
     async def _fetch_all_executive_summaries(self) -> dict[str, str]:
@@ -976,7 +1024,10 @@ class SummarizationService:
                     SummaryModel.mode,
                     SummaryModel.content,
                     SummaryModel.created_at,
-                ).order_by(SummaryModel.created_at.desc())
+                )
+                # A summary that outlived its document must not describe the library.
+                .join(DocumentModel, DocumentModel.id == SummaryModel.document_id)
+                .order_by(SummaryModel.created_at.desc())
             )
             # best[doc_id] = (priority, content)
             best: dict[str, tuple[int, str]] = {}
@@ -1059,7 +1110,7 @@ class SummarizationService:
             if len(exec_summaries) == 1:
                 # Single-document library: serve that document's executive summary directly
                 doc_id, content = next(iter(exec_summaries.items()))
-                summary_id = await self._store_library_summary(mode, content)
+                summary_id = await self._store_library_summary(mode, content, [doc_id])
                 yield f"data: {json.dumps({'token': content})}\n\n"
                 yield f"data: {
                     json.dumps({'done': True, 'summary_id': summary_id, 'cached': False})
@@ -1126,7 +1177,7 @@ class SummarizationService:
                 yield f"data: {json.dumps({'token': token})}\n\n"
 
             summary_text = "".join(collected)
-            summary_id = await self._store_library_summary(mode, summary_text)
+            summary_id = await self._store_library_summary(mode, summary_text, doc_ids)
             done_evt = {"done": True, "summary_id": summary_id, "cached": False}
             yield f"data: {json.dumps(done_evt)}\n\n"
 
@@ -1158,6 +1209,11 @@ class SummarizationService:
         wins the moment it exists and never before. A summary one document out of
         date is worth more than no summary at all.
         """
+        from app.services.llm_routing import refusal  # noqa: PLC0415
+
+        if refusal("background") is not None:
+            logger.info("library summary refresh: not run, this host refuses the background model")
+            return
         try:
             async for _ in self.stream_library_summary(
                 mode="executive", model=None, force_refresh=True, background=True

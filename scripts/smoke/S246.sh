@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S246: GET /settings/llm/routing -- where each unit of work runs
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 echo "=== S246 Smoke: LLM routing report ==="
 
@@ -57,11 +56,14 @@ if missing:
     sys.exit(f'FAIL: work rows missing: {sorted(missing)}')
 
 for w in d['work']:
-    for key in ('id', 'label', 'model', 'on_device', 'routable', 'why'):
+    for key in ('id', 'label', 'model', 'on_device', 'routable', 'why', 'refused_reason'):
         if key not in w:
             sys.exit(f'FAIL: work row {w.get(\"id\")!r} missing {key!r}')
     if not isinstance(w['on_device'], bool) or not isinstance(w['routable'], bool):
         sys.exit(f'FAIL: work row {w[\"id\"]!r} has a non-boolean flag')
+    # A refused row names a local model this host will not run; nothing is sent for it.
+    if w['refused_reason'] is not None and not w['on_device']:
+        sys.exit(f'FAIL: work row {w[\"id\"]!r} is refused yet reported as leaving the machine')
 
 derived = sorted(w['id'] for w in d['work'] if not w['on_device'])
 if derived != sorted(d['leaves_device']):

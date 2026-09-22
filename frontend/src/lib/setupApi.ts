@@ -46,7 +46,7 @@ export interface Component {
   id: string
   label: string
   description: string
-  kind: "ollama_model" | "python_extra" | "tool"
+  kind: "ollama_model" | "python_extra" | "tool" | "engine_runner"
   ref: string
   size_bytes: number
   licence: string

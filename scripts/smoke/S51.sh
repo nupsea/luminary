@@ -3,8 +3,7 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 # 1. GET /study/due — must return 200 with JSON array
 BODY=$(curl -sf "${BASE}/study/due?limit=1")

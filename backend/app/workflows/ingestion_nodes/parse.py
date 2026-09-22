@@ -15,6 +15,7 @@ import logging
 from pathlib import Path
 
 from app.services.content_classifier import classify_content, classify_form
+from app.services.llm_admission import awaited
 from app.telemetry import trace_ingestion_node
 from app.types import TECHNICAL_CONTENT_TYPES, DocumentProfile, register_for_form
 from app.workflows.ingestion_nodes._shared import (
@@ -131,6 +132,9 @@ async def classify_node(state: IngestionState) -> IngestionState:
     # Fast-path: content_type was provided by the user — skip all heuristics and LLM.
     # Classification only runs for legacy paths where content_type is unknown.
     provided = state.get("content_type")
+    if provided not in ("audio", "video"):
+        # Before the classify probes, which queue behind other LLM work (#142).
+        await _update_stage(state["document_id"], "classifying")
     if provided is not None:
         if provided == "technical":
             pd = state.get("parsed_document")
@@ -185,13 +189,15 @@ async def classify_node(state: IngestionState) -> IngestionState:
         return {**state, "is_technical": is_technical, "status": "chunking"}
     with trace_ingestion_node("classify", state):
         try:
-            await _update_stage(state["document_id"], "classifying")
             pd = state["parsed_document"]
-            if pd is None:
-                return {**state, "content_type": "notes", "status": "chunking"}
             fp_obj = Path(state["file_path"])
             file_ext = fp_obj.suffix.lstrip(".")
             filename = fp_obj.name
+            if pd is None:
+                # Media has no text until transcribe_node, which runs only for
+                # audio/video: labelled `notes`, a file completed with no chunks.
+                media = classify_content("", [], 0, file_ext.lower(), filename)
+                return {**state, "content_type": media, "status": "chunking"}
             content_type = classify_content(
                 pd["raw_text"], pd["sections"], pd["word_count"], file_ext, filename
             )
@@ -214,7 +220,8 @@ async def classify_node(state: IngestionState) -> IngestionState:
                         f"Document snippet (first 2000 chars):\n{snippet}\n\n"
                         "Reply with exactly one word from the list above."
                     )
-                    llm_result = await get_llm_service().generate(prompt, background=True)
+                    with awaited():
+                        llm_result = await get_llm_service().generate(prompt, background=True)
                     llm_type = str(llm_result).strip().lower().split()[0]
                     _valid_types = {
                         "paper",

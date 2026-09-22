@@ -18,8 +18,7 @@
 #   scripts/smoke/clean.sh --since 2026-09-06T00:00:00Z
 #   scripts/smoke/clean.sh --dry-run          # uses .last-run, written by all.sh
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LAST_RUN_FILE="$HERE/.last-run"
 SINCE="${SINCE:-}"

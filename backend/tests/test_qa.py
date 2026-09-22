@@ -1725,3 +1725,53 @@ def test_chatstate_declares_every_field_the_receipt_reads():
         "receipt, but ChatState does not declare them, so the graph drops them and "
         "the receipt reports null in the running app"
     )
+
+
+@pytest.mark.asyncio
+async def test_receipt_names_the_model_that_served_a_fallen_back_answer(test_db):
+    """A routed cloud answer served by the local fallback must not be reported as cloud.
+
+    Seen on a real run: the provider was unreachable, the local model answered, and
+    the receipt said engine=cloud, model=openai/gpt-4o-mini.
+    """
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id)
+
+    result = {
+        "answer": "",
+        "citations": [],
+        "confidence": "high",
+        "not_found": False,
+        "chunks": [],
+        "source_citations": [],
+        "_llm_prompt": "Answer.",
+        "_system_prompt": "",
+        "intent": "factual",
+    }
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(return_value=result)
+
+    class _ServedLocally:
+        model = "ollama/qwen3.5:4b"
+
+        def __aiter__(self):
+            return _async_iter(["Answer."])
+
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock(return_value=_ServedLocally())
+
+    with (
+        patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
+        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch(
+            "app.services.settings_service.get_effective_routing",
+            return_value=("openai/gpt-4o-mini", None),
+        ),
+        patch("app.services.connectivity.provider_reachable", return_value=True),
+    ):
+        events = [e async for e in QAService().stream_answer("q?", [doc_id], "single", None)]
+
+    receipt = json.loads(events[-1][len("data: ") :])["receipt"]
+    assert receipt["model"] == "ollama/qwen3.5:4b"
+    assert receipt["engine"] == "local"

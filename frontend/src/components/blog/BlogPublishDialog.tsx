@@ -53,6 +53,8 @@ interface BlogPublishDialogProps {
   noteId: string
   noteContent: string
   kind?: BlogKind
+  // Seeds the body editor from the Refine step; the note itself is never changed.
+  initialBody?: string
 }
 
 const inputCls =
@@ -77,6 +79,7 @@ export function BlogPublishDialog({
   noteId,
   noteContent,
   kind = "blog",
+  initialBody,
 }: BlogPublishDialogProps) {
   const kindLabel = KIND_SINGULAR[kind]
   const [draft, setDraft] = useState<BlogDraft | null>(null)
@@ -123,7 +126,7 @@ export function BlogPublishDialog({
         setDescription(d.description)
         setSlug(d.slug)
         setPubDate(d.pub_date)
-        setBody(d.markdown)
+        setBody(initialBody ?? d.markdown)
         setMermaidSvgs(await renderMermaidSvgs(noteContent))
       } catch (err) {
         if (!cancelled) setDraftError(errorMessage(err, "Failed to build draft"))
@@ -134,6 +137,8 @@ export function BlogPublishDialog({
     return () => {
       cancelled = true
     }
+    // A one-time seed: omitted from deps so a re-render never discards edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, noteId, noteContent, kind])
 
   // Default the destination folder to the site's content collection dir.

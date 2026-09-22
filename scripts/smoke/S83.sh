@@ -8,20 +8,19 @@
 #    asking the product to overstate what it knew.
 # 2. POST /qa with scope='all' summary query — asserts HTTP 200, non-empty answer
 set -euo pipefail
-
-BASE="${BACKEND_URL:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 # ---- Ingest two small documents so scope='all' retrieval has content ----
+echo "Sherlock Holmes examined the room carefully. The mystery deepened each moment." > "$SMOKE_TMP/smoke_s83_a.txt"
 DOC1=$(curl -sf -X POST "$BASE/documents/ingest" \
-  -F "file=@/dev/stdin;filename=smoke_s83_a.txt;type=text/plain" \
-  -F "content_type=book" <<< \
-  "Sherlock Holmes examined the room carefully. The mystery deepened each moment." \
+  -F "file=@$SMOKE_TMP/smoke_s83_a.txt;filename=smoke_s83_a.txt;type=text/plain" \
+  -F "content_type=book" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['document_id'])")
 
+echo "Watson recorded the events in his journal. The adventure concluded successfully." > "$SMOKE_TMP/smoke_s83_b.txt"
 DOC2=$(curl -sf -X POST "$BASE/documents/ingest" \
-  -F "file=@/dev/stdin;filename=smoke_s83_b.txt;type=text/plain" \
-  -F "content_type=book" <<< \
-  "Watson recorded the events in his journal. The adventure concluded successfully." \
+  -F "file=@$SMOKE_TMP/smoke_s83_b.txt;filename=smoke_s83_b.txt;type=text/plain" \
+  -F "content_type=book" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['document_id'])")
 
 # Both documents go however this exits; the script had been leaving two per run.
@@ -32,7 +31,9 @@ cleanup_docs() {
 trap cleanup_docs EXIT
 
 echo "Ingested doc1=$DOC1 doc2=$DOC2"
-sleep 2
+# Asked before indexing, /qa answers from whatever else the library holds.
+smoke_wait_complete "$DOC1"
+smoke_wait_complete "$DOC2"
 
 # ---- (1) Factual query across all docs — confidence should not be 'low' ----
 QA_RESP=$(curl -sf -X POST "$BASE/qa" \

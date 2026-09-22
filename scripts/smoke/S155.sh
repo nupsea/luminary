@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-BASE="http://localhost:7820"
-
+source "$(dirname "$0")/lib.sh"
 # Test that the endpoint exists and returns 404 for a non-existent card
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
   "${BASE}/flashcards/nonexistent-card-id/source-context")

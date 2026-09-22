@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Smoke test for S189: Auto-organize guided plan with confirmation workflow
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
 PASS=0
 FAIL=0
 
 check() {
   local desc="$1" url="$2" expected_status="$3" body_check="${4:-}"
-  TMPFILE=$(mktemp /tmp/s189_XXXXXX)
+  TMPFILE=$(mktemp $SMOKE_TMP/s189_XXXXXX)
   HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$url")
   BODY=$(cat "$TMPFILE")
   rm -f "$TMPFILE"
@@ -34,7 +34,7 @@ check() {
 
 check_post() {
   local desc="$1" url="$2" expected_status="$3" data="$4" body_check="${5:-}"
-  TMPFILE=$(mktemp /tmp/s189_XXXXXX)
+  TMPFILE=$(mktemp $SMOKE_TMP/s189_XXXXXX)
   HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$data" "$url")
   BODY=$(cat "$TMPFILE")
   rm -f "$TMPFILE"

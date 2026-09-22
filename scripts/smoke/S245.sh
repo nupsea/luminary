@@ -9,10 +9,10 @@
 # Uploads a tiny unique text file twice and deletes it, so it leaves no residue
 # in the library it ran against.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 STAMP="s245_$(date +%s)_$$"
-TMP="$(mktemp -t s245).txt"
+TMP="$SMOKE_TMP/${STAMP}.txt"
 printf 'S245 duplicate-signal fixture %s\n' "$STAMP" > "$TMP"
 DOC_ID=""
 # Cleanup on EXIT, not at the end: `set -e` plus a curl timeout can kill this
@@ -37,19 +37,9 @@ if [ "$STATUS" != "processing" ]; then
   exit 1
 fi
 
-# Wait for it to reach a terminal stage; the duplicate branch only fires on complete.
-for _ in $(seq 1 60); do
-  STAGE=$(curl -sf -m 10 "${BASE}/documents/${DOC_ID}/status" \
-    | sed -n 's/.*"stage":"\([^"]*\)".*/\1/p')
-  [ "$STAGE" = "complete" ] && break
-  [ "$STAGE" = "error" ] && break
-  sleep 2
-done
-
-if [ "$STAGE" != "complete" ]; then
-  echo "SKIP: S245 -- fixture did not reach complete (stage=$STAGE); duplicate branch not reachable"
-  exit 0
-fi
+# The duplicate branch only fires on complete. A fixture that never completes is
+# an ingestion failure, not a skip -- this used to exit 0 and count as a pass.
+smoke_wait_complete "$DOC_ID"
 
 SECOND=$(curl -sf -m 120 -X POST "${BASE}/documents/ingest" -F "file=@${TMP};filename=${STAMP}.txt")
 DUP_STATUS=$(printf '%s' "$SECOND" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')

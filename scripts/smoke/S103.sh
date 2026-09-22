@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # S103 smoke test: POST /qa returns HTTP 200 SSE response (Ollama online path)
 set -euo pipefail
-
-BASE_URL="${BASE_URL:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 echo "S103: POST /qa returns HTTP 200..."
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-  -X POST "${BASE_URL}/qa" \
+  -X POST "${BASE}/qa" \
   -H "Content-Type: application/json" \
   -d '{"question":"What is this about?"}')
 

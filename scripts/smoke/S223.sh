@@ -2,6 +2,7 @@
 # Smoke test for S223: cross-domain golden datasets.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"

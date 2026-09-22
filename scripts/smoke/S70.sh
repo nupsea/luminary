@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S70: Ingestion performance — verify add_all batching and generate_all_summaries
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 BACKEND_DIR="$(cd "$(dirname "$0")/../../backend" && pwd)"
 

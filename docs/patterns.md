@@ -14,6 +14,13 @@ Patterns discovered through completed stories. Read before implementing new feat
 - **Type-dispatched compute methods**: keep the dispatcher trivial -- a series of `if self.type == 'A': return await self._compute_A()` branches ending with `raise InvalidType`. Each branch is independently testable and logic stays out of the dispatcher.
 - **Subprocess backend URL constant**: When launching subprocesses from within a backend service (e.g., eval runner), they need to reach the backend API. Store the URL as a module-level constant (`_BACKEND_URL = "http://localhost:7820"`) and pass it as `--backend-url` to all subprocess invocations. Avoids hard-coded ports scattered across code.
 
+## Stores and imports
+
+- **Kuzu results**: `get_next()` raises when no row exists; call `has_next()` first on every iteration.
+- **Circular imports**: break a cycle with a lazy import inside the function (`from app.runtime.X import fn  # noqa: PLC0415`); tests then patch `app.runtime.X.fn`, not the call site.
+- **Settings**: import `get_settings` at module level in services, never lazily and never under a bare `except`, so the patch target stays predictable.
+- **SSE generators**: persist rows before the LLM call, and `await session.rollback()` explicitly in the error handler; the implicit rollback on close is not enough after a generator raises.
+
 ## ORM Relationships
 
 - **`models.py` declares no `relationship()`, and nothing uses `selectinload`/`joinedload`.** Every association is joined by hand. This is deliberate: under async SQLAlchemy a lazy load outside the greenlet context raises `MissingGreenlet` at runtime, so an unannotated relationship access is a production error rather than a slow query. Keep writing explicit joins. The cost is that a "fetch children for each parent" loop is easy to write and reads as normal code -- when you need one, build a single grouped query keyed by parent id, not a query per row.
@@ -47,6 +54,10 @@ Patterns discovered through completed stories. Read before implementing new feat
 
 ## Frontend
 
+- **Loading, error and empty states on every surface**: a skeleton rather than a page-blocking spinner, an inline error per section, and an explicit "No X yet". No blank panels.
+- **The `done` SSE event carries the clean `answer`**: replace the streamed text with `payload.answer`, because streamed tokens include citation JSON fragments.
+- **Cross-tab navigation**: dispatch `new CustomEvent('luminary:navigate', { detail: { tab, filter } })`, handled in `App.tsx`; never URL hacks or router state.
+- **No `MarkdownRenderer` in list or table cells**: block elements inside a `<td>` break layout; use `stripMarkdown()` from `src/lib/utils.ts`.
 - **Button-based tab nav with hash persistence**: @radix-ui/react-tabs may not be installed; use state-driven buttons + `window.location.hash` for URL persistence. Initialize tab from hash: `const [activeTab, setActiveTab] = useState(() => { const hash = window.location.hash.replace('#', '') as TabId; return TABS.some(t => t.id === hash) ? hash : 'default' })`. On change: `setActiveTab(tab); window.location.hash = tab`. Style with `border-b-2 border-primary` for active, `border-transparent` for inactive.
 - **localStorage snapshot for persistent UI state**: module-level `readSnapshot()`, `writeSnapshot()`, `clearSnapshot()` triplet in Zustand modules; read snapshot at module load to seed initial state; call `writeSnapshot()` in a `useEffect` on every state change. On component mount, reconcile with server (e.g., `GET /resource/active`); if server has no record, `clearSnapshot()` and reset to idle; otherwise hydrate from server response. Critical: module-level read happens once per page load, so every state mutation must call `writeSnapshot()` to persist across refresh.
 - **Vitest for pure logic only**: vitest config uses "node" environment (not jsdom). Convention: extract pure functions into helpers (lib/ or store/) and unit-test those; do NOT mount React components in vitest tests. See ClozeCard.test.ts and focusUtils.test.ts as canonical patterns.

@@ -62,7 +62,7 @@ Located in `evals/golden/`. Each `.jsonl` has one JSON object per line:
 | `odyssey` | The Odyssey (Butler translation) — gpt-5.4 generated + cross-verified | 40 |
 | `d2l` | Dive into Deep Learning (CC-BY-SA 4.0) — technical reference corpus | ~50 |
 
-Documents are auto-ingested on first run and their IDs cached in `evals/golden/manifest.json`. Re-runs skip ingestion.
+Documents are auto-ingested on first run and their IDs cached in `evals/golden/manifest.json`. Re-runs skip ingestion. The cache is local and untracked: document ids belong to one database, and a stale entry re-resolves by filename.
 
 `d2l` is the **technical reference corpus** (a data/AI-engineering book, in contrast to the public-domain fiction). It is the primary benchmark for retrieval/Q&A quality on the kind of dense, code-and-concept material real users ingest. See `DATA/books/D2L_ATTRIBUTION.md` for provenance.
 

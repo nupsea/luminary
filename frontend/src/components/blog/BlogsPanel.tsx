@@ -5,9 +5,9 @@
  * (both commit locally; the user pushes). Shown in the Notes page "Blogs" view.
  */
 
-import { useState } from "react"
+import { Suspense, lazy, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ExternalLink, Loader2, Pencil, Send, Trash2 } from "lucide-react"
+import { ExternalLink, Loader2, Pencil, Send, Sparkles, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Skeleton } from "@/components/ui/skeleton"
@@ -26,6 +26,13 @@ import { BlogEditDialog } from "./BlogEditDialog"
 import { BlogPublishDialog } from "./BlogPublishDialog"
 import { PushBlogButton } from "./PushBlogButton"
 
+// Full-mode only, folded at build time so the public bundle drops it. Must compare
+// `import.meta.env.VITE_LUMINARY_MODE` directly for Rollup to fold it.
+const BlogRefineDialog =
+  import.meta.env.VITE_LUMINARY_MODE === "full"
+    ? lazy(() => import("./BlogRefineDialog").then((m) => ({ default: m.BlogRefineDialog })))
+    : null
+
 const KINDS: BlogKind[] = ["blog", "thoughts"]
 
 function formatDate(value: string): string {
@@ -41,6 +48,8 @@ export function BlogsPanel() {
   const [editing, setEditing] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
   const [publishing, setPublishing] = useState<string | null>(null)
+  const [refining, setRefining] = useState<string | null>(null)
+  const [refinedBody, setRefinedBody] = useState<string | null>(null)
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["blog-posts", kind],
@@ -71,6 +80,12 @@ export function BlogsPanel() {
     queryKey: ["note", publishing],
     queryFn: () => getNote(publishing as string),
     enabled: !!publishing,
+  })
+
+  const { data: refiningNote } = useQuery({
+    queryKey: ["note", refining],
+    queryFn: () => getNote(refining as string),
+    enabled: !!refining,
   })
 
   const deleteMut = useMutation({
@@ -249,6 +264,19 @@ export function BlogsPanel() {
                 <code className="hidden shrink-0 truncate rounded bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground sm:block">
                   {d.slug}.md
                 </code>
+                {BlogRefineDialog && (
+                  <button
+                    onClick={() => {
+                      setRefinedBody(null)
+                      setRefining(d.note_id)
+                    }}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-foreground hover:bg-accent"
+                    title="Run a grammar/structure pass before publishing (full mode only)"
+                  >
+                    <Sparkles size={12} />
+                    Refine
+                  </button>
+                )}
                 <button
                   onClick={() => setPublishing(d.note_id)}
                   className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/20"
@@ -270,13 +298,32 @@ export function BlogsPanel() {
           kind={kind}
           noteId={publishing}
           noteContent={publishingNote.content}
+          initialBody={refinedBody ?? undefined}
           onClose={() => {
             setPublishing(null)
+            setRefinedBody(null)
             void qc.invalidateQueries({ queryKey: ["blog-drafts"] })
             void qc.invalidateQueries({ queryKey: ["blog-posts"] })
             void qc.invalidateQueries({ queryKey: ["blog-config"] })
           }}
         />
+      )}
+
+      {BlogRefineDialog && refining && refiningNote && (
+        <Suspense fallback={null}>
+          <BlogRefineDialog
+            open={!!refining}
+            kind={kind}
+            noteId={refining}
+            noteContent={refiningNote.content}
+            onClose={() => setRefining(null)}
+            onApprove={(content) => {
+              setRefinedBody(content)
+              setPublishing(refining)
+              setRefining(null)
+            }}
+          />
+        </Suspense>
       )}
 
       {editing && (

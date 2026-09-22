@@ -3,8 +3,7 @@
 # Does not require any documents to be ingested -- just verifies the field is present in the done event.
 
 set -euo pipefail
-BASE="http://localhost:7820"
-
+source "$(dirname "$0")/lib.sh"
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")
 if [ "$HTTP_HEALTH" != "200" ]; then
   echo "FAIL: backend not healthy (got ${HTTP_HEALTH})"

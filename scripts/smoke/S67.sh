@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S67: Library list view — chunk_count in GET /documents
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 echo "S67 smoke: GET /documents returns 200 with chunk_count field"
 RESP=$(curl -sf "${BASE}/documents")

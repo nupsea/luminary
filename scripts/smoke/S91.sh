@@ -2,8 +2,7 @@
 # Smoke test for S91: Notes search -- GET /notes/search.
 
 set -euo pipefail
-BASE="http://localhost:7820"
-
+source "$(dirname "$0")/lib.sh"
 # 1. Create a note with searchable content
 CREATE=$(curl -sf -X POST "${BASE}/notes" \
   -H "Content-Type: application/json" \
@@ -11,7 +10,7 @@ CREATE=$(curl -sf -X POST "${BASE}/notes" \
 NOTE_ID=$(echo "$CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
 
 # 2. Search for a term that should match the note via FTS
-HTTP_CODE=$(curl -s -o /tmp/s91_search.json -w "%{http_code}" \
+HTTP_CODE=$(curl -s -o $SMOKE_TMP/s91_search.json -w "%{http_code}" \
   "${BASE}/notes/search?q=reciprocal+rank+fusion")
 if [ "$HTTP_CODE" != "200" ]; then
   echo "FAIL: GET /notes/search returned ${HTTP_CODE} (expected 200)"
@@ -19,7 +18,7 @@ if [ "$HTTP_CODE" != "200" ]; then
   exit 1
 fi
 
-TOTAL=$(python3 -c "import json; print(json.load(open('/tmp/s91_search.json'))['total'])")
+TOTAL=$(python3 -c "import json; print(json.load(open('$SMOKE_TMP/s91_search.json'))['total'])")
 if [ "$TOTAL" -lt 1 ]; then
   echo "FAIL: search returned 0 results (expected >= 1)"
   curl -s -X DELETE "${BASE}/notes/${NOTE_ID}" -o /dev/null || true

@@ -46,3 +46,15 @@ class DependencyUnavailable(LuminaryError):
     """A required local component (Ollama, ffmpeg, a model) is not usable."""
 
     status_code = 503
+
+
+class ModelNotDownloaded(DependencyUnavailable):
+    """A local model's weights are not on disk. Loaders never download (I-57):
+    weights arrive only through setup or a component install."""
+
+
+class LocalInferenceRefused(DependencyUnavailable):
+    """A local model call on a host that cannot run one at a usable speed.
+
+    Not an outage: background work records it as skipped, not failed.
+    """

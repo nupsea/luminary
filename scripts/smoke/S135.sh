@@ -7,8 +7,9 @@
 # with an empty entities array (no doc found — valid response).
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
-BASE="http://localhost:7820"
 DOC_ID="${1:-smoke-test-nonexistent-doc}"
 
 # 1. Health check

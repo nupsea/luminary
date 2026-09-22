@@ -286,6 +286,7 @@ class ChatState(TypedDict):
     doc_ids: list[str]
     scope: str  # 'single' | 'all'
     model: str | None
+    direct: bool  # ask model directly without library grounding
 
     # Set by classify_node
     intent: str | None  # IntentType | None
@@ -294,6 +295,8 @@ class ChatState(TypedDict):
     # Set by strategy nodes
     chunks: list[dict]
     section_context: str | None
+    # notes_node answered a subject-less notes question from the most recent notes.
+    notes_recent: bool
     # True when retrieval raised rather than returning nothing. Without it, a
     # failed search and an empty library are the same downstream state, and the
     # user is told to ingest a document while their library sits there.

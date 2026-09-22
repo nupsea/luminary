@@ -3,8 +3,8 @@
 # Tests: collection normalization, tag normalization, autocomplete normalization,
 #        migration endpoints
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${BASE:-http://localhost:7820}"
 FAIL=0
 
 check() {
@@ -18,7 +18,7 @@ check() {
 }
 
 # 1. POST /collections normalizes name
-TMPFILE=$(mktemp /tmp/s199_XXXXXX)
+TMPFILE=$(mktemp $SMOKE_TMP/s199_XXXXXX)
 HTTP=$(curl -s -o "$TMPFILE" -w "%{http_code}" \
     -X POST "$BASE/collections" \
     -H "Content-Type: application/json" \

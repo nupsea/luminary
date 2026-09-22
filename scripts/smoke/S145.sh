@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # S145 smoke test: concept mastery endpoints return 200 with empty data for nonexistent IDs
 set -e
-BASE="http://localhost:7820"
-
+source "$(dirname "$0")/lib.sh"
 echo "S145 smoke: GET /mastery/concepts"
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
   "${BASE}/mastery/concepts?document_ids=nonexistent-00000000")

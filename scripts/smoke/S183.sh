@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test for S183 -- Learning tab stats bar: verify endpoints used by LibraryStatsBar
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${BASE:-http://localhost:7820}"
 PASS=0
 FAIL=0
 

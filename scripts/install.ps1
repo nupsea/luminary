@@ -286,7 +286,9 @@ if ($portActive) {
 # silently pick the single-model default on every profile.
 $MemGB = 0
 try {
-    $MemGB = [int][math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+    # Rounded up (I-56): TotalPhysicalMemory is installed RAM minus what firmware
+    # reserves, so a 16GB machine reads 15.x and Floor refused it as under 16.
+    $MemGB = [int][math]::Ceiling((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
 } catch {
     Write-Host "[install] Could not read installed RAM; assuming a small machine." -ForegroundColor Gray
 }

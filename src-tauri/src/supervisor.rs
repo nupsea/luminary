@@ -12,7 +12,7 @@ use luminary_host::{alive, executable_of, Tree};
 use serde::{Deserialize, Serialize};
 
 use crate::logging;
-use crate::stage::{OLLAMA_BINARY, PYTHON_BINARY};
+use crate::stage::{OLLAMA_BINARY, OLLAMA_LIBRARY_DIR, PYTHON_BINARY};
 
 /// Enough of a child's output to explain why it died, without turning the
 /// failure screen into a wall of text.
@@ -50,9 +50,10 @@ const PATH_SEPARATOR: &str = ":";
 ///
 /// Windows CPython does not start without `SystemRoot`: it is how every DLL
 /// search and the temp directory are resolved. `USERPROFILE` is what `Path.home()`
-/// reads there, the way `HOME` is on unix.
+/// reads there. `USERNAME`: torch calls `getpass.getuser()` on import, which has
+/// no fallback on Windows.
 #[cfg(windows)]
-const INHERITED_ENV: &[&str] = &["SystemRoot", "USERPROFILE", "TEMP", "TMP"];
+const INHERITED_ENV: &[&str] = &["SystemRoot", "USERPROFILE", "USERNAME", "TEMP", "TMP"];
 #[cfg(not(windows))]
 const INHERITED_ENV: &[&str] = &["HOME"];
 
@@ -433,8 +434,9 @@ fn env_file_value(data_dir: &Path, key: &str) -> Option<String> {
 }
 
 /// Physical RAM in GB, or `None` if the kernel will not say.
+/// Rounded up, as every RAM reader is (I-56).
 fn total_memory_gb() -> Option<u64> {
-    luminary_host::total_memory_bytes().map(|bytes| bytes / 1_073_741_824)
+    luminary_host::total_memory_bytes().map(|bytes| bytes.div_ceil(1_073_741_824))
 }
 
 /// How many requests the bundled Ollama serves concurrently (I-31).
@@ -492,13 +494,14 @@ fn ollama_max_loaded_models(data_dir: &Path) -> u32 {
     }
 }
 
+/// `engine` is what `stage::engine_dir` returned.
 pub fn spawn_ollama(
     sup: &Supervisor,
-    stage: &Path,
+    engine: &Path,
     data_dir: &Path,
     port: u16,
 ) -> Result<(), String> {
-    let binary = stage.join(OLLAMA_BINARY);
+    let binary = engine.join(OLLAMA_BINARY);
     if !binary.is_file() {
         return Err(format!("no ollama binary at {binary:?}"));
     }
@@ -510,8 +513,8 @@ pub fn spawn_ollama(
         .arg("serve")
         .env("OLLAMA_HOST", format!("127.0.0.1:{port}"))
         .env("OLLAMA_MODELS", &models)
-        // The runner libs sit beside the binary in the official tarball.
-        .env("OLLAMA_LIBRARY_PATH", stage.join("ollama"))
+        // Reaches only the runner child; must name the tree the binary runs from.
+        .env("OLLAMA_LIBRARY_PATH", engine.join(OLLAMA_LIBRARY_DIR))
         .env("OLLAMA_KEEP_ALIVE", "30m")
         .env(
             "OLLAMA_NUM_PARALLEL",

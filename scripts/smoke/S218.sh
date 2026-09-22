@@ -2,6 +2,7 @@
 # Smoke test for S218: intent routing eval.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"

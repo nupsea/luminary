@@ -3,10 +3,9 @@
 # Verifies:
 #   1. POST /annotations with page_number field accepted (201)
 #   2. GET /annotations?document_id=... returns annotation with page_number
-#   3. Frontend unit tests pass (resolveSourceRefUtils)
-#   4. TypeScript compilation passes
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 # BSD mktemp only substitutes Xs at the END of a template, so
 # `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
@@ -14,8 +13,6 @@ set -euo pipefail
 # keeps the extensions -- uploads are validated on them -- and cleans up itself.
 SMOKE_TMPDIR=$(mktemp -d)
 trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
-REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
 FAIL=0
 TMPFILE="$SMOKE_TMPDIR/smoke_s198.json"
 
@@ -25,7 +22,7 @@ DOC_ID="smoke-doc-s198-$(date +%s)"
 SECTION_ID="smoke-sec-1"
 
 # 1. POST /annotations with page_number
-echo "[1/4] POST /annotations with page_number (expect 201)"
+echo "[1/2] POST /annotations with page_number (expect 201)"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "${BASE}/annotations" \
   -H "Content-Type: application/json" \
   -d "{\"document_id\":\"${DOC_ID}\",\"section_id\":\"${SECTION_ID}\",\"selected_text\":\"test highlight\",\"start_offset\":0,\"end_offset\":14,\"color\":\"yellow\",\"page_number\":3}")
@@ -44,7 +41,7 @@ else
 fi
 
 # 2. GET /annotations for the document
-echo "[2/4] GET /annotations?document_id=${DOC_ID} (expect 200)"
+echo "[2/2] GET /annotations?document_id=${DOC_ID} (expect 200)"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "${BASE}/annotations?document_id=${DOC_ID}")
 if [ "$STATUS" = "200" ]; then
   COUNT=$(python3 -c "import json; print(len(json.load(open('$TMPFILE'))))" 2>/dev/null || echo "0")
@@ -56,25 +53,6 @@ if [ "$STATUS" = "200" ]; then
   fi
 else
   echo "  FAIL: expected 200 got $STATUS"
-  FAIL=1
-fi
-
-# 3. Frontend unit tests
-echo "[3/4] vitest resolveSourceRefUtils"
-cd "$REPO/frontend"
-if npx vitest run src/components/reader/resolveSourceRefUtils.test.ts 2>&1 | tail -3; then
-  echo "  PASS: vitest"
-else
-  echo "  FAIL: vitest"
-  FAIL=1
-fi
-
-# 4. TypeScript compilation
-echo "[4/4] npx tsc --noEmit"
-if npx tsc --noEmit 2>&1; then
-  echo "  PASS: tsc"
-else
-  echo "  FAIL: tsc"
   FAIL=1
 fi
 

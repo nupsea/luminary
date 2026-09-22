@@ -73,7 +73,7 @@ def test_an_ablation_arm_reports_boundary_misses_alongside_its_hit_rate():
 
     metrics = arm_metrics(split)
 
-    assert set(metrics) == {"hit_rate_5", "mrr", "ndcg_10", "boundary_misses"}
+    assert set(metrics) == {"hit_rate_5", "mrr", "ndcg_10", "boundary_misses", "search_failures"}
     assert metrics["hit_rate_5"] == 0.0
     assert metrics["boundary_misses"] == 1, "a split hint is a chunking miss, not a ranking one"
 

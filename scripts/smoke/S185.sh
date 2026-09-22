@@ -4,14 +4,14 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 PASS=0
 FAIL=0
 
 check() {
   local desc="$1" url="$2" expected="$3"
-  TMPFILE=$(mktemp /tmp/s185_XXXXXX)
+  TMPFILE=$(mktemp $SMOKE_TMP/s185_XXXXXX)
   HTTP=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$url")
   if [ "$HTTP" != "$expected" ]; then
     echo "FAIL: $desc — expected $expected, got $HTTP"
@@ -33,7 +33,7 @@ check "GET /flashcards/search" "${BASE}/flashcards/search" "200"
 
 # 3. Bloom audit endpoint (used by InsightsAccordion DeckHealthPanel)
 # No documents ingested in smoke, so dummy doc_id returns 404 or 200
-TMPFILE=$(mktemp /tmp/s185_XXXXXX)
+TMPFILE=$(mktemp $SMOKE_TMP/s185_XXXXXX)
 HTTP=$(curl -s -o "$TMPFILE" -w "%{http_code}" "${BASE}/flashcards/audit/smoke-doc-s185")
 if [ "$HTTP" = "200" ] || [ "$HTTP" = "404" ]; then
   echo "PASS: GET /flashcards/audit/:id — reachable ($HTTP)"
@@ -45,7 +45,7 @@ fi
 rm -f "$TMPFILE"
 
 # 4. Health report endpoint (used by InsightsAccordion HealthReportPanel)
-TMPFILE=$(mktemp /tmp/s185_XXXXXX)
+TMPFILE=$(mktemp $SMOKE_TMP/s185_XXXXXX)
 HTTP=$(curl -s -o "$TMPFILE" -w "%{http_code}" "${BASE}/flashcards/health/smoke-doc-s185")
 if [ "$HTTP" = "200" ] || [ "$HTTP" = "404" ]; then
   echo "PASS: GET /flashcards/health/:id — reachable ($HTTP)"
@@ -57,7 +57,7 @@ fi
 rm -f "$TMPFILE"
 
 # 5. Struggling cards endpoint (used by InsightsAccordion StrugglingPanel)
-TMPFILE=$(mktemp /tmp/s185_XXXXXX)
+TMPFILE=$(mktemp $SMOKE_TMP/s185_XXXXXX)
 HTTP=$(curl -s -o "$TMPFILE" -w "%{http_code}" "${BASE}/study/struggling?document_id=smoke-doc-s185")
 if [ "$HTTP" = "200" ] || [ "$HTTP" = "404" ]; then
   echo "PASS: GET /study/struggling — reachable ($HTTP)"

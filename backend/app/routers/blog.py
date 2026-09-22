@@ -32,10 +32,14 @@ from app.schemas.blog import (
     BlogPublishRequest,
     BlogPublishResponse,
     BlogPushResponse,
+    RefineNoteRequest,
+    RefineNoteResponse,
     SuggestDescriptionRequest,
     SuggestDescriptionResponse,
 )
 from app.services import blog_service
+from app.services.llm_admission import awaited
+from app.services.note_refiner import RefineDroppedContentError, get_note_refiner
 
 logger = logging.getLogger(__name__)
 
@@ -167,23 +171,42 @@ async def suggest_description(
 
     body = blog_service.transform_note_to_blog(note.content, "preview").markdown
     try:
-        raw = await get_llm_service().complete(
-            messages=[
-                {"role": "system", "content": _DESC_SYSTEM},
-                {"role": "user", "content": f"Post content:\n{body[:2000]}\n\nDescription:"},
-            ],
-            temperature=0.4,
-            max_tokens=60,
-            # The payload is the user's own note. Hybrid mode would otherwise
-            # route a click-triggered call to the cloud provider; note content
-            # stays on the machine regardless of what the user is about to
-            # publish from it.
-            background=True,
-        )
+        with awaited():
+            raw = await get_llm_service().complete(
+                messages=[
+                    {"role": "system", "content": _DESC_SYSTEM},
+                    {"role": "user", "content": f"Post content:\n{body[:2000]}\n\nDescription:"},
+                ],
+                temperature=0.4,
+                max_tokens=60,
+                # The payload is the user's own note. Hybrid mode would otherwise
+                # route a click-triggered call to the cloud provider; note content
+                # stays on the machine regardless of what the user is about to
+                # publish from it.
+                background=True,
+            )
     except LLMUnavailableError as exc:
         raise HTTPException(status_code=503, detail="LLM unavailable") from exc
     desc = re.sub(r'^["\']|["\']$', "", raw.strip()).strip()
     return SuggestDescriptionResponse(description=desc)
+
+
+@router.post("/refine", response_model=RefineNoteResponse)
+async def refine_note(
+    req: RefineNoteRequest,
+    repo: NoteRepo = Depends(get_note_repo),
+) -> RefineNoteResponse:
+    note = await repo.get_or_404(req.note_id)
+    from app.services.llm import LLMUnavailableError  # noqa: PLC0415
+
+    try:
+        with awaited():
+            refined = await get_note_refiner().refine(note.content, req.instruction, req.model)
+    except LLMUnavailableError as exc:
+        raise HTTPException(status_code=503, detail="LLM unavailable") from exc
+    except RefineDroppedContentError as exc:
+        raise HTTPException(status_code=502, detail=exc.detail) from exc
+    return RefineNoteResponse(refined_content=refined)
 
 
 def _write_assets(
@@ -249,7 +272,8 @@ async def publish(
             updated_date=updated_date,
             hero_image=req.hero_image,
         )
-        blog_service.write_text_file(md_path, f"{frontmatter}\n\n{req.markdown.strip()}\n")
+        body = blog_service.render_sized_images(req.markdown.strip())
+        blog_service.write_text_file(md_path, f"{frontmatter}\n\n{body}\n")
         files = [md_path, *asset_files]
         sha = await blog_service.git_add_commit(repo, files, f"{kind}: {req.title}")
     except (FileNotFoundError, RuntimeError) as exc:
@@ -344,7 +368,8 @@ async def update_post(
             updated_date=req.updated_date,
             hero_image=req.hero_image,
         )
-        blog_service.write_text_file(md_path, f"{frontmatter}\n\n{body.strip()}\n")
+        sized_body = blog_service.render_sized_images(body.strip())
+        blog_service.write_text_file(md_path, f"{frontmatter}\n\n{sized_body}\n")
         files = [md_path, *written, *removed]
         sha = await blog_service.git_add_commit(repo, files, f"{kind}: update {clean}")
     except (FileNotFoundError, RuntimeError) as exc:
@@ -497,6 +522,7 @@ async def live_preview(
     # The edited body references /<kind>/<real-slug>/...; rewrite to the preview
     # slug so its assets resolve under the preview asset dir.
     body = req.markdown.replace(f"/{kind}/{blog_service.slugify(req.slug)}/", f"/{kind}/{pslug}/")
+    body = blog_service.render_sized_images(body)
     blog_service.write_text_file(_content_dir(kind) / f"{pslug}.md", f"{frontmatter}\n\n{body}\n")
     try:
         _write_assets(pslug, note.content, req.mermaid_svgs, kind)

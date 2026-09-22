@@ -17,8 +17,7 @@
 #   5. GET /settings/models/catalogue is smallest-first and flags what does not fit
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 fail() {
   echo "FAIL: $1"

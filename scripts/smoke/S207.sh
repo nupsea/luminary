@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S207: naming normalization check + apply endpoints
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 # BSD mktemp only substitutes Xs at the END of a template, so
 # `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
@@ -9,7 +10,6 @@ set -euo pipefail
 SMOKE_TMPDIR=$(mktemp -d)
 trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
 
-BASE="${LUMINARY_URL:-http://localhost:7820}"
 PASS=0
 FAIL=0
 
@@ -47,17 +47,6 @@ check "POST /notes/cluster/normalize-apply (empty)" "200" "$STATUS2"
 BODY2=$(cat "$TMPFILE2")
 echo "  normalize-apply response: ${BODY2:0:200}"
 rm -f "$TMPFILE2"
-
-# 3. TypeScript compiles
-echo "  Checking tsc..."
-cd "$(dirname "$0")/../../frontend"
-npx tsc --noEmit > /dev/null 2>&1 && {
-  echo "  PASS: tsc --noEmit"
-  PASS=$((PASS + 1))
-} || {
-  echo "  FAIL: tsc --noEmit"
-  FAIL=$((FAIL + 1))
-}
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="

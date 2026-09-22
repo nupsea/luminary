@@ -6,8 +6,7 @@
 # Requires: backend running at BASE_URL (default http://localhost:7820)
 
 set -euo pipefail
-
-BASE="${1:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 echo "S81 smoke: confidence-adaptive retry — $BASE"
 

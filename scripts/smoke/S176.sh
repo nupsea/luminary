@@ -4,8 +4,7 @@
 # Frontend layout changes (Sheet/Drawer, floating bar) are browser-only.
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 echo "=== S176 smoke: Notes reader-first layout ==="
 

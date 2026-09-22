@@ -43,6 +43,7 @@ class QARequest(BaseModel):
     web_enabled: bool = False  # optional web augmentation
     socratic: bool = False  # when True, LLM asks a probing question before answering
     creative: bool = False  # grounded generative synthesis (creative prompt + higher temp)
+    direct: bool = False  # per-question Direct toggle: ask model without library retrieval
     include_context: bool = False  # eval-only: echo the grounding chunk texts in the done event
 
 
@@ -79,6 +80,7 @@ async def ask_question(req: QARequest) -> StreamingResponse:
             web_enabled=req.web_enabled,
             socratic=req.socratic,
             creative=req.creative,
+            direct=req.direct,
             include_context=req.include_context,
         ),
         media_type="text/event-stream",

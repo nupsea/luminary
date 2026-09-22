@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Smoke test for S188: Flashcard generation context-rich questions with source grounding
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
 PASS=0
 FAIL=0
 
 check() {
   local desc="$1" url="$2" expected_status="$3" body_check="${4:-}"
-  TMPFILE=$(mktemp /tmp/s188_XXXXXX)
+  TMPFILE=$(mktemp $SMOKE_TMP/s188_XXXXXX)
   HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$url")
   BODY=$(cat "$TMPFILE")
   rm -f "$TMPFILE"
@@ -34,7 +34,7 @@ check() {
 
 check_post() {
   local desc="$1" url="$2" data="$3" expected_status="$4" body_check="${5:-}"
-  TMPFILE=$(mktemp /tmp/s188_XXXXXX)
+  TMPFILE=$(mktemp $SMOKE_TMP/s188_XXXXXX)
   HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$data" "$url")
   BODY=$(cat "$TMPFILE")
   rm -f "$TMPFILE"
@@ -78,12 +78,7 @@ check "GET /flashcards/decks returns 200 with list" \
   "assert isinstance(d, list)"
 
 # AC: Verify FlashcardResponse schema includes section_heading via OpenAPI
-TMPFILE=$(mktemp /tmp/s188_XXXXXX)
-HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/openapi.json")
-BODY=$(cat "$TMPFILE")
-rm -f "$TMPFILE"
-
-if [ "$HTTP_CODE" = "200" ]; then
+if BODY=$(smoke_openapi); then
   if echo "$BODY" | python3 -c "
 import sys, json
 spec = json.load(sys.stdin)
@@ -99,7 +94,7 @@ assert 'bloom_level' in fr, 'bloom_level not in FlashcardResponse'
     FAIL=$((FAIL + 1))
   fi
 else
-  echo "FAIL: Could not fetch openapi.json (HTTP $HTTP_CODE)"
+  echo "FAIL: could not fetch the OpenAPI schema"
   FAIL=$((FAIL + 1))
 fi
 

@@ -470,4 +470,8 @@ class Settings(BaseSettings):
 
 @functools.lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    # LiteLLM's Ollama model-info lookup ignores the per-call api_base; pointed at a
+    # closed port it blocked the event loop ~16s per call on Windows. OLLAMA_URL wins.
+    os.environ["OLLAMA_API_BASE"] = settings.OLLAMA_URL
+    return settings

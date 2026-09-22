@@ -72,6 +72,7 @@ from app.services.export_service import get_export_service
 from app.services.flashcard import get_flashcard_service
 from app.services.gap_detector import get_gap_detector
 from app.services.llm import LLMUnavailableError
+from app.services.llm_admission import awaited
 from app.services.naming import normalize_tag_slug
 from app.services.note_graph import get_note_graph_service
 from app.services.note_search import get_note_search_service
@@ -979,11 +980,12 @@ async def gap_detect(
         raise HTTPException(status_code=422, detail="note_ids must be non-empty")
 
     try:
-        report = await get_gap_detector().detect_gaps(
-            note_ids=req.note_ids,
-            document_id=req.document_id,
-            session=session,
-        )
+        with awaited():
+            report = await get_gap_detector().detect_gaps(
+                note_ids=req.note_ids,
+                document_id=req.document_id,
+                session=session,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except LLMUnavailableError as exc:
@@ -1017,7 +1019,8 @@ async def suggest_tags(
     # during a potentially slow LLM call.
     note_content = note.content
 
-    raw_tags = await _note_tagger_module.get_note_tagger().suggest_tags(note_content)
+    with awaited():
+        raw_tags = await _note_tagger_module.get_note_tagger().suggest_tags(note_content)
     tags = [n for t in raw_tags if (n := normalize_tag_slug(t))]
     logger.debug("suggest_tags note_id=%s returned %d tags", note_id, len(tags))
     return SuggestedTagsResponse(tags=tags)
@@ -1029,7 +1032,8 @@ async def suggest_title(
 ) -> NoteTitleSuggestResponse:
     """Return LLM-suggested title for the provided note content."""
 
-    title = await get_title_generator().suggest_title(req.content)
+    with awaited():
+        title = await get_title_generator().suggest_title(req.content)
     return NoteTitleSuggestResponse(title=title)
 
 

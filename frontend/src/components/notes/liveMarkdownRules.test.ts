@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   caretInTableRow,
   clickedSourceLine,
+  columnOffset,
   firstEditableLine,
   hidesBlock,
   isDelimitedBlock,
@@ -196,5 +197,20 @@ describe("firstEditableLine", () => {
   it("skips the opening fence of a delimited block", () => {
     expect(firstEditableLine(true)).toBe(1)
     expect(firstEditableLine(false)).toBe(0)
+  })
+})
+
+describe("columnOffset", () => {
+  it("keeps the caret's column on a landing line long enough for it", () => {
+    expect(columnOffset("some longer line of text", 5)).toBe(5)
+  })
+
+  it("clamps to the landing line's length instead of running past it", () => {
+    expect(columnOffset("short", 20)).toBe(5)
+    expect(columnOffset("", 4)).toBe(0)
+  })
+
+  it("never goes negative", () => {
+    expect(columnOffset("text", -3)).toBe(0)
   })
 })

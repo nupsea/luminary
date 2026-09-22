@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 # Stage the application payload (backend source, SPA, manifest, licenses).
-#
-# $STAGE becomes Contents/Resources in the .app. The layout mirrors the repo
-# tree because backend/app resolves surface-manifest.json, frontend/dist,
-# alembic.ini and pyproject.toml via Path(__file__).resolve().parents[2] --
-# from <stage>/backend/app/config.py that is <stage>. Same contract as the
-# release tarball in .github/workflows/release.yml.
+# Mirrors the repo tree: backend/app resolves its resources via parents[2].
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -20,8 +15,13 @@ if [ "$BUILD_SPA" = "1" ]; then
     (
         cd "$REPO_ROOT/frontend"
         [ -d node_modules ] || npm ci
-        VITE_LUMINARY_MODE=public VITE_API_BASE=/api npm run build
+        # Git Bash otherwise rewrites "/api" to "C:/Program Files/Git/api" for node.exe.
+        MSYS2_ENV_CONV_EXCL=VITE_API_BASE \
+            VITE_LUMINARY_MODE=public VITE_API_BASE=/api npm run build
     )
+    if grep -rqE '"[A-Za-z]:/[^"]*/api"' "$REPO_ROOT/frontend/dist/assets"; then
+        _die "SPA baked a drive-letter API base; VITE_API_BASE was path-converted"
+    fi
 fi
 [ -f "$REPO_ROOT/frontend/dist/index.html" ] || _die "frontend/dist/index.html missing; run with BUILD_SPA=1"
 
@@ -37,8 +37,7 @@ find "$STAGE/backend" "$STAGE/frontend" \( -name '*.pyc' -o -name '*.db' -o -nam
 _step "Staging third-party notices"
 cp "$REPO_ROOT/LICENSE" "$STAGE/licenses/LUMINARY-LICENSE"
 
-# Ollama is MIT and statically vendors MIT llama.cpp. Both notices must ship in
-# binary distributions; this is a license obligation, not a nicety.
+# License obligation: Ollama and its vendored llama.cpp (both MIT).
 curl -fsSL "https://raw.githubusercontent.com/ollama/ollama/$OLLAMA_VERSION/LICENSE" \
     -o "$STAGE/licenses/OLLAMA-LICENSE"
 curl -fsSL "https://raw.githubusercontent.com/ggml-org/llama.cpp/master/LICENSE" \
@@ -51,10 +50,8 @@ for f in surface-manifest.json frontend/dist/index.html backend/app/main.py \
     [ -e "$STAGE/$f" ] || _die "missing from stage: $f"
 done
 [ -d "$STAGE/backend/alembic/versions" ] || _die "missing alembic/versions"
-# The code executor was deleted from the repo -- it ran arbitrary code as the
-# desktop user with full filesystem and network access. This guard fails the
-# build if it is ever reintroduced, rather than shipping it to an end user.
+# The code executor ran arbitrary code as the user; fail if it ever comes back.
 ! [ -e "$STAGE/backend/app/routers/code_executor.py" ] || _die "code_executor leaked into the payload"
-! grep -rq "/Users/$(whoami)" "$STAGE/backend/app" || _die "personal path in payload"
+! grep -rqE "/(Users|home)/$(whoami)/" "$STAGE/backend/app" || _die "personal path in payload"
 
 _info "payload staged ($(du -sh "$STAGE/backend" "$STAGE/frontend" | awk '{print $1}' | paste -sd+ -))"

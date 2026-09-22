@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S68: App startup readiness — backend responds to GET /documents
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 echo "S68 smoke: waiting 2s then GET /documents"
 sleep 2

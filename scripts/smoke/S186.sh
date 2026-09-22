@@ -2,14 +2,14 @@
 # Smoke test for S186: Chat inline document scope selector
 # Verifies the backend endpoints that the new combobox depends on.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
 PASS=0
 FAIL=0
 
 check() {
   local desc="$1" url="$2" expected_status="$3" body_check="${4:-}"
-  TMPFILE=$(mktemp /tmp/s186_XXXXXX)
+  TMPFILE=$(mktemp $SMOKE_TMP/s186_XXXXXX)
   HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$url")
   BODY=$(cat "$TMPFILE")
   rm -f "$TMPFILE"

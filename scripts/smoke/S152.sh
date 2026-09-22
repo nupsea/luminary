@@ -3,14 +3,13 @@
 # Requires a running backend at localhost:7820 with at least one ingested document.
 
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 # --- Step 1: Get the first document ID ---
 DOCS=$(curl -sf "${BASE}/documents" | python3 -c "import sys,json; docs=json.load(sys.stdin).get('items',[]); print(docs[0]['id'] if docs else '')")
 if [ -z "$DOCS" ]; then
   echo "SKIP: no documents in DB -- ingest a document first"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 DOC_ID="$DOCS"
 

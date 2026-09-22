@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Cloud, GitMerge, Loader2, Monitor, Moon, RefreshCw, Settings, Shield, Sun, X } from "lucide-react"
+import { Loader2, Monitor, Moon, RefreshCw, Settings, Sun, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
+import { ALWAYS_LOCAL, ENGINE_MODES, engineMode } from "@/lib/engineModes"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
@@ -396,91 +397,38 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
 
           {/* Section 1: LLM Mode */}
           <section>
-            <h3 className="mb-3 text-sm font-semibold text-foreground">LLM Mode</h3>
+            <h3 className="mb-1 text-sm font-semibold text-foreground">Where models run</h3>
+            <p className="mb-3 text-xs text-muted-foreground">{ALWAYS_LOCAL}</p>
 
             <div className="mb-4 grid grid-cols-3 gap-2">
-              <label
-                className={cn(
-                  "flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-colors",
-                  localMode === "private"
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-muted-foreground",
-                )}
-              >
-                <input
-                  type="radio"
-                  name="llmMode"
-                  value="private"
-                  checked={localMode === "private"}
-                  onChange={() => setLocalMode("private")}
-                  className="sr-only"
-                />
-                <div className="flex items-center gap-2">
-                  <Shield size={16} className="text-green-600" />
-                  <span className="text-sm font-semibold text-foreground">Private</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  All processing on-device via Ollama.
-                </p>
-              </label>
-
-              <label
-                className={cn(
-                  "flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-colors",
-                  localMode === "hybrid"
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-muted-foreground",
-                )}
-              >
-                <input
-                  type="radio"
-                  name="llmMode"
-                  value="hybrid"
-                  checked={localMode === "hybrid"}
-                  onChange={() => setLocalMode("hybrid")}
-                  className="sr-only"
-                />
-                <div className="flex items-center gap-2">
-                  <GitMerge size={16} className="text-purple-500" />
-                  <span className="text-sm font-semibold text-foreground">Hybrid</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Cloud for chat; Ollama for background tasks.
-                </p>
-              </label>
-
-              <label
-                className={cn(
-                  "flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-colors",
-                  localMode === "cloud"
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-muted-foreground",
-                )}
-              >
-                <input
-                  type="radio"
-                  name="llmMode"
-                  value="cloud"
-                  checked={localMode === "cloud"}
-                  onChange={() => setLocalMode("cloud")}
-                  className="sr-only"
-                />
-                <div className="flex items-center gap-2">
-                  <Cloud size={16} className="text-blue-500" />
-                  <span className="text-sm font-semibold text-foreground">Cloud</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  All features use OpenAI, Anthropic, or Google.
-                </p>
-              </label>
+              {ENGINE_MODES.map((mode) => (
+                <label
+                  key={mode.id}
+                  className={cn(
+                    "flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-colors",
+                    localMode === mode.id
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:border-muted-foreground",
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="llmMode"
+                    value={mode.id}
+                    checked={localMode === mode.id}
+                    onChange={() => setLocalMode(mode.id)}
+                    className="sr-only"
+                  />
+                  <span className="text-sm font-semibold text-foreground">{mode.label}</span>
+                  <p className="text-xs text-muted-foreground">{mode.summary}</p>
+                </label>
+              ))}
             </div>
 
-            {localMode === "cloud" && (
-              <div className="rounded-md bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 p-3 text-xs text-amber-800 dark:text-amber-300">
-                <span className="font-semibold block mb-0.5">Cloud Cost Warning</span>
-                All LLM functionalities (chat, summarization, tags, references, teach-back, etc.) will consume your cloud API quota and incur costs from your configured cloud provider.
-              </div>
-            )}
+            <p className="mb-3 text-xs text-muted-foreground">
+              Sends: {engineMode(localMode).sends}
+              {localMode !== "private" && " Uses your provider's quota and is billed by them."}
+            </p>
 
             {(localMode === "cloud" || localMode === "hybrid") && (
               <div className="space-y-3">
@@ -791,7 +739,8 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   )
 }
 
-// LLMModeBadge — shown in sidebar footer, populates Zustand store
+// LLMModeBadge — shown in sidebar footer. Reads the saved setting like every
+// other view; nothing copies the mode into client state.
 
 interface LLMModeBadgeProps {
   onClick: () => void
@@ -804,26 +753,17 @@ export function LLMModeBadge({ onClick }: LLMModeBadgeProps) {
     staleTime: 30_000,
     refetchInterval: 30_000,
   })
-  const setLlmMode = useAppStore((s) => s.setLlmMode)
-
-  useEffect(() => {
-    if (data) {
-      setLlmMode(data.mode, data.provider)
-    }
-  }, [data, setLlmMode])
 
   const mode = data?.mode ?? "private"
+  const modeLabel = engineMode(mode).label
   const ollamaDown = mode === "private" && data?.processing_mode === "unavailable"
   const dotColor =
     ollamaDown ? "bg-red-500" : mode === "cloud" ? "bg-blue-500" : mode === "hybrid" ? "bg-purple-500" : "bg-green-500"
-  const label =
-    ollamaDown
-      ? "Private (Ollama offline)"
-      : mode === "cloud"
-        ? `Cloud: ${data?.model ?? ""}`
-        : mode === "hybrid"
-          ? `Hybrid: ${data?.model ?? ""}`
-          : "Private"
+  const label = ollamaDown
+    ? `${modeLabel} (local model unavailable)`
+    : mode === "private"
+      ? modeLabel
+      : `${modeLabel}: ${data?.model ?? ""}`
 
   return (
     <button

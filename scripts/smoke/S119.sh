@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -e
-BASE=http://localhost:7820
-
+source "$(dirname "$0")/lib.sh"
 # Verify the library endpoint returns expected shape
 RESP=$(curl -sf "${BASE}/documents")
 echo "${RESP}" | grep -q '"items"' || { echo "FAIL: /documents did not return items"; exit 1; }

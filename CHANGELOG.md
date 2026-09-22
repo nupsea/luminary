@@ -4,6 +4,36 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.13.0] - 2026-09-22
+
+### Added
+- **Windows and Linux installers.** `desktop-installers.yml` builds a per-user NSIS `-setup.exe` (no admin prompt, unsigned), a `.deb` and an AppImage; each is installed in CI and must ingest and find a document before the job passes.
+- **NVIDIA acceleration is a verified download, not a payload.** Installers ship CPU and Vulkan runners; CUDA (629 MB, what put the Windows stage over the NSIS ceiling) is offered from `/setup/components` only on a host with an NVIDIA device, resumed and sha256-checked before unpacking.
+- **Direct mode in Ask** sends a question to the model without retrieving from the library (#79).
+- **First run offers Local, Hybrid and Cloud**, where it offered no Cloud before. On a host that cannot run a local model, work the chosen mode refuses is skipped and named instead of failing, and changing the mode resumes it.
+- **Blog note-refine step and sized images** when publishing.
+
+### Changed
+- **The engine runs from the library directory**, because Ollama resolves runners beside its own executable and an installed tree is read-only on Linux. macOS keeps running from the bundle.
+- **A running app never downloads model weights or contacts a third party**; models are cache-only at runtime.
+- **`make smoke` runs against the dev backend or the bundled app** (`LUMINARY_BASE_URL`), a skipped script now reports as a skip instead of a pass, and a script with no verdict after 30 minutes is killed and failed.
+
+### Fixed
+- **A 16 GiB Linux host was refused as under the 16 GB floor** (#139). Reported RAM is rounded up.
+- **Deleted documents kept their summaries and stayed in the library summary** (#140).
+- **A notes question with no subject answered `not_found`** with the matching note in context (#141).
+- **Questions and new documents waited minutes behind background enrichment.** Background LLM calls are now capped at the serving width and admitted in arrival order, and calls a user or a new document is waiting on go first (#142).
+- **`make smoke` rewrote the committed golden manifest** (#143); it is now a local cache.
+- **The answer receipt named the cloud model when the local model had answered.** A routed cloud call that fell back to the local model because the provider was unreachable was reported as `engine: cloud`; the receipt and the stored history now name the model that served the answer.
+- **The reader could not reach past the 200th section of a long document.** Citations, search hits and contents entries there opened the book at its first page, and scrolling stopped on a spinner.
+- **Audio added without a content type was stored with no transcript** and reported complete.
+- **A Wikipedia link could not be added**: a pre-check the site refused aborted the ingest before the article extractor ran.
+- **A YouTube link that could not be read said only "exit 1"**; it now carries YouTube's reason.
+- **A failed eval search scored as a miss** instead of failing the run.
+- **Notes editor**: caret jumps and dead mouse selection near rendered blocks, runaway drag-selection redraws, and scroll position lost when toggling split preview.
+
 ## [0.12.11] - 2026-09-18
 
 ### Fixed

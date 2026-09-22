@@ -9,6 +9,7 @@
 #   5. Thresholds include faithfulness and answer_relevance gates.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"

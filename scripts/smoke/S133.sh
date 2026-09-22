@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-BASE="${BASE:-http://localhost:7820}"
-
+source "$(dirname "$0")/lib.sh"
 # `all.sh` passes no arguments, so requiring one made this script a guaranteed
 # failure in the suite it belongs to. The id is still accepted as an override;
 # otherwise pick a complete document, and skip cleanly when the library has none.
@@ -17,16 +16,16 @@ print(ready[0]['id'] if ready else '')
 fi
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: no complete document in the library"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
-IMAGES_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:7820/documents/${DOC_ID}/images")
+IMAGES_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/documents/${DOC_ID}/images")
 if [ "$IMAGES_STATUS" -ne 200 ]; then
   echo "FAIL: GET /documents/${DOC_ID}/images returned $IMAGES_STATUS"
   exit 1
 fi
 
-ENRICHMENT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:7820/documents/${DOC_ID}/enrichment")
+ENRICHMENT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/documents/${DOC_ID}/enrichment")
 if [ "$ENRICHMENT_STATUS" -ne 200 ]; then
   echo "FAIL: GET /documents/${DOC_ID}/enrichment returned $ENRICHMENT_STATUS"
   exit 1

@@ -146,22 +146,46 @@ export function orderHitsByDocument<T extends { section_id: string }>(
   return [...hits].sort((a, b) => rank(a) - rank(b))
 }
 
+/** The slice of a document's sections the Read view renders: `[start, start + limit)`. */
+export interface SectionWindow {
+  start: number
+  limit: number
+}
+
 /**
- * The render window needed to include `targetIndex`, given the current one.
+ * The render window that includes `targetIndex`.
  *
- * The Read view renders a page of sections at a time and otherwise grows only
- * as the reader scrolls, so a search hit (or a deep link) naming a section
- * past the window has no element to scroll to and the jump silently does
- * nothing. Never shrinks the window -- that would unmount sections the reader
- * is looking at -- and never exceeds `max`, which the server refuses beyond.
+ * A citation, search hit or contents entry naming a section outside the window
+ * has no element to scroll to, and the jump silently does nothing. Grows the
+ * window when the target is within `max` of its start, so the sections being
+ * read stay mounted; otherwise moves it to the target with a page above. The
+ * window never exceeds `max`, which the server refuses beyond -- only growing
+ * from 0 left every section past the 200th unreachable.
  */
-export function widenedListLimit(
-  currentLimit: number,
+export function windowIncluding(
+  win: SectionWindow,
   targetIndex: number,
   page: number,
   max: number,
-): number {
-  if (targetIndex < 0 || targetIndex < currentLimit) return currentLimit
-  const needed = Math.ceil((targetIndex + 1) / page) * page
-  return Math.min(Math.max(needed, currentLimit), max)
+): SectionWindow {
+  if (targetIndex < 0) return win
+  if (targetIndex >= win.start && targetIndex < win.start + win.limit) return win
+  if (targetIndex >= win.start && targetIndex - win.start < max) {
+    const needed = Math.ceil((targetIndex - win.start + 1) / page) * page
+    return { start: win.start, limit: Math.min(Math.max(needed, win.limit), max) }
+  }
+  const start = Math.max(0, Math.floor(targetIndex / page) * page - page)
+  return { start, limit: Math.min(targetIndex - start + page, max) }
+}
+
+/** One page further down; past `max` the window slides rather than grows. */
+export function extendWindowDown(win: SectionWindow, page: number, max: number): SectionWindow {
+  const limit = win.limit + page
+  return limit <= max ? { start: win.start, limit } : { start: win.start + limit - max, limit: max }
+}
+
+/** One page further up, trimming the tail to stay within `max`. */
+export function extendWindowUp(win: SectionWindow, page: number, max: number): SectionWindow {
+  const start = Math.max(0, win.start - page)
+  return { start, limit: Math.min(win.limit + win.start - start, max) }
 }

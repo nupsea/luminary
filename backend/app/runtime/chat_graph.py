@@ -44,6 +44,9 @@ from app.runtime.chat_nodes.confidence import (
     confidence_gate_node,
     web_augment_node,
 )
+from app.runtime.chat_nodes.direct import (
+    direct_node,  # noqa: F401  re-exported for back-compat
+)
 from app.runtime.chat_nodes.graph import (
     _extract_entities_from_question,  # noqa: F401  re-exported for back-compat
     _query_kuzu_for_entity,  # noqa: F401  re-exported for back-compat
@@ -180,6 +183,8 @@ def _strategy_for(intent: str, scope: str) -> str:
     actually ran: the two had drifted, and a notes_gap question was labelled
     "search" in the transparency panel while notes_gap_node answered it.
     """
+    if intent == "direct":
+        return "direct_node"
     if intent == "teach_back":
         return "teach_back_node"
     if intent == "socratic":
@@ -203,6 +208,16 @@ def _strategy_for(intent: str, scope: str) -> str:
 
 async def classify_node(state: ChatState) -> dict:
     """Detect intent (heuristic + optional LLM fallback) and rewrite vague queries."""
+    if state.get("direct"):
+        logger.info("classify_node: direct mode enabled — bypassing retrieval")
+        return {
+            "intent": "direct",
+            "rewritten_question": state["question"],
+            "primary_strategy": "direct_node",
+            "scope": state.get("scope", "all"),
+            "doc_ids": state.get("doc_ids") or [],
+        }
+
     question = state["question"]
     scope = state.get("scope", "all")
     doc_ids = state.get("doc_ids") or []
@@ -295,6 +310,8 @@ async def classify_node(state: ChatState) -> dict:
 
 def route_node(state: ChatState) -> str:
     """Return the next node name based on detected intent and scope."""
+    if state.get("direct"):
+        return "direct_node"
     intent = state.get("intent") or "factual"
     scope = state.get("scope", "all")
     node = _strategy_for(intent, scope)
@@ -357,6 +374,7 @@ def build_chat_graph() -> StateGraph:
     g: StateGraph = StateGraph(ChatState)  # type: ignore[type-var]
 
     g.add_node("classify_node", classify_node)
+    g.add_node("direct_node", direct_node)
     g.add_node("notes_node", notes_node)
     g.add_node("notes_gap_node", notes_gap_node)
     g.add_node("socratic_node", socratic_node)
@@ -376,6 +394,7 @@ def build_chat_graph() -> StateGraph:
         "classify_node",
         route_node,
         {
+            "direct_node": "direct_node",
             "teach_back_node": "teach_back_node",
             "socratic_node": "socratic_node",
             "notes_gap_node": "notes_gap_node",
@@ -398,7 +417,8 @@ def build_chat_graph() -> StateGraph:
             },
         )
 
-    # card nodes route to END -- card answers skip synthesize/confidence retry
+    # card and direct nodes route to END -- skip synthesize/confidence retry
+    g.add_edge("direct_node", END)
     g.add_edge("teach_back_node", END)
     g.add_edge("socratic_node", END)
     g.add_edge("notes_gap_node", END)

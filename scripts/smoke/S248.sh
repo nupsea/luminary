@@ -6,8 +6,8 @@
 # contract: the counts partition the document's chunks, and a scope whose every
 # passage carries a card reports nothing left.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${BASE:-http://localhost:7820}"
 FAIL=0
 
 check() {
@@ -20,7 +20,7 @@ check() {
     fi
 }
 
-TMPFILE=$(mktemp /tmp/s248_XXXXXX)
+TMPFILE=$(mktemp $SMOKE_TMP/s248_XXXXXX)
 trap 'rm -f "$TMPFILE"' EXIT
 
 HTTP=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/flashcards/decks")
@@ -34,8 +34,7 @@ PY
 )
 if [ -z "$DOC_ID" ]; then
     echo "SKIP: no document in this library has a card"
-    echo "ALL SMOKE TESTS PASSED"
-    exit 0
+    exit "$SMOKE_SKIP"
 fi
 
 HTTP=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/flashcards/$DOC_ID/headroom")

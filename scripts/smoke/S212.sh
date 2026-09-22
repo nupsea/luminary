@@ -13,15 +13,23 @@
 # real dev port to match every other smoke in scripts/smoke/.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
+# Its manifest and history describe this server, not the developer's library.
+export LUMINARY_EVAL_STATE_DIR="$SMOKE_TMP/eval-state"
+mkdir -p "$LUMINARY_EVAL_STATE_DIR"
+# run_eval.py reads which rerank arm ships from /evals/environment, which public
+# mode does not mount; without it the eval refuses rather than guess the arm.
+# smoke-calls: /evals/environment
+smoke_require_mode full
+
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 EVALS_DIR="${REPO_ROOT}/evals"
 
 # 0. Backend health
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")
 if [ "$HTTP_HEALTH" != "200" ]; then
-  echo "FAIL: backend not healthy (got ${HTTP_HEALTH}). Start the backend on :7820."
+  echo "FAIL: backend not healthy (got ${HTTP_HEALTH}). Start the backend, or set LUMINARY_BASE_URL."
   exit 1
 fi
 

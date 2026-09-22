@@ -140,7 +140,7 @@ async def test_notes_node_multiple_results_joined():
     mock_svc = MagicMock()
     mock_svc.search = AsyncMock(return_value=results)
 
-    state = _make_minimal_state(question="what did I note")
+    state = _make_minimal_state(question="what did I note about the rabbit")
 
     with patch("app.services.note_search.get_note_search_service", return_value=mock_svc):
         result = await notes_node(state)
@@ -190,3 +190,108 @@ def test_notes_chat_integration(all_books_ingested):
 
         assert resp.status_code == 200
         assert len(resp.content) > 0
+
+
+# #141: a notes question that names no subject answers from the most recent notes
+
+
+@pytest.mark.parametrize(
+    ("question", "generic"),
+    [
+        ("what did I note about my reading", True),
+        ("what did I note?", True),
+        ("what have I noted recently", True),
+        ("what did I note about my reading of Hamlet", False),
+        ("what did I note about Alice", False),
+        ("in my notes about the White Rabbit", False),
+    ],
+)
+def test_notes_subject_is_generic(question, generic):
+    from app.services.intent import notes_subject_is_generic
+
+    assert notes_subject_is_generic(question) is generic
+
+
+@pytest.fixture
+async def notes_db(tmp_path, monkeypatch):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import app.database as db_module
+    from app.config import get_settings
+    from app.database import make_engine
+    from app.db_init import create_all_tables
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    get_settings.cache_clear()
+    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path}/test.db")
+    await create_all_tables(engine)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    orig = db_module._engine, db_module._session_factory
+    db_module._engine, db_module._session_factory = engine, factory
+    yield factory
+    db_module._engine, db_module._session_factory = orig
+    get_settings.cache_clear()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_notes_node_generic_subject_uses_recent_notes(notes_db):
+    from datetime import UTC, datetime, timedelta
+
+    from app.models import NoteModel
+
+    now = datetime.now(UTC)
+    async with notes_db() as s:
+        for i, text in enumerate(
+            ["older note", "The Cheshire Cat can vanish leaving only its grin"]
+        ):
+            s.add(
+                NoteModel(
+                    id=f"n{i}",
+                    content=text,
+                    tags=[],
+                    created_at=now,
+                    updated_at=now + timedelta(seconds=i),
+                )
+            )
+        await s.commit()
+
+    mock_svc = MagicMock()
+    mock_svc.search = AsyncMock(return_value=[])
+    state = _make_minimal_state(question="what did I note about my reading")
+    with patch("app.services.note_search.get_note_search_service", return_value=mock_svc):
+        result = await notes_node(state)
+
+    mock_svc.search.assert_not_called()
+    assert result["notes_recent"] is True
+    ctx = result["section_context"]
+    assert ctx.index("Cheshire Cat") < ctx.index("older note"), "most recent first"
+
+
+@pytest.mark.asyncio
+async def test_notes_node_generic_subject_without_notes_is_not_found(notes_db):
+    state = _make_minimal_state(question="what did I note about my reading")
+    result = await notes_node(state)
+    assert result.get("section_context") is None
+    assert not result.get("notes_recent")
+
+
+@pytest.mark.asyncio
+async def test_synthesize_uses_notes_prompt_only_for_recent_notes(notes_db):
+    from app.runtime.chat_nodes.synthesize import synthesize_node
+    from app.services.qa import NOT_FOUND_SENTINEL, QA_NOTES_RECENT_SYSTEM_PROMPT
+
+    ctx = "[From your notes] The Cheshire Cat can vanish leaving only its grin"
+    recent = await synthesize_node(
+        _make_minimal_state(
+            question="what did I note", intent="notes", section_context=ctx, notes_recent=True
+        )
+    )
+    searched = await synthesize_node(
+        _make_minimal_state(
+            question="what did I note about Alice", intent="notes", section_context=ctx
+        )
+    )
+    assert recent["_system_prompt"] == QA_NOTES_RECENT_SYSTEM_PROMPT
+    assert NOT_FOUND_SENTINEL not in recent["_system_prompt"]
+    assert NOT_FOUND_SENTINEL in searched["_system_prompt"]

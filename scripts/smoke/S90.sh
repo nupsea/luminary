@@ -3,8 +3,7 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
 
 # 1. Create a note with sufficient content for tagging
 CREATE=$(curl -sf -X POST "${BASE}/notes" \
@@ -22,13 +21,13 @@ if [ -z "$NOTE_ID" ]; then
 fi
 
 # 2. Call suggest-tags -- must return HTTP 200 with tags array
-HTTP_CODE=$(curl -s -o /tmp/s90_suggest.json -w "%{http_code}" -X POST "${BASE}/notes/${NOTE_ID}/suggest-tags")
+HTTP_CODE=$(curl -s -o $SMOKE_TMP/s90_suggest.json -w "%{http_code}" -X POST "${BASE}/notes/${NOTE_ID}/suggest-tags")
 if [ "$HTTP_CODE" != "200" ]; then
   echo "FAIL: POST /notes/${NOTE_ID}/suggest-tags returned ${HTTP_CODE} (expected 200)"
   exit 1
 fi
 
-TAGS=$(python3 -c "import json; d=json.load(open('/tmp/s90_suggest.json')); print(type(d.get('tags')).__name__)")
+TAGS=$(python3 -c "import json; d=json.load(open('$SMOKE_TMP/s90_suggest.json')); print(type(d.get('tags')).__name__)")
 if [ "$TAGS" != "list" ]; then
   echo "FAIL: suggest-tags response missing 'tags' list"
   exit 1

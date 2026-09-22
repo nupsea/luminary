@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-BASE="http://localhost:7820"
-
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 RESP=$(curl -sf "$BASE/graph/concepts/linked")
 echo "$RESP" | python3 -c "
 import sys, json

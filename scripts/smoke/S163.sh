@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 fail() { echo "FAIL: $1"; exit 1; }
 
 # ---------------------------------------------------------------------------

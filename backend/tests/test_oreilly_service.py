@@ -1,5 +1,6 @@
 """Tests for O'Reilly service and endpoints."""
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -261,6 +262,16 @@ def test_links_into_the_book_point_at_the_stored_chapter():
     assert 'href="https://example.com/"' in cleaned
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "NTFS has no POSIX mode bits: os.chmod on Windows can only toggle the "
+        "read-only attribute, so stat().st_mode always reports 0o666 for a "
+        "regular file regardless of the mode os.open() was given. The file's "
+        "actual access is the user profile directory's ACL, which chmod cannot "
+        "narrow and this test cannot observe through st_mode."
+    ),
+)
 def test_saved_cookies_are_owner_only():
     save_oreilly_cookies({"sessionid": "secret"})
     from app.services.oreilly_service import _cookies_file_path

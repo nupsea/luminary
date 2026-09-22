@@ -18,8 +18,8 @@
 #
 # Non-destructive: reads only.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="${BASE:-http://localhost:7820}"
 FAIL=0
 
 check() {

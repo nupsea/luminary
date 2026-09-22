@@ -3,8 +3,8 @@
 # Verifies GET /evals/results returns HTTP 200 with a JSON array body.
 # Verifies POST /evals/run with dataset=book returns HTTP 202.
 set -euo pipefail
-
-BASE="http://localhost:7820"
+source "$(dirname "$0")/lib.sh"
+smoke_require_mode full
 
 echo "S85 smoke: GET /evals/results"
 BODY=$(curl -sf "$BASE/evals/results")

@@ -3,14 +3,14 @@
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 
-BASE="http://localhost:7820"
 PASS=0
 FAIL=0
 
 check() {
   local desc="$1" url="$2" expected="$3"
-  TMPFILE=$(mktemp /tmp/s184_XXXXXX)
+  TMPFILE=$(mktemp $SMOKE_TMP/s184_XXXXXX)
   HTTP=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$url")
   if [ "$HTTP" != "$expected" ]; then
     echo "FAIL: $desc — expected $expected, got $HTTP"
@@ -28,7 +28,7 @@ check() {
 check "Health check" "${BASE}/health" "200"
 
 # 2. GET /flashcards/search with no params returns 200 + JSON with items array
-TMPFILE=$(mktemp /tmp/s184_XXXXXX)
+TMPFILE=$(mktemp $SMOKE_TMP/s184_XXXXXX)
 HTTP=$(curl -s -o "$TMPFILE" -w "%{http_code}" "${BASE}/flashcards/search")
 if [ "$HTTP" != "200" ]; then
   echo "FAIL: search no params — expected 200, got $HTTP"

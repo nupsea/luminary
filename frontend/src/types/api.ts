@@ -1298,6 +1298,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/cover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Document Cover
+         * @description Serve or generate on-demand the cover / preview image for a document.
+         *
+         *     - For PDF / EPUB: renders page 0 via PyMuPDF (fitz) if not already cached.
+         *     - If images exist (e.g. from article extraction), serves the first diagram/figure.
+         *     - Returns 404 if no image can be produced for this document.
+         */
+        get: operations["get_document_cover_documents__document_id__cover_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/pdf-meta": {
         parameters: {
             query?: never;
@@ -8946,7 +8970,7 @@ export interface components {
         /** LLMSettingsPatch */
         LLMSettingsPatch: {
             /** Mode */
-            mode?: string | null;
+            mode?: ("private" | "hybrid" | "cloud") | null;
             /** Provider */
             provider?: string | null;
             /** Model */
@@ -9787,6 +9811,11 @@ export interface components {
              */
             creative: boolean;
             /**
+             * Direct
+             * @default false
+             */
+            direct: boolean;
+            /**
              * Include Context
              * @default false
              */
@@ -10340,10 +10369,23 @@ export interface components {
             flashcard_id: string;
             /** Question */
             question: string;
+            /**
+             * Answer
+             * @default
+             */
+            answer: string;
+            /** Source Excerpt */
+            source_excerpt?: string | null;
+            /** Section Heading */
+            section_heading?: string | null;
+            /** Chunk Id */
+            chunk_id?: string | null;
             /** Rating */
             rating: string;
             /** Is Correct */
             is_correct: boolean;
+            /** Predicted Rating */
+            predicted_rating?: string | null;
             /**
              * Reviewed At
              * Format: date-time
@@ -11179,6 +11221,8 @@ export interface components {
             why: string;
             /** Fallback Reason */
             fallback_reason?: string | null;
+            /** Refused Reason */
+            refused_reason?: string | null;
         };
         /** SessionListItem */
         app__routers__chat_sessions__SessionListItem: {
@@ -13723,6 +13767,37 @@ export interface operations {
         };
     };
     serve_document_file_documents__document_id__file_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_cover_documents__document_id__cover_get: {
         parameters: {
             query?: never;
             header?: never;

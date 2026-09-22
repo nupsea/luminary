@@ -119,6 +119,11 @@ export default function NotePage() {
   const abortRef = useRef<AbortController | null>(null)
   const editorHandleRef = useRef<MarkdownEditorHandle | null>(null)
   const proseRef = useRef<HTMLDivElement>(null)
+  // The write pane is a CodeMirror view keyed on layout shape (editor-only vs.
+  // split), so toggling split preview unmounts and remounts it -- silently
+  // resetting scroll to the top of the note. Captured on click, before the
+  // remount, and reapplied once the new instance is mounted below.
+  const pendingScrollLineRef = useRef<number | null>(null)
 
   const propsRailOpen = useNoteEditorUi((s) => s.propsRailOpen)
   const setPropsRailOpen = useNoteEditorUi((s) => s.setPropsRailOpen)
@@ -186,6 +191,17 @@ export default function NotePage() {
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [])
+
+  // Runs after the write pane's remount above has committed and attached its
+  // handle, restoring the scroll position the split-preview toggle captured.
+  // topSourceLine() answers 1-based (matching CodeMirror's own Line.number);
+  // scrollToLine takes the 0-based index parseOutline also hands it.
+  useEffect(() => {
+    const line = pendingScrollLineRef.current
+    if (line == null) return
+    pendingScrollLineRef.current = null
+    editorHandleRef.current?.scrollToLine(Math.max(0, Math.floor(line) - 1))
+  }, [splitPreview])
 
   // Refresh list surfaces once on leave; per-keystroke invalidation would
   // refetch the whole notes list for every autosave.
@@ -391,7 +407,10 @@ export default function NotePage() {
             {!readingView && (
               <>
                 <button
-                  onClick={() => setSplitPreview(!splitPreview)}
+                  onClick={() => {
+                    pendingScrollLineRef.current = editorHandleRef.current?.topSourceLine() ?? null
+                    setSplitPreview(!splitPreview)
+                  }}
                   className={`rounded p-1 hover:bg-accent hover:text-foreground ${
                     splitPreview ? "text-primary" : "text-muted-foreground"
                   }`}

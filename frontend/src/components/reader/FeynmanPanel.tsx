@@ -19,9 +19,9 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { RubricCard, type Rubric } from "@/components/RubricCard"
 import { computeExplanationDiff, splitSentences, type DiffSegment } from "@/lib/explanationDiff"
 
-import { ApiError, apiGet, apiPost } from "@/lib/apiClient"
-import { useAppStore } from "@/store"
+import { ApiError, apiGet, apiPost, detailFromError } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
+import { modelUnavailableMessage } from "@/lib/engineModes"
 import {
   fetchSummary,
   summaryCache,
@@ -56,7 +56,6 @@ export function FeynmanPanel({
 }: FeynmanPanelProps) {
   const [activeTab, setActiveTab] = useState<SessionTab>("chat")
   const [referenceOpen, setReferenceOpen] = useState(true)
-  const llmMode = useAppStore((s) => s.llmMode)
 
   // Summary loading state
   const [summaryContent, setSummaryContent] = useState<string | null>(null)
@@ -161,11 +160,7 @@ export function FeynmanPanel({
         if (err instanceof ApiError && err.status !== 503) {
           setSessionError(`Failed to start session (HTTP ${err.status})`)
         } else {
-          setSessionError(
-            llmMode === "private"
-              ? "Ollama is not running. Start it with: ollama serve"
-              : "LLM service is unreachable. Please check your internet connection or settings."
-          )
+          setSessionError(detailFromError(err, modelUnavailableMessage(null)).message)
         }
       } finally {
         if (!cancelled) setSessionLoading(false)
@@ -266,11 +261,9 @@ export function FeynmanPanel({
               ])
             }
             if (payload["error"] === "llm_unavailable") {
-              const msg = typeof payload["message"] === "string"
-                ? payload["message"]
-                : (llmMode === "private"
-                    ? "Ollama is not running. Start it with: ollama serve"
-                    : "LLM service is unreachable. Please check your connection or settings.")
+              const msg = modelUnavailableMessage(
+                typeof payload["message"] === "string" ? payload["message"] : null,
+              )
               setMessages((prev) => [
                 ...prev.slice(0, -1),
                 { role: "tutor", content: msg },
@@ -299,10 +292,7 @@ export function FeynmanPanel({
           ...prev.slice(0, -1),
           {
             role: "tutor",
-            content:
-              llmMode === "private"
-                ? "Error: Connection failed. Check that Ollama is running."
-                : "Error: Connection failed. Check your internet connection or settings.",
+            content: "Error: Connection failed. Try again.",
           },
         ])
       }
@@ -411,11 +401,7 @@ export function FeynmanPanel({
         }
       }
     } catch {
-      setModelExplanationError(
-        llmMode === "private"
-          ? "Connection failed. Check that Ollama is running."
-          : "Connection failed. Check your internet connection or settings."
-      )
+      setModelExplanationError("Connection failed. Try again.")
     } finally {
       setModelExplanationStreaming(false)
     }

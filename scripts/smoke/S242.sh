@@ -18,8 +18,7 @@
 #   6. `content` is not swallowed by the document-id route
 
 set -euo pipefail
-
-BASE="${BASE:-http://localhost:7820}"
+source "$(dirname "$0")/lib.sh"
 
 fail() {
   echo "FAIL: $1"

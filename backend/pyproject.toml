@@ -1,6 +1,6 @@
 [project]
 name = "luminary-backend"
-version = "0.12.11"
+version = "0.13.0"
 description = "Luminary — local-first personal knowledge and learning assistant"
 requires-python = ">=3.13"
 dependencies = [
@@ -63,6 +63,11 @@ dependencies = [
     # upgrade smuggled in as a size fix. Raise both halves together, and read the
     # index listing before raising the floor.
     "torch>=2.10.0,<2.11.0",
+    # Direct, though they arrived transitively: clustering imports scipy/sklearn
+    # lazily, and the Linux engine runner download is a .tar.zst.
+    "scipy>=1.17.1",
+    "scikit-learn>=1.8.0",
+    "zstandard>=0.25.0",
     "curl-cffi>=0.7.0",
 ]
 

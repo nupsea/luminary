@@ -9,11 +9,13 @@
 # lib/pythonX.Y/os.py landmark, and the PBS binary links
 # @executable_path/../lib/libpython3.13.dylib, so the result contains no
 # absolute paths at all and relocates into the .app unchanged.
+#
+# The dependency profile, prunes and .pth are shared with Windows and Linux
+# (scripts/desktop/lib.sh). What is here is what only a signed Mac bundle needs.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 PY_STAGE="$STAGE/python"
-REQ="$BUILD_DIR/requirements-app.txt"
 
 mkdir -p "$BUILD_DIR"
 command -v uv >/dev/null || _die "uv not found"
@@ -30,48 +32,17 @@ mkdir -p "$STAGE"
 # extended attributes that Tauri's own resource copier mangles.
 ditto "$SRC" "$PY_STAGE"
 PY="$(staged_python)"
+STDLIB="$(staged_stdlib)"
+SITE="$(staged_site)"
 
 # uv marks the interpreters it manages EXTERNALLY-MANAGED so nobody pip-installs
 # into the shared toolchain. This staged copy is a private runtime we own and
 # ship, and installing into it is the entire point, so the marker is wrong here.
-rm -f "$PY_STAGE/lib/python$PY_MINOR/EXTERNALLY-MANAGED"
+rm -f "$STDLIB/EXTERNALLY-MANAGED"
 
-_step "Resolving the shipping dependency set"
-# The shipping profile: no `dev` (Phoenix, pytest, ruff, tiktoken, reportlab --
-# ~120MB that no user ever runs) but yes `full`, because the desktop app
-# advertises YouTube/web/audio ingestion and must actually support it.
-uv export --directory "$REPO_ROOT/backend" \
-    --frozen --no-emit-project --no-default-groups --group full \
-    --format requirements-txt --quiet -o "$REQ"
-_info "$(grep -cE '^[a-zA-Z0-9]' "$REQ") packages"
-
-_step "Installing dependencies into the staged interpreter"
-# --system because this is not a venv: it is a private interpreter we own.
-uv pip sync --python "$PY" --system "$REQ"
-
-_step "Pruning bundled test suites"
-# Third-party test suites are never executed from the bundle. `testing` is NOT
-# in this list and must not be: `import torch` imports `torch.testing`, so
-# removing it breaks the interpreter this ships. Only directories literally
-# named `test`/`tests` go.
-pruned=0
-freed=0
-while IFS= read -r d; do
-    sz=$(du -sk "$d" 2>/dev/null | cut -f1)
-    rm -rf "$d" && pruned=$((pruned + 1)) && freed=$((freed + sz))
-done < <(find "$PY_STAGE/lib/python$PY_MINOR/site-packages" \
-             -type d \( -name tests -o -name test \) -prune -print 2>/dev/null)
-_info "removed $pruned test directories ($((freed / 1024)) MB)"
-
-_step "Putting the backend source on sys.path"
-SITE="$PY_STAGE/lib/python$PY_MINOR/site-packages"
-[ -d "$SITE" ] || _die "site-packages not at $SITE"
-# site.addpackage joins each line against the site dir, so a RELATIVE line
-# relocates with the bundle. Four levels up from site-packages is the stage root
-# (= Contents/Resources), where stage_payload.sh puts backend/.
-# We launch with `python -I`, which drops PYTHONPATH, so this .pth is the only
-# way the backend package is importable.
-printf '../../../../backend\n' > "$SITE/_luminary.pth"
+install_shipping_dependencies "$PY"
+prune_test_suites "$SITE"
+write_backend_pth "$SITE"
 
 _step "Sanitizing build-machine paths"
 # _sysconfigdata__*.py records the interpreter's build-time prefix, which is the
@@ -85,76 +56,20 @@ while IFS= read -r f; do
 done < <(grep -rlF "$SRC" "$PY_STAGE" --binary-files=without-match 2>/dev/null || true)
 _info "sanitized $sanitized files"
 
-_step "Making console scripts relocatable"
-# uv writes entry-point scripts with an absolute shebang pointing at the build
-# machine's interpreter, which is dead on a user's Mac. We cannot just delete
-# them: youtube_downloader.py resolves `yt-dlp` through PATH and spawns it as a
-# subprocess, so bin/ has to work. Rewrite the shebang as the standard sh/Python
-# polyglot trampoline -- sh runs the exec line, Python sees one string literal.
-"$PY" - "$PY_STAGE/bin" <<'PYEOF'
-import os, sys
-bin_dir = sys.argv[1]
-# sh reads '''' as two empty strings, so the word is `exec`, and `# ` starts a
-# comment that swallows the trailing quotes. Python reads the whole line as one
-# triple-quoted string. The quoting is exact -- a stray quote after `exec`
-# breaks the sh side and the script falls through into its own Python body.
-tramp = "#!/bin/sh\n''''exec \"$(dirname \"$0\")/python%d.%d\" \"$0\" \"$@\" # '''\n" % sys.version_info[:2]
-fixed = 0
-for name in os.listdir(bin_dir):
-    p = os.path.join(bin_dir, name)
-    if not os.path.isfile(p) or os.path.islink(p):
-        continue
-    try:
-        with open(p, "rb") as fh:
-            head = fh.readline()
-            if not head.startswith(b"#!") or b"python" not in head:
-                continue
-            rest = fh.read()
-    except OSError:
-        continue
-    with open(p, "wb") as fh:
-        fh.write(tramp.encode())
-        fh.write(rest)
-    os.chmod(p, 0o755)
-    fixed += 1
-print(f"    rewrote {fixed} console-script shebangs")
-PYEOF
+relocatable_shebangs "$PY" "$PY_STAGE/bin"
 
 _step "Pruning the interpreter"
 # tkinter/tcl/tk is ~15MB and nothing in the backend imports it.
 rm -rf "$PY_STAGE"/lib/tcl8* "$PY_STAGE"/lib/tk8* "$PY_STAGE"/lib/itcl* \
        "$PY_STAGE"/lib/thread* "$PY_STAGE"/lib/sqlite3* \
-       "$PY_STAGE/lib/python$PY_MINOR"/{tkinter,idlelib,turtledemo,ensurepip} \
-       "$PY_STAGE/lib/python$PY_MINOR/test" \
-       "$PY_STAGE/lib/python$PY_MINOR/lib-dynload"/_tkinter*.so \
+       "$STDLIB"/{tkinter,idlelib,turtledemo,ensurepip} \
+       "$STDLIB/test" \
+       "$STDLIB/lib-dynload"/_tkinter*.so \
        "$PY_STAGE/include" "$PY_STAGE/share" 2>/dev/null || true
 
-_step "Pruning dependencies"
-# Every entry here is dead weight at runtime. Guarded by verify_stage.sh, which
-# imports the full native surface after this runs.
-rm -rf "$SITE/torch/include"                                      # C++ headers
-# pip stays: it is how the user installs post-install components (speech-to-text
-# and anything else kept out of the installer for licensing reasons).
-rm -rf "$SITE/onnxruntime"/{transformers,quantization,tools}      # export/training helpers
-# NOT litellm/proxy (27MB): litellm_logging imports integrations.gcs_bucket at
-# module scope, which imports litellm.proxy._types, so plain `import litellm`
-# needs it. Verified by verify_stage.sh, which is why the prunes are guarded.
-rm -rf "$SITE/pyarrow"/{include,tests}
-# Flight only. NOT libarrow_substrait/_dataset/_acero: pyarrow/lib.*.so links all
-# three directly, so removing substrait breaks `import pyarrow` outright and
-# cascades into lancedb, sentence-transformers and gliner.
-rm -f "$SITE/pyarrow"/libarrow_flight*.dylib
-find "$SITE" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
-find "$SITE" -name '*.dist-info' -type d -exec rm -rf {}/RECORD \; 2>/dev/null || true
-
-_step "Byte-compiling"
-# unchecked-hash, not the default timestamp invalidation: ditto, DMG creation
-# and notarization all rewrite mtimes, which would invalidate every .pyc and
-# send a read-only bundle trying to rewrite them at import time.
-"$PY" -m compileall -q -f -j 0 --invalidation-mode unchecked-hash \
-    "$PY_STAGE/lib/python$PY_MINOR" >/dev/null 2>&1 || _warn "compileall reported errors (usually py2-only vendored files)"
-[ -d "$STAGE/backend" ] && "$PY" -m compileall -q -f -j 0 --invalidation-mode unchecked-hash \
-    "$STAGE/backend" >/dev/null 2>&1 || true
+prune_dependencies "$SITE"
+byte_compile "$PY" "$STDLIB"
+if [ -d "$STAGE/backend" ]; then byte_compile "$PY" "$STAGE/backend"; fi
 
 _step "Thinning universal extensions to arm64"
 # Several wheels (lxml, scipy, ml_dtypes, ...) ship universal2 binaries. We

@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-refusal eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-refusal eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -48,24 +48,36 @@ frontend:
 install:
 	bash scripts/install.sh
 
-# --- macOS desktop bundle -----------------------------------------------
+# --- desktop bundle -------------------------------------------------------
 # Stage the payload, the relocatable Python runtime and the bundled inference
-# server into build/stage, which becomes Contents/Resources in the .app.
+# server into build/stage. macOS keeps its own runtime and engine scripts for the
+# signed-bundle steps. The Windows runner has no make; CI calls the scripts directly.
+
+ifeq ($(shell uname -s),Darwin)
+STAGE_SCRIPTS = scripts/macos
+STAGE_REQUIRED = surface-manifest.json python/bin/python3.13 backend/app frontend ollama/ollama
+else ifeq ($(shell uname -s),Linux)
+STAGE_SCRIPTS = scripts/desktop
+STAGE_REQUIRED = surface-manifest.json python/bin/python3.13 backend/app frontend ollama/ollama ollama/lib/ollama
+else
+STAGE_SCRIPTS = scripts/desktop
+STAGE_REQUIRED = surface-manifest.json python/python.exe backend/app frontend ollama/ollama.exe ollama/lib/ollama
+endif
 
 stage: stage-payload stage-python stage-ollama
 
 stage-payload:
-	bash scripts/macos/stage_payload.sh
+	bash scripts/desktop/stage_payload.sh
 
 stage-python:
-	bash scripts/macos/stage_python.sh
+	bash $(STAGE_SCRIPTS)/stage_python.sh
 
 stage-ollama:
-	bash scripts/macos/stage_ollama.sh
+	bash $(STAGE_SCRIPTS)/stage_ollama.sh
 
 verify-stage:
-	bash scripts/macos/verify_stage.sh
-	bash scripts/macos/verify_ollama.sh
+	bash $(STAGE_SCRIPTS)/verify_stage.sh
+	bash $(STAGE_SCRIPTS)/verify_ollama.sh
 
 # The desktop shell's own tests. Needs macOS: the crate does not build anywhere
 # else, which is why ordinary `make ci` (ubuntu) cannot cover it.
@@ -92,9 +104,7 @@ DESKTOP_APP = src-tauri/target/release/bundle/macos/Luminary.app
 
 TAURI = $(CURDIR)/frontend/node_modules/.bin/tauri
 
-# Everything the shell refuses to start without. Kept in step with REQUIRED in
-# src-tauri/src/stage.rs, which checks the same list at runtime.
-STAGE_REQUIRED = surface-manifest.json python/bin/python3.13 backend/app frontend ollama/ollama
+# STAGE_REQUIRED (above): keep in step with REQUIRED in src-tauri/src/stage.rs.
 
 # `ditto` copies a partial stage without complaint, producing an .app that
 # launches and then cannot start. Note this gate cannot catch the other route to
@@ -123,6 +133,11 @@ desktop-app: check-stage
 	cd src-tauri && $(TAURI) build --bundles app --config tauri.conf.json
 	ditto build/stage "$(DESKTOP_APP)/Contents/Resources"
 	@echo "built $(DESKTOP_APP)"
+
+# Linux AppImage and .deb (or the Windows setup .exe) from build/stage, per
+# tauri.<platform>.conf.json.
+desktop-installer: check-stage
+	cd src-tauri && $(TAURI) build $(TAURI_BUILD_FLAGS)
 
 # Sign and package locally with the ad-hoc identity. Exercises enumeration,
 # ordering and every gate; the result is not notarizable and Gatekeeper rejects
@@ -360,7 +375,7 @@ stop:
 # ("files": []), so a bare `tsc --noEmit` resolves zero files and always passes.
 lint:
 	cd backend && uv run ruff check .
-	cd frontend && npx tsc -b --noEmit
+	cd frontend && ./node_modules/.bin/tsc -b --noEmit
 	cd frontend && npm run lint
 	python3 scripts/check_manifest_schema.py
 	python3 scripts/check_manifest_coverage.py
@@ -399,7 +414,7 @@ test-v2:
 	cd backend && uv run pytest tests/test_v2_pipeline.py -v -m slow --timeout=1800
 
 smoke:
-	@echo "Running smoke tests (requires backend on :7820)..."
+	@echo "Running smoke tests against $${LUMINARY_BASE_URL:-http://localhost:7820} (LUMINARY_BASE_URL to change)..."
 	bash scripts/smoke/all.sh
 
 # The suite cleans up after itself, including when it fails partway. This is for
@@ -440,7 +455,7 @@ docker-run-gpu: require-docker require-compose-release
 	docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up --build $(if $(DETACH),-d,)
 
 smoke-clean:
-	@echo "Removing smoke fixtures from the library (requires backend on :7820)..."
+	@echo "Removing smoke fixtures from the library at $${LUMINARY_BASE_URL:-http://localhost:7820}..."
 	bash scripts/smoke/clean.sh $(if $(SINCE),--since $(SINCE),) $(if $(DRY_RUN),--dry-run,)
 
 # Footprint + interactive-latency baseline. FILE= ingests and samples through it;
@@ -773,14 +788,16 @@ endif
 	python3 scripts/check_public_surface_calls.py
 	python3 scripts/check_smoke_paths.py
 	bash scripts/check_powershell.sh
-	cd frontend && npm run build
+	# `npm run build` includes tsc. Vite only warns past chunkSizeWarningLimit; make it fatal.
+	cd frontend && out="$$(npm run build 2>&1)"; rc=$$?; printf '%s\n' "$$out"; \
+		[ $$rc -eq 0 ] || exit $$rc; \
+		! printf '%s' "$$out" | grep -q 'Some chunks are larger than' \
+		|| { echo 'FAIL: a chunk exceeds chunkSizeWarningLimit'; exit 1; }
 	python3 scripts/check_public_bundle_excludes_full.py
-	cd frontend && npx tsc -b --noEmit
 	cd frontend && npm run lint
 	# The frontend suite was never wired into a gate: 59 files of pure-logic
 	# tests ran only when someone typed `npm test`, so a broken helper reached
 	# master green. It costs ~1s.
-	cd frontend && npm test
 	cd frontend && npm test
 	@echo "CI passed."
 

@@ -145,6 +145,96 @@ export const QUOTES: readonly Quote[] = [
     author: "Hannah Arendt",
     source: "The Life of the Mind, 1978",
   },
+  {
+    text: "At the start of the day tell yourself: I shall meet people who are officious, ungrateful, abusive, treacherous, malicious, and selfish. In every case, they've got like this because of their ignorance of good and bad.",
+    author: "Marcus Aurelius",
+    source: "Meditations II.1, tr. Hays",
+  },
+  {
+    text: "It is not that we have a short time to live, but that we waste a lot of it.",
+    author: "Seneca",
+    source: "On the Shortness of Life I, tr. Costa",
+  },
+  {
+    text: "Nothing, Lucilius, is ours, except time. We were entrusted by nature with the ownership of this single thing, so fleeting and slippery that anyone who will can oust us from possession.",
+    author: "Seneca",
+    source: "Letters to Lucilius, Letter I, tr. Campbell",
+  },
+  {
+    text: "We must make the best of those things that are in our power, and take the rest as nature gives it.",
+    author: "Epictetus",
+    source: "Discourses I.1, tr. Long",
+  },
+  {
+    text: "But all things excellent are as difficult as they are rare.",
+    author: "Baruch Spinoza",
+    source: "Ethics, Part V, final lines, 1677",
+  },
+  {
+    text: "Every now and then a man's mind is stretched by a new idea or sensation, and never shrinks back to its former dimensions.",
+    author: "Oliver Wendell Holmes Sr.",
+    source: "The Autocrat of the Breakfast-Table, The Atlantic Monthly, Sep. 1858 — the line usually misattributed to Emerson",
+  },
+  {
+    text: "Ignorance more frequently begets confidence than does knowledge: it is those who know little, and not those who know much, who so positively assert that this or that problem will never be solved by science.",
+    author: "Charles Darwin",
+    source: "The Descent of Man, 1871, Introduction",
+  },
+  {
+    text: "Intellectual freedom depends upon material things. Poetry depends upon intellectual freedom.",
+    author: "Virginia Woolf",
+    source: "A Room of One's Own, 1929",
+  },
+  {
+    text: "To see what is in front of one's nose needs a constant struggle.",
+    author: "George Orwell",
+    source: "In Front of Your Nose, Tribune, 22 March 1946",
+  },
+  {
+    text: "Everything can be taken from a man but one thing: the last of the human freedoms — to choose one's attitude in any given set of circumstances, to choose one's own way.",
+    author: "Viktor Frankl",
+    source: "Man's Search for Meaning, 1946",
+  },
+  {
+    text: "Not everything that is faced can be changed, but nothing can be changed until it is faced.",
+    author: "James Baldwin",
+    source: "As Much Truth as One Can Bear, The New York Times Book Review, 14 Jan. 1962",
+  },
+  {
+    text: "I insist that the object of all true education is not to make men carpenters, it is to make carpenters men.",
+    author: "W. E. B. Du Bois",
+    source: "The Souls of Black Folk, 1903, ch. II",
+  },
+  {
+    text: "The more clearly we can focus our attention on the wonders and realities of the universe about us, the less taste we shall have for destruction.",
+    author: "Rachel Carson",
+    source: "The Sense of Wonder, 1965",
+  },
+  {
+    text: "I don't know anything, but I do know that everything is interesting if you go into it deeply enough.",
+    author: "Richard Feynman",
+    source: "The Pleasure of Finding Things Out, 1999, from a 1979 Omni interview",
+  },
+  {
+    text: "Extraordinary claims require extraordinary evidence.",
+    author: "Carl Sagan",
+    source: "Cosmos, episode 12 \"Encyclopedia Galactica,\" 1980 — popularising a formulation of Marcello Truzzi's",
+  },
+  {
+    text: "We will need writers who can remember freedom: poets, visionaries — the realists of a larger reality.",
+    author: "Ursula K. Le Guin",
+    source: "National Book Foundation Medal acceptance speech, 2014",
+  },
+  {
+    text: "We die. That may be the meaning of life. But we do language. That may be the measure of our lives.",
+    author: "Toni Morrison",
+    source: "Nobel Lecture, 1993",
+  },
+  {
+    text: "Attention, taken to its highest degree, is the same thing as prayer. It presupposes faith and love. Absolutely unmixed attention is prayer.",
+    author: "Simone Weil",
+    source: "Gravity and Grace, 1952 (posthumous)",
+  },
 ]
 
 /** Day of the year in UTC, so the quote turns over at the same moment for everyone. */

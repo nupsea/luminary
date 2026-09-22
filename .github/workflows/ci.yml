@@ -50,6 +50,11 @@ jobs:
       - name: Install frontend dependencies
         run: cd frontend && npm ci
 
+      # Loaders never download (I-57), so tests that embed for real need the
+      # weights provisioned first, into the cache `tests/conftest.py` shares.
+      - name: Download the local models
+        run: cd backend && uv run python -m app.services.model_prefetch --models-dir "$HOME/.cache/luminary/test-models"
+
       - name: Run CI checks
         run: make ci
 
@@ -102,6 +107,12 @@ jobs:
           workspaces: src-tauri -> target
       - name: Check formatting
         run: cargo fmt --all --check
+      # tauri.windows.conf.json bundles build/stage, and tauri-build refuses to
+      # compile when a resource path is missing. This job tests the shell, not
+      # the installer, so an empty stage stands in for one.
+      - name: Placeholder stage
+        shell: bash
+        run: mkdir -p ../build/stage && touch ../build/stage/.placeholder
       - name: Build and test the desktop shell
         run: cargo test --workspace
       - name: Lint the desktop shell
@@ -173,6 +184,9 @@ jobs:
 
       - name: Boundary checker
         run: uv run python tools/boundary_checker.py
+
+      - name: Download the local models
+        run: uv run python -m app.services.model_prefetch --models-dir "$HOME/.cache/luminary/test-models"
 
       - name: Full backend suite, on the platform it got wrong
         run: uv run pytest
