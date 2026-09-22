@@ -20,6 +20,7 @@ This file is a table of contents. The system of record is `docs/`.
 | touching the reader's docked panel | `docs/reader-panel.md` |
 | an eval change, or quoting an eval number | `docs/eval-coverage.md`, then the `eval-integrity` skill |
 | writing docs | the `project-docs` skill |
+| calling a major feature or branch done | `.claude/rules/common/clean-code.md` — a cleanup pass over its own diff |
 
 Never state a dependency version in prose — point at `package.json` / `pyproject.toml`.
 Prose versions in this repo have drifted before.
@@ -52,6 +53,9 @@ produced GitHub-only failures. Markers `slow`, `e2e` and `unstable` are excluded
 These are the ones that get violated by an agent working from general priors rather than
 from this repo. The full set is in `docs/invariants.md`.
 
+- **Every major feature ends with a clean-code pass over its own diff** — comments cut to a
+  one- or two-line WHY, dead code and duplicates removed, committed separately.
+  `.claude/rules/common/clean-code.md`.
 - **Nothing the system supplies may satisfy a check on the system's output.** Prompt examples,
   placeholders and defaults are not evidence; a verification the product can pass with its own
   text verifies nothing. `.claude/rules/common/product-integrity.md`.
