@@ -11,7 +11,7 @@ print(docs[0]['id'] if docs else '')
 
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: no documents in DB -- ingest a document first"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 # GET /flashcards/audit/{document_id} -- must return 200 with CoverageReport fields

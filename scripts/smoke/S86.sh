@@ -28,21 +28,8 @@ UPLOAD=$(curl -sf -X POST "$BASE/documents/ingest" \
 DOC_ID=$(echo "$UPLOAD" | python3 -c "import sys,json; print(json.load(sys.stdin)['document_id'])")
 echo "S86 smoke: document_id=$DOC_ID"
 
-echo "S86 smoke: waiting for ingestion to complete (max 120s)"
-STAGE=""
-for i in $(seq 1 24); do
-  STAGE=$(curl -sf "$BASE/documents/$DOC_ID" | python3 -c "import sys,json; print(json.load(sys.stdin).get('stage',''))")
-  echo "  stage=$STAGE (attempt $i)"
-  if [ "$STAGE" = "complete" ]; then break; fi
-  if [ "$STAGE" = "error" ]; then echo "FAIL: ingestion stage=error"; rm -f "$FIXTURE"; exit 1; fi
-  sleep 5
-done
-
-if [ "$STAGE" != "complete" ]; then
-  echo "FAIL: ingestion did not complete within 120s (stage=$STAGE)"
-  rm -f "$FIXTURE"
-  exit 1
-fi
+echo "S86 smoke: waiting for ingestion to complete"
+smoke_wait_complete "$DOC_ID" || { rm -f "$FIXTURE"; exit 1; }
 
 echo "S86 smoke: GET /graph/$DOC_ID"
 GRAPH=$(curl -sf "$BASE/graph/$DOC_ID")

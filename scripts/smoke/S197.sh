@@ -34,7 +34,7 @@ print(ready[0]['id'] if ready else '')
 
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: no complete document to build an auto-collection for"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 # Only clean up a collection this run created; an auto-collection the library

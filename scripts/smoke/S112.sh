@@ -13,7 +13,7 @@ print(items[0]['id'] if items else '')
 
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: no documents ingested; cannot verify entity-pairs or generate-from-graph"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 echo "S112 [2/3]: GET /flashcards/entity-pairs -- must return 200 with pairs key..."

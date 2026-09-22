@@ -12,7 +12,7 @@ print(docs[0]['id']) if docs else print('')
 
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: No documents in library -- ingest a document first"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 echo "Using document: ${DOC_ID}"
 

@@ -31,7 +31,9 @@ cleanup_docs() {
 trap cleanup_docs EXIT
 
 echo "Ingested doc1=$DOC1 doc2=$DOC2"
-sleep 2
+# Asked before indexing, /qa answers from whatever else the library holds.
+smoke_wait_complete "$DOC1"
+smoke_wait_complete "$DOC2"
 
 # ---- (1) Factual query across all docs — confidence should not be 'low' ----
 QA_RESP=$(curl -sf -X POST "$BASE/qa" \

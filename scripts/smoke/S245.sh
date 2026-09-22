@@ -37,19 +37,9 @@ if [ "$STATUS" != "processing" ]; then
   exit 1
 fi
 
-# Wait for it to reach a terminal stage; the duplicate branch only fires on complete.
-for _ in $(seq 1 60); do
-  STAGE=$(curl -sf -m 10 "${BASE}/documents/${DOC_ID}/status" \
-    | sed -n 's/.*"stage":"\([^"]*\)".*/\1/p')
-  [ "$STAGE" = "complete" ] && break
-  [ "$STAGE" = "error" ] && break
-  sleep 2
-done
-
-if [ "$STAGE" != "complete" ]; then
-  echo "SKIP: S245 -- fixture did not reach complete (stage=$STAGE); duplicate branch not reachable"
-  exit 0
-fi
+# The duplicate branch only fires on complete. A fixture that never completes is
+# an ingestion failure, not a skip -- this used to exit 0 and count as a pass.
+smoke_wait_complete "$DOC_ID"
 
 SECOND=$(curl -sf -m 120 -X POST "${BASE}/documents/ingest" -F "file=@${TMP};filename=${STAMP}.txt")
 DUP_STATUS=$(printf '%s' "$SECOND" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')

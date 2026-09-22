@@ -17,7 +17,7 @@ if items:
 
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: no documents in library -- cannot test Feynman session creation"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/feynman/sessions" \

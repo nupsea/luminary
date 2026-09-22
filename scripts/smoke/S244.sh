@@ -11,7 +11,7 @@ case "$CT" in
   application/json*) ;;
   *)
     echo "SKIP: S244 -- /blog is not mounted (public mode); nothing to check"
-    exit 0
+    exit "$SMOKE_SKIP"
     ;;
 esac
 

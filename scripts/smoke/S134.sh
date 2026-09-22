@@ -29,7 +29,7 @@ print(len(d.get('images', d) if isinstance(d, dict) else d))
 fi
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: no complete document with extracted images"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 echo "S134 smoke test — document_id=$DOC_ID"

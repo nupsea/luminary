@@ -34,8 +34,7 @@ PY
 )
 if [ -z "$DOC_ID" ]; then
     echo "SKIP: no document in this library has a card"
-    echo "ALL SMOKE TESTS PASSED"
-    exit 0
+    exit "$SMOKE_SKIP"
 fi
 
 HTTP=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/flashcards/$DOC_ID/headroom")

@@ -35,7 +35,7 @@ if [ "$STATUS_NONE" = "403" ]; then
   grep -q "disabled" "$BODY" \
     || fail "403 without saying admin routes are disabled: $(head -c 200 "$BODY")"
   echo "  no key: admin routes disabled (403), which is the closed default"
-  echo "SKIP: ADMIN_KEY is not configured, so the reindex path itself is not exercised"
+  echo "  NOT EXERCISED: ADMIN_KEY is not configured, so the reindex path itself is not run"
   echo "S170 smoke: all checks passed"
   exit 0
 fi

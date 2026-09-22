@@ -48,6 +48,8 @@ suite run against the dev backend and the bundled app alike:
   code page before curl sees it -- both failed silently on the second Windows run;
 - none reads `$BASE/openapi.json`: the schema is at the origin's root and its paths
   carry `/api` in public mode, so scripts use `smoke_openapi`;
+- a script that reports SKIP exits `$SMOKE_SKIP`, never 0: seventeen printed SKIP
+  and exited 0, so the runner counted every one of them as a pass;
 - a script that calls a route public mode does not mount declares
   `smoke_require_mode full`, so it is reported as skipped against the bundled app
   rather than failed -- and a script that declares it without needing it is
@@ -87,6 +89,7 @@ _FRONTEND_TOOLCHAIN = re.compile(r"\b(?:npx|npm|tsc|vitest)\b|node_modules")
 _STDIN_UPLOAD = re.compile(r"@(?:/dev/stdin|-)(?:[;\"\']|$)")
 _SCHEMA_UNDER_BASE = re.compile(r"\$\{?BASE\}?/openapi\.json")
 _CURL_DATA = re.compile(r"(?:^|\s)(?:-d|--data(?:-raw|-binary)?)\s")
+_SKIP_MESSAGE = re.compile(r'^\s*echo\s+["\']SKIP')
 _OWN_BASE = re.compile(r"^\s*(?:export\s+)?(?:BASE|BASE_URL|API|API_BASE)=", re.M)
 # Public mode mounts the whole API under this prefix (main.py `_API_PREFIX`).
 _PUBLIC_PREFIX = "/api"
@@ -114,6 +117,12 @@ def hygiene_violations(text: str) -> list[str]:
         found.append("uploads from stdin, which curl.exe cannot read; write to $SMOKE_TMP")
     if any(_SCHEMA_UNDER_BASE.search(line) for line in code):
         found.append("reads $BASE/openapi.json, a 404 on the bundled app; use smoke_openapi")
+    for i, line in enumerate(code):
+        if _SKIP_MESSAGE.match(line) and any(
+            nxt.strip() == "exit 0" for nxt in code[i + 1 : i + 3]
+        ):
+            found.append('prints SKIP but exits 0, which counts as a pass; exit "$SMOKE_SKIP"')
+            break
     if any(_CURL_DATA.search(line) and not line.isascii() for line in code):
         found.append(
             "passes non-ASCII in a curl data argument, which Windows re-encodes to its"

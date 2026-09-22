@@ -9,7 +9,7 @@ source "$(dirname "$0")/lib.sh"
 DOCS=$(curl -sf "${BASE}/documents" | python3 -c "import sys,json; docs=json.load(sys.stdin).get('items',[]); print(docs[0]['id'] if docs else '')")
 if [ -z "$DOCS" ]; then
   echo "SKIP: no documents in DB -- ingest a document first"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 DOC_ID="$DOCS"
 

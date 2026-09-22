@@ -12,7 +12,7 @@ print(docs[0]['id']) if docs else print('')
 
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: No documents in library"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 SEC_ID=$(curl -sf "${BASE}/documents/${DOC_ID}" | python3 -c "
@@ -24,7 +24,7 @@ print(secs[0]['id']) if secs else print('')
 
 if [ -z "$SEC_ID" ]; then
   echo "SKIP: Document has no sections"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 echo "S111 [2/5]: POST /annotations -> 201..."

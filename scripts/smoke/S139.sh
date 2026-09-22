@@ -13,7 +13,7 @@ print(items[0]['id'] if items else '')
 
 if [ -z "$DOCS" ]; then
   echo "SKIP: no documents ingested"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 DOC_ID="$DOCS"

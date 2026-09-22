@@ -31,7 +31,7 @@ rm -f "${TMPFILE}"
 
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: no documents ingested yet"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 # 3. GET /documents/{id}/progress must return 200 with required fields

@@ -18,7 +18,7 @@ print(ready[0]['id'] if ready else '')
 fi
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: no complete document in the library"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/documents/${DOC_ID}/objectives")

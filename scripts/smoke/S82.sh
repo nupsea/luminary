@@ -38,14 +38,7 @@ DOC_ID=$(echo "$INGEST_RESP" | python3 -c "import sys,json; print(json.load(sys.
 trap 'curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC_ID" || true' EXIT
 echo "Created document: $DOC_ID"
 
-# Ingestion is asynchronous; poll rather than guess at a sleep.
-for _ in $(seq 1 60); do
-  STAGE=$(curl -s "$BASE/documents/$DOC_ID" \
-    | python3 -c "import json,sys; print(json.load(sys.stdin).get('stage',''))" 2>/dev/null || echo "")
-  [ "$STAGE" = "complete" ] && break
-  sleep 2
-done
-[ "$STAGE" = "complete" ] || { echo "FAIL: document stalled at stage=${STAGE:-unknown}"; exit 1; }
+smoke_wait_complete "$DOC_ID"
 
 # Request executive summary with force_refresh=true and collect streaming output.
 # `GET /summarize/{id}?mode=...` is a 405: summarize takes POST with a JSON body.

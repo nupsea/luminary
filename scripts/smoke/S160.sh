@@ -8,7 +8,7 @@ DOC_ID=$(curl -s "$BASE/documents?sort=newest&page=1&page_size=1" \
 
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: no documents in the library"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 # GET /flashcards/health/{document_id}

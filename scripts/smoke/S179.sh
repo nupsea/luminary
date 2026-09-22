@@ -29,7 +29,7 @@ if complete:
 if [ -z "$DOC_ID" ]; then
   echo "SKIP: No complete documents found -- cannot test flashcard generation"
   echo "S179 smoke: skipped (no documents)"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 echo "OK: Using document $DOC_ID"
