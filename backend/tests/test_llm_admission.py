@@ -549,3 +549,123 @@ async def test_an_interactive_call_records_how_long_it_ran(admission_settings):
         await asyncio.sleep(0.05)
 
     assert state.last_interactive_seconds >= 0.05
+
+
+@pytest.mark.asyncio
+async def test_background_never_exceeds_the_serving_width(admission_settings):
+    """With no question in flight, extra background calls queue here, not in Ollama."""
+    admission_settings(OLLAMA_NUM_PARALLEL=1, LLM_ADMISSION_GRACE_SECONDS=0.0)
+    release = asyncio.Event()
+    first_admitted = asyncio.Event()
+    second_admitted = asyncio.Event()
+
+    async def background(flag: asyncio.Event):
+        async with llm_admission.background_call():
+            flag.set()
+            await release.wait()
+
+    tasks = [
+        asyncio.create_task(background(first_admitted)),
+        asyncio.create_task(background(second_admitted)),
+    ]
+    await asyncio.wait_for(first_admitted.wait(), timeout=1.0)
+    await asyncio.sleep(0.4)
+
+    assert second_admitted.is_set() is False
+    assert llm_admission.paused_for_interaction() is False
+
+    release.set()
+    await asyncio.wait_for(asyncio.gather(*tasks), timeout=2.0)
+    assert second_admitted.is_set() is True
+
+
+@pytest.mark.asyncio
+async def test_the_defer_bound_never_forces_past_the_width(admission_settings):
+    admission_settings(
+        OLLAMA_NUM_PARALLEL=1,
+        LLM_ADMISSION_GRACE_SECONDS=0.0,
+        LLM_ADMISSION_MAX_DEFER_SECONDS=0.2,
+    )
+    release_background = asyncio.Event()
+    release_chat = asyncio.Event()
+    first_admitted = asyncio.Event()
+    second_admitted = asyncio.Event()
+
+    async def background(flag: asyncio.Event, release: asyncio.Event):
+        async with llm_admission.background_call():
+            flag.set()
+            await release.wait()
+
+    async def chatting():
+        async with llm_admission.interactive_call():
+            await release_chat.wait()
+
+    first = asyncio.create_task(background(first_admitted, release_background))
+    await asyncio.wait_for(first_admitted.wait(), timeout=1.0)
+    chat = asyncio.create_task(chatting())
+    await asyncio.sleep(0)
+    second = asyncio.create_task(background(second_admitted, asyncio.Event()))
+    await asyncio.sleep(0.6)
+
+    assert second_admitted.is_set() is False
+
+    release_background.set()
+    await asyncio.wait_for(second_admitted.wait(), timeout=2.0)
+    assert llm_admission.admission_stats()["forced_admissions"] == 1
+
+    release_chat.set()
+    second.cancel()
+    await asyncio.gather(first, chat, second, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_an_ingest_critical_call_is_admitted_ahead_of_other_background(
+    admission_settings,
+):
+    admission_settings(OLLAMA_NUM_PARALLEL=1, LLM_ADMISSION_GRACE_SECONDS=0.0)
+    release = asyncio.Event()
+    holding = asyncio.Event()
+    order: list[str] = []
+
+    async def holder():
+        async with llm_admission.background_call():
+            holding.set()
+            await release.wait()
+
+    async def background(name: str, critical: bool):
+        if critical:
+            with llm_admission.ingest_critical():
+                async with llm_admission.background_call():
+                    order.append(name)
+        else:
+            async with llm_admission.background_call():
+                order.append(name)
+
+    hold = asyncio.create_task(holder())
+    await holding.wait()
+    garnish = asyncio.create_task(background("garnish", critical=False))
+    await asyncio.sleep(0.3)
+    probe = asyncio.create_task(background("probe", critical=True))
+    await asyncio.sleep(0.3)
+
+    release.set()
+    await asyncio.wait_for(asyncio.gather(hold, garnish, probe), timeout=2.0)
+    assert order == ["probe", "garnish"]
+
+
+@pytest.mark.asyncio
+async def test_a_background_stream_nobody_closed_does_not_wedge_the_gate(
+    admission_settings, monkeypatch
+):
+    admission_settings(OLLAMA_NUM_PARALLEL=1, LLM_ADMISSION_GRACE_SECONDS=0.0)
+    monkeypatch.setattr(llm_admission, "_MAX_DEFER_CEILING_SECONDS", 0.3)
+
+    abandoned = llm_admission.background_call()
+    await abandoned.__aenter__()
+
+    started = time.monotonic()
+    async with llm_admission.background_call():
+        waited = time.monotonic() - started
+
+    assert 0.2 <= waited < 2.0
+    await abandoned.__aexit__(None, None, None)

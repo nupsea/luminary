@@ -31,6 +31,7 @@ and holding one back would make hybrid mode slower for no reason.
 
 import asyncio
 import contextlib
+import contextvars
 import logging
 import time
 import weakref
@@ -77,6 +78,12 @@ _STALE_INTERACTIVE_SECONDS = 180.0
 # ingestion yields to a user who is actually being served.
 _MAX_DEFER_CEILING_SECONDS = 600.0
 
+# Set only around a call that gates a document reaching `complete`. Scoped to the
+# call, never to the ingestion task: work that task spawns inherits its context.
+_ingest_critical: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "llm_ingest_critical", default=False
+)
+
 
 @dataclass
 class AdmissionState:
@@ -86,8 +93,11 @@ class AdmissionState:
     # A list of single-element lists so a streaming call can bump its own entry
     # in place without needing an index that reordering would invalidate.
     interactive_activity: list[list[float]] = field(default_factory=list)
-    background_inflight: int = 0
+    # Same shape as interactive_activity, so a background stream nobody closes
+    # stops holding a slot instead of wedging every background call behind it.
+    background_activity: list[list[float]] = field(default_factory=list)
     background_waiting: int = 0
+    critical_waiting: int = 0
     last_interactive_end: float = 0.0
     # How long the most recent interactive call ran. The deferral bound is
     # wall-clock, and 60s was calibrated where a call takes seconds; on a CPU-only
@@ -103,6 +113,14 @@ class AdmissionState:
     @property
     def interactive_inflight(self) -> int:
         return len(self.interactive_activity)
+
+    @property
+    def background_inflight(self) -> int:
+        return len(self.background_activity)
+
+    def live_background(self) -> int:
+        now = time.monotonic()
+        return sum(now - seen[0] < _MAX_DEFER_CEILING_SECONDS for seen in self.background_activity)
 
 
 # Keyed by running loop, as in enrichment_concurrency: state shared within the
@@ -189,10 +207,11 @@ def paused_for_interaction() -> bool:
 
     This is the honest signal behind the UI's "paused while you're asking" state
     (I-10): it is true only when a background call is actually waiting, not
-    merely when a question is in flight.
+    merely when a question is in flight -- nor when it waits only for other
+    background work.
     """
     state = current_state()
-    return state is not None and state.background_waiting > 0
+    return state is not None and state.background_waiting > 0 and under_interactive_pressure()
 
 
 def admission_stats() -> dict[str, float | int | bool]:
@@ -211,33 +230,55 @@ def admission_stats() -> dict[str, float | int | bool]:
     }
 
 
-def _blocked(state: AdmissionState, reserve: int) -> bool:
-    return state.background_inflight >= reserve and under_interactive_pressure()
+def _held_for_interactive(state: AdmissionState, reserve: int) -> bool:
+    return state.live_background() >= reserve and under_interactive_pressure()
 
 
-async def _wait_for_slot(state: AdmissionState) -> None:
+def _held_for_background(state: AdmissionState, width: int, critical: bool) -> bool:
+    # Never more background calls than serving slots, pressure or not: the excess
+    # queues inside the runtime, and a question arriving later waits behind all of
+    # it (I-31). Measured: four queued there ahead of a /qa that then timed out.
+    if state.live_background() >= width:
+        return True
+    return not critical and state.critical_waiting > 0
+
+
+async def _wait_for_slot(state: AdmissionState, critical: bool) -> None:
     reserve = background_reserve()
-    if not _blocked(state, reserve):
+    width = enrichment_concurrency()
+    forced = False
+
+    def held() -> bool:
+        if _held_for_background(state, width, critical):
+            return True
+        return not forced and _held_for_interactive(state, reserve)
+
+    if not held():
         return
 
     max_defer = _max_defer_seconds(state)
     started = time.monotonic()
     state.background_waiting += 1
+    state.critical_waiting += critical
     state.deferred_calls += 1
     try:
-        while _blocked(state, reserve):
+        while held():
             waited = time.monotonic() - started
-            if waited >= max_defer:
+            # The bound lifts the interactive reserve only, never the width cap:
+            # forcing past the width put every long waiter into the runtime queue.
+            if not forced and waited >= max_defer and _held_for_interactive(state, reserve):
+                forced = True
                 state.forced_admissions += 1
                 logger.warning(
                     "background LLM call admitted after %.1fs of interactive pressure; "
                     "ingestion would otherwise stall",
                     waited,
                 )
-                break
-            await asyncio.sleep(min(_POLL_SECONDS, max_defer - waited))
+                continue
+            await asyncio.sleep(_POLL_SECONDS)
     finally:
         state.background_waiting -= 1
+        state.critical_waiting -= critical
         state.deferred_seconds += time.monotonic() - started
 
 
@@ -258,17 +299,33 @@ async def interactive_call():
         state.last_interactive_seconds = now - started
 
 
+@contextlib.contextmanager
+def ingest_critical():
+    """Admit background calls made inside ahead of other background work.
+
+    For the calls a document waits on before it reaches `complete` (#142): without
+    it, a two-line note queued behind other documents' enrichment for minutes.
+    """
+    token = _ingest_critical.set(True)
+    try:
+        yield
+    finally:
+        _ingest_critical.reset(token)
+
+
 @asynccontextmanager
 async def background_call():
     """Hold a background call until the runtime has room for it."""
     state = _state()
     if admission_enabled():
-        await _wait_for_slot(state)
-    state.background_inflight += 1
+        await _wait_for_slot(state, _ingest_critical.get())
+    entry = [time.monotonic()]
+    state.background_activity.append(entry)
     try:
-        yield
+        yield entry
     finally:
-        state.background_inflight -= 1
+        with contextlib.suppress(ValueError):
+            state.background_activity.remove(entry)
 
 
 @asynccontextmanager
@@ -283,8 +340,12 @@ async def admit(model: str, *, background: bool):
         yield _noop
         return
     if background:
-        async with background_call():
-            yield _noop
+        async with background_call() as entry:
+
+            def keepalive_background() -> None:
+                entry[0] = time.monotonic()
+
+            yield keepalive_background
         return
     async with interactive_call() as entry:
 
