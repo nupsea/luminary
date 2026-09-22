@@ -50,11 +50,8 @@ install:
 
 # --- desktop bundle -------------------------------------------------------
 # Stage the payload, the relocatable Python runtime and the bundled inference
-# server into build/stage: Contents/Resources in the macOS .app, the resource
-# directory of the Windows and Linux installs. macOS keeps its own runtime and
-# engine scripts for the steps a signed bundle needs; what ships is decided once,
-# in scripts/desktop/. No `make` exists on the Windows runner, so
-# desktop-installers.yml calls the scripts directly there.
+# server into build/stage. macOS keeps its own runtime and engine scripts for the
+# signed-bundle steps. The Windows runner has no make; CI calls the scripts directly.
 
 ifeq ($(shell uname -s),Darwin)
 STAGE_SCRIPTS = scripts/macos
@@ -107,9 +104,7 @@ DESKTOP_APP = src-tauri/target/release/bundle/macos/Luminary.app
 
 TAURI = $(CURDIR)/frontend/node_modules/.bin/tauri
 
-# STAGE_REQUIRED (per platform, above) is everything a working install needs.
-# Kept in step with REQUIRED in src-tauri/src/stage.rs, which checks the pieces
-# the shell cannot start without at runtime.
+# STAGE_REQUIRED (above): keep in step with REQUIRED in src-tauri/src/stage.rs.
 
 # `ditto` copies a partial stage without complaint, producing an .app that
 # launches and then cannot start. Note this gate cannot catch the other route to
@@ -139,11 +134,8 @@ desktop-app: check-stage
 	ditto build/stage "$(DESKTOP_APP)/Contents/Resources"
 	@echo "built $(DESKTOP_APP)"
 
-# Linux AppImage and .deb (or the Windows setup .exe) from build/stage. Targets
-# and resources come from tauri.<platform>.conf.json, which Tauri merges over
-# tauri.conf.json. Its resource copier follows symlinks, which on Linux costs
-# only the interpreter's aliases -- the reason macOS copies with ditto instead
-# does not apply. Built and launched in CI by desktop-installers.yml.
+# Linux AppImage and .deb (or the Windows setup .exe) from build/stage, per
+# tauri.<platform>.conf.json.
 desktop-installer: check-stage
 	cd src-tauri && $(TAURI) build $(TAURI_BUILD_FLAGS)
 
@@ -796,9 +788,7 @@ endif
 	python3 scripts/check_public_surface_calls.py
 	python3 scripts/check_smoke_paths.py
 	bash scripts/check_powershell.sh
-	# `npm run build` is `tsc -b && vite build`, so this is also the typecheck. Vite
-	# only warns past chunkSizeWarningLimit (2000 kB; largest chunk 1820 kB), so the
-	# warning is made fatal here rather than scrolling past.
+	# `npm run build` includes tsc. Vite only warns past chunkSizeWarningLimit; make it fatal.
 	cd frontend && out="$$(npm run build 2>&1)"; rc=$$?; printf '%s\n' "$$out"; \
 		[ $$rc -eq 0 ] || exit $$rc; \
 		! printf '%s' "$$out" | grep -q 'Some chunks are larger than' \

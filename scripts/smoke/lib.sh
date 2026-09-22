@@ -6,31 +6,23 @@
 #   dev backend (full mode)   http://localhost:7820            (the default)
 #   bundled app (public mode) http://127.0.0.1:<its port>/api
 #
-# scripts/check_smoke_paths.py fails `make lint` if a script does not source this,
-# defines its own base, writes to a literal /tmp, or calls a surface public mode
-# does not mount without `smoke_require_mode full`.
+# scripts/check_smoke_paths.py enforces the conventions below in `make lint`.
 
 SMOKE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SMOKE_DIR/../.." && pwd)"
 
 BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
 BASE="${BASE%/}"
-# Exported so Python snippets read os.environ["BASE"] instead of restating it.
 export BASE
 
-# Native Windows Python decodes stdin and pipes as cp1252 without this, and every
-# script that pipes JSON with a non-ASCII character into python3 fails there.
+# Native Windows Python otherwise decodes pipes as cp1252.
 export PYTHONUTF8=1
 
 # all.sh counts this exit code as a skip, not a failure.
 SMOKE_SKIP=77
 
-# One directory per run, created by all.sh and removed when it finishes; a script
-# run on its own gets a fresh one under the system temp dir. TMPDIR points into it,
-# so a bare `mktemp` lands there too. Write temp files under $SMOKE_TMP or through
-# `mktemp`, never to a literal /tmp: on Git Bash /tmp is an MSYS path that native
-# Windows Python cannot open when it appears inside a `python3 -c` string.
-# `cygpath -m` gives C:/... instead, which bash, curl and Python all resolve.
+# One temp dir per run; write under $SMOKE_TMP or `mktemp`, never a literal /tmp,
+# which native Windows Python cannot open. `cygpath -m` gives a C:/... all tools read.
 if [ -z "${SMOKE_TMP:-}" ]; then
     SMOKE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/luminary-smoke.XXXXXX")"
     if command -v cygpath >/dev/null 2>&1; then
@@ -51,9 +43,7 @@ smoke_server_mode() {
     printf '%s' "$SMOKE_SERVER_MODE"
 }
 
-# smoke_requires_internet: this script makes the backend fetch from a third-party
-# site. SMOKE_OFFLINE=1 skips it, for a machine whose network must not see that
-# traffic; the backend itself contacts no third party unless asked (I-18, I-57).
+# smoke_requires_internet: the backend fetches from a third party; SMOKE_OFFLINE=1 skips.
 smoke_requires_internet() {
     if [ "${SMOKE_OFFLINE:-0}" = "1" ]; then
         echo "SKIP: fetches from a third-party site, and SMOKE_OFFLINE=1"
@@ -61,11 +51,8 @@ smoke_requires_internet() {
     fi
 }
 
-# smoke_wait_complete <document_id>: poll until ingestion reaches stage=complete.
-# Fails at once on stage=error or a document the backend no longer has. The
-# deadline is long because ingestion makes background LLM calls that queue behind
-# earlier scripts' summaries on the one serving slot, so its duration depends on
-# what ran before it, not on the document (#142). SMOKE_INGEST_TIMEOUT overrides.
+# smoke_wait_complete <document_id>: poll until stage=complete; fail on error or 404.
+# Long deadline: ingestion queues behind earlier scripts' LLM calls (#142).
 smoke_wait_complete() {
     local doc_id="$1" limit="${SMOKE_INGEST_TIMEOUT:-600}" elapsed=0 code stage=""
     while [ "$elapsed" -lt "$limit" ]; do
@@ -104,19 +91,13 @@ smoke_require_mode() {
     fi
 }
 
-# smoke_openapi: the API schema on stdout, its paths relative to $BASE. FastAPI
-# serves it at the origin's root, not under /api, and in public mode every path in
-# it carries the /api prefix, so `$BASE/openapi.json` is a 404 against the bundled
-# app and the paths a script indexes by would not match. Fetched once per run.
+# smoke_openapi: the API schema, paths relative to $BASE. Served at the origin root,
+# with /api-prefixed paths in public mode. Fetched once per run.
 smoke_openapi() {
     local cache="$SMOKE_TMP/openapi.json" origin="${BASE%/api}" prefix=""
     [ "$origin" != "$BASE" ] && prefix="/api"
     if [ ! -s "$cache" ]; then
-        # MSYS_NO_PATHCONV: Git Bash on Windows rewrites a bare argv that looks like
-        # a POSIX path before handing it to a native exe, so "/api" arrived as
-        # "C:/Program Files/Git/api" and the strip below silently matched nothing --
-        # every path stayed prefixed and every script indexing by "/foo" got a
-        # KeyError. Env vars get the same rewrite, so this must be an argv, not export.
+        # Git Bash otherwise rewrites the "/api" argv to "C:/Program Files/Git/api".
         curl -sf --max-time 60 "$origin/openapi.json" | MSYS_NO_PATHCONV=1 python3 -c '
 import json, sys
 spec, prefix = json.load(sys.stdin), sys.argv[1]

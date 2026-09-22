@@ -1001,15 +1001,9 @@ def main() -> None:
             "search_failed": search_failed,
         }
 
-    # Parallel /search requests still queue on the backend's single worker, and
-    # each request's timeout includes that wait: a 4-vCPU Windows host timed out
-    # 22 of 40 at six workers. Those rows now fail the run rather than score as
-    # misses. /qa is worse: a local Ollama serves one
-    # generation at a time, so concurrent /qa requests queue and the waiting one
-    # blows past its timeout (empty answer). Concurrency here buys no throughput,
-    # only dropped answers — run generation rows sequentially. (A hosted
-    # answering model could parallelise, but the app default is local; correctness
-    # over speed for a background batch job.)
+    # Sequential: requests queue on the backend's single worker (and one Ollama
+    # generation slot), and the wait counts against each timeout. Concurrency buys
+    # only timeouts: 22 of 40 /search rows at six workers on a 4-vCPU host.
     # Repair counters before the first question: the difference after the run
     # is what THIS run's completions needed to be usable.
     stats_before = output_stats(args.backend_url)

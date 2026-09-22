@@ -1,20 +1,8 @@
 #!/usr/bin/env bash
 # Stage the bundled inference server for the Windows and Linux installers.
-#
-# Ollama's archive for these platforms is ~1.4GB, almost all of it CUDA: two
-# generations at 1.15GB and 629MB. Neither is staged. What ships is the CPU
-# runners and Vulkan, which every GPU vendor serves -- NVIDIA and AMD through
-# their own drivers on Windows, Mesa or the vendor packages on Linux -- so a
-# GPU machine is accelerated out of the box without a gigabyte in the installer.
-#
-# NVIDIA owners are offered the CUDA runner as a download afterwards, which is
-# faster than Vulkan on that hardware. It installs into the engine copy in the
-# library directory, which is why the engine is relocated there at all.
-# 629MB is also what put the Windows stage over the ~2GB NSIS can pack.
-#
-# Layout: `ollama/ollama[.exe]` beside `ollama/lib/ollama/`, a place Ollama
-# searches relative to its own executable on both platforms (ml/path.go). Kept
-# in step with OLLAMA_LIBRARY_DIR in src-tauri/src/stage.rs.
+# Ships the CPU and Vulkan runners only; CUDA is a verified download afterwards
+# (docs/lighter-install-plan.md). Layout kept in step with OLLAMA_LIBRARY_DIR in
+# src-tauri/src/stage.rs.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -39,8 +27,6 @@ if [ ! -f "$ARCHIVE" ]; then
 fi
 
 _step "Checking the archive against the release checksums"
-# A truncated download extracts partially and fails at the first generation, on
-# a user's machine rather than here.
 expected="$(curl -fsSL "$BASE/sha256sum.txt" \
     | awk -v a="$ASSET" '{ n = $2; sub(/^\*/, "", n); sub(/^\.\//, "", n); if (n == a) print $1 }')"
 [ -n "$expected" ] || _die "$ASSET is not listed in the release's sha256sum.txt"
@@ -54,8 +40,7 @@ _info "sha256 $actual"
 _step "Extracting the CPU and Vulkan runners"
 rm -rf "$OL_STAGE" "$TMP"
 mkdir -p "$OL_STAGE/lib" "$TMP"
-# CUDA is excluded while extracting rather than deleted afterwards: it is 1.8GB
-# of disk on a runner that also holds two copies of the stage.
+# Excluded while extracting: CUDA is 1.8GB of runner disk.
 if [ "$DESKTOP_OS" = linux ]; then
     command -v unzstd >/dev/null || _die "unzstd not found (install zstd)"
     tar --use-compress-program=unzstd --exclude='*cuda_v*' -xf "$ARCHIVE" -C "$TMP"
@@ -81,25 +66,13 @@ if compgen -G "$LIB/cuda_v*" >/dev/null; then
 fi
 compgen -G "$LIB/*ggml-cpu*" >/dev/null || _die "no CPU runners in $ASSET"
 
-# The engine's libraries load each other through the rpath on `ollama` itself, so
-# linuxdeploy -- which inspects each one alone -- calls libggml-base.so.0 missing
-# and fails the AppImage. `verify_ollama.sh` runs the engine after this, so a
-# relink that broke it fails the stage rather than the bundle.
 relink_bundled_libs "$LIB"
 
-# The shell copies this tree into the writable library directory on first launch
-# and spawns it from there (engine_dir in src-tauri/src/stage.rs): Ollama
-# resolves its runners relative to its own executable, and an installed tree is
-# read-only on Linux. This file is what tells it whether that copy is current,
-# so a release bump replaces the copy instead of running last version's runners.
+# Tells engine_dir (src-tauri/src/stage.rs) whether the relocated copy is current.
 printf '%s\n' "$OLLAMA_VERSION" > "$OL_STAGE/ENGINE_VERSION"
 
-# Where the CUDA runner that was just excluded can be fetched from later.
-# Ollama publishes no standalone CUDA asset -- it exists only inside this same
-# archive -- so the download is the whole thing and only cuda_v13 is kept. The
-# digest is the one verified above, pinned by the build rather than re-fetched
-# at install time, so the user's machine downloads exactly the archive this
-# installer was built from.
+# CUDA exists only inside this archive, so the later download is the same file,
+# pinned to the digest verified above.
 cat > "$OL_STAGE/engine-source.json" <<JSON
 {
   "version": "$OLLAMA_VERSION",

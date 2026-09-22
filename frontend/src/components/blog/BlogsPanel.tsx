@@ -26,13 +26,8 @@ import { BlogEditDialog } from "./BlogEditDialog"
 import { BlogPublishDialog } from "./BlogPublishDialog"
 import { PushBlogButton } from "./PushBlogButton"
 
-// Full-mode only, folded at BUILD time -- an LLM rewrite of the user's own
-// note content is not something a public/demo build should offer, and
-// folding it (rather than just hiding the button) drops BlogRefineDialog and
-// its /blog/refine calls from the public bundle entirely. Compared against
-// `import.meta.env.VITE_LUMINARY_MODE`, not the exported LUMINARY_MODE
-// constant -- see DocumentReader.tsx's FeynmanPanel for why that's required
-// for Rollup to fold the branch and drop the dynamic import.
+// Full-mode only, folded at build time so the public bundle drops it. Must compare
+// `import.meta.env.VITE_LUMINARY_MODE` directly for Rollup to fold it.
 const BlogRefineDialog =
   import.meta.env.VITE_LUMINARY_MODE === "full"
     ? lazy(() => import("./BlogRefineDialog").then((m) => ({ default: m.BlogRefineDialog })))

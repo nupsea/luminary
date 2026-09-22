@@ -420,11 +420,8 @@ class EntityExtractor:
     def _load_model(self):
         """Lazy-load the GLiNER model from DATA_DIR/models/gliner/."""
         if self._model is None:
-            # Cache-only: setup downloads the checkpoint and its tokenizer base
-            # (model_prefetch). `local_files_only=True` alone is not cache-only here:
-            # GLiNER loads the tokenizer through a bare `AutoTokenizer.from_pretrained`,
-            # which still calls huggingface.co unless the hub is forced offline --
-            # process-wide, so no other model's download may still be running.
+            # Cache-only. GLiNER's tokenizer load ignores local_files_only, so the hub is
+            # forced offline process-wide: no other download may still be running.
             model_prefetch.require_snapshot(self._model_dir, self._model_id)
             model_prefetch.wait_for_downloads()
         # The lock must span the construction itself, not just the None check --

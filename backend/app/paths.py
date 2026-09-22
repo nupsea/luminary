@@ -46,12 +46,8 @@ def spa_dist() -> Path:
 
 
 def engine_source_path() -> Path:
-    """Where the staged engine records the archive it came from.
-
-    Written by `scripts/desktop/stage_ollama.sh`, and absent in a source
-    checkout and in the macOS bundle -- neither of which offers a downloadable
-    runner. Its absence is the answer "nothing to offer here", never an error.
-    """
+    """Written by `scripts/desktop/stage_ollama.sh`. Absent (source checkout, macOS)
+    means no downloadable runner to offer, never an error."""
     return app_root() / "ollama" / "engine-source.json"
 
 

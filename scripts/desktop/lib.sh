@@ -1,9 +1,5 @@
 # Shared by the desktop-bundle scripts on every platform. Source, don't execute.
-#
-# `scripts/macos/` sources this and adds what only a signed Mac bundle needs.
-# Everything that decides WHAT ships -- the dependency profile, the prunes, the
-# import check in verify_imports.py -- lives here once, so the three installers
-# cannot drift into shipping different apps.
+# What ships is decided here once, so the three installers cannot drift apart.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-$REPO_ROOT/build}"
@@ -17,8 +13,7 @@ case "$(uname -s)" in
     *) DESKTOP_OS=unsupported ;;
 esac
 
-# Pinned deliberately. Bumping this changes every user's interpreter, so it is a
-# reviewed decision, not a floating range.
+# Pinned: bumping this changes every user's interpreter.
 PY_MINOR="3.13"
 PY_RELEASE="3.13.7"
 case "$DESKTOP_OS" in
@@ -30,29 +25,17 @@ case "$DESKTOP_OS" in
 esac
 PBS_VERSION="${PBS_VERSION:-cpython-$PY_RELEASE-$_pbs_platform}"
 
-# Pinned Ollama release, the same on every platform.
 OLLAMA_VERSION="${OLLAMA_VERSION:-v0.32.5}"
 
-# Stage budgets, enforced by verify_stage.sh. Both exist because a stage that
-# grows past a tool's limit fails in the tool's own words, not ours: makensis
-# says "Internal compiler error #12345: error mmapping datablock" and nothing
-# about size.
-#
-# Size, Windows only: NSIS cannot pack much past 2GB. A 2.28GB stage failed; the
-# hard ceiling is ~2048MB. 1900 leaves room for the installer's own overhead
-# without leaving room to drift back. Linux has no equivalent ceiling and no
-# failure case to bracket a number with, so it reports its size and does not
-# gate on it -- give it a budget when something actually breaks at a known size.
+# Stage budgets, enforced by verify_stage.sh, so a tool limit fails in our words.
+# NSIS cannot pack past ~2048MB (a 2.28GB stage failed); Linux has no known ceiling.
 case "$DESKTOP_OS" in
     windows) STAGE_SIZE_BUDGET_MB="${STAGE_SIZE_BUDGET_MB:-1900}" ;;
     *) STAGE_SIZE_BUDGET_MB="${STAGE_SIZE_BUDGET_MB:-}" ;;
 esac
 
-# Path length, every OS: Windows MAX_PATH is 260 and the per-user install root
-# `C:\Users\<name>\AppData\Local\Luminary\` spends about 60 of it, so a stage
-# path over ~190 cannot be written on a user's machine even though it staged
-# fine on the build runner. Checked on Linux too because the two dependency
-# trees are the same packages and Linux CI is the cheaper signal.
+# Windows MAX_PATH 260 minus ~60 for the per-user install root. Checked on every OS:
+# the dependency trees match and Linux CI is the cheaper signal.
 STAGE_PATH_BUDGET="${STAGE_PATH_BUDGET:-190}"
 
 _step() { printf '\n\033[1;36m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
@@ -60,9 +43,7 @@ _info() { printf '    %s\n' "$*"; }
 _warn() { printf '\033[1;33m  ! %s\033[0m\n' "$*" >&2; }
 _die()  { printf '\033[1;31m  x %s\033[0m\n' "$*" >&2; exit 1; }
 
-# python-build-standalone lays Windows out flat (python.exe, Lib/) and unix
-# under bin/ and lib/pythonX.Y/. Kept in step with PYTHON_BINARY in
-# src-tauri/src/stage.rs.
+# Keep in step with PYTHON_BINARY in src-tauri/src/stage.rs.
 staged_python() {
     if [ "$DESKTOP_OS" = windows ]; then
         echo "$STAGE/python/python.exe"
@@ -81,18 +62,13 @@ staged_stdlib() {
 
 staged_site() { echo "$(staged_stdlib)/site-packages"; }
 
-# A path as native programs on this host spell it. Git Bash shows /d/a/...,
-# while a Windows program writes D:\a\... into what it produces, so anything
-# looking for a build-machine path has to look for both.
+# Git Bash shows /d/a/..., Windows programs write D:\a\...
 native_path() {
     if [ "$DESKTOP_OS" = windows ]; then cygpath -w "$1"; else echo "$1"; fi
 }
 
-# The shipping profile: no `dev` (Phoenix, pytest, ruff, tiktoken, reportlab --
-# ~120MB that no user ever runs) but yes `full`, because the desktop app
-# advertises YouTube and web ingestion and must actually support it. `media`
-# stays out: its wheels carry GPL codecs (docs/desktop-bundle.md).
-# Keep in step with scripts/bootstrap.sh, which installs the same profile.
+# `full` without `dev`; `media` stays out for its GPL codecs (docs/desktop-bundle.md).
+# Keep in step with scripts/bootstrap.sh.
 install_shipping_dependencies() {
     local py="$1"
     local req="$BUILD_DIR/requirements-app.txt"
@@ -103,11 +79,8 @@ install_shipping_dependencies() {
     _info "$(grep -cE '^[a-zA-Z0-9]' "$req") packages"
 
     _step "Installing dependencies into the staged interpreter"
-    # `uv export` pins torch to the CPU build on Linux and Windows but does not
-    # carry the explicit index it comes from, so without this `torch==X+cpu` is
-    # looked up on PyPI alone and never found. unsafe-best-match lets the pinned
-    # PyPI packages resolve too; the exported hashes still fix every file. macOS
-    # takes torch from PyPI and is left exactly as it was.
+    # `uv export` pins `torch==X+cpu` but drops the index it lives on; the exported
+    # hashes still fix every file under unsafe-best-match.
     local index_args=()
     if [ "$DESKTOP_OS" != macos ]; then
         local cpu_index
@@ -120,15 +93,11 @@ PYEOF
 )" || _die "no pytorch-cpu index in backend/pyproject.toml"
         index_args=(--extra-index-url "$cpu_index" --index-strategy unsafe-best-match)
     fi
-    # --system because this is not a venv: it is a private interpreter we own.
-    # The +alternate form: macOS's bash 3.2 treats an empty array as unbound under set -u.
+    # The +alternate form: bash 3.2 treats an empty array as unbound under set -u.
     uv pip sync --python "$py" --system ${index_args[@]+"${index_args[@]}"} "$req"
 }
 
-# Third-party test suites are never executed from the bundle. `testing` is NOT
-# in this list and must not be: `import torch` imports `torch.testing`, so
-# removing it breaks the interpreter this ships. Only directories literally
-# named `test`/`tests` go.
+# Never add `testing`: `import torch` imports `torch.testing`.
 prune_test_suites() {
     local site="$1" pruned=0 freed=0 sz d
     _step "Pruning bundled test suites"
@@ -139,11 +108,8 @@ prune_test_suites() {
     _info "removed $pruned test directories ($((freed / 1024)) MB)"
 }
 
-# site.addpackage joins each .pth line against the site dir, so a RELATIVE line
-# relocates with the bundle. It climbs to the stage root, where stage_payload.sh
-# puts backend/: four levels from lib/pythonX.Y/site-packages, three from
-# Windows' Lib/site-packages. The app launches with `python -I`, which drops
-# PYTHONPATH, so this .pth is the only way the backend package is importable.
+# A relative .pth line relocates with the bundle. `python -I` drops PYTHONPATH, so
+# this is the only way the backend package is importable.
 write_backend_pth() {
     local site="$1" rel
     _step "Putting the backend source on sys.path"
@@ -152,21 +118,15 @@ write_backend_pth() {
     printf '%s\n' "$rel" > "$site/_luminary.pth"
 }
 
-# uv writes unix console scripts with an absolute shebang naming the build
-# machine's interpreter, which is dead on a user's machine -- and bin/ is on the
-# backend's PATH, so a dead script there is found and then fails. Rewrite the
-# shebang as the sh/Python polyglot trampoline: sh runs the exec line, Python
-# sees one string literal.
+# uv's absolute shebangs name the build machine's interpreter. Replace them with an
+# sh/Python polyglot: sh runs the exec line, Python sees one string literal.
 relocatable_shebangs() {
     local py="$1" bin_dir="$2"
     _step "Making console scripts relocatable"
     "$py" - "$bin_dir" <<'PYEOF'
 import os, sys
 bin_dir = sys.argv[1]
-# sh reads '''' as two empty strings, so the word is `exec`, and `# ` starts a
-# comment that swallows the trailing quotes. Python reads the whole line as one
-# triple-quoted string. The quoting is exact -- a stray quote after `exec`
-# breaks the sh side and the script falls through into its own Python body.
+# The quoting is exact: a stray quote after `exec` breaks the sh side.
 tramp = "#!/bin/sh\n''''exec \"$(dirname \"$0\")/python%d.%d\" \"$0\" \"$@\" # '''\n" % sys.version_info[:2]
 fixed = 0
 for name in os.listdir(bin_dir):
@@ -190,65 +150,35 @@ print(f"    rewrote {fixed} console-script shebangs")
 PYEOF
 }
 
-# Every entry here is dead weight at runtime. Guarded by the verifiers, which
-# import the full native surface after this runs.
+# Guarded by the verifiers, which import the full native surface afterwards.
 prune_dependencies() {
     local site="$1"
     _step "Pruning dependencies"
     rm -rf "$site/torch/include"                                      # C++ headers
-    # pip stays: it is how the user installs post-install components (speech-to-text
-    # and anything else kept out of the installer for licensing reasons).
+    # pip stays: it installs post-install components.
     rm -rf "$site/onnxruntime"/{transformers,quantization,tools}      # export/training helpers
-    # NOT litellm/proxy (27MB): litellm_logging imports integrations.gcs_bucket at
-    # module scope, which imports litellm.proxy._types, so plain `import litellm`
-    # needs it.
+    # NOT litellm/proxy: plain `import litellm` reaches litellm.proxy._types.
     rm -rf "$site/pyarrow"/{include,tests}
-    # Flight only. NOT libarrow_substrait/_dataset/_acero: pyarrow's lib extension
-    # links all three directly, so removing substrait breaks `import pyarrow`
-    # outright and cascades into lancedb, sentence-transformers and gliner.
+    # Flight only, and all of it: a half-removed Flight leaves a dangling link that
+    # fails linuxdeploy. NOT substrait/_dataset/_acero, which `import pyarrow` links.
     rm -f "$site/pyarrow"/libarrow_flight*.dylib "$site/pyarrow"/libarrow_flight.so* \
-          "$site/pyarrow"/arrow_flight.dll
-    # Remove the rest of Flight in the same breath. `libarrow_flight*` never
-    # matched `libarrow_python_flight*`, so the extension survived while the
-    # library it links did not -- and linuxdeploy walks those dependencies and
-    # fails the AppImage on the dangling one. Nothing but _flight links
-    # libarrow_python_flight, and `flight` is optional at import (pyarrow reaches
-    # for it only in show_info(), behind _module_is_available).
-    rm -f "$site/pyarrow"/libarrow_python_flight*.dylib \
+          "$site/pyarrow"/arrow_flight.dll \
+          "$site/pyarrow"/libarrow_python_flight*.dylib \
           "$site/pyarrow"/libarrow_python_flight.so* \
           "$site/pyarrow"/arrow_python_flight.dll \
           "$site/pyarrow"/_flight.cpython-*.so "$site/pyarrow"/_flight*.pyd \
           "$site/pyarrow"/_flight.pyx "$site/pyarrow"/flight.py
-    # The proxy admin UI: a Next.js build, 17MB of .js/.png/.html and not one
-    # .py. NOT _experimental itself -- proxy/guardrails imports
-    # _experimental.mcp_server, the same trap as litellm/proxy above.
+    # The proxy admin UI build. NOT _experimental itself: guardrails imports it.
     rm -rf "$site/litellm/proxy/_experimental/out"
-    # Benchmark fixtures, and the source of the two longest paths in the stage
-    # (197 and 185 chars, against the STAGE_PATH_BUDGET of 190). Its only .py is a pytest
-    # file that nothing imports; prune_test_suites misses it because the
-    # directory is not named test/tests.
+    # Benchmark fixtures holding the stage's longest paths (over STAGE_PATH_BUDGET).
     rm -rf "$site/litellm/proxy/guardrails/guardrail_hooks"/*/guardrail_benchmarks
     find "$site" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
     find "$site" -name '*.dist-info' -type d -exec rm -rf {}/RECORD \; 2>/dev/null || true
 }
 
-# A library that is loaded through someone else's RPATH carries no rpath that
-# reaches its own dependencies: RPATH is inherited by transitive loads, so
-# auditwheel records `$ORIGIN/../<pkg>.libs` on the extension module alone and
-# Ollama records `$ORIGIN/lib/ollama` on the `ollama` executable alone. Whatever
-# they pull in resolves through that single entry -- `pillow.libs/libfreetype ->
-# libpng16-4a38ea05.so.16.53.0` beside it, `lib/ollama/vulkan/libggml-vulkan.so
-# -> libggml-base.so.0` a directory above it. linuxdeploy inspects every ELF in
-# the AppDir on its own, with no parent to inherit from, so it reads those as
-# missing dependencies and fails the AppImage -- on a stage that is correct and
-# that the .deb ships working.
-#
-# Recording the directory states what the parent's RPATH already implied. The
-# search runs from the library's own directory up to the root of the tree being
-# staged and no wider, which is the reach that RPATH had; a dependency the host
-# owns is never found there and so is left to the host. Entries are appended, so
-# whatever an rpath resolves today it still resolves the same way, and a library
-# already covering all of its NEEDED is not touched at all.
+# Libraries that resolve their deps through a parent's inherited RPATH look broken
+# to linuxdeploy, which inspects each ELF alone. Append the rpath the parent implied,
+# searching only up to the stage root so host-owned deps stay with the host.
 relink_bundled_libs() {
     local root="$1" lib dir need rpath target rel add new patched=0 examined=0
     [ "$DESKTOP_OS" = linux ] || return 0
@@ -260,13 +190,9 @@ relink_bundled_libs() {
         rpath="$(patchelf --print-rpath "$lib" 2>/dev/null)" || continue
         add=""
         while IFS= read -r need; do
-            if [ -z "$need" ]; then
-                continue
-            fi
+            [ -n "$need" ] || continue
             target="$(_holding_dir "$dir" "$root" "$need")" || continue
-            if _rpath_covers "$dir" "$rpath$add" "$need"; then
-                continue
-            fi
+            _rpath_covers "$dir" "$rpath$add" "$need" && continue
             rel="$(realpath --relative-to="$dir" "$target")"
             if [ "$rel" = "." ]; then
                 add="$add:\$ORIGIN"
@@ -274,17 +200,13 @@ relink_bundled_libs() {
                 add="$add:\$ORIGIN/$rel"
             fi
         done < <(patchelf --print-needed "$lib" 2>/dev/null)
-        if [ -z "$add" ]; then
-            continue
-        fi
+        [ -n "$add" ] || continue
         if [ -n "$rpath" ]; then
             new="$rpath$add"
         else
             new="${add#:}"
         fi
-        # --force-rpath keeps a DT_RPATH a DT_RPATH: patchelf writes DT_RUNPATH by
-        # default, which is not inherited, and demoting one would cut off whatever
-        # was resolving through it.
+        # Keep a DT_RPATH a DT_RPATH: patchelf defaults to DT_RUNPATH, which is not inherited.
         if [ -n "$rpath" ] && objdump -p "$lib" 2>/dev/null | grep -q 'RPATH'; then
             patchelf --force-rpath --set-rpath "$new" "$lib"
         else
@@ -315,9 +237,7 @@ _holding_dir() {
 _rpath_covers() {
     local dir="$1" entry
     while IFS= read -r entry; do
-        if [ -z "$entry" ]; then
-            continue
-        fi
+        [ -n "$entry" ] || continue
         entry="${entry//\$\{ORIGIN\}/$dir}"
         entry="${entry//\$ORIGIN/$dir}"
         if [ -e "$entry/$3" ]; then
@@ -327,9 +247,7 @@ _rpath_covers() {
     return 1
 }
 
-# unchecked-hash, not the default timestamp invalidation: copying into a bundle
-# or an installer rewrites mtimes, which would invalidate every .pyc and send a
-# read-only install trying to rewrite them at import time.
+# unchecked-hash: installers rewrite mtimes, which would invalidate timestamp .pycs.
 byte_compile() {
     local py="$1"
     shift

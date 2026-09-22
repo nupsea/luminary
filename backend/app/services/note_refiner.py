@@ -47,18 +47,12 @@ _SYSTEM = (
 
 _USER_TMPL = "{instruction}\n\n---\n\n{content}"
 
-# The model's own output length tracks the input's, plus room for the "light
-# elaboration where useful" the instruction invites. 3 chars/token is a
-# deliberately low (i.e. generous) estimate of English text -- real text runs
-# closer to 4 -- so this errs toward more budget rather than truncating a long
-# note (see docs/patterns.md: never buy latency by cutting off content).
+# Deliberately low (real English runs ~4): errs toward budget over truncation.
 _CHARS_PER_TOKEN_FLOOR = 3.0
 _OUTPUT_BUFFER_TOKENS = 400
 _MIN_MAX_TOKENS = 800
 
-# Identity of an image reference for the before/after structural check: the
-# placeholder path, not its alt text -- a grammar pass may reasonably reword
-# "Pasted Image" but must never drop or rewrite the path itself.
+# An image reference is its path, not its alt text, which a grammar pass may reword.
 _IMAGE_REF_RE = re.compile(r"__LUMINARY_IMG__/[^\s)\"']+")
 
 
@@ -93,9 +87,7 @@ class NoteRefinerService:
                 model=model,
                 temperature=0.5,
                 max_tokens=max_tokens,
-                # The payload is the user's own note, click-triggered. Hybrid
-                # mode would otherwise route this to the cloud provider --
-                # note content stays on the machine regardless.
+                # Note content stays local even in hybrid mode.
                 background=True,
             )
         except LLMUnavailableError:

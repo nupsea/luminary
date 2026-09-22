@@ -204,11 +204,8 @@ QA_SYSTEM_PROMPT = (
     f"{CITATION_RULE}"
 )
 
-# A notes question that names no subject ("what did I note about my reading") asks
-# for the notes themselves, so the most recent ones are the answer. Under
-# QA_SYSTEM_PROMPT the model read "is the answer present" strictly and returned the
-# sentinel with the user's note in context (#141). No sentinel here: notes_node
-# only takes this path when there are notes to report.
+# A subject-less notes question is answered from the most recent notes (#141). No
+# sentinel: notes_node takes this path only when there are notes to report.
 QA_NOTES_RECENT_SYSTEM_PROMPT = (
     "You are a knowledge assistant answering from the user's own notes. "
     "The user asked what they noted without naming a specific subject, so the context "
@@ -1273,11 +1270,7 @@ class QAService:
                     citations, citations_unresolved = _resolve_marker_citations(
                         citations, result.get("cited_chunks") or [], doc_titles, answer_text
                     )
-                    # The chunk a citation was resolved from cannot say where it sits:
-                    # every vector row carries section_heading "" and page 0. Without
-                    # this the chip renders with no section and "page 0" while the
-                    # section row holds the real heading, and several chips on one
-                    # answer become indistinguishable from each other.
+                    # Vector rows carry section_heading "" and page 0; fill the real ones.
                     await _fill_citation_locations(citations)
                     # Summary/graph routes ground on section_context with zero chunks,
                     # so both are the grounding an excerpt must be found in.
@@ -1383,9 +1376,7 @@ class QAService:
                     if section_context and section_context.strip():
                         context_texts.append(section_context)
                     final["context_chunks"] = context_texts
-                    # Eval-only: separates the two reasons an answer carries no source --
-                    # the model named none, or the ones it named were ungrounded and
-                    # removed. citation_coverage alone cannot tell those apart.
+                    # Eval-only: "named no source" vs "named ungrounded ones".
                     final["citations_dropped"] = citations_dropped
                     # How many chips the model proposed vs how many the relevance
                     # gate kept: coverage moving without this is uninterpretable.

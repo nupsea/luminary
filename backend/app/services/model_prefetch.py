@@ -147,12 +147,8 @@ def _snapshot(root: Path, repo_id: str) -> Path | None:
 
 
 def tokenizer_base(root: Path, repo_id: str) -> str | None:
-    """The second repo a GLiNER checkpoint needs, or None for any other model.
-
-    GLiNER builds its tokenizer from the encoder it was trained on, named in
-    ``gliner_config.json`` (``microsoft/mdeberta-v3-base`` for the default), so
-    a cached checkpoint alone does not load. Read from the checkpoint rather
-    than listed here, because it changes with NER_MODEL.
+    """The encoder repo a GLiNER checkpoint builds its tokenizer from, read from its
+    ``gliner_config.json``; None for any other model.
     """
     snap = _snapshot(root, repo_id)
     config = snap / "gliner_config.json" if snap else None
@@ -180,10 +176,8 @@ _in_flight_lock = threading.Lock()
 def require_snapshot(root: Path, repo_id: str) -> None:
     """Raise `ModelNotDownloaded` unless a cache-only load can succeed.
 
-    A request that arrives while setup is still downloading this model waits for
-    that download rather than failing. Blocks, so call it outside MODEL_LOAD_LOCK:
-    the download needs no lock, and holding one here would stall every other
-    model's construction behind the slowest download.
+    Waits for an in-flight setup download of this model. Call it outside
+    MODEL_LOAD_LOCK, or every other model's load stalls behind the download.
     """
     if snapshot_present(root, repo_id):
         return
@@ -201,11 +195,8 @@ def require_snapshot(root: Path, repo_id: str) -> None:
 
 
 def wait_for_downloads() -> None:
-    """Block until no setup download is in flight.
-
-    For a loader that must force the hub offline (`offline_model_load`), which is
-    process-wide and fails any download still running.
-    """
+    """Block until no setup download is in flight: forcing the hub offline is
+    process-wide and would fail them."""
     with _in_flight_lock:
         pending = list(_in_flight.values())
     for done in pending:
@@ -327,11 +318,8 @@ def prefetch(to_fetch: list[ModelSpec], status) -> dict[str, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Download whatever is missing, for a build or test run that needs the models.
-
-    ``--models-dir`` targets a cache other than this install's, such as the one
-    the test suite shares (`tests/conftest.py`).
-    """
+    """Download whatever is missing. ``--models-dir`` targets another cache, such as
+    the test suite's (`tests/conftest.py`)."""
     parser = argparse.ArgumentParser(prog="python -m app.services.model_prefetch")
     parser.add_argument("--models-dir", type=Path, default=None)
     root = parser.parse_args(argv).models_dir

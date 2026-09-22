@@ -1,14 +1,8 @@
 name: Desktop installers
 
 # Builds the Windows setup .exe and the Linux AppImage and .deb, installs each on
-# a clean runner and launches it the way a user does. Nothing here is attached
-# to a release: these join the tag release once a first run has also passed on
-# real hardware (docs/roadmap.md, 0.13.0).
-#
-# A workflow of its own rather than jobs in ci.yml: a build is most of an hour
-# per platform and downloads 1.4GB of Ollama, which no ordinary push should pay.
-# The runners have no GPU, so this proves the install, the layout and the CPU
-# path -- never which accelerator a real machine gets.
+# a clean runner and launches it. Separate from ci.yml: a build is most of an hour.
+# No GPU on the runners, so this proves the install and the CPU path only.
 
 on:
   workflow_dispatch:
@@ -57,13 +51,7 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      # No cache for build/pythons. `uv python install` fetches the interpreter in
-      # under two seconds, restoring the cache took longer than that, and the
-      # directory holds uv's minor-version link -- a reparse point on Windows that
-      # actions/cache restores as something `uv` then cannot remove:
-      # "failed to remove directory cpython-3.13-windows-x86_64-none:
-      # The directory name is invalid. (os error 267)". The cache paid nothing and
-      # cost the build.
+      # No cache for build/pythons: restoring uv's reparse-point link breaks uv on Windows.
 
       - run: cd frontend && npm ci
 
@@ -73,11 +61,9 @@ jobs:
       - name: Verify the stage
         run: make verify-stage
 
-      # NO_STRIP: linuxdeploy's bundled strip predates the ELF sections newer
-      # toolchains emit and fails the bundle on them.
-      # One bundle per step, the .deb first: an AppImage failure then cannot hide
-      # whether the .deb installs and opens. --verbose because tauri reports a
-      # failing linuxdeploy as "failed to run linuxdeploy" and nothing else.
+      # NO_STRIP: linuxdeploy's strip fails on newer ELF sections. One bundle per step,
+      # the .deb first, so an AppImage failure cannot hide it. --verbose: tauri hides
+      # linuxdeploy's error otherwise.
       - name: Build the .deb
         env:
           NO_STRIP: "true"
@@ -91,11 +77,7 @@ jobs:
           SCREENSHOT=build/linux-deb.png xvfb-run -a -s "-screen 0 1440x900x24" \
             bash scripts/desktop/verify_installed.sh "$exe"
 
-      # LINUXDEPLOY_EXCLUDED_LIBRARIES: linuxdeploy walks every native dependency
-      # and copies it in. Driver libraries must not be copied -- they belong to
-      # the host, and a bundled libcuda/libvulkan binds the AppImage to whatever
-      # the runner happened to have. The engine's own runners are staged
-      # separately and are not linuxdeploy's to resolve.
+      # Driver libraries belong to the host; the engine's runners are staged separately.
       - name: Build the AppImage
         if: ${{ !cancelled() }}
         env:
@@ -114,9 +96,7 @@ jobs:
           SCREENSHOT=build/linux-appimage.png xvfb-run -a -s "-screen 0 1440x900x24" \
             bash scripts/desktop/verify_installed.sh "$appimage"
 
-      # The stage budget in verify_stage.sh gates the input; this is the output,
-      # and it is what a user actually downloads. Printed rather than gated:
-      # there is no Linux packaging ceiling to bracket a budget against yet.
+      # The download size; printed, not gated (no known Linux ceiling).
       - name: Report installer sizes
         if: ${{ !cancelled() }}
         run: |
@@ -156,8 +136,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Staging and installing are tens of thousands of small files, which
-      # Defender's real-time scan turns into a multiple of the job's time.
+      # Defender's real-time scan multiplies the job time over this many small files.
       - name: Exclude the build and install paths from Defender's real-time scan
         shell: pwsh
         run: |
@@ -182,13 +161,7 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      # No cache for build/pythons. `uv python install` fetches the interpreter in
-      # under two seconds, restoring the cache took longer than that, and the
-      # directory holds uv's minor-version link -- a reparse point on Windows that
-      # actions/cache restores as something `uv` then cannot remove:
-      # "failed to remove directory cpython-3.13-windows-x86_64-none:
-      # The directory name is invalid. (os error 267)". The cache paid nothing and
-      # cost the build.
+      # No cache for build/pythons: restoring uv's reparse-point link breaks uv on Windows.
 
       - run: cd frontend && npm ci
 
@@ -212,9 +185,7 @@ jobs:
           $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
           Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
 
-      # `|| true`: the step runs under `-e -o pipefail`, one of the two roots does
-      # not exist, and find exits 1 on a missing path -- which killed this step
-      # before its own guard could report anything. It printed nothing at all.
+      # `|| true`: one root is missing and find would kill the step under -e.
       - name: Open the installed app
         run: |
           root="$(cygpath -u "$LOCALAPPDATA")"
@@ -227,9 +198,7 @@ jobs:
           echo "installed at $exe"
           SCREENSHOT=build/windows.png bash scripts/desktop/verify_installed.sh "$exe"
 
-      # The number that decides whether makensis can pack this at all. The stage
-      # budget in verify_stage.sh gates the input before the build; this records
-      # what came out, so the two can be compared across runs.
+      # Recorded to compare against the stage budget across runs.
       - name: Report installer size
         if: ${{ !cancelled() }}
         run: |
@@ -245,9 +214,7 @@ jobs:
           retention-days: 7
           compression-level: 0
 
-      # The workspace is on D: and the app writes its log under C:, so
-      # upload-artifact has no common root for the two and refuses the whole
-      # upload. Copied into the workspace instead of uploaded from where it lies.
+      # The log is on C:, the workspace on D:; upload-artifact needs one root.
       - name: Collect the app log
         if: always()
         run: |

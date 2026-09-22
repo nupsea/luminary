@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 # Stage a relocatable Python runtime for the Windows and Linux installers.
-#
-# Same method as scripts/macos/stage_python.sh, which explains why this is not a
-# venv: dependencies go straight into python-build-standalone's own
-# site-packages, and CPython finds its prefix relative to its own executable.
-# macOS keeps a separate script for the steps only a signed bundle needs
-# (thinning universal binaries, breaking hardlinks before codesign).
+# Same method as scripts/macos/stage_python.sh, minus the signed-bundle steps.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -33,8 +28,7 @@ STDLIB="$(staged_stdlib)"
 SITE="$(staged_site)"
 [ -x "$PY" ] || _die "interpreter not at $PY"
 
-# uv marks the interpreters it manages EXTERNALLY-MANAGED so nobody pip-installs
-# into the shared toolchain. This copy is a private runtime we own and ship.
+# A private runtime we ship, not uv's shared toolchain.
 rm -f "$STDLIB/EXTERNALLY-MANAGED"
 
 install_shipping_dependencies "$PY"
@@ -42,10 +36,7 @@ prune_test_suites "$SITE"
 write_backend_pth "$SITE"
 
 _step "Sanitizing build-machine paths"
-# Linux's _sysconfigdata records the interpreter's build-time prefix, as on
-# macOS; a Windows build can write the same root with backslashes, forward
-# slashes, or escaped inside a Python string. Inert at runtime, but it leaks a
-# build layout into a distributed artifact. Text files only.
+# _sysconfigdata leaks the build prefix, in any of three Windows spellings. Text files only.
 "$PY" - "$PY_STAGE" "$SRC" "$(native_path "$SRC")" <<'PYEOF'
 import os, sys
 root, *spellings = sys.argv[1:]
@@ -78,14 +69,8 @@ PYEOF
 
 if [ "$DESKTOP_OS" = windows ]; then
     _step "Removing console-script launchers"
-    # uv's Windows launchers are .exe files with the build machine's interpreter
-    # path embedded, so each one is dead once installed anywhere else, and none
-    # can be rewritten the way a unix shebang can. Nothing needs them: the backend
-    # runs yt-dlp as `python -m yt_dlp` and pip as `python -m pip`. A dead launcher
-    # left on the backend's PATH is worse than none, because `shutil.which` finds it.
-    # Everything goes, not only *.exe: packages that ship plain `scripts=` files
-    # (jsonpatch, jsonpointer) leave extensionless ones whose shebang names the
-    # stage's own interpreter, which Windows cannot run either. The directory stays.
+    # uv's launchers embed the build machine's interpreter path and `shutil.which` would
+    # find them on the backend's PATH. The backend uses `python -m`; empty the directory.
     find "$PY_STAGE/Scripts" -mindepth 1 -delete 2>/dev/null || true
 else
     relocatable_shebangs "$PY" "$PY_STAGE/bin"

@@ -30,14 +30,8 @@ def is_youtube_url(url: str) -> bool:
 
 
 def _ytdlp_argv() -> list[str]:
-    """How to start yt-dlp: as a module of this interpreter when it carries one.
-
-    The console script beside the interpreter records the build machine's
-    interpreter path. A unix shebang can be rewritten when the desktop bundle is
-    staged; a Windows launcher is an `.exe` with the path compiled in, dead once
-    the installer puts it anywhere else. `python -m yt_dlp` needs neither, and is
-    the same package the script would have run.
-    """
+    """yt-dlp as a module of this interpreter when it carries one: the bundled
+    Windows launcher `.exe` has the build machine's path compiled in."""
     if importlib.util.find_spec("yt_dlp") is not None:
         return [sys.executable, "-m", "yt_dlp"]
     return [resolve_tool("yt-dlp") or "yt-dlp"]

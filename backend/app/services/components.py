@@ -95,12 +95,7 @@ def _registry_licence(model_id: str) -> str:
 
 
 def engine_source() -> dict | None:
-    """The archive the staged engine came from, or None if there is nothing to offer.
-
-    Absent in a source checkout and in the macOS bundle. macOS carries Metal and
-    has no runner to fetch; a checkout has no staged engine at all. Read per call
-    rather than cached, for the same reason `catalogue()` is built per call.
-    """
+    """The archive the staged engine came from, or None if there is nothing to offer."""
     path = engine_source_path()
     try:
         source = json.loads(path.read_text(encoding="utf-8"))
@@ -117,12 +112,8 @@ def engine_source() -> dict | None:
 
 
 def engine_lib_dir() -> Path:
-    """Where the engine's runners live once the shell has relocated it.
-
-    Kept in step with `engine_dir` and `OLLAMA_LIBRARY_DIR` in
-    `src-tauri/src/stage.rs`: the shell copies the staged engine here on first
-    launch precisely so a downloaded runner has somewhere writable to land.
-    """
+    """The relocated engine's runners. Keep in step with `engine_dir` and
+    `OLLAMA_LIBRARY_DIR` in `src-tauri/src/stage.rs`."""
     return Path(get_settings().DATA_DIR).expanduser() / "engine" / "ollama" / "lib" / "ollama"
 
 
@@ -137,9 +128,7 @@ def _engine_runner_component(source: dict) -> Component:
         kind="engine_runner",
         ref=source["runner"],
         size_bytes=int(source["archive_bytes"]),
-        # Downloaded from Ollama's own release, on request, onto the user's
-        # machine -- the same arrangement as ffmpeg below, and the reason no
-        # CUDA library travels inside the installer.
+        # Fetched from Ollama's release on request, like ffmpeg: never redistributed.
         licence="NVIDIA CUDA EULA (not distributed with Luminary)",
         enables=("Faster local chat", "Faster flashcard generation", "Faster summaries"),
     )
@@ -211,10 +200,7 @@ def catalogue() -> tuple[Component, ...]:
             enables=("MP4 ingestion", "YouTube transcription"),
         ),
     )
-    # Appended rather than listed above: it exists only where the stage recorded
-    # an archive to fetch it from (Windows and Linux), and only offered to a host
-    # that can use it -- CUDA is NVIDIA-only, so an AMD or CPU-only box gets
-    # Vulkan for free and never sees a download it cannot benefit from.
+    # Only where the stage recorded an archive, and only to an NVIDIA host.
     source = engine_source()
     if source is None:
         return entries
@@ -248,8 +234,7 @@ def _whisper_fetch() -> None:
 
 
 # A python_extra whose package runs a model: (weights on disk?, download them).
-# The download belongs to the install, which the user asked for; the model's
-# loader never fetches, so it cannot reach the network from a transcription.
+# The install downloads; the loader never does.
 _EXTRA_WEIGHTS = {"transcription": (_whisper_cached, _whisper_fetch)}
 
 
@@ -591,11 +576,7 @@ async def install_python_extra(comp: Component) -> AsyncIterator[dict]:
 
 
 async def install_engine_runner(comp: Component) -> AsyncIterator[dict]:
-    """Fetch an accelerator runner and drop it beside the ones that shipped.
-
-    Ollama publishes no standalone CUDA asset, so the download is the whole
-    release archive and only this one directory is kept out of it.
-    """
+    """Fetch an accelerator runner out of the release archive, beside the shipped ones."""
     source = engine_source()
     if source is None:
         yield {"state": "failed", "detail": "this build has no downloadable engine runner"}
@@ -603,9 +584,7 @@ async def install_engine_runner(comp: Component) -> AsyncIterator[dict]:
 
     lib = engine_lib_dir()
     if not lib.is_dir():
-        # The shell creates this on first launch. If it is missing, the engine
-        # never started, and installing a runner into nothing would report
-        # success and change nothing.
+        # The shell creates this on first launch; missing means the engine never started.
         yield {
             "state": "failed",
             "detail": f"the engine is not prepared at {lib}; restart Luminary and try again",
@@ -625,8 +604,7 @@ async def install_engine_runner(comp: Component) -> AsyncIterator[dict]:
         if event["state"] != "ready":
             yield event
             continue
-        # Ollama enumerates its runner directory when it starts, so the runner
-        # that was just installed is not the one currently serving.
+        # Ollama enumerates runners at start.
         yield {**event, "detail": f"{comp.label} installed. Restart Luminary to use it."}
 
 
@@ -670,9 +648,7 @@ async def remove_component(component_id: str) -> None:
         await remove_ollama_model(comp.ref)
         return
     if comp.kind == "engine_runner":
-        # Safe to remove outright, unlike the extras below: this directory holds
-        # nothing but the files that were unpacked into it, and dropping it puts
-        # the engine back on the runners the installer shipped.
+        # Holds only what was unpacked into it.
         await asyncio.to_thread(shutil.rmtree, engine_lib_dir() / comp.ref, True)
         return
     if comp.kind == "python_extra":

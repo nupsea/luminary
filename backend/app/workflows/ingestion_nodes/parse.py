@@ -132,9 +132,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
     # Classification only runs for legacy paths where content_type is unknown.
     provided = state.get("content_type")
     if provided not in ("audio", "video"):
-        # Set before the domain and register probes, which are background LLM calls
-        # that queue behind other documents' summaries: left at "parsing", an 11 KB
-        # text file reported parsing for three minutes while it waited (#142).
+        # Before the classify probes, which queue behind other LLM work (#142).
         await _update_stage(state["document_id"], "classifying")
     if provided is not None:
         if provided == "technical":

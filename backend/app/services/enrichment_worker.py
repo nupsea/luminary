@@ -61,6 +61,7 @@ async def _record_skip(job_id: str, message: str, *, refund_attempt: bool) -> No
         )
         await session.commit()
 
+
 # Type alias: (document_id, job_id) -> None (raises on failure)
 JobHandler = Callable[[str, str], Coroutine[Any, Any, None]]
 

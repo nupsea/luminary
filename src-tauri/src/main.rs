@@ -246,8 +246,7 @@ fn boot(app: AppHandle, sup: Arc<Supervisor>) {
 
     progress(&app, "ready", "Ready");
     let url = format!("http://127.0.0.1:{port}");
-    // A contract, not a courtesy: verify_installed.sh reads this line to reach the
-    // installed backend and ingest a document through it.
+    // Contract: verify_installed.sh reads this line to find the backend.
     logging::write("shell", &format!("backend: {url}"));
     if let Some(window) = app.get_webview_window("main") {
         // Navigating to the backend's own origin keeps the SPA and the API

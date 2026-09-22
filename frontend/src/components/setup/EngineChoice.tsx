@@ -1,18 +1,8 @@
-// The one question first run asks: Local, Hybrid or Cloud.
+// The one question first run asks: Local, Hybrid or Cloud. All three are always
+// offered and nothing is preselected on the user's behalf.
 //
-// Asked before "add a document" because it is the only setting that changes how
-// the next five minutes feel. It writes the same stored value Settings writes, and
-// both render the modes from `lib/engineModes`, so the two cannot describe one
-// choice in two wordings.
-//
-// All three modes are always offered: the choice is the user's. On a host that
-// cannot run a local model each option says what it will and will not do there,
-// and nothing is preselected or switched on the user's behalf.
-//
-// **No invented numbers.** The local side quotes `local_probe_seconds` when the
-// start-up probe measured this host and says nothing numeric when it did not --
-// null is not "fast". The cloud side quotes nothing, because nothing has measured
-// it on this machine; the receipt under the first answer supplies the real figure.
+// No invented numbers: the local side quotes `local_probe_seconds` only when the
+// start-up probe measured it; the cloud side quotes nothing.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Cloud, GitMerge, HardDrive, Loader2 } from "lucide-react"

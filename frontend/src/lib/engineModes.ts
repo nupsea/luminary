@@ -1,13 +1,6 @@
-// Local, Hybrid and Cloud: what each mode is, defined once for every surface.
-//
-// The first-run question and Settings described the same stored value in two
-// wordings ("Answer with your API key" beside "Hybrid"), and first run never
-// offered Cloud. A choice about what leaves the machine has one definition, or the
-// wordings drift and one of them misleads. The stored values stay
-// `private | hybrid | cloud`; only the words shown are defined here.
-//
-// Pure, and in lib/, so the wording rules are unit-tested: Vitest runs in the node
-// environment here and components stay untested by convention.
+// Local, Hybrid and Cloud: what each mode is, defined once for every surface, so
+// first run and Settings cannot describe one stored value in two wordings. Pure and
+// in lib/ so the wording rules are unit-tested.
 
 import { joinLabels, type RoutingResponse } from "@/lib/llmRouting"
 
@@ -64,12 +57,8 @@ export function engineMode(id: string | undefined): EngineModeDef {
 }
 
 /**
- * The text shown when a model call fails.
- *
- * The server's message names the actual situation -- a refusing host, a bad key,
- * an unreachable provider. The client used to replace it with a sentence chosen
- * from a copy of the mode, which told a user on a machine that cannot run a model
- * to start Ollama from a terminal the desktop app does not have.
+ * The text shown when a model call fails: the server's message, which names the
+ * actual situation, never a client-side guess from the mode.
  */
 export function modelUnavailableMessage(serverMessage?: string | null): string {
   const text = serverMessage?.trim()
@@ -83,11 +72,8 @@ export interface HostVerdict {
 }
 
 /**
- * The banner line for a host that cannot run a local model, or null.
- *
- * Built from the routing report's refused rows rather than from the mode, so it
- * names exactly the work that does not run under the saved setting and changes
- * the moment that setting does.
+ * The banner line for a host that cannot run a local model, or null. Built from
+ * the routing report's refused rows, not the mode.
  */
 export function hostNotice(
   host: HostVerdict | undefined,

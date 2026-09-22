@@ -53,9 +53,7 @@ interface BlogPublishDialogProps {
   noteId: string
   noteContent: string
   kind?: BlogKind
-  // Pre-refined body from the Refine step, used in place of the freshly
-  // transformed draft markdown. The underlying note is never touched by
-  // Refine -- this is purely a starting point for the body editor below.
+  // Seeds the body editor from the Refine step; the note itself is never changed.
   initialBody?: string
 }
 
@@ -139,8 +137,7 @@ export function BlogPublishDialog({
     return () => {
       cancelled = true
     }
-    // initialBody is a one-time seed for the body editor, not a live prop --
-    // omitted from deps so an unrelated re-render never blows away edits.
+    // A one-time seed: omitted from deps so a re-render never discards edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, noteId, noteContent, kind])
 

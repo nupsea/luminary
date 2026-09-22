@@ -104,16 +104,10 @@ PROFILE_MIN_RAM_GB: dict[MemoryProfile, int] = {
 
 
 def whole_gb(total_bytes: int) -> int:
-    """Installed RAM in GB from what the OS reports, rounded UP (I-56).
+    """Installed RAM in GB, rounded UP (I-56): Linux and Windows report a little under.
 
-    Linux (`MemTotal`) and Windows (`TotalPhys`) report installed RAM minus what
-    firmware and the kernel reserve, so the figure is always a little under the
-    installed size and never over it. Truncating read a 16 GiB Linux box as 15
-    and refused it as under the 16GB floor (#139). macOS reports `hw.memsize`,
-    the exact installed figure, which rounds up to itself.
-
-    The two cases that bracket it: that 16 GiB box reports 15.x and is 16; Docker
-    Desktop's VM on a 16GB Mac reports ~7.7 and is 8, still under the floor.
+    Brackets: a 16 GiB Linux box reports 15.x and is 16; Docker Desktop's VM on a
+    16GB Mac reports ~7.7 and is 8, still under the floor.
     """
     return -(-total_bytes // 1024**3)
 

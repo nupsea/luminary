@@ -1,14 +1,6 @@
-// The support boundary, stated once, wherever the user is.
-//
-// Not dismissible, and deliberately: it is the reason everything else on an
-// unsupported host feels broken, and hiding it leaves a user to conclude the
-// product is bad rather than that the machine cannot run a local model.
-//
-// It names the work that does not run under the SAVED mode, read from the routing
-// report's refused rows, so it changes the moment the mode does -- from first run
-// or from Settings -- and disappears when nothing is refused. I-16: no key must
-// keep meaning a working app, so it names the mode that would run the rest and
-// never switches it.
+// The support boundary, stated once, wherever the user is. Not dismissible: hidden,
+// an unsupported host just looks like a broken product. Names the work the SAVED
+// mode refuses and never switches the mode itself (I-16).
 
 import { useQuery } from "@tanstack/react-query"
 import { AlertTriangle } from "lucide-react"

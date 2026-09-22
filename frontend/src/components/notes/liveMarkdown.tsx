@@ -234,20 +234,9 @@ class RenderedBlock extends WidgetType {
   }
 
   /**
-   * A widget is opaque to CodeMirror's own mouse-selection tracking
-   * (`ignoreEvent` below), so a drag beginning with mousedown on an image,
-   * table, or code block would otherwise only ever place a caret -- the same
-   * drag starting on plain text and crossing into the block already extends
-   * correctly, because that tracking lives on `document`, outside this
-   * widget's DOM. This replicates it for the one side `ignoreEvent` breaks.
-   *
-   * Throttled to one dispatch per frame, same as CodeMirror's own drag
-   * tracking: a raw mousemove listener can fire far more often than the
-   * browser paints, and each dispatch here is a full decoration recompute
-   * over a React-rendered widget (an image mid-reflow as it loads). Without
-   * the throttle those dispatches outrun layout and the selection background
-   * is drawn from a block-height cache the DOM has already moved past --
-   * a highlighted band floating away from the widget it belongs to.
+   * `ignoreEvent` hides a drag that starts on a widget from CodeMirror's own
+   * selection tracking; this replicates it. One dispatch per frame, as CodeMirror
+   * does: faster dispatches outrun layout and draw the selection off the widget.
    */
   private startDrag(view: EditorView, anchor: number) {
     this.endDrag?.()
@@ -608,9 +597,7 @@ function stepInto(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -
       const cellPos = caretInTableRow(targetLine.text, 0)
       anchor = targetLine.from + cellPos
     } else {
-      // Keep the column the caret was at, not the line's end -- landing at
-      // `.to` every time reads as the caret jumping to an unrelated spot
-      // whenever a block sits on the line being crossed.
+      // Keep the caret's column rather than jumping to the line's end.
       anchor = targetLine.from + columnOffset(targetLine.text, column)
     }
   })

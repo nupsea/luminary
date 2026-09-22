@@ -17,9 +17,7 @@ pub const OLLAMA_BINARY: &str = "ollama/ollama.exe";
 #[cfg(not(windows))]
 pub const OLLAMA_BINARY: &str = "ollama/ollama";
 
-/// Where the model server's runner libraries sit. The macOS archive is flat,
-/// beside the binary; Windows and Linux are staged with `lib/ollama` next to
-/// it, a layout Ollama searches relative to its own executable on both.
+/// The macOS archive is flat; elsewhere Ollama searches `lib/ollama` beside itself.
 #[cfg(target_os = "macos")]
 pub const OLLAMA_LIBRARY_DIR: &str = "ollama";
 #[cfg(not(target_os = "macos"))]
@@ -80,12 +78,8 @@ pub fn missing_pieces(stage: &Path) -> Vec<&'static str> {
         .collect()
 }
 
-/// Where the library lives: writable, outside the read-only install.
-///
-/// The local data directory, not the roaming one. They are the same directory
-/// on macOS and Linux; on Windows `app_data_dir` is `%APPDATA%`, which a domain
-/// profile copies to a server at every sign-in -- gigabytes of vectors and
-/// models, for a library that is only ever opened on this machine.
+/// Where the library lives: writable, outside the read-only install. Local, not
+/// roaming: a Windows domain profile syncs `%APPDATA%` to a server at every sign-in.
 pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -95,31 +89,18 @@ pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// The release the staged engine came from, written by `stage_ollama.sh`.
-/// It is what decides whether the copy in the library directory is current.
+/// Written by `stage_ollama.sh`; decides whether the relocated copy is current.
 pub const ENGINE_STAMP: &str = "ollama/ENGINE_VERSION";
 
-/// Whether the engine runs from a writable copy instead of the install dir.
-///
-/// macOS keeps running from the bundle: its archive carries Metal, there is no
-/// accelerator pack to fetch, and a copy would spend disk for nothing.
+/// macOS runs from the bundle: its archive carries Metal and has no pack to fetch.
 const RELOCATE_ENGINE: bool = !cfg!(target_os = "macos");
 
 /// Where the engine runs from: the stage, or a writable copy of it.
 ///
-/// Ollama resolves its runner directory from `os.Executable()` at init and has
-/// no environment override for it. In `ml/path.go`, `LibOllamaPath` is a
-/// package-level var and `libOllamaPathCandidates` consults only the executable
-/// path, the working directory and hardcoded relative dirs -- there is no
-/// environment branch, so `OLLAMA_LIBRARY_PATH` reaches `llama-server` but
-/// never steers `ollama serve`. An accelerator pack downloaded later therefore
-/// cannot be pointed at; it has to land beside the runners that shipped. The
-/// install directory is read-only on Linux -- `/usr` for the .deb, the whole
-/// mount for the AppImage -- so the engine is copied out once and spawned from
-/// the copy.
-///
-/// `before_copy` runs only when a copy is actually needed, so the caller can
-/// say so on the splash screen without having to know when that is.
+/// `ollama serve` finds its runners only relative to its own executable (no env
+/// override), so a later-downloaded accelerator pack must land beside the shipped
+/// runners, and the Linux install dir is read-only. `before_copy` runs only when
+/// a copy is needed.
 pub fn engine_dir(
     stage: &Path,
     data_dir: &Path,
@@ -131,8 +112,7 @@ pub fn engine_dir(
     relocate_engine(stage, data_dir, before_copy)
 }
 
-/// Compiled on every platform, not only where it runs, so that the mechanism is
-/// exercised by the test suite wherever that suite happens to run.
+/// Compiled everywhere so the tests exercise it on every platform.
 fn relocate_engine(
     stage: &Path,
     data_dir: &Path,
@@ -152,8 +132,7 @@ fn relocate_engine(
     }
 
     before_copy();
-    // Copy aside and rename, so an interrupted copy cannot leave a half-written
-    // engine in place of a working one.
+    // Copy aside and rename: an interrupted copy never replaces a working engine.
     let staging = data_dir.join("engine.new");
     let _ = std::fs::remove_dir_all(&staging);
     copy_tree(&stage.join("ollama"), &staging.join("ollama"))?;
@@ -178,8 +157,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
         } else if kind.is_symlink() {
             copy_link(&src, &dst)?;
         } else {
-            // fs::copy carries the mode on unix, which is what keeps the engine
-            // and its runners executable in the copy.
+            // fs::copy carries the unix mode, keeping the runners executable.
             std::fs::copy(&src, &dst)
                 .map_err(|e| format!("could not copy {src:?} to {dst:?}: {e}"))?;
         }
@@ -187,9 +165,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Recreated rather than followed: the CUDA runners ship versioned sonames as
-/// links to one file, and copying through each of them would write that file
-/// several times.
+/// Recreated, not followed: versioned CUDA sonames all link to one file.
 #[cfg(unix)]
 fn copy_link(src: &Path, dst: &Path) -> Result<(), String> {
     let target =
@@ -246,22 +222,23 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A stage with an engine in it, stamped with `version`.
-    fn fake_stage(dir: &Path, version: &str) {
-        let lib = dir.join("ollama/lib/ollama/cuda_v13");
+    /// A fresh (root, stage, data) with an engine staged at v0.32.5.
+    fn engine_fixture(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("luminary-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (stage, data) = (root.join("stage"), root.join("data"));
+        let lib = stage.join("ollama/lib/ollama/cuda_v13");
         std::fs::create_dir_all(&lib).unwrap();
+        std::fs::create_dir_all(&data).unwrap();
         std::fs::write(lib.join("libggml-cuda.so"), b"runner").unwrap();
-        std::fs::write(dir.join(OLLAMA_BINARY), b"engine").unwrap();
-        std::fs::write(dir.join(ENGINE_STAMP), version).unwrap();
+        std::fs::write(stage.join(OLLAMA_BINARY), b"engine").unwrap();
+        std::fs::write(stage.join(ENGINE_STAMP), "v0.32.5").unwrap();
+        (root, stage, data)
     }
 
     #[test]
     fn an_engine_is_copied_once_and_then_reused() {
-        let root = std::env::temp_dir().join(format!("luminary-engine-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let (stage, data) = (root.join("stage"), root.join("data"));
-        fake_stage(&stage, "v0.32.5");
-        std::fs::create_dir_all(&data).unwrap();
+        let (root, stage, data) = engine_fixture("engine");
 
         let mut copied = false;
         let engine = relocate_engine(&stage, &data, || copied = true).unwrap();
@@ -273,8 +250,7 @@ mod tests {
             .is_file());
         assert!(!data.join("engine.new").exists(), "staging dir left behind");
 
-        // A downloaded accelerator pack is exactly this: a file that was not in
-        // the stage. A second launch must not wipe it.
+        // A downloaded accelerator pack: a file not in the stage.
         let pack = engine.join("ollama/lib/ollama/cuda_v13/pack-marker");
         std::fs::write(&pack, b"downloaded").unwrap();
 
@@ -292,11 +268,7 @@ mod tests {
 
     #[test]
     fn a_new_release_replaces_the_copy() {
-        let root = std::env::temp_dir().join(format!("luminary-engine-up-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let (stage, data) = (root.join("stage"), root.join("data"));
-        fake_stage(&stage, "v0.32.5");
-        std::fs::create_dir_all(&data).unwrap();
+        let (root, stage, data) = engine_fixture("engine-up");
 
         let engine = relocate_engine(&stage, &data, || {}).unwrap();
         let stale = engine.join("ollama/lib/ollama/cuda_v13/pack-marker");
@@ -320,12 +292,8 @@ mod tests {
 
     #[test]
     fn a_stage_with_no_stamp_is_reported_not_silently_copied() {
-        let root = std::env::temp_dir().join(format!("luminary-engine-no-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let (stage, data) = (root.join("stage"), root.join("data"));
-        fake_stage(&stage, "v0.32.5");
+        let (root, stage, data) = engine_fixture("engine-no");
         std::fs::remove_file(stage.join(ENGINE_STAMP)).unwrap();
-        std::fs::create_dir_all(&data).unwrap();
 
         let err = relocate_engine(&stage, &data, || {}).unwrap_err();
         assert!(err.contains("ENGINE_VERSION"), "unhelpful error: {err}");

@@ -199,11 +199,8 @@ class DocumentDeletionService:
                 CollectionMemberModel.member_type == "document",
             )
         )
-        # The library summary carries no document_id, but it is built from every
-        # document. Serving the old one while a replacement generates is right after
-        # an ingest (one document short) and wrong after a delete: it presents a
-        # document the user removed as part of their library. The caller schedules
-        # the regeneration once the transaction commits.
+        # The library summary describes every document, so a delete drops it (#140).
+        # The caller schedules the regeneration once the transaction commits.
         await session.execute(delete(LibrarySummaryModel))
         await session.delete(doc)
 

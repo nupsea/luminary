@@ -50,10 +50,8 @@ const PATH_SEPARATOR: &str = ":";
 ///
 /// Windows CPython does not start without `SystemRoot`: it is how every DLL
 /// search and the temp directory are resolved. `USERPROFILE` is what `Path.home()`
-/// reads there, the way `HOME` is on unix. `getpass.getuser()` has no fallback on
-/// Windows once `USERNAME` is gone, and torch calls it while importing
-/// `torch._dynamo`: without it every embed failed and a retried import then died
-/// on "Artifact of type=precompile already registered" (unix falls back to pwd).
+/// reads there. `USERNAME`: torch calls `getpass.getuser()` on import, which has
+/// no fallback on Windows.
 #[cfg(windows)]
 const INHERITED_ENV: &[&str] = &["SystemRoot", "USERPROFILE", "USERNAME", "TEMP", "TMP"];
 #[cfg(not(windows))]
@@ -436,9 +434,7 @@ fn env_file_value(data_dir: &Path, key: &str) -> Option<String> {
 }
 
 /// Physical RAM in GB, or `None` if the kernel will not say.
-/// Rounded up, as every RAM reader in the repo is (I-56): Linux and Windows
-/// report installed RAM minus firmware and kernel reservations, so a 16 GiB
-/// machine reads 15.x and truncating it fell under the 16GB band.
+/// Rounded up, as every RAM reader is (I-56).
 fn total_memory_gb() -> Option<u64> {
     luminary_host::total_memory_bytes().map(|bytes| bytes.div_ceil(1_073_741_824))
 }
@@ -498,8 +494,7 @@ fn ollama_max_loaded_models(data_dir: &Path) -> u32 {
     }
 }
 
-/// `engine` is what `stage::engine_dir` returned, which is the stage itself on
-/// macOS and a writable copy of it elsewhere -- never the stage directly.
+/// `engine` is what `stage::engine_dir` returned.
 pub fn spawn_ollama(
     sup: &Supervisor,
     engine: &Path,
@@ -518,9 +513,7 @@ pub fn spawn_ollama(
         .arg("serve")
         .env("OLLAMA_HOST", format!("127.0.0.1:{port}"))
         .env("OLLAMA_MODELS", &models)
-        // Passed down to the runner child. It is not what makes `ollama serve`
-        // find its runners -- that is resolved from the executable's own path --
-        // so this must point into the same tree the binary was spawned from.
+        // Reaches only the runner child; must name the tree the binary runs from.
         .env("OLLAMA_LIBRARY_PATH", engine.join(OLLAMA_LIBRARY_DIR))
         .env("OLLAMA_KEEP_ALIVE", "30m")
         .env(

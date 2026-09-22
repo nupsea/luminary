@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # Prove the staged Ollama infers on Windows or Linux, not just that it starts.
 #
-# `ollama serve` starts happily without a working runner; a missing library only
-# surfaces at the first generation. A CI runner has no GPU, so this proves the
-# layout and the CPU path. Which accelerator a real machine gets is printed from
-# Ollama's own discovery line, never assumed.
+# `ollama serve` starts without a working runner, so generate. CI has no GPU: this
+# proves the layout and the CPU path.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -28,9 +26,7 @@ _pass() { printf '\033[1;32m  ok\033[0m   %s\n' "$*"; }
 _step "Structure"
 [ -x "$OL_STAGE/$EXE" ] && _pass "$EXE present" || _fail "no $EXE"
 [ -d "$LIB/vulkan" ] && _pass "vulkan runner present" || _fail "no vulkan runner"
-# CUDA is a download, not a payload: it is 1.8GB of the archive and 629MB of it
-# is what put the Windows stage past what NSIS can pack. A staged CUDA runner
-# means the exclusion in stage_ollama.sh stopped matching.
+# A staged CUDA runner means the exclusion in stage_ollama.sh stopped matching.
 if compgen -G "$LIB/cuda_v*" >/dev/null; then
     _fail "CUDA shipped in the installer: $(cd "$LIB" && echo cuda_v*)"
 else
@@ -39,10 +35,7 @@ fi
 [ -s "$OL_STAGE/ENGINE_VERSION" ] && _pass "stamped $(tr -d '\r\n' < "$OL_STAGE/ENGINE_VERSION")" \
     || _fail "no ENGINE_VERSION; the shell cannot tell whether its copy is current"
 
-# Everything below runs from a COPY, because that is what the app runs: the
-# shell copies the engine into the writable library directory and spawns it from
-# there. Ollama finds its runners relative to its own executable, so a tree that
-# infers in place is not evidence that the relocated one does.
+# Run from a copy, as the app does: runners resolve relative to the executable.
 _step "Relocating the engine the way the shell does"
 RELOC="$BUILD_DIR/engine-copy"
 rm -rf "$RELOC"
@@ -52,16 +45,9 @@ OL_RUN="$RELOC/ollama"
 LIB_RUN="$OL_RUN/lib/ollama"
 _pass "copied to $OL_RUN"
 
-# The relink in stage_ollama.sh records the directory an inherited RPATH already
-# implied, and `vulkan/libggml-vulkan.so` -- the file it exists for -- is never
-# loaded on a CPU-only runner, so the generation below cannot exercise it. This
-# does, statically: a library the stage SHIPS must resolve from inside the tree.
-# One the host owns is skipped rather than failed, because a CI runner has no
-# Vulkan loader and `libvulkan.so.1` is legitimately absent here.
-#
-# `edges` is reported because a predicate that matches nothing is not a passing
-# check, it is a dead one: if the engine ever stops shipping a library that
-# another shipped library needs, this must say so rather than go quietly green.
+# Static check of the relink: the Vulkan runner never loads on a CPU runner. A lib the
+# stage ships must resolve inside the tree; host-owned ones are skipped. `edges` > 0
+# proves the predicate matched something.
 if [ "$DESKTOP_OS" = linux ]; then
     _step "Resolving the engine's own libraries"
     unresolved="" edges=0 seen=0

@@ -63,16 +63,10 @@ dependencies = [
     # upgrade smuggled in as a size fix. Raise both halves together, and read the
     # index listing before raising the floor.
     "torch>=2.10.0,<2.11.0",
-    # Direct, though only lazy imports reach them: clustering_service and
-    # concept_nodes/build_hierarchy need these at call time, and until now they
-    # arrived solely as sentence-transformers dependencies. Dropping that package
-    # would have taken them with it, leaving `make ci` green and the first
-    # clustering run broken. Declare them before removing anything above.
+    # Direct, though they arrived transitively: clustering imports scipy/sklearn
+    # lazily, and the Linux engine runner download is a .tar.zst.
     "scipy>=1.17.1",
     "scikit-learn>=1.8.0",
-    # Direct for the same reason as scipy above: the engine runner Luminary
-    # downloads on Linux is a .tar.zst, and until now zstandard arrived only as
-    # a langsmith dependency -- a tracing package, nothing to do with archives.
     "zstandard>=0.25.0",
     "curl-cffi>=0.7.0",
 ]

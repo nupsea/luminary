@@ -3,13 +3,9 @@
 #
 #   scripts/desktop/verify_installed.sh <installed-executable> [deadline-seconds]
 #
-# Passes when the shell logs `ready`, which it reaches only after both children
-# were spawned and the backend accepted a connection, the app is still running
-# shortly after, and a document ingested through it is found by vector search.
-# Fails on the shell's failure line, on its warning that the bundled engine did
-# not start, on a failed ingest, or when the app exits or a deadline passes first.
-# The check document is deleted again, so this is safe against a real library. SCREENSHOT=<file.png> captures the screen once it is ready (Linux needs
-# ImageMagick's `import` and a display, e.g. under xvfb-run).
+# Passes when the shell logs `ready`, the app stays up, and a document ingested
+# through it is found by vector search (then deleted). SCREENSHOT=<file.png>
+# captures the screen once ready (Linux needs ImageMagick's `import` and a display).
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -35,10 +31,7 @@ this_launch() { [ -f "$LOG" ] && tail -n +"$((before + 1))" "$LOG"; }
 
 json_field() { sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"; }
 
-# `ready` means the backend accepted a connection, not that it can do its job: on
-# the first real Windows install every ingest failed while this still passed. So
-# ingest one document through the installed backend, wait for it to finish, and
-# find it by vector search, which needs the embedder the ingest path loads.
+# `ready` is only a connection; the first real Windows install passed it while every ingest failed.
 check_ingest() {
     local backend api dir doc_id status stage waited
     backend="$(this_launch | sed -n 's/.*\[shell\] backend: \(http[^ ]*\).*/\1/p' | tail -1)"
@@ -107,8 +100,7 @@ case "$result" in
         if grep -q 'local model server unavailable' <<<"$lines"; then
             _warn "the bundled engine did not start"; FAILED=1
         fi
-        # Long enough for the window to navigate to the library, and for a backend
-        # that dies right after accepting its first connection to be seen dying.
+        # Long enough for a backend that dies after its first connection to be seen dying.
         sleep 20
         kill -0 "$APP" 2>/dev/null || { _warn "the app exited after reporting ready"; FAILED=1; }
         [ "$FAILED" = 0 ] && { check_ingest || FAILED=1; }

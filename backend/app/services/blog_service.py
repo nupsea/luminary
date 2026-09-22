@@ -264,10 +264,7 @@ def transform_note_to_blog(content: str, slug: str, kind: str = "blog") -> BlogD
 
 def _escape_html_attr(value: str) -> str:
     return (
-        value.replace("&", "&amp;")
-        .replace('"', "&quot;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
+        value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
     )
 
 

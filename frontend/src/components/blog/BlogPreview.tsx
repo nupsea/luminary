@@ -11,9 +11,7 @@ import "katex/dist/katex.min.css"
 
 import "./blogPreview.css"
 
-// Kept in sync with `_IMAGE_SIZE_STYLE` in backend/app/services/blog_service.py
-// (render_sized_images) -- this is a preview of what that function turns the
-// same `|small|medium|large` alt hint into on the actual published page.
+// Keep in sync with `_IMAGE_SIZE_STYLE` in backend/app/services/blog_service.py.
 const SIZE_STYLE: Record<string, CSSProperties> = {
   small: { float: "right", maxWidth: 220, width: "100%", margin: "0.25rem 0 1.25rem 1.5rem", borderRadius: 8 },
   medium: { display: "block", maxWidth: 480, width: "100%", margin: "1.5rem auto", borderRadius: 8 },

@@ -17,13 +17,8 @@ REQUIRED = [
     "yt_dlp", "trafilatura", "tree_sitter", "cloudscraper", "pip", "zstandard",
 ]  # fmt: skip
 
-# `av` and its dependants carry libx264/libx265 (GPL-2.0-or-later) inside their
-# wheels, and Luminary ships Apache-2.0 -- they are installed after the fact as
-# the `transcription` component, never bundled. `optimum`/`onnx` are simply
-# unused; they cost ~49MB when they crept in.
-# NOT sympy, though it is 72MB and arrives only as a torch dependency: `import
-# torch` does not load it, but `import transformers` pulls `torch.fx`, which
-# does. Dropping it broke transformers, sentence_transformers and gliner at once.
+# `av` carries GPL codecs and ships as the `transcription` component; optimum/onnx are unused.
+# NOT sympy: `import transformers` pulls torch.fx, which imports it.
 FORBIDDEN = ["av", "faster_whisper", "ctranslate2", "optimum", "onnx"]
 
 
