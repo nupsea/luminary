@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest"
 
 import {
   applySearchTerm,
+  extendWindowDown,
+  extendWindowUp,
   orderHitsByDocument,
   SEARCH_MARK_CLASS,
   setActiveSearchMark,
-  widenedListLimit,
+  windowIncluding,
 } from "./searchHighlight"
 
 describe("applySearchTerm", () => {
@@ -94,32 +96,63 @@ describe("orderHitsByDocument", () => {
   })
 })
 
-describe("widenedListLimit", () => {
+describe("windowIncluding", () => {
   const PAGE = 40
   const MAX = 200
+  const top = (limit: number) => ({ start: 0, limit })
+  const contains = (w: { start: number; limit: number }, i: number) =>
+    i >= w.start && i < w.start + w.limit
 
   it("leaves the window alone when the target is already rendered", () => {
-    expect(widenedListLimit(40, 12, PAGE, MAX)).toBe(40)
-    expect(widenedListLimit(40, 39, PAGE, MAX)).toBe(40)
+    expect(windowIncluding(top(40), 12, PAGE, MAX)).toEqual(top(40))
+    expect(windowIncluding(top(40), 39, PAGE, MAX)).toEqual(top(40))
   })
 
   it("widens to the page boundary covering the target", () => {
     // index 40 is the 41st section -- one past a 40-section window.
-    expect(widenedListLimit(40, 40, PAGE, MAX)).toBe(80)
-    expect(widenedListLimit(40, 95, PAGE, MAX)).toBe(120)
+    expect(windowIncluding(top(40), 40, PAGE, MAX)).toEqual(top(80))
+    expect(windowIncluding(top(40), 95, PAGE, MAX)).toEqual(top(120))
   })
 
   it("never shrinks an already-wider window", () => {
-    expect(widenedListLimit(160, 45, PAGE, MAX)).toBe(160)
+    expect(windowIncluding(top(160), 45, PAGE, MAX)).toEqual(top(160))
   })
 
-  it("clamps at the server's maximum window", () => {
-    // The server refuses a larger window; asking for more would 422.
-    expect(widenedListLimit(40, 900, PAGE, MAX)).toBe(MAX)
+  it("moves to a target past the server's maximum window, and holds it", () => {
+    // Growing from 0 capped at 200 and never reached section 226 of 448 (AI
+    // Engineering), so its citations opened the book at the first page.
+    for (const target of [200, 226, 900]) {
+      const w = windowIncluding(top(40), target, PAGE, MAX)
+      expect(contains(w, target)).toBe(true)
+      expect(w.limit).toBeLessThanOrEqual(MAX)
+    }
+    expect(windowIncluding(top(40), 226, PAGE, MAX)).toEqual({ start: 160, limit: 106 })
+  })
+
+  it("moves back to a target above a moved window", () => {
+    const w = windowIncluding({ start: 400, limit: 80 }, 10, PAGE, MAX)
+    expect(contains(w, 10)).toBe(true)
+    expect(w.start).toBe(0)
   })
 
   it("ignores a target that is not in the document", () => {
-    expect(widenedListLimit(40, -1, PAGE, MAX)).toBe(40)
+    expect(windowIncluding(top(40), -1, PAGE, MAX)).toEqual(top(40))
+  })
+})
+
+describe("extendWindowDown / extendWindowUp", () => {
+  const PAGE = 40
+  const MAX = 200
+
+  it("grows down to the maximum, then slides", () => {
+    expect(extendWindowDown({ start: 0, limit: 40 }, PAGE, MAX)).toEqual({ start: 0, limit: 80 })
+    expect(extendWindowDown({ start: 0, limit: 200 }, PAGE, MAX)).toEqual({ start: 40, limit: 200 })
+  })
+
+  it("grows up to section 0, trimming the tail at the maximum", () => {
+    expect(extendWindowUp({ start: 160, limit: 106 }, PAGE, MAX)).toEqual({ start: 120, limit: 146 })
+    expect(extendWindowUp({ start: 40, limit: 200 }, PAGE, MAX)).toEqual({ start: 0, limit: 200 })
+    expect(extendWindowUp({ start: 20, limit: 40 }, PAGE, MAX)).toEqual({ start: 0, limit: 60 })
   })
 })
 

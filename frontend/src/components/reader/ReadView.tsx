@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { apiGet, apiPost } from "@/lib/apiClient"
@@ -16,7 +16,15 @@ import {
   resolveReadingLayout,
   type ResolvedLayout,
 } from "./readingProfile"
-import { applySearchTerm, SEARCH_MARK_TOKEN, setActiveSearchMark, widenedListLimit } from "./searchHighlight"
+import {
+  applySearchTerm,
+  extendWindowDown,
+  extendWindowUp,
+  SEARCH_MARK_TOKEN,
+  type SectionWindow,
+  setActiveSearchMark,
+  windowIncluding,
+} from "./searchHighlight"
 import { hasAuthoredHeading, sectionTitle, usableSections } from "./sectionTitle"
 import { parseSpeakerTurns, type SpeakerTurn } from "./speakerTurns"
 import { useReaderPreferences } from "./useReaderPreferences"
@@ -307,8 +315,8 @@ const MAX_SECTION_WINDOW = 200
 // A DOM ceiling for the contents panel, not a contract.
 const TOC_LIMIT = 2000
 
-const fetchSectionContent = (documentId: string, limit: number): Promise<SectionContentPage> =>
-  apiGet<SectionContentPage>(`/sections/${documentId}/content`, { offset: 0, limit })
+const fetchSectionContent = (documentId: string, win: SectionWindow): Promise<SectionContentPage> =>
+  apiGet<SectionContentPage>(`/sections/${documentId}/content`, { offset: win.start, limit: win.limit })
 
 // Headings only, for the contents panel, which lists the whole document while
 // the body is a window: 253 KB against 20.2 MB for the same 1,017 sections.
@@ -574,10 +582,23 @@ export function ReadView({
   )
   const contentRef = useRef<HTMLDivElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
+  const loadEarlierRef = useRef<HTMLDivElement>(null)
   const [activeSection, setActiveSection] = useState<string | null>(null)
-  // How far scrolling alone has extended the window. The window actually
-  // rendered is `listLimit` below, which also accounts for a jump target.
-  const [scrolledLimit, setScrolledLimit] = useState(SECTION_PAGE)
+  const [win, setWin] = useState<SectionWindow>({ start: 0, limit: SECTION_PAGE })
+  // A contents entry clicked outside the window; a new citation or deep link supersedes it.
+  const [tocTarget, setTocTarget] = useState<{ id: string; n: number } | null>(null)
+  const [arrival, setArrival] = useState({ documentId, citedSectionId, initialSectionId })
+  if (
+    arrival.documentId !== documentId ||
+    arrival.citedSectionId !== citedSectionId ||
+    arrival.initialSectionId !== initialSectionId
+  ) {
+    if (arrival.documentId !== documentId) setWin({ start: 0, limit: SECTION_PAGE })
+    setArrival({ documentId, citedSectionId, initialSectionId })
+    setTocTarget(null)
+  }
+  // The section at the top of the port before the window moves, restored after.
+  const anchorRef = useRef<{ id: string; top: number } | null>(null)
   const toc = useResizablePanel({
     storageKey: "luminary-read-toc",
     defaultWidth: 224,
@@ -592,25 +613,29 @@ export function ReadView({
     staleTime: 60_000,
   })
 
-  // A search hit or a deep link can name a section past the rendered window,
-  // which starts at SECTION_PAGE and otherwise only grows as the reader
-  // scrolls. There is no element to scroll to until the window covers it, so
-  // the target widens it -- without this, jumping to a hit in a long document
-  // silently did nothing and the search looked broken.
-  //
-  // Derived rather than pushed into state by an effect, so the fetch below
-  // asks for the right window on its first attempt instead of fetching twice.
+  // A citation, search hit, deep link or contents entry can name a section
+  // outside the rendered window. There is no element to scroll to until the
+  // window covers it, so the target moves the window. Adjusted during render
+  // rather than in an effect, so the fetch asks for the right window first time.
   const targetIndex = useMemo(() => {
-    const targetId = citedSectionId || initialSectionId
+    const targetId = tocTarget?.id || citedSectionId || initialSectionId
     if (!targetId || !sectionMeta) return -1
     return sectionMeta.findIndex((m) => m.id === targetId)
-  }, [citedSectionId, initialSectionId, sectionMeta])
-  const listLimit = widenedListLimit(scrolledLimit, targetIndex, SECTION_PAGE, MAX_SECTION_WINDOW)
+  }, [tocTarget, citedSectionId, initialSectionId, sectionMeta])
+  const [appliedTarget, setAppliedTarget] = useState(-1)
+  if (targetIndex !== appliedTarget) {
+    setAppliedTarget(targetIndex)
+    const next = windowIncluding(win, targetIndex, SECTION_PAGE, MAX_SECTION_WINDOW)
+    if (next !== win) setWin(next)
+  }
 
   const { data: page, isLoading, error } = useQuery({
-    queryKey: ["section-content", documentId, listLimit],
-    queryFn: () => fetchSectionContent(documentId, listLimit),
+    queryKey: ["section-content", documentId, win.start, win.limit],
+    queryFn: () => fetchSectionContent(documentId, win),
     staleTime: 60_000,
+    // Keeps the sections on screen while the next window loads: dropping to the
+    // spinner would unmount them and lose the reader's place.
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === documentId ? prev : undefined),
   })
   const sections = useMemo(() => page?.items ?? [], [page])
   const totalSections = page?.total ?? 0
@@ -747,32 +772,72 @@ export function ReadView({
     return () => container.removeEventListener("scroll", onScroll)
   }, [sections])
 
-  // Extend the rendered window when its tail comes into view.
+  const captureAnchor = useCallback(() => {
+    const container = contentRef.current
+    if (!container) return
+    const portTop = container.getBoundingClientRect().top
+    const els = Array.from(container.querySelectorAll<HTMLElement>("[data-section-id]"))
+    const first = els.find((el) => el.getBoundingClientRect().bottom > portTop)
+    if (first?.dataset.sectionId) {
+      anchorRef.current = { id: first.dataset.sectionId, top: first.getBoundingClientRect().top }
+    }
+  }, [])
+
+  // Sections added above or trimmed from above move everything below; put the
+  // section the reader was on back where it was. Idempotent where the browser
+  // anchors scroll itself (Chromium), required where it does not (WebKit).
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current
+    const container = contentRef.current
+    if (!anchor || !container) return
+    anchorRef.current = null
+    const el = document.getElementById(`read-sec-${anchor.id}`)
+    if (el) container.scrollTop += el.getBoundingClientRect().top - anchor.top
+  }, [sections])
+
+  // Extend the rendered window when either end comes into view. Reads the window
+  // the server returned, so a request in flight is never extended twice.
+  const shown = page ? `${page.offset}:${page.limit}` : ""
   useEffect(() => {
-    const el = loadMoreRef.current
-    if (!el) return
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          // Steps up from the window actually rendered, not from `scrolledLimit`
-          // alone: after a jump target has widened it, incrementing the smaller
-          // number leaves the rendered window unchanged and the reader cannot
-          // load any further.
-          setScrolledLimit(Math.min(listLimit + SECTION_PAGE, MAX_SECTION_WINDOW))
-        }
-      },
-      { rootMargin: "800px" },
-    )
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [listLimit, sections])
+    const observers: IntersectionObserver[] = []
+    const watch = (el: HTMLElement | null, extend: (w: SectionWindow) => SectionWindow) => {
+      if (!el) return
+      const observer = new IntersectionObserver(
+        ([entry]) => {
+          if (!entry.isIntersecting) return
+          captureAnchor()
+          setWin((w) => (`${w.start}:${w.limit}` === shown ? extend(w) : w))
+        },
+        { root: contentRef.current, rootMargin: "800px" },
+      )
+      observer.observe(el)
+      observers.push(observer)
+    }
+    watch(loadMoreRef.current, (w) => extendWindowDown(w, SECTION_PAGE, MAX_SECTION_WINDOW))
+    watch(loadEarlierRef.current, (w) => extendWindowUp(w, SECTION_PAGE, MAX_SECTION_WINDOW))
+    return () => observers.forEach((o) => o.disconnect())
+  }, [sections, shown, captureAnchor])
 
   const scrollToSection = useCallback((sectionId: string) => {
     const el = document.getElementById(`read-sec-${sectionId}`)
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "start" })
+    } else {
+      setTocTarget((t) => ({ id: sectionId, n: (t?.n ?? 0) + 1 }))
     }
   }, [])
+
+  // A contents entry outside the window lands once the moved window renders it.
+  useEffect(() => {
+    if (!tocTarget) return
+    return settleIntoView<Element>({
+      find: () => document.getElementById(`read-sec-${tocTarget.id}`),
+      distance: (el) => el.getBoundingClientRect().top - scrollPortOf(el).top,
+      centre: (el) => el.scrollIntoView({ behavior: "instant", block: "start" }),
+      schedule: (fn, ms) => window.setTimeout(fn, ms),
+      cancel: (handle) => window.clearTimeout(handle),
+    })
+  }, [tocTarget])
 
   if (isLoading) {
     return (
@@ -897,6 +962,11 @@ export function ReadView({
               <ReimportAction documentId={documentId} sourceUrl={sourceUrl} />
             </div>
           )}
+          {(page?.offset ?? 0) > 0 && (
+            <div ref={loadEarlierRef} className="mb-12 flex justify-center">
+              <Loader2 size={16} className="animate-spin text-muted-foreground" />
+            </div>
+          )}
           {sections.map((section, i) => (
             <LazySection
               key={section.section_id}
@@ -916,7 +986,7 @@ export function ReadView({
           ))}
           
           {/* The window bounds the DOM only; reaching its end extends it. */}
-          {totalSections > sections.length && (
+          {totalSections > (page?.offset ?? 0) + sections.length && (
             <div ref={loadMoreRef} className="mb-20 mt-12 flex justify-center">
               <Loader2 size={16} className="animate-spin text-muted-foreground" />
             </div>
