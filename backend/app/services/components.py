@@ -397,24 +397,38 @@ async def _installed_ollama_models() -> set[str]:
     return {m.get("name", "") for m in data.get("models", [])}
 
 
+def _installed_locally(comp) -> bool:
+    if comp.kind == "python_extra":
+        activate_extras()
+        installed = importlib.util.find_spec(comp.ref) is not None
+        if installed and (weights := _EXTRA_WEIGHTS.get(comp.id)):
+            installed = weights[0]()
+        return installed
+    if comp.kind == "engine_runner":
+        return (engine_lib_dir() / comp.ref).is_dir()
+    return resolve_tool(comp.ref) is not None
+
+
+def _probe_catalogue() -> tuple[list, dict[str, bool]]:
+    comps = catalogue()
+    local = {c.id: _installed_locally(c) for c in comps if c.kind != "ollama_model"}
+    return comps, local
+
+
 async def component_status() -> list[dict]:
     installed_models = await _installed_ollama_models()
+    # Off the loop (I-2): the Whisper weights probe imports faster_whisper, which
+    # pulls in transformers and torch; on the loop it stalled every request 10-16s.
+    comps, local_installed = await asyncio.to_thread(_probe_catalogue)
 
     out = []
-    for comp in catalogue():
+    for comp in comps:
         if comp.kind == "ollama_model":
             # Ollama reports tags as "name:tag"; a bare ref means ":latest".
             ref = comp.ref if ":" in comp.ref else f"{comp.ref}:latest"
             installed = ref in installed_models or comp.ref in installed_models
-        elif comp.kind == "python_extra":
-            activate_extras()
-            installed = importlib.util.find_spec(comp.ref) is not None
-            if installed and (weights := _EXTRA_WEIGHTS.get(comp.id)):
-                installed = weights[0]()
-        elif comp.kind == "engine_runner":
-            installed = (engine_lib_dir() / comp.ref).is_dir()
         else:
-            installed = resolve_tool(comp.ref) is not None
+            installed = local_installed[comp.id]
 
         out.append(
             {
