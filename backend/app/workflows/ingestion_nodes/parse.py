@@ -190,11 +190,14 @@ async def classify_node(state: IngestionState) -> IngestionState:
     with trace_ingestion_node("classify", state):
         try:
             pd = state["parsed_document"]
-            if pd is None:
-                return {**state, "content_type": "notes", "status": "chunking"}
             fp_obj = Path(state["file_path"])
             file_ext = fp_obj.suffix.lstrip(".")
             filename = fp_obj.name
+            if pd is None:
+                # Media has no text until transcribe_node, which runs only for
+                # audio/video: labelled `notes`, a file completed with no chunks.
+                media = classify_content("", [], 0, file_ext.lower(), filename)
+                return {**state, "content_type": media, "status": "chunking"}
             content_type = classify_content(
                 pd["raw_text"], pd["sections"], pd["word_count"], file_ext, filename
             )
