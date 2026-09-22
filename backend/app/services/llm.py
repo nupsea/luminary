@@ -455,7 +455,7 @@ class LLMService:
         timeout: float | None = None,
         max_tokens: int | None = None,
         num_ctx: int | None = None,
-    ) -> AsyncGenerator[str]:
+    ) -> "TokenStream":
         """Stream content deltas for the given message list."""
         settings = get_settings()
         effective_model, override_key = self._resolve_model(model, background=background)
@@ -477,7 +477,7 @@ class LLMService:
         fallback = self._offline_fallback_kwargs(
             model, effective_model, kwargs, settings, num_ctx=num_ctx
         )
-        return self._token_stream(kwargs, fallback, background=background)
+        return TokenStream(self, kwargs, fallback, background=background)
 
     async def generate(
         self,
@@ -491,7 +491,7 @@ class LLMService:
         num_ctx: int | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
-    ) -> str | AsyncGenerator[str]:
+    ) -> "str | TokenStream":
         messages: list[dict] = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -518,7 +518,12 @@ class LLMService:
         )
 
     async def _token_stream(
-        self, kwargs: dict, fallback_kwargs: dict | None = None, *, background: bool = False
+        self,
+        kwargs: dict,
+        fallback_kwargs: dict | None = None,
+        *,
+        background: bool = False,
+        served: "TokenStream | None" = None,
     ) -> AsyncGenerator[str]:
         """Stream deltas, holding the admission gate while tokens are flowing.
 
@@ -542,6 +547,8 @@ class LLMService:
                 )
                 fallback_kwargs.pop("stream", None)
                 response = await litellm.acompletion(stream=True, **fallback_kwargs)
+                if served is not None:
+                    served.model = str(fallback_kwargs["model"])
             async for chunk in response:
                 delta = chunk.choices[0].delta.content
                 if delta:
@@ -551,6 +558,23 @@ class LLMService:
                     # left the gate stuck and suspended every background call.
                     keepalive()
                     yield delta
+
+
+class TokenStream:
+    """The deltas of one streamed call, and the model that actually served them.
+
+    Read `model` after consuming the stream: a routed cloud answer that fell back
+    to the local model must not be reported as cloud (the privacy receipt).
+    """
+
+    def __init__(
+        self, service: "LLMService", kwargs: dict, fallback: dict | None, *, background: bool
+    ) -> None:
+        self.model = str(kwargs.get("model", ""))
+        self._gen = service._token_stream(kwargs, fallback, background=background, served=self)
+
+    def __aiter__(self) -> AsyncGenerator[str]:
+        return self._gen
 
 
 def _messages_to_text(messages: list[dict]) -> str:

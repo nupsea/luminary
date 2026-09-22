@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A notes question with no subject answered `not_found`** with the matching note in context (#141).
 - **Questions and new documents waited minutes behind background enrichment.** Background LLM calls are now capped at the serving width and admitted in arrival order, and calls a user or a new document is waiting on go first (#142).
 - **`make smoke` rewrote the committed golden manifest** (#143); it is now a local cache.
+- **The answer receipt named the cloud model when the local model had answered.** A routed cloud call that fell back to the local model because the provider was unreachable was reported as `engine: cloud`; the receipt and the stored history now name the model that served the answer.
 - **A failed eval search scored as a miss** instead of failing the run.
 - **Notes editor**: caret jumps and dead mouse selection near rendered blocks, runaway drag-selection redraws, and scroll position lost when toggling split preview.
 

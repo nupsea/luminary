@@ -901,6 +901,8 @@ class QAService:
                 store_model = model or get_effective_routing()[0]
             except Exception:
                 store_model = model or "unknown"
+            # What actually answered, which a cloud call that fell back is not.
+            served_model = store_model
 
             # Tell the user when a routed cloud answer is about to run locally
             # because the provider is unreachable. Only for routed (model=None)
@@ -1229,13 +1231,14 @@ class QAService:
                     return
 
                 full_text = "".join(collected)
+                served_model = getattr(token_gen, "model", None) or store_model
 
                 if NOT_FOUND_SENTINEL in full_text:
                     sentinel_pos = full_text.index(NOT_FOUND_SENTINEL)
                     prose_before = full_text[:sentinel_pos].strip()
                     if not prose_before:
                         # True not-found: sentinel at the start of response
-                        await self._store_qa(question, None, [], "low", None, scope, store_model)
+                        await self._store_qa(question, None, [], "low", None, scope, served_model)
                         yield f"data: {json.dumps({'done': True, 'not_found': True})}\n\n"
                         return
                     # LLM appended sentinel after a real answer — use the prose portion
@@ -1322,7 +1325,7 @@ class QAService:
                 confidence,
                 first_doc_id if not direct else None,
                 "direct" if direct else scope,
-                store_model,
+                served_model,
             )
             final = {
                 "done": True,
@@ -1346,8 +1349,8 @@ class QAService:
                 # the budget automatically (#100). That changes what the reader
                 # receives, and it used to say so only in a log line.
                 "receipt": {
-                    "engine": "local" if is_on_device(store_model) else "cloud",
-                    "model": store_model,
+                    "engine": "local" if is_on_device(served_model) else "cloud",
+                    "model": served_model,
                     "ttft_seconds": (round(ttft_seconds, 2) if ttft_seconds is not None else None),
                     "total_seconds": round(time.perf_counter() - t_start, 2),
                     "passages_sent": 0 if direct else result.get("_passages_sent"),

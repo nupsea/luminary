@@ -229,3 +229,35 @@ async def test_streaming_falls_back_to_local(cloud_routing):
 
     assert out == "local stream"
     assert calls[1]["model"].startswith("ollama/")
+
+
+@pytest.mark.asyncio
+async def test_a_stream_reports_the_model_that_served_it(cloud_routing):
+    """The privacy receipt reads this: a cloud answer that fell back is local."""
+    svc = LLMService()
+    calls: list[dict] = []
+
+    async def chunks():
+        delta = MagicMock()
+        delta.content = "local"
+        choice = MagicMock()
+        choice.delta = delta
+        chunk = MagicMock()
+        chunk.choices = [choice]
+        yield chunk
+
+    async def side_effect(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise litellm.APIConnectionError(
+                message="offline", llm_provider="openai", model="gpt-5-mini"
+            )
+        return chunks()
+
+    with patch("litellm.acompletion", side_effect=side_effect):
+        stream = await svc.stream_messages([{"role": "user", "content": "hi"}])
+        assert stream.model.startswith("openai/")
+        _ = [token async for token in stream]
+
+    assert stream.model == calls[1]["model"]
+    assert stream.model.startswith("ollama/")

@@ -1,6 +1,6 @@
 """Tests for LLMService and GET /settings/llm endpoint."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncIterable
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -136,7 +136,7 @@ async def test_generate_stream_returns_async_generator():
     # Patch must remain active while iterating (generator executes lazily)
     with patch("litellm.acompletion", side_effect=fake_acompletion):
         result = await svc.generate("prompt", stream=True)
-        assert isinstance(result, AsyncGenerator)
+        assert isinstance(result, AsyncIterable)
         tokens = [t async for t in result]
     assert tokens == ["Hello", " world"]
 
