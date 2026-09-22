@@ -6,16 +6,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-22
+
 ### Added
-- **Windows and Linux installers.** `desktop-installers.yml` stages and builds a `.deb`, an AppImage and a per-user NSIS setup `.exe`; only the `.deb` installs and opens so far, because the Windows stage was 2.28 GB and makensis fails past ~2 GB.
-- **NVIDIA GPU acceleration is a download, not a payload.** The installer ships CPU and Vulkan runners only, which serve every GPU vendor; CUDA was 629 MB of the Windows stage and is what put it over the NSIS ceiling. NVIDIA owners are offered the faster CUDA runner from `/setup/components`.
-- **The engine runs from the library directory.** Ollama resolves its runners relative to its own executable with no environment override, and an installed tree is read-only on Linux, so the engine is copied to `DATA_DIR/engine` once per release and spawned there. macOS keeps running from the bundle.
-- **A component downloader that resumes and verifies.** `component_download.py` resumes with `Range`, checks sha256 before unpacking anything, and unpacks beside the target so a failure cannot replace a working runner with a partial one.
-- **A desktop stage has a size budget and a path-length budget.** `verify_stage.sh` fails a Windows stage over 1900 MB, or any stage path over 190 characters — what `MAX_PATH` leaves once the per-user install root is spent.
+- **Windows and Linux installers.** `desktop-installers.yml` builds a per-user NSIS `-setup.exe` (no admin prompt, unsigned), a `.deb` and an AppImage; each is installed in CI and must ingest and find a document before the job passes.
+- **NVIDIA acceleration is a verified download, not a payload.** Installers ship CPU and Vulkan runners; CUDA (629 MB, what put the Windows stage over the NSIS ceiling) is offered from `/setup/components` only on a host with an NVIDIA device, resumed and sha256-checked before unpacking.
+- **Direct mode in Ask** sends a question to the model without retrieving from the library (#79).
+- **First run offers Local, Hybrid and Cloud**, where it offered no Cloud before. On a host that cannot run a local model, work the chosen mode refuses is skipped and named instead of failing, and changing the mode resumes it.
+- **Blog note-refine step and sized images** when publishing.
 
 ### Changed
-- **yt-dlp runs as `python -m yt_dlp`.** The console script records the build machine's interpreter path, and on Windows that path is compiled into an `.exe` no installed copy can use.
-- **What a desktop bundle ships is decided once, in `scripts/desktop/`.** The macOS scripts use the same dependency profile, prunes and import check as Windows and Linux.
+- **The engine runs from the library directory**, because Ollama resolves runners beside its own executable and an installed tree is read-only on Linux. macOS keeps running from the bundle.
+- **A running app never downloads model weights or contacts a third party**; models are cache-only at runtime.
+- **`make smoke` runs against the dev backend or the bundled app** (`LUMINARY_BASE_URL`), a skipped script now reports as a skip instead of a pass, and a script with no verdict after 30 minutes is killed and failed.
+
+### Fixed
+- **A 16 GiB Linux host was refused as under the 16 GB floor** (#139). Reported RAM is rounded up.
+- **Deleted documents kept their summaries and stayed in the library summary** (#140).
+- **A notes question with no subject answered `not_found`** with the matching note in context (#141).
+- **Questions and new documents waited minutes behind background enrichment.** Background LLM calls are now capped at the serving width and admitted in arrival order, and calls a user or a new document is waiting on go first (#142).
+- **`make smoke` rewrote the committed golden manifest** (#143); it is now a local cache.
+- **A failed eval search scored as a miss** instead of failing the run.
+- **Notes editor**: caret jumps and dead mouse selection near rendered blocks, runaway drag-selection redraws, and scroll position lost when toggling split preview.
 
 ## [0.12.11] - 2026-09-18
 

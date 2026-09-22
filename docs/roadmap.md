@@ -303,9 +303,13 @@ miss: `book_alice` read HR@5 0.0000 with the backend busy, and passed once it wa
 
 The harness side is fixed: every script reads `LUMINARY_BASE_URL`, skips a full-only surface on a
 public server, and writes temp files under `SMOKE_TMP` (`scripts/smoke/lib.sh`, enforced by
-`check_smoke_paths.py`); a failed eval search now fails the run (I-32). On macOS, full mode, 182 of
-186 passed with `SMOKE_OFFLINE=1` (S122 skipped) and the backend holding no non-local connection
-(I-57, I-18); the three failures are #140, #141 and #142, not gates.
+`check_smoke_paths.py`); a failed eval search now fails the run (I-32). On macOS, full mode, with
+`SMOKE_OFFLINE=1` and the backend holding no non-local connection (I-57, I-18), 170 of 177 passed
+and none failed on `d1520e5a` once #140, #141 and #142 were fixed. A skip now exits as a skip:
+seventeen scripts had printed SKIP and counted as passes. Of the seven skips, S122 needs the
+network, and S110-S112 and S132-S134 find no document because they run before any script ingests
+one, so they exercise nothing on a fresh library. A script with no verdict after 30 minutes is
+killed and failed, and a silent `set -e` exit names its command.
 
 **`verify_installed.sh` ingests a document through each installed build, and has run green.** Run
 `35654900886`: the AppImage and the `.deb` each ingested and found the document by vector search in
