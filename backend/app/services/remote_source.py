@@ -117,7 +117,8 @@ async def fetch_remote_document(url: str) -> RemoteDocument | None:
     Raises UningestibleRemoteContent for a recognised file type this endpoint
     cannot handle, and RemoteDocumentTooLarge past the size ceiling. Transport
     failures propagate: returning None would send the article extractor after a
-    URL already known to be unreachable.
+    URL already known to be unreachable. A refusal is not that: Wikimedia answers
+    this client 403 and the extractor's own fetch 200, so the page goes to it.
     """
     target = canonical_source_url(url)
     if target != url:
@@ -125,6 +126,9 @@ async def fetch_remote_document(url: str) -> RemoteDocument | None:
 
     async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
         async with client.stream("GET", target, headers={"User-Agent": _UA}) as resp:
+            if resp.status_code == 403:
+                logger.info("remote_source: %s refused the sniff (403); treating it as a page", url)
+                return None
             resp.raise_for_status()
             declared = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
 
