@@ -470,4 +470,13 @@ class Settings(BaseSettings):
 
 @functools.lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    # LiteLLM's Ollama model-info lookup (usage accounting around every streamed
+    # call) ignores the per-call api_base and reads OLLAMA_API_BASE, else
+    # localhost:11434. The bundled engine is on an ephemeral port, so that lookup
+    # hit a closed port. macOS refuses at once; Windows retries a refused
+    # localhost connect for ~2s per address, and the lookup is synchronous, so it
+    # stalled the event loop for ~16s before the first token and ~20s after the
+    # last. Assigned, not setdefault: OLLAMA_URL is the one knob.
+    os.environ["OLLAMA_API_BASE"] = settings.OLLAMA_URL
+    return settings
