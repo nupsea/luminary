@@ -31,7 +31,9 @@ async def test_db(tmp_path, monkeypatch):
 
     get_settings.cache_clear()
 
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    # A file, not :memory: -- StaticPool shares one connection, so a sibling session's
+    # close rolls back a concurrent unit's uncommitted INSERT (lost row on Windows CI).
+    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path}/test.db")
     await create_all_tables(engine)
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
