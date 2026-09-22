@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from app.database import get_session_factory
 from app.models import CollectionMemberModel, CollectionModel
+from app.repos.note_repo import NoteRepo
 from app.services import (
     gap_detector as _gap_detector_module,  # indirect: get_gap_detector is patched
 )
@@ -26,15 +27,33 @@ from app.services import (
 from app.services import (
     note_search as _note_search_module,  # indirect: get_note_search_service is patched
 )
+from app.services.intent import notes_subject_is_generic
 from app.services.llm import LLMUnavailableError
 from app.services.settings_service import get_llm_error_message
 from app.types import ChatState
 
 logger = logging.getLogger(__name__)
 
+# The same number of notes a subject search returns (k=5 below).
+_RECENT_NOTES = 5
+
 
 async def notes_node(state: ChatState) -> dict:
-    """Search user notes via NoteSearchService and format context for synthesize_node."""
+    """Search user notes via NoteSearchService and format context for synthesize_node.
+
+    A question that names no subject ("what did I note about my reading") is
+    answered from the most recent notes instead: a search for "my reading" matches
+    nothing specific, and the notes themselves are what was asked for (#141).
+    """
+    if notes_subject_is_generic(state["question"]):
+        async with get_session_factory()() as session:
+            recent = await NoteRepo(session).list_recent(limit=_RECENT_NOTES)
+        logger.info("notes_node: generic subject, %d recent notes", len(recent))
+        if not recent:
+            return {"chunks": [], "section_context": None}
+        section_context = "\n\n".join(f"[From your notes] {content}" for _, content in recent)
+        return {"chunks": [], "section_context": section_context, "notes_recent": True}
+
     q = state.get("rewritten_question") or state["question"]
     logger.info("notes_node: query=%r", q[:80])
 

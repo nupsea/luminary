@@ -204,6 +204,22 @@ QA_SYSTEM_PROMPT = (
     f"{CITATION_RULE}"
 )
 
+# A notes question that names no subject ("what did I note about my reading") asks
+# for the notes themselves, so the most recent ones are the answer. Under
+# QA_SYSTEM_PROMPT the model read "is the answer present" strictly and returned the
+# sentinel with the user's note in context (#141). No sentinel here: notes_node
+# only takes this path when there are notes to report.
+QA_NOTES_RECENT_SYSTEM_PROMPT = (
+    "You are a knowledge assistant answering from the user's own notes. "
+    "The user asked what they noted without naming a specific subject, so the context "
+    "holds their most recent notes. Say that these are their most recent notes, then "
+    "report what the notes say. Use only the notes in the context and add nothing "
+    "that is not in them. "
+    "Write your answer as Markdown prose. "
+    "Then on a new line write this JSON: "
+    '{"citations":[],"confidence":"high|medium|low"}'
+)
+
 # Creative mode: opt-in via the UI toggle. Still grounded in the learner's own
 # retrieved material (synthesize_node returns not_found when nothing is retrieved),
 # but the model is licensed to invent narrative framing/voice and the sampling
@@ -1086,8 +1102,7 @@ class QAService:
                             "Before answering, start with one probing question (1-2 sentences) "
                             "that activates the user's prior knowledge about this topic. "
                             "Format: [Your probing question?]\n\n"
-                            "[Full answer below]\n\n"
-                            + system_prompt
+                            "[Full answer below]\n\n" + system_prompt
                         )
                 else:
                     if creative and system_prompt:
@@ -1098,8 +1113,7 @@ class QAService:
                             "Before answering, start with one probing question (1-2 sentences) "
                             "that activates the user's prior knowledge about this topic. "
                             "Format: [Your probing question?]\n\n"
-                            "[Full answer with citations below]\n\n"
-                            + system_prompt
+                            "[Full answer with citations below]\n\n" + system_prompt
                         )
                 # Retrieval is already finished here -- the graph ran to completion
                 # and left `_llm_prompt` behind -- so the source chips can be on
@@ -1267,9 +1281,7 @@ class QAService:
                     await _fill_citation_locations(citations)
                     # Summary/graph routes ground on section_context with zero chunks,
                     # so both are the grounding an excerpt must be found in.
-                    grounding_texts = [
-                        c.get("text", "") for c in chunks_returned if c.get("text")
-                    ]
+                    grounding_texts = [c.get("text", "") for c in chunks_returned if c.get("text")]
                     section_context_for_citations = result.get("section_context")
                     if section_context_for_citations and section_context_for_citations.strip():
                         grounding_texts.append(section_context_for_citations)
@@ -1366,9 +1378,7 @@ class QAService:
                     final["citations_proposed"] = 0
                     final["citations_gated"] = 0
                 else:
-                    context_texts = [
-                        c.get("text", "") for c in chunks_returned if c.get("text")
-                    ]
+                    context_texts = [c.get("text", "") for c in chunks_returned if c.get("text")]
                     section_context = result.get("section_context")
                     if section_context and section_context.strip():
                         context_texts.append(section_context)

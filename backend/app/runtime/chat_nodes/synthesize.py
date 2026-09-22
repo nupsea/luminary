@@ -27,6 +27,7 @@ from app.services.qa import (
     CITATION_MIN_SCORE,
     CITATION_REL_RATIO,
     MAX_CITATIONS,
+    QA_NOTES_RECENT_SYSTEM_PROMPT,
     _excerpt_from_chunk,
     _should_use_summary,
 )
@@ -343,7 +344,9 @@ async def synthesize_node(state: ChatState) -> dict:
         prompt = f"{history_block}\n\nContext:\n\n{context}\n\nQuestion: {question}"
     else:
         prompt = f"Context:\n\n{context}\n\nQuestion: {question}"
-    system_prompt = _get_system_prompt(intent)
+    system_prompt = (
+        QA_NOTES_RECENT_SYSTEM_PROMPT if state.get("notes_recent") else _get_system_prompt(intent)
+    )
 
     # Prefill is ~linear in prompt size and is the whole wait on a CPU-only host,
     # yet nothing reported what the prompt actually weighed -- only what the chunk
