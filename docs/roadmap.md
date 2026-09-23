@@ -350,9 +350,6 @@ fixed):
 - A first run of the 0.13.0 installer on a real Windows machine, and `make smoke` there. CI installs
   it, ingests and searches (`desktop-installers.yml`); nothing has run the app past that.
 - `make smoke` against the bundled macOS app, and the 0.13.0 DMG on a cleared data directory.
-- SIGTERM never drains the tree on Linux or macOS: the shell has no signal handler, so
-  `Supervisor::shutdown` (`src-tauri/src/supervisor.rs:190`) runs only on a window close
-  (`src-tauri/src/main.rs:421`). On the Linux box a SIGTERMed shell left `llama-server` behind.
 - Evals: `eval-ingest` reports a document this database lacks as "no chunks stored"
   (`evals/run_ingest_eval.py:115`); `eval-summary` replays stored summaries unless asked to refresh
   (`evals/run_summary_eval.py`, the `eval-summary` target); the flashcard judge's atomicity read
@@ -362,7 +359,41 @@ fixed):
   "Mercury's plan" is Jove's), though the passage that corrects it was retrieved.
 - Web articles keep Wikipedia's `[edit]` links in the chunk text.
 - YouTube ingest unverified this release: YouTube refused the test machine as a bot, and the Linux
-  box has no ffmpeg. `make measure-ttft`, both arms, not run.
+  box has no ffmpeg.
+- `make measure-ttft` cannot run: `scripts/measure_ttft.py` was deleted in `97c3a78c` and the
+  Makefile target still calls it.
+
+**0.13.2: one-command installs on Windows and Linux** (on `feat/windows-linux-release`). The aim
+for 1.0 is reach: any recent Windows or Linux machine either runs well or is told before the
+download that it cannot, as an Intel Mac is today, and pointed at a cloud key or the hosted version.
+
+| Item | Status |
+|---|---|
+| `get-luminary.sh` / `.ps1` install the latest release in one command | built, CI installs through them |
+| SIGTERM drains the process tree on Linux and macOS; an AppImage without FUSE ends with its runtime | built |
+| Off Apple Silicon the default text model is `qwen3.5:4b` whatever the host holds; other models are the user's pick in Settings | built |
+| The one-command installers refuse before downloading where `host_support.local_inference_support` would, with its message, and offer to continue for reading, search and notes (`LUMINARY_INSTALL_ANYWAY=1` without asking); `test_get_luminary_script.py` fails if they disagree | built |
+| A release job attaches the Windows setup, `.deb`, AppImage and their `.sha256` files; README carries the one-liners once a release does | open: a `publish` job for `desktop-installers.yml` is drafted, adding it needs the maintainer |
+| One timing script over the installed app: book ingest (Think Python), Ask, flashcards, teach-back, on `qwen3.5:4b`; its baseline is the M3 Pro | open |
+| Hard limits checked before any cloud run: installer size budget, path length, driver mode | open |
+
+**Cloud runs: two boxes, same card, same model.** A Linux and a Windows `g4dn.xlarge` (T4), both on
+`qwen3.5:4b`, so they differ by OS only. Each runs the one-command install, a first run with no
+terminal, `make smoke` against the installed app, and the timing script. Windows needs AWS's gaming
+driver, which runs the card in WDDM mode; if Ollama still reports no VRAM after ten minutes, the box
+is terminated and the Windows GPU path goes to a volunteer. No CPU-only box is run: such a host is
+refused, so timing it measures nothing. Parity is proposed as each timing within 1.5x of the M3 Pro.
+
+**Not in 0.13.2.** Intel and AMD integrated graphics are refused as `no_accelerator`, though Ollama
+serves them through Vulkan. That covers most current Windows laptops, and whether to admit them is
+decided in 0.13.3 once one has been timed on `qwen3.5:4b`; AWS has no such machine. Code signing
+(SmartScreen warns) is not in it either.
+
+**Seams kept for the hosted version and mobile.** The host verdict has one owner,
+`host_support.py`, served over HTTP, and the installers copy it under test. The default model lives
+in `model_registry.py`. The engine is a setting (`llm_mode`) behind LiteLLM, and embedding,
+retrieval and the learner record never move with it. Desktop-only code stays in `luminary-host` and
+`src-tauri`, so the same backend can serve from a server.
 
 **Exit gate.** First run completes with no terminal on a Windows and a Linux machine that has never
 seen Luminary; each host's verdict names the accelerator it actually has, proven by a platform-pinned
