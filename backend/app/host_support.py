@@ -19,10 +19,12 @@ GPU passes, and a bare-metal box without one does not.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import platform
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -112,6 +114,41 @@ def has_nvidia_accelerator() -> bool:
         if Path(node).exists():
             return True
     return any(Path("/dev").glob("nvidia[0-9]*"))
+
+
+@functools.cache
+def accelerator_memory_bytes() -> int | None:
+    """Memory a model can run from without falling back to the processor.
+
+    None on Apple Silicon, where memory is unified and the RAM rule already
+    answers. Elsewhere the largest NVIDIA card's own memory, or 0 where none is
+    readable: AMD cards and built-in graphics are unmeasured, not assumed.
+    """
+    if platform.system() == "Darwin":
+        return None if _has_accelerator() else 0
+    if not has_nvidia_accelerator():
+        return 0
+    exe = shutil.which("nvidia-smi")
+    if exe is None and platform.system() == "Windows":
+        candidate = _windows_system32() / "nvidia-smi.exe"
+        exe = str(candidate) if candidate.exists() else None
+    if exe is None:
+        return 0
+    try:
+        out = subprocess.run(  # noqa: S603 -- fixed argv, binary resolved above
+            [exe, "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+            # The desktop backend has no console; without this Windows flashes one.
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("nvidia-smi could not report card memory", exc_info=True)
+        return 0
+    mib = [int(v) for v in out.split() if v.isdigit()]
+    return max(mib, default=0) * 1024 * 1024
 
 
 def _has_amd_accelerator() -> bool:

@@ -61,6 +61,17 @@ buys the finish, not the start.** Quoting it as "faster to first token" quotes n
 host is unmeasured here. The slow-host context budget that halves passages has no quality number
 behind it (#100); do not take a second latency win out of content.
 
+## Default model on a host
+
+`model_registry.recommended_assignment` upgrades the default text model from `qwen3.5:4b` to
+`qwen2.5:14b-instruct` only where the larger one runs from graphics memory: Apple Silicon by the
+half-of-RAM rule (memory is unified), elsewhere only when the largest NVIDIA card's own memory
+(`host_support.accelerator_memory_bytes`, read from `nvidia-smi`) holds its 9.67GB. An 8GB card
+declines it; a 12GB card holds it. AMD cards and built-in graphics report nothing and keep `qwen3.5:4b`
+until measured. RAM alone chose 14B on a 64GB machine with no card, and answers took 2-4 minutes.
+`install.sh` and `install.ps1` apply the same gate (`LARGE_TEXT_MIN_CARD_MIB`); `test_installer_models.py`
+fails on drift. A user may still pick 14B in Settings.
+
 ## Supported hosts
 
 `app/host_support.py` decides whether local inference is worth offering, and `HostSupportBanner`

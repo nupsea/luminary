@@ -361,11 +361,24 @@ $LargeTextModel = "qwen2.5:14b-instruct"
 # downloads 9.67GB the backend then refuses to load. Mirrors
 # LARGE_TEXT_MIN_RAM_GB in install.sh; test_installer_models.py fails on drift.
 $LargeTextMinRamGB = 26
+# It must also fit the card's own memory, or it answers from the processor
+# (minutes per answer). Its resident size in MiB: an 8GB card declines it, a
+# 12GB card holds it. Mirrors LARGE_TEXT_MIN_CARD_MIB in install.sh.
+$LargeTextMinCardMiB = 9903
+
+function Get-LargestCardMiB {
+    $smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    if (-not $smi) { return 0 }
+    $out = & $smi.Source --query-gpu=memory.total --format=csv,noheader,nounits 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $out) { return 0 }
+    return ($out | ForEach-Object { [int]("$_".Trim()) } | Measure-Object -Maximum).Maximum
+}
 
 $chatModel = $env:LUMINARY_CHAT_MODEL
 $visionModel = $env:LUMINARY_VISION_MODEL
 if (-not $chatModel) {
-    if ($LumProfile -eq "performance" -and $MemGB -ge $LargeTextMinRamGB) {
+    if ($LumProfile -eq "performance" -and $MemGB -ge $LargeTextMinRamGB -and
+        (Get-LargestCardMiB) -ge $LargeTextMinCardMiB) {
         # The only band with room for a text model that cannot read figures.
         $chatModel = $LargeTextModel
     } else {

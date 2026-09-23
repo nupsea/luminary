@@ -313,7 +313,24 @@ def fits_together(models: tuple[ModelProfile, ...], ram_gb: int | None = None) -
     return total <= ram * _GB * _RESIDENT_SET_FRACTION
 
 
-def recommended_assignment(ram_gb: int | None = None) -> tuple[str, str] | None:
+def _runs_from_accelerator(text: ModelProfile, accelerator_bytes: int | None) -> bool:
+    """Whether the text model runs from graphics memory rather than the processor.
+
+    Off Apple Silicon a model larger than the card's own memory answers on the
+    processor: `qwen2.5:14b-instruct` chosen by RAM on a 64GB host with no card
+    took 2-4 minutes per answer. The default model (`GENERALIST_PREFERENCE[0]`)
+    always passes, so this only ever declines an upgrade.
+    """
+    if accelerator_bytes is None:
+        return True
+    if text.id == GENERALIST_PREFERENCE[0]:
+        return True
+    return text.resident_bytes <= accelerator_bytes
+
+
+def recommended_assignment(
+    ram_gb: int | None = None, accelerator_bytes: int | None | Literal["host"] = "host"
+) -> tuple[str, str] | None:
     """(text model, vision model) -- the best pair this machine can actually hold.
 
     Text and vision cannot be chosen separately, which is the trap this exists to
@@ -327,9 +344,15 @@ def recommended_assignment(ram_gb: int | None = None) -> tuple[str, str] | None:
     (`TEXT_PREFERENCE`, `VISION_PREFERENCE`), and a reader can check the result by
     eye -- which a solver's answer would not allow.
     """
+    if accelerator_bytes == "host":
+        from app.host_support import accelerator_memory_bytes  # noqa: PLC0415
+
+        accelerator_bytes = accelerator_memory_bytes()
     for text_id in TEXT_PREFERENCE:
         text = REGISTRY.get(text_id)
         if text is None or not fits_host(text, ram_gb):
+            continue
+        if not _runs_from_accelerator(text, accelerator_bytes):
             continue
         for vision_id in VISION_PREFERENCE:
             vision = REGISTRY.get(vision_id)

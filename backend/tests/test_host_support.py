@@ -15,6 +15,18 @@ import pytest
 from app.host_support import UNSUPPORTED_MESSAGE, has_nvidia_accelerator, local_inference_support
 
 
+@pytest.fixture(autouse=True)
+def _settings_follow_the_environment():
+    """The declaration is also read through the cached Settings, so a test that
+    unsets the variable must not see one built while it was set, nor leave its
+    own behind once the variable is restored."""
+    from app.config import get_settings  # noqa: PLC0415
+
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.fixture
 def host(monkeypatch):
     """Drive the three inputs the verdict reads."""
@@ -462,3 +474,51 @@ def test_the_refusal_survives_the_llm_service_fallback(routing):
     ):
         with pytest.raises(DependencyUnavailable):
             LLMService()._resolve_model(None, background=False)
+
+
+@pytest.fixture
+def fresh_accelerator_memory():
+    from app.host_support import accelerator_memory_bytes
+
+    accelerator_memory_bytes.cache_clear()
+    yield accelerator_memory_bytes
+    accelerator_memory_bytes.cache_clear()
+
+
+def test_apple_silicon_reports_unified_memory(monkeypatch, fresh_accelerator_memory):
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    monkeypatch.setattr("platform.machine", lambda: "arm64")
+    assert fresh_accelerator_memory() is None
+
+
+def test_no_card_reports_no_card_memory(monkeypatch, fresh_accelerator_memory):
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("app.host_support.has_nvidia_accelerator", lambda: False)
+    assert fresh_accelerator_memory() == 0
+
+
+def test_the_largest_nvidia_card_is_reported(monkeypatch, fresh_accelerator_memory):
+    import subprocess
+
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("app.host_support.has_nvidia_accelerator", lambda: True)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/nvidia-smi")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess(a, 0, stdout="8188\n24564\n", stderr=""),
+    )
+    assert fresh_accelerator_memory() == 24564 * 1024 * 1024
+
+
+def test_an_unreadable_card_counts_as_none(monkeypatch, fresh_accelerator_memory):
+    import subprocess
+
+    def fail(*a, **kw):
+        raise subprocess.TimeoutExpired("nvidia-smi", 10)
+
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("app.host_support.has_nvidia_accelerator", lambda: True)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/nvidia-smi")
+    monkeypatch.setattr(subprocess, "run", fail)
+    assert fresh_accelerator_memory() == 0

@@ -672,3 +672,16 @@ def test_bootstrap_does_not_write_a_key_the_template_already_sets():
     assert re.search(r"grep -vE '\^\(LITELLM_DEFAULT_MODEL\|VISION_MODEL", text), (
         "bootstrap.sh appends model keys without stripping the template's copies"
     )
+
+
+def test_the_large_text_model_is_gated_on_the_card_holding_it(sh, ps1):
+    """Off Apple Silicon a RAM-only gate pulled 9.67GB onto machines whose card
+    could not hold it, and every answer then ran on the processor."""
+    import math
+
+    text = REGISTRY[f"ollama/{_assign(sh, r'^LARGE_TEXT_MODEL=\"([^\"]+)\"')}"]
+    expected_mib = math.ceil(text.resident_bytes / 1024**2)
+    assert int(_assign(sh, r"^LARGE_TEXT_MIN_CARD_MIB=(\d+)")) == expected_mib
+    assert int(_assign(ps1, r"^\$LargeTextMinCardMiB = (\d+)")) == expected_mib
+    assert "&& _card_holds_large_model; then" in sh
+    assert "(Get-LargestCardMiB) -ge $LargeTextMinCardMiB" in ps1
