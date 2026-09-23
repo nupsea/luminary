@@ -85,7 +85,10 @@ def test_available_projects_discovery(tmp_path):
     """)
     blog_dir = repo / "src/content/blog"
     blog_dir.mkdir(parents=True, exist_ok=True)
-    (blog_dir / "custom.md").write_text('---\ntitle: "c"\ndescription: "d"\npubDate: "Jun 1 2026"\nproject: "dkit"\n---\nbody')
+    post_text = (
+        '---\ntitle: "c"\ndescription: "d"\npubDate: "Jun 1 2026"\nproject: "dkit"\n---\nbody'
+    )
+    (blog_dir / "custom.md").write_text(post_text)
     projs = blog_service.available_projects(repo)
     assert projs[0] == "Luminary"
     assert "Headwater" in projs
@@ -120,8 +123,8 @@ def test_transform_drops_links_strips_diagrams_registers_assets():
 def test_render_sized_images_floats_small_leaves_others_alone():
     md = (
         "before\n\n"
-        '![Pasted Image|small](/blog/p/asset1.png)\n\n'
-        '![Pasted Image|medium](/blog/p/asset2.png)\n\n'
+        "![Pasted Image|small](/blog/p/asset1.png)\n\n"
+        "![Pasted Image|medium](/blog/p/asset2.png)\n\n"
         "![diagram](/blog/p/diagram1.svg)\n\n"
         "![no size hint](/blog/p/asset3.png)\n"
     )
@@ -138,7 +141,7 @@ def test_render_sized_images_floats_small_leaves_others_alone():
 def test_render_sized_images_escapes_html_special_chars():
     md = '![Alt & <text>|small](/blog/p/a.png?x=1&y="2")\n'
     out = blog_service.render_sized_images(md)
-    assert "alt=\"Alt &amp; &lt;text&gt;\"" in out
+    assert 'alt="Alt &amp; &lt;text&gt;"' in out
     assert "&amp;y=" in out
 
 
@@ -624,9 +627,7 @@ def test_refine_forwards_model_override_when_given(client, monkeypatch):
     monkeypatch.setattr(llm_module, "get_llm_service", lambda: _FakeLLM())
     note_id = client.post("/notes", json={"content": "rough text", "tags": []}).json()["id"]
 
-    resp = client.post(
-        "/blog/refine", json={"note_id": note_id, "model": "ollama/qwen3.5:4b"}
-    )
+    resp = client.post("/blog/refine", json={"note_id": note_id, "model": "ollama/qwen3.5:4b"})
     assert resp.status_code == 200
     assert seen["model"] == "ollama/qwen3.5:4b"
 

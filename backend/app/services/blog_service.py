@@ -13,6 +13,7 @@ All registered assets are rewritten to ``/blog/<slug>/<file>`` references.
 """
 
 import asyncio
+import logging
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -20,6 +21,8 @@ from datetime import date, datetime
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 # [[<uuid>|display text]] wiki-link between Luminary notes -- no public target.
 _NOTE_LINK_RE = re.compile(r"\[\[[0-9a-fA-F-]+\|[^\]]+\]\]")
@@ -252,8 +255,8 @@ def available_projects(repo: Path) -> list[str]:
             content = projects_astro.read_text(encoding="utf-8")
             names = re.findall(r'name:\s*["\']([^"\']+)["\']', content)
             projects.update(n.strip() for n in names if n.strip())
-        except Exception:
-            pass
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.debug("Failed reading projects.astro: %s", exc)
 
     blog_dir = repo / "src/content/blog"
     if blog_dir.is_dir():
@@ -263,8 +266,8 @@ def available_projects(repo: Path) -> list[str]:
                 proj = meta.get("project")
                 if proj and isinstance(proj, str) and proj.strip():
                     projects.add(proj.strip())
-            except Exception:
-                pass
+            except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+                logger.debug("Failed reading post %s for project discovery: %s", p, exc)
 
     others = sorted(p for p in projects if p.lower() != "luminary")
     luminary_entry = next((p for p in projects if p.lower() == "luminary"), "Luminary")
