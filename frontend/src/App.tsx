@@ -10,6 +10,8 @@ import type { QueryKey } from "@tanstack/react-query"
 import { Activity, AlertTriangle, BookOpen, Info, MessageSquare, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
 import { LuminaryGlyph } from "./components/icons/LuminaryGlyph"
 import { HostSupportBanner } from "@/components/HostSupportBanner"
+import { useHostVerdict } from "@/hooks/useHostVerdict"
+import { localModelNotice } from "@/lib/engineModes"
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary"
 import { UploadDialog } from "@/components/library/UploadDialog"
 import { WindowDropZone } from "@/components/library/WindowDropZone"
@@ -436,9 +438,9 @@ function AppShell() {
     }>,
     staleTime: 30_000,
   })
-  const ollamaUnavailable = llmData?.mode === "private" && llmData?.processing_mode === "unavailable"
-  // Up-but-no-model reads as "unavailable" too; tell them apart so the banner's fix is right.
-  const ollamaModelMissing = ollamaUnavailable && llmData?.ollama_reachable !== false
+  const modelNotice = localModelNotice(llmData, useHostVerdict())
+  const ollamaUnavailable = modelNotice !== null
+  const ollamaModelMissing = modelNotice === "model-missing"
   // Reset dismissed state when Ollama comes back online
   useEffect(() => {
     if (!ollamaUnavailable) setOllamaWarningDismissed(false)

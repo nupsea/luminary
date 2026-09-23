@@ -6,6 +6,7 @@ import {
   ENGINE_MODES,
   engineMode,
   hostNotice,
+  localModelNotice,
   modelUnavailableMessage,
   type HostVerdict,
 } from "./engineModes"
@@ -87,5 +88,29 @@ describe("hostNotice", () => {
 
   it("disappears when nothing is refused", () => {
     expect(hostNotice(UNSUPPORTED, routing("cloud", [row("answering", "Answering", false)]))).toBeNull()
+  })
+})
+
+describe("localModelNotice", () => {
+  const refused: HostVerdict = { supported: false, host: "Linux/x86_64", message: "no" }
+  const supported: HostVerdict = { supported: true, host: "Darwin/arm64", message: null }
+  const missing = { mode: "private", processing_mode: "unavailable", ollama_reachable: true }
+
+  it("offers the model download on a supported host with no model", () => {
+    expect(localModelNotice(missing, supported)).toBe("model-missing")
+  })
+
+  it("offers nothing on a refused host: the host notice names the cause", () => {
+    expect(localModelNotice(missing, refused)).toBeNull()
+    expect(localModelNotice({ ...missing, ollama_reachable: false }, refused)).toBeNull()
+  })
+
+  it("says the server is down when Ollama is unreachable", () => {
+    expect(localModelNotice({ ...missing, ollama_reachable: false }, supported)).toBe("server-down")
+  })
+
+  it("stays quiet outside Local mode or while the verdict is loading into a working state", () => {
+    expect(localModelNotice({ ...missing, mode: "cloud" }, supported)).toBeNull()
+    expect(localModelNotice({ mode: "private", processing_mode: "local" }, undefined)).toBeNull()
   })
 })

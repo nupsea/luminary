@@ -5,18 +5,12 @@
 import { useQuery } from "@tanstack/react-query"
 import { AlertTriangle } from "lucide-react"
 
-import { apiGet } from "@/lib/apiClient"
-import { hostNotice, type HostVerdict } from "@/lib/engineModes"
+import { useHostVerdict } from "@/hooks/useHostVerdict"
+import { hostNotice } from "@/lib/engineModes"
 import { fetchRouting } from "@/lib/llmRouting"
 
 export function HostSupportBanner() {
-  const { data: host } = useQuery({
-    queryKey: ["host-support"],
-    queryFn: () => apiGet<HostVerdict>("/setup/host-support"),
-    // The host does not change while the app is open.
-    staleTime: Infinity,
-    gcTime: Infinity,
-  })
+  const host = useHostVerdict()
   const { data: routing } = useQuery({
     queryKey: ["llm-routing"],
     queryFn: fetchRouting,

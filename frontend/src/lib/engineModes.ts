@@ -75,6 +75,21 @@ export interface HostVerdict {
  * The banner line for a host that cannot run a local model, or null. Built from
  * the routing report's refused rows, not the mode.
  */
+/**
+ * Which local-model warning to show, if any. None on a refused host: the host
+ * notice names the cause, and a download offer there sells gigabytes the app
+ * then declines to run.
+ */
+export function localModelNotice(
+  llm: { mode?: string; processing_mode?: string; ollama_reachable?: boolean } | undefined,
+  host: HostVerdict | undefined,
+): "model-missing" | "server-down" | null {
+  if (host?.supported === false) return null
+  if (llm?.mode !== "private" || llm.processing_mode !== "unavailable") return null
+  // Up-but-no-model reads as "unavailable" too; tell them apart so the fix offered is right.
+  return llm.ollama_reachable === false ? "server-down" : "model-missing"
+}
+
 export function hostNotice(
   host: HostVerdict | undefined,
   routing: RoutingResponse | undefined,
