@@ -11,7 +11,7 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, RotateCcw, X } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
@@ -35,6 +35,56 @@ const fetchChapter = (
   chapterIndex: number,
 ): Promise<EpubChapter> =>
   apiGet<EpubChapter>(`/documents/${documentId}/epub/chapter/${chapterIndex}`)
+
+// Keyboard navigation shortcuts: ArrowRight / PageDown for next chapter, ArrowLeft / PageUp for previous
+export function handleEpubKeyboardShortcut(
+  e: {
+    key: string
+    target?: EventTarget | null
+    preventDefault?: () => void
+  },
+  state: {
+    activeChapter: number
+    totalChapters: number
+    zoomedImgSrc: string | null
+    onNextChapter: () => void
+    onPrevChapter: () => void
+    onCloseLightbox: () => void
+  },
+): boolean {
+  if (
+    typeof HTMLElement !== "undefined" &&
+    (e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement ||
+      (e.target as HTMLElement)?.isContentEditable)
+  ) {
+    return false
+  }
+
+  if (e.key === "Escape") {
+    if (state.zoomedImgSrc) {
+      e.preventDefault?.()
+      state.onCloseLightbox()
+      return true
+    }
+  }
+
+  if (e.key === "ArrowRight" || e.key === "PageDown") {
+    if (state.activeChapter < state.totalChapters - 1) {
+      e.preventDefault?.()
+      state.onNextChapter()
+      return true
+    }
+  } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+    if (state.activeChapter > 0) {
+      e.preventDefault?.()
+      state.onPrevChapter()
+      return true
+    }
+  }
+
+  return false
+}
 
 interface EPUBViewerProps {
   documentId: string
@@ -77,6 +127,7 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
   })
 
   const totalChapters = toc?.length ?? 0
+  const contentContainerRef = useRef<HTMLDivElement>(null)
 
   function goToPrev() {
     if (activeChapter > 0) setActiveChapter((c) => c - 1)
@@ -85,6 +136,28 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
   function goToNext() {
     if (activeChapter < totalChapters - 1) setActiveChapter((c) => c + 1)
   }
+
+  // Scroll to top of content when active chapter changes
+  useEffect(() => {
+    contentContainerRef.current?.scrollTo({ top: 0, behavior: "instant" })
+  }, [activeChapter])
+
+  // Keyboard navigation shortcuts: ArrowRight / PageDown for next chapter, ArrowLeft / PageUp for previous
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      handleEpubKeyboardShortcut(e, {
+        activeChapter,
+        totalChapters,
+        zoomedImgSrc,
+        onNextChapter: () => setActiveChapter((c) => c + 1),
+        onPrevChapter: () => setActiveChapter((c) => c - 1),
+        onCloseLightbox: () => setZoomedImgSrc(null),
+      })
+    }
+
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [activeChapter, totalChapters, zoomedImgSrc])
 
   /**
    * Keep the book's own links inside the book: chapter HTML is injected
@@ -236,7 +309,7 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
 
         {/* Chapter content */}
         {chapter && !chapterLoading && !chapterError && (
-          <div className="flex-1 overflow-auto">
+          <div ref={contentContainerRef} className="flex-1 overflow-auto">
             <div
               className={cn(
                 "epub-reader-content prose prose-sm dark:prose-invert max-w-3xl mx-auto px-6 py-6",

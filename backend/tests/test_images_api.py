@@ -322,6 +322,31 @@ async def test_upload_invalid_note_excalidraw_scene_returns_400(test_db):
 
 
 @pytest.mark.asyncio
+async def test_upload_note_image_without_extension_derives_from_content_type(test_db):
+    """Pasting a clipboard screenshot often produces a blob filename without extension."""
+    engine, factory, tmp_path = test_db
+    png_data = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        upload = await client.post(
+            "/images/notes",
+            files={"file": ("blob", png_data, "image/png")},
+        )
+
+    assert upload.status_code == 200
+    data = upload.json()
+    assert data["path"].startswith("__LUMINARY_IMG__/notes/")
+    assert data["filename"].endswith(".png")
+    assert (tmp_path / "images" / "notes" / data["filename"]).exists()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        served = await client.get(f"/images/local/notes/{data['filename']}")
+
+    assert served.status_code == 200
+    assert served.headers["content-type"] == "image/png"
+
+
+@pytest.mark.asyncio
 async def test_get_enrichment_returns_404_for_unknown_doc(test_db):
     """GET /documents/{unknown}/enrichment returns 404."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

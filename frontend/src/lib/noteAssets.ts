@@ -7,7 +7,13 @@ export interface NoteAssetUpload {
 
 export async function uploadNoteAsset(file: File): Promise<NoteAssetUpload> {
   const formData = new FormData()
-  formData.append("file", file)
+  let filename = file.name
+  if (!filename || filename === "blob" || !/\.[a-zA-Z0-9]+$/.test(filename)) {
+    const subtype = file.type ? file.type.split("/")[1] || "png" : "png"
+    const ext = subtype === "jpeg" ? "jpg" : subtype
+    filename = `screenshot.${ext}`
+  }
+  formData.append("file", file, filename)
 
   const res = await fetch(`${API_BASE}/images/notes`, {
     method: "POST",
