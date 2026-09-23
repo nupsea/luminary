@@ -453,6 +453,13 @@ class Settings(BaseSettings):
             if not (isinstance(v, str) and _PLACEHOLDER_RE.fullmatch(v.strip()))
         }
 
+    @field_validator("LUMINARY_HOST_SUPPORTED", mode="before")
+    @classmethod
+    def _empty_declares_nothing(cls, v: Any) -> Any:
+        # An unset compose variable interpolates to "", which bool parsing rejects,
+        # and a Settings that cannot build takes the whole backend down with it.
+        return False if isinstance(v, str) and not v.strip() else v
+
     @field_validator("DATA_DIR")
     @classmethod
     def _anchor_relative_data_dir(cls, v: str) -> str:
