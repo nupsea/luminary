@@ -118,10 +118,13 @@ install_appimage() {
         say "libfuse2 not found: Luminary will unpack itself on each launch (slower start)"
     fi
 
-    if (cd "$WORK" && "$target" --appimage-extract '*.png' >/dev/null 2>&1); then
-        local png
-        png="$(find "$WORK/squashfs-root" -maxdepth 1 -name '*.png' | head -1)"
-        [ -n "$png" ] && cp "$png" "$dir/luminary.png" && icon="$dir/luminary.png"
+    # The top-level icon is a symlink into usr/share/icons, so extract both.
+    (cd "$WORK" && "$target" --appimage-extract '*.png' >/dev/null 2>&1 \
+        && "$target" --appimage-extract 'usr/share/icons/*' >/dev/null 2>&1) || true
+    local png
+    png="$(find "$WORK/squashfs-root" -maxdepth 1 -name '*.png' 2>/dev/null | head -1)"
+    if [ -n "$png" ] && cp -L "$png" "$dir/luminary.png" 2>/dev/null; then
+        icon="$dir/luminary.png"
     fi
 
     cat > "$bin" <<EOF
