@@ -156,6 +156,27 @@ if (!doc) {
   await shot("deeplink-doc")
 }
 
+// The rail from an open PDF. PDFViewer stays mounted behind every reader tab, so
+// an update loop in it starves route changes: the URL moves, the reader stays.
+const pdf = (await json(`${API}/documents?page=1&page_size=100`).catch(() => ({ items: [] }))).items?.find(
+  (d) => d.format === "pdf" && d.stage === "complete",
+)
+if (!pdf) {
+  skip("rail from an open PDF", "no ingested PDF in the library")
+} else {
+  const loopsBefore = consoleMsgs.filter((m) => m.text.includes("Maximum update depth")).length
+  for (const { href, label } of rail.filter((r) => r.href !== "/" && r.href !== "/library")) {
+    await page.goto(`${APP}/library?doc=${pdf.id}`, { waitUntil: "networkidle" })
+    await settle(2500)
+    await page.locator(`nav a[href="${href}"]`).first().click()
+    await settle(900)
+    const readerGone = (await page.locator("button", { hasText: /^Back to library$/ }).count()) === 0
+    check(`rail → ${href} (${label}) from an open PDF`, here() === href && readerGone, `url=${here()} readerGone=${readerGone}`)
+  }
+  const loops = consoleMsgs.filter((m) => m.text.includes("Maximum update depth")).length - loopsBefore
+  check("an open PDF renders without an update loop", loops === 0, `${loops} "Maximum update depth" message(s)`)
+}
+
 const notes = await json(`${API}/notes`).catch(() => [])
 const note = Array.isArray(notes) ? notes[0] : notes?.items?.[0]
 if (!note) {

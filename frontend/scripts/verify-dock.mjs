@@ -226,9 +226,12 @@ if (paraCount) {
   const boxRect = await para.boundingBox()
   check("that paragraph is on screen", Boolean(boxRect))
   if (boxRect) {
-    await page.mouse.move(boxRect.x + 5, boxRect.y + boxRect.height / 2)
+    // Along the first line: the vertical middle of a two-line paragraph is the gap
+    // between its lines, and a drag there selects nothing.
+    const lineY = boxRect.y + Math.min(12, boxRect.height / 2)
+    await page.mouse.move(boxRect.x + 5, lineY)
     await page.mouse.down()
-    await page.mouse.move(boxRect.x + Math.min(boxRect.width - 5, 320), boxRect.y + boxRect.height / 2, { steps: 12 })
+    await page.mouse.move(boxRect.x + Math.min(boxRect.width - 5, 320), lineY, { steps: 12 })
     await page.mouse.up()
     await page.waitForTimeout(800)
     const askAction = page.getByRole("button", { name: "Ask", exact: true })
@@ -260,9 +263,9 @@ if (paraCount) {
     // one run lost the toolbar to a render and reported a missing button.
     const selectAgain = async (locator) => {
       for (let attempt = 0; attempt < 3; attempt++) {
-        await page.mouse.move(boxRect.x + 5, boxRect.y + boxRect.height / 2)
+        await page.mouse.move(boxRect.x + 5, lineY)
         await page.mouse.down()
-        await page.mouse.move(boxRect.x + Math.min(boxRect.width - 5, 320), boxRect.y + boxRect.height / 2, { steps: 12 })
+        await page.mouse.move(boxRect.x + Math.min(boxRect.width - 5, 320), lineY, { steps: 12 })
         await page.mouse.up()
         for (let i = 0; i < 8; i++) {
           await page.waitForTimeout(400)

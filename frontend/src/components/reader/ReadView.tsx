@@ -599,7 +599,7 @@ export function ReadView({
   }
   // The section at the top of the port before the window moves, restored after.
   const anchorRef = useRef<{ id: string; top: number } | null>(null)
-  const toc = useResizablePanel({
+  const { attachPanel: attachToc, ...toc } = useResizablePanel({
     storageKey: "luminary-read-toc",
     defaultWidth: 224,
     minWidth: 160,
@@ -879,6 +879,7 @@ export function ReadView({
       ) : (
       <div
         className="shrink-0 border-r overflow-y-auto p-2 scrollbar-thin"
+        ref={attachToc}
         style={{ width: toc.width }}
       >
         <div className="mb-3 flex items-center justify-between px-2">

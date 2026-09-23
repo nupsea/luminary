@@ -791,7 +791,8 @@ export function ChatConversation({
       )}
       <div className="flex h-full flex-col flex-1 min-w-0">
       {/* Header controls */}
-      <div className="sticky top-0 z-20 flex items-center gap-2 border-b border-border bg-background/80 px-6 py-2.5 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
+      {/* Wraps: docked beside a document the row is narrower than its controls. */}
+      <div className={`sticky top-0 z-20 flex flex-wrap items-center gap-2 border-b border-border bg-background/80 ${isPage ? "px-6" : "px-3"} py-2.5 backdrop-blur-md supports-[backdrop-filter]:bg-background/60`}>
         {isPage && canGoBack && (
           <button
             onClick={goBack}
@@ -854,7 +855,7 @@ export function ChatConversation({
           />
         )}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {/* Direct mode -- per-question toggle (ask model directly without grounding) */}
           <button
             onClick={() => setDirectEnabled((prev) => !prev)}

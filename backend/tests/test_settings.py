@@ -24,30 +24,6 @@ from app.services.settings_service import (
     update_llm_settings,
 )
 
-# In-memory keyring backend for tests
-
-
-class _InMemoryKeyring(keyring.backend.KeyringBackend):
-    """Simple in-memory keyring backend — no OS interaction in tests."""
-
-    priority = 100
-
-    def __init__(self):
-        self._store: dict[tuple[str, str], str] = {}
-
-    def set_password(self, service, username, password):
-        self._store[(service, username)] = password
-
-    def get_password(self, service, username):
-        return self._store.get((service, username))
-
-    def delete_password(self, service, username):
-        key = (service, username)
-        if key not in self._store:
-            raise keyring.errors.PasswordDeleteError("not found")
-        del self._store[key]
-
-
 # Fixtures
 
 
@@ -79,16 +55,6 @@ async def test_db(tmp_path, monkeypatch):
 
     # Restore cache to defaults after test
     svc_module._cache.update(_DEFAULTS)
-
-
-@pytest.fixture(autouse=True)
-def in_memory_keyring():
-    """Replace the OS keyring with a clean in-memory backend for each test."""
-    backend = _InMemoryKeyring()
-    keyring.set_keyring(backend)
-    yield backend
-    # Reset to system default after test
-    keyring.core._keyring_backend = None  # noqa: SLF001
 
 
 # Tests

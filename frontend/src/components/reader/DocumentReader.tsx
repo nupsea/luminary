@@ -188,7 +188,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   const sectionListRef = useRef<HTMLDivElement>(null)
   const readerContainerRef = useRef<HTMLDivElement>(null)
-  const insights = useResizablePanel({
+  const { attachPanel: attachInsights, ...insights } = useResizablePanel({
     storageKey: "luminary-reader-insights",
     defaultWidth: 460,
     minWidth: 280,
@@ -1729,6 +1729,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             draft. */}
         <div
           className={`flex shrink-0 flex-col overflow-hidden ${insightsCollapsed ? "hidden" : ""}`}
+          ref={attachInsights}
           style={{ width: insights.width }}
         >
           <div className="flex items-center gap-1 border-b border-border px-3 py-2">

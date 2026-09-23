@@ -203,7 +203,7 @@ class HybridRetriever:
         try:
             svc = _vector_store_module.get_lancedb_service()
             # Check if any vectors exist before running a search.
-            if svc.count_for_document(document_ids[0] if document_ids else "") == 0:
+            if not document_ids or svc.count_for_document(document_ids[0]) == 0:
                 # Table may be empty or doc not yet indexed; check total row count.
                 try:
                     table = svc._get_table()

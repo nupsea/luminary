@@ -15,7 +15,7 @@ export interface EnrichmentQueue {
 const ACTIVE_POLL_MS = 5_000
 const IDLE_POLL_MS = 20_000
 
-export function EnrichmentStatusPill() {
+export function EnrichmentStatus() {
   const { data } = useQuery({
     queryKey: ["enrichment-queue"],
     queryFn: () => apiGet<EnrichmentQueue>("/enrichment/queue"),
@@ -29,23 +29,22 @@ export function EnrichmentStatusPill() {
   const remaining = data.pending + data.running
   const docs = data.documents_active
 
+  const label = `Enriching ${docs} ${docs === 1 ? "document" : "documents"}, ${remaining} ${remaining === 1 ? "task" : "tasks"} left`
+
+  // In the nav rail: it runs for minutes, and floating over a page it covered
+  // the PDF pager at the foot and page toolbars at the top.
   return (
     <div
-      className="pointer-events-auto flex items-center gap-3 rounded-xl border border-border bg-background/95 px-4 py-3 shadow-lg backdrop-blur-md"
-      style={{ minWidth: 320, maxWidth: 420 }}
+      className="flex flex-col items-center gap-0.5"
+      title={`${label}. Figures and diagrams are read by a local model.`}
       role="status"
       aria-live="polite"
     >
-      <Sparkles className="h-5 w-5 shrink-0 animate-pulse text-primary" aria-hidden />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-sm font-semibold text-foreground">
-          Enriching {docs} {docs === 1 ? "document" : "documents"}
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {remaining} {remaining === 1 ? "task" : "tasks"} left &middot; figures and diagrams
-          are read by a local model
-        </span>
-      </div>
+      <Sparkles className="h-4 w-4 animate-pulse text-primary" aria-hidden />
+      <span className="text-[9px] font-medium tabular-nums text-sidebar-foreground/70" aria-hidden>
+        {remaining}
+      </span>
+      <span className="sr-only">{label}</span>
     </div>
   )
 }

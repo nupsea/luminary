@@ -319,7 +319,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     // mode we invert the canvas to a dark page by default; the user can toggle it
     // off for figure-heavy pages, where inversion turns photos into negatives.
     const isDark = useIsDark()
-    const toc = useResizablePanel({
+    const { attachPanel: attachToc, ...toc } = useResizablePanel({
       storageKey: "luminary-pdf-toc",
       defaultWidth: 224,
       minWidth: 160,
@@ -394,6 +394,14 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const [declaredLabels, setDeclaredLabels] = useState<string[] | null>(null)
     // What the overlay currently shows, so an identical redraw is skipped.
     const lastHighlightRef = useRef("")
+
+    // Memoized: the search effects depend on it, and a new identity per render
+    // re-ran them every render -- an update loop that starved route changes.
+    const goToPage = useCallback((n: number) => {
+      const clamped = Math.max(1, Math.min(n, totalPages))
+      setCurrentPage(clamped)
+      setPageInput(String(clamped))
+    }, [totalPages])
 
     // Expose goToPage for parent (section list page-jump badges)
     useImperativeHandle(
@@ -736,7 +744,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         // "Cannot use the same canvas during multiple render() operations".
         for (const task of activeRenderTasks) task.cancel()
       }
-    }, [pdfDoc, currentPage, zoom, totalPages, loadStatus])
+    }, [pdfDoc, currentPage, zoom, totalPages, loadStatus, goToPage])
 
     // Notify parent of page changes
     useEffect(() => {
@@ -756,12 +764,6 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       }
       applyPdfHighlights(textDiv, overlayDiv, annotations, currentPage, sections)
     }, [textLayerVersion, currentPage, annotations, highlightsVisible, sections])
-
-    function goToPage(n: number) {
-      const clamped = Math.max(1, Math.min(n, totalPages))
-      setCurrentPage(clamped)
-      setPageInput(String(clamped))
-    }
 
     // Go to the page holding the cited passage.
     //
@@ -786,8 +788,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         if (!cancelled && page !== null) goToPage(page)
       })
       return () => { cancelled = true }
-    // goToPage is a stable declaration recreated each render; adding it would
-    // re-run the scan on every render.
+    // goToPage changes when the page count arrives; that must not re-run the scan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pdfDoc, citationWords, citationPage, initialPage])
 
@@ -869,7 +870,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           // Set initial match index to first match if not yet set
           setGlobalMatchIndex((prev) => {
             if (prev < 0 && matches.length > 0) {
-              if (matches[0].page !== currentPage) goToPage(matches[0].page)
+              goToPage(matches[0].page)
               return 0
             }
             return prev
@@ -878,7 +879,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         // Yield to main thread between batches to keep UI responsive
         await new Promise((resolve) => setTimeout(resolve, 50))
       }
-    }, [extractPageText, currentPage, goToPage])
+    }, [extractPageText, goToPage])
 
     // Settle the typed text before searching on it. 250ms matches the page
     // field: long enough that a word is typed as one query, short enough that
@@ -904,7 +905,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       setGlobalMatches(cached)
       if (cached.length > 0) {
         setGlobalMatchIndex(0)
-        if (cached[0].page !== currentPage) goToPage(cached[0].page)
+        goToPage(cached[0].page)
       }
 
       // Then progressively extract remaining pages. Once the whole document is
@@ -914,7 +915,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       if (pageTextCacheRef.current.size >= pdfDoc.numPages) {
         setGlobalMatchIndex((prev) => {
           if (prev < 0 && cached.length > 0) {
-            if (cached[0].page !== currentPage) goToPage(cached[0].page)
+            goToPage(cached[0].page)
             return 0
           }
           return prev
@@ -929,7 +930,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           setGlobalMatches(all)
           setGlobalMatchIndex((prev) => {
             if (prev < 0 && all.length > 0) {
-              if (all[0].page !== currentPage) goToPage(all[0].page)
+              goToPage(all[0].page)
               return 0
             }
             return prev
@@ -938,7 +939,9 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       })()
 
       return () => { cancelled = true }
-    }, [searchQuery, searchOpen, pdfDoc, extractAllPages, currentPage, goToPage])
+    // Not on currentPage: turning a page must not restart the search or jump back
+    // to its first match.
+    }, [searchQuery, searchOpen, pdfDoc, extractAllPages, goToPage])
 
     // Size the page to the pane. Measured from the page itself rather than a
     // remembered number, so every mode stays correct after the panel is resized.
@@ -980,13 +983,22 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const fitToWidth = useCallback(() => void fitTo("width"), [fitTo])
 
     // Refit on resize: opening the insights panel, dragging its divider, or the
-    // window changing all alter the room the page has to be legible in.
+    // window changing all alter the room the page has to be legible in. Debounced,
+    // since a refit re-renders the page. The border box, because a scrollbar the
+    // fit toggles shrinks the content box and would refit again, in a loop.
     useEffect(() => {
       const el = scrollAreaRef.current
       if (!el || zoomMode !== "readable" || !pdfDoc) return
-      const observer = new ResizeObserver(() => void fitTo("readable"))
-      observer.observe(el)
-      return () => observer.disconnect()
+      let timer = 0
+      const observer = new ResizeObserver(() => {
+        window.clearTimeout(timer)
+        timer = window.setTimeout(() => void fitTo("readable"), 150)
+      })
+      observer.observe(el, { box: "border-box" })
+      return () => {
+        window.clearTimeout(timer)
+        observer.disconnect()
+      }
     }, [zoomMode, pdfDoc, fitTo])
     const fitToPage = useCallback(() => void fitTo("page"), [fitTo])
 
@@ -1129,6 +1141,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         ) : (
         <div
           className="shrink-0 border-r overflow-y-auto p-2"
+          ref={attachToc}
           style={{ width: toc.width }}
         >
           <div className="mb-2 flex items-center justify-between px-1">
@@ -1246,7 +1259,9 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             />
           )}
           {/* Canvas scroll area */}
-          <div ref={scrollAreaRef} className="flex-1 overflow-auto p-4">
+          {/* Stable gutter: the width a page is fitted to must not depend on whether
+              that page then needs a vertical scrollbar. */}
+          <div ref={scrollAreaRef} className="flex-1 overflow-auto p-4 [scrollbar-gutter:stable]">
             <div className="relative" style={{ width: "fit-content", marginInline: "auto" }}>
               {/* Canvas: pointer-events:none so the text layer receives all mouse events.
                   The filter lives on the canvas alone -- putting it on the parent would

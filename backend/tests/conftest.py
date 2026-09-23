@@ -20,11 +20,42 @@ import warnings
 from pathlib import Path
 from unittest.mock import patch
 
+import keyring
+import keyring.backend
+import keyring.errors
 import pytest
 import pytest_asyncio
 
 # Filter aiosqlite DeprecationWarning for Python 3.12+ datetime adapter
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="aiosqlite")
+
+
+class _InMemoryKeyring(keyring.backend.KeyringBackend):
+    priority = 100
+
+    def __init__(self):
+        self._store: dict[tuple[str, str], str] = {}
+
+    def set_password(self, service, username, password):
+        self._store[(service, username)] = password
+
+    def get_password(self, service, username):
+        return self._store.get((service, username))
+
+    def delete_password(self, service, username):
+        if (service, username) not in self._store:
+            raise keyring.errors.PasswordDeleteError("not found")
+        del self._store[(service, username)]
+
+
+@pytest.fixture(autouse=True)
+def in_memory_keyring():
+    """Every test gets an in-memory keyring: a real one wrote test keys into the
+    developer's login keychain under the app's own service name."""
+    backend = _InMemoryKeyring()
+    keyring.set_keyring(backend)
+    yield backend
+    keyring.core._keyring_backend = None  # noqa: SLF001
 
 
 @pytest.fixture(scope="session", autouse=True)

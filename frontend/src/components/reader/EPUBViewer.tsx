@@ -41,7 +41,7 @@ interface EPUBViewerProps {
 }
 
 export function EPUBViewer({ documentId }: EPUBViewerProps) {
-  const tocPanel = useResizablePanel({
+  const { attachPanel: attachTocPanel, ...tocPanel } = useResizablePanel({
     storageKey: "luminary-epub-toc",
     defaultWidth: 224,
     minWidth: 160,
@@ -129,6 +129,7 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
       ) : (
       <div
         className="shrink-0 border-r border-border flex flex-col overflow-hidden"
+        ref={attachTocPanel}
         style={{ width: tocPanel.width }}
       >
         <div className="flex items-center justify-between px-3 py-2 border-b border-border">

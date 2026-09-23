@@ -49,6 +49,13 @@ export function useResizablePanel({
   const [collapsed, setCollapsed] = useState(initial.collapsed)
   const [dragging, setDragging] = useState(false)
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null)
+  // During a drag the width goes straight to this element, once per frame, and
+  // reaches state only on release: a state update per pointermove re-rendered
+  // the whole reader and dropped the drag to a few frames a second.
+  const panelEl = useRef<HTMLDivElement | null>(null)
+  const attachPanel = useCallback((el: HTMLDivElement | null) => {
+    panelEl.current = el
+  }, [])
 
   useEffect(() => {
     writeSnapshot(storageKey, { width, collapsed })
@@ -65,14 +72,22 @@ export function useResizablePanel({
 
   useEffect(() => {
     if (!dragging) return
+    let live = dragState.current?.startWidth ?? minWidth
+    let frame = 0
     const onMove = (e: PointerEvent) => {
       const state = dragState.current
       if (!state) return
       const delta = side === "left" ? state.startX - e.clientX : e.clientX - state.startX
-      setWidth(Math.min(maxWidth, Math.max(minWidth, state.startWidth + delta)))
+      live = Math.min(maxWidth, Math.max(minWidth, state.startWidth + delta))
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        if (panelEl.current) panelEl.current.style.width = `${live}px`
+      })
     }
     const stop = () => {
       dragState.current = null
+      setWidth(live)
       setDragging(false)
     }
     window.addEventListener("pointermove", onMove)
@@ -81,6 +96,7 @@ export function useResizablePanel({
     const priorSelect = document.body.style.userSelect
     document.body.style.userSelect = "none"
     return () => {
+      if (frame) cancelAnimationFrame(frame)
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", stop)
       document.body.style.userSelect = priorSelect
@@ -89,5 +105,5 @@ export function useResizablePanel({
 
   const toggle = useCallback(() => setCollapsed(c => !c), [])
 
-  return { width, collapsed, dragging, toggle, onPointerDown }
+  return { width, collapsed, dragging, toggle, onPointerDown, attachPanel }
 }
