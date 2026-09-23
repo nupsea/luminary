@@ -158,7 +158,7 @@ Dictation worked under `tauri dev`, which inherits the terminal's grant and skip
 CPython maps `os.kill` onto TerminateProcess for everything but `CTRL_C_EVENT`/`CTRL_BREAK_EVENT`, which reach only console processes, so `os.kill(parent_pid, 0)` kills the shell it asks about and `os.kill(os.getpid(), SIGTERM)` skips `lifespan`. Branch, do not port: `OpenProcess` plus `GetExitCodeProcess` to ask, `signal.raise_signal` to stop. Found by reading CPython's contract, not an incident. `tests/test_parent_watch.py` pins both platforms.
 
 **I-56. Reported RAM is installed RAM minus reservations on every OS but macOS, so every site that converts it to GB rounds up.**
-A 16 GiB AWS g4dn.xlarge reported 15GB and was refused local inference (#139): all five readers truncated (`memory_profile.host_ram_gb`, `install.sh`, `install.ps1`, `bootstrap.sh`, `supervisor.rs`), and macOS's exact `hw.memsize` hid it. The reported figure never exceeds installed, so rounding up errs safely (Docker's 7.7 GiB VM is 8, still refused). `test_host_support.py::test_the_floor_reads_the_bytes_the_os_reports` and `test_installer_models.py::test_every_ram_reader_rounds_up` guard it.
+A 16 GiB AWS g4dn.xlarge reported 15GB and was refused local inference (#139): all five readers truncated (`memory_profile.host_ram_gb`, `install.sh`, `install.ps1`, `bootstrap.sh`, `supervisor.rs`), and macOS's exact `hw.memsize` hid it. `get-luminary.sh` and `get-luminary.ps1` read it too, to refuse before the download. The reported figure never exceeds installed, so rounding up errs safely (Docker's 7.7 GiB VM is 8, still refused). `test_host_support.py::test_the_floor_reads_the_bytes_the_os_reports` and `test_installer_models.py::test_every_ram_reader_rounds_up` guard it.
 
 ## Retired numbers
 

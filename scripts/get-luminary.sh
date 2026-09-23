@@ -12,6 +12,7 @@
 # LUMINARY_FORMAT=appimage  skip apt even where it exists (deb|appimage|auto)
 # LUMINARY_INSTALLER=<file> install a local .deb/.AppImage, no download
 # LUMINARY_NO_LAUNCH=1      install without opening the app
+# LUMINARY_INSTALL_ANYWAY=1 install on a host that cannot run local models, without asking
 set -euo pipefail
 
 REPO="${LUMINARY_REPO:-nupsea/luminary}"
@@ -20,6 +21,13 @@ FORMAT="${LUMINARY_FORMAT:-auto}"
 PREFIX="${LUMINARY_PREFIX:-$HOME/.local}"
 # The AppImage is built on Ubuntu 22.04 and runs only on a glibc this new or newer.
 MIN_GLIBC="2.35"
+# The host checks and message are host_support.local_inference_support's, so a
+# refused machine hears it before the download rather than after.
+# test_get_luminary_script.py fails when they drift.
+MIN_RAM_GB=16
+UNSUPPORTED_MESSAGE="This system isn't supported for running local models at a usable speed. Reading, search, notes and your learner record all work as normal. For answers and flashcards, add your own API key in Settings — or wait for the hosted version of Luminary, which is coming soon."
+# Tests point this at a fake /dev and /proc.
+SYSROOT="${LUMINARY_SYSROOT:-}"
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -44,6 +52,49 @@ glibc_ok() {
     local have
     have="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')"
     [ -n "$have" ] && [ "$(printf '%s\n%s\n' "$MIN_GLIBC" "$have" | sort -V | head -1)" = "$MIN_GLIBC" ]
+}
+
+has_accelerator() {
+    case "${CUDA_VISIBLE_DEVICES:-}" in "" | -1) ;; *) return 0 ;; esac
+    local node
+    for node in /dev/nvidiactl /proc/driver/nvidia/version /dev/kfd; do
+        [ -e "$SYSROOT$node" ] && return 0
+    done
+    compgen -G "$SYSROOT/dev/nvidia[0-9]*" >/dev/null
+}
+
+# Rounded up (I-56); 0 when unreadable, which is not a refusal on its own.
+ram_gb() {
+    local kb
+    kb="$(awk '/^MemTotal:/ {print $2; exit}' "$SYSROOT/proc/meminfo" 2>/dev/null)" || true
+    echo $(( (${kb:-0} + 1048575) / 1048576 ))
+}
+
+check_host() {
+    local declared why="" ram answer=""
+    declared="$(printf %s "${LUMINARY_HOST_SUPPORTED:-}" | tr "[:upper:]" "[:lower:]")"
+    case "$declared" in 1 | true | yes) return ;; esac
+    if ! has_accelerator; then
+        why="no NVIDIA or AMD graphics card was found"
+    else
+        ram="$(ram_gb)"
+        if [ "$ram" -gt 0 ] && [ "$ram" -lt "$MIN_RAM_GB" ]; then
+            why="this machine has ${ram}GB of memory; local models need ${MIN_RAM_GB}GB"
+        fi
+    fi
+    [ -z "$why" ] && return
+    printf '\n%s\n(%s)\n\n' "$UNSUPPORTED_MESSAGE" "$why" >&2
+    if [ "${LUMINARY_INSTALL_ANYWAY:-0}" = 1 ]; then
+        say "Installing anyway for reading, search and notes"
+        return
+    fi
+    # Under `curl | bash` stdin is this script, so the answer comes from the terminal.
+    if (: </dev/tty) 2>/dev/null; then
+        printf 'Install anyway for reading, search and notes? [y/N] ' >&2
+        read -r answer </dev/tty || true
+    fi
+    case "$answer" in [yY] | [yY][eE][sS]) return ;; esac
+    die "not installed. To install for reading, search and notes, run again with LUMINARY_INSTALL_ANYWAY=1"
 }
 
 release_json() {
@@ -154,6 +205,8 @@ case "$FORMAT" in
     *) die "LUMINARY_FORMAT must be deb, appimage or auto (got '$FORMAT')" ;;
 esac
 [ "$FORMAT" = deb ] && ! can_use_apt && die "the .deb needs apt-get and sudo; try LUMINARY_FORMAT=appimage"
+
+check_host
 
 if [ -n "${LUMINARY_INSTALLER:-}" ]; then
     [ -f "$LUMINARY_INSTALLER" ] || die "no such file: $LUMINARY_INSTALLER"

@@ -73,7 +73,7 @@ jobs:
       - name: Install the .deb and open it
         run: |
           deb="$(ls src-tauri/target/release/bundle/deb/*.deb)"
-          LUMINARY_INSTALLER="$deb" LUMINARY_FORMAT=deb LUMINARY_NO_LAUNCH=1 bash scripts/get-luminary.sh
+          LUMINARY_HOST_SUPPORTED=1 LUMINARY_INSTALLER="$deb" LUMINARY_FORMAT=deb LUMINARY_NO_LAUNCH=1 bash scripts/get-luminary.sh
           exe="$(dpkg -L "$(dpkg-deb -f "$deb" Package)" | grep '^/usr/bin/' | head -1)"
           SCREENSHOT=build/linux-deb.png xvfb-run -a -s "-screen 0 1440x900x24" \
             bash scripts/desktop/verify_installed.sh "$exe"
@@ -93,7 +93,7 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
           appimage="$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
-          LUMINARY_INSTALLER="$appimage" LUMINARY_FORMAT=appimage LUMINARY_NO_LAUNCH=1 bash scripts/get-luminary.sh
+          LUMINARY_HOST_SUPPORTED=1 LUMINARY_INSTALLER="$appimage" LUMINARY_FORMAT=appimage LUMINARY_NO_LAUNCH=1 bash scripts/get-luminary.sh
           SCREENSHOT=build/linux-appimage.png xvfb-run -a -s "-screen 0 1440x900x24" \
             bash scripts/desktop/verify_installed.sh "$HOME/.local/bin/luminary"
 
@@ -181,12 +181,14 @@ jobs:
         run: cd src-tauri && ../frontend/node_modules/.bin/tauri build --verbose
 
       # Windows PowerShell 5.1, the shell a user's `irm | iex` runs in, not pwsh.
+      # The runner has no GPU, so the host check is declared past as an operator would.
       - name: Install through get-luminary.ps1
         shell: powershell
         run: |
           $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
           $env:LUMINARY_INSTALLER = $setup.FullName
           $env:LUMINARY_NO_LAUNCH = "1"
+          $env:LUMINARY_HOST_SUPPORTED = "1"
           ./scripts/get-luminary.ps1
 
       # `|| true`: one root is missing and find would kill the step under -e.

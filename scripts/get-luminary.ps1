@@ -9,6 +9,7 @@
 # $env:LUMINARY_VERSION = "0.13.2"   a specific release instead of the latest
 # $env:LUMINARY_INSTALLER = "<file>"  install a local setup .exe, no download
 # $env:LUMINARY_NO_LAUNCH = "1"       install without opening the app
+# $env:LUMINARY_INSTALL_ANYWAY = "1"  install on a host that cannot run local models, without asking
 #
 # Errors throw rather than exit: under `irm | iex`, exit closes the user's window.
 
@@ -18,6 +19,56 @@ $ProgressPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 function Write-Step([string]$message) { Write-Host "==> $message" }
+
+# The host checks and message are host_support.local_inference_support's, so a
+# refused machine hears it before the download rather than after.
+# test_get_luminary_script.py fails when they drift. The dash is a [char] because
+# Windows PowerShell 5.1 reads a BOM-less script as ANSI.
+$MinRamGB = 16
+$UnsupportedMessage = "This system isn't supported for running local models at a usable speed. Reading, search, notes and your learner record all work as normal. For answers and flashcards, add your own API key in Settings $([char]0x2014) or wait for the hosted version of Luminary, which is coming soon."
+
+function Test-Accelerator {
+    $visible = "$env:CUDA_VISIBLE_DEVICES".Trim()
+    if ($visible -and $visible -ne "-1") { return $true }
+    $root = if ($env:SYSTEMROOT) { $env:SYSTEMROOT } else { "C:\Windows" }
+    $system32 = Join-Path $root "System32"
+    if (Test-Path (Join-Path $system32 "nvcuda.dll")) { return $true }
+    if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { return $true }
+    return (Test-Path (Join-Path $system32 "amdhip64.dll"))
+}
+
+# Rounded up (I-56); 0 when unreadable, which is not a refusal on its own.
+function Get-RamGB {
+    try { return [int][math]::Ceiling((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB) }
+    catch { return 0 }
+}
+
+function Confirm-HostSupport {
+    if ("$env:LUMINARY_HOST_SUPPORTED".Trim().ToLowerInvariant() -in @("1", "true", "yes")) { return }
+    $why = $null
+    if (-not (Test-Accelerator)) {
+        $why = "no NVIDIA or AMD graphics card was found"
+    } else {
+        $ram = Get-RamGB
+        if ($ram -gt 0 -and $ram -lt $MinRamGB) {
+            $why = "this machine has $($ram)GB of memory; local models need $($MinRamGB)GB"
+        }
+    }
+    if (-not $why) { return }
+    Write-Host ""
+    Write-Host $UnsupportedMessage -ForegroundColor Yellow
+    Write-Host "($why)"
+    Write-Host ""
+    if ($env:LUMINARY_INSTALL_ANYWAY -eq "1") {
+        Write-Step "Installing anyway for reading, search and notes"
+        return
+    }
+    if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+        $answer = Read-Host "Install anyway for reading, search and notes? [y/N]"
+        if ($answer -match '^(y|yes)$') { return }
+    }
+    throw "Not installed. To install for reading, search and notes, set `$env:LUMINARY_INSTALL_ANYWAY = `"1`" and run this again."
+}
 
 function Find-LuminaryInstall {
     $keys = @(
@@ -60,6 +111,8 @@ function Install-Luminary {
             throw "Luminary is running. Close it, then run this again; your library is kept."
         }
     }
+
+    Confirm-HostSupport
 
     $work = Join-Path $env:TEMP ("luminary-setup-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $work -Force | Out-Null
