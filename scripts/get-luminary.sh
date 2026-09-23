@@ -122,7 +122,7 @@ install_appimage() {
     (cd "$WORK" && "$target" --appimage-extract '*.png' >/dev/null 2>&1 \
         && "$target" --appimage-extract 'usr/share/icons/*' >/dev/null 2>&1) || true
     local png
-    png="$(find "$WORK/squashfs-root" -maxdepth 1 -name '*.png' 2>/dev/null | head -1)"
+    png="$(find "$WORK/squashfs-root" -maxdepth 1 -name '*.png' 2>/dev/null | head -1)" || true
     if [ -n "$png" ] && cp -L "$png" "$dir/luminary.png" 2>/dev/null; then
         icon="$dir/luminary.png"
     fi
