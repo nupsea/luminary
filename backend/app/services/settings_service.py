@@ -11,6 +11,7 @@ import keyring.errors
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import CloudKeyMissing
 from app.models import SettingsModel
 
 logger = logging.getLogger(__name__)
@@ -490,7 +491,7 @@ def get_effective_routing(background: bool = False) -> tuple[str, str | None]:
     background=False — caller is user-facing and the cloud is the point of hybrid
                        mode (chat, explain, feynman, study, flashcard generation).
 
-    Raises ValueError when cloud routing is active but the API key is missing.
+    Raises CloudKeyMissing when cloud routing is active but the API key is missing.
     """
     mode = _cache["llm_mode"]
 
@@ -506,7 +507,7 @@ def get_effective_routing(background: bool = False) -> tuple[str, str | None]:
     api_key = resolve_provider_api_key(prefix)
 
     if not api_key:
-        raise ValueError(
+        raise CloudKeyMissing(
             f"Cloud LLM key not configured for {provider}. Go to Settings to add your API key."
         )
 

@@ -468,6 +468,39 @@ async def test_generate_endpoint_returns_201(test_db):
     assert data[0]["is_user_edited"] is False
 
 
+async def test_generate_without_cloud_key_is_503_naming_settings(test_db, monkeypatch):
+    """Hybrid mode with no key must tell the user to add one, not crash with a bare 500."""
+    from types import SimpleNamespace
+
+    import app.config as config_module
+    import app.services.settings_service as svc_module
+
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        session.add(_make_chunk(doc_id=doc_id))
+        await session.commit()
+
+    monkeypatch.setattr(
+        config_module,
+        "get_settings",
+        lambda: SimpleNamespace(OPENAI_API_KEY="", ANTHROPIC_API_KEY="", GOOGLE_API_KEY=""),
+    )
+    monkeypatch.setitem(svc_module._cache, "llm_mode", "hybrid")
+    monkeypatch.setitem(svc_module._cache, "cloud_provider", "openai")
+    monkeypatch.setitem(svc_module._cache, "openai_api_key", "")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/flashcards/generate",
+            json={"document_id": doc_id, "scope": "full", "count": 1},
+        )
+
+    assert resp.status_code == 503
+    assert "Go to Settings to add your API key" in resp.json()["detail"]
+
+
 async def test_generate_retries_to_backfill_gated_cards(test_db):
     """When some cards fail the quality gate, extra LLM passes backfill the
     shortfall so the requested count is met."""
