@@ -196,9 +196,9 @@ def under_interactive_pressure() -> bool:
     state = current_state()
     if state is None:
         return False
-    now = time.monotonic()
-    if any(now - seen[0] < _STALE_INTERACTIVE_SECONDS for seen in state.interactive_activity):
+    if _answer_live(state):
         return True
+    now = time.monotonic()
     if state.last_interactive_end <= 0.0:
         return False
     grace = float(_settings().LLM_ADMISSION_GRACE_SECONDS)
@@ -231,6 +231,11 @@ def admission_stats() -> dict[str, float | int | bool]:
         "deferred_seconds": round(state.deferred_seconds, 3),
         "forced_admissions": state.forced_admissions,
     }
+
+
+def _answer_live(state: AdmissionState) -> bool:
+    now = time.monotonic()
+    return any(now - seen[0] < _STALE_INTERACTIVE_SECONDS for seen in state.interactive_activity)
 
 
 def _held_for_interactive(state: AdmissionState, reserve: int) -> bool:
@@ -274,9 +279,12 @@ async def _wait_in_queue(state: AdmissionState, ticket: tuple[int, int]) -> None
     try:
         while held():
             waited = time.monotonic() - started
+            # The starvation guard fires between turns, never into a live answer:
+            # a one-slot runtime serves a forced call ahead of the user's own.
+            bound = _MAX_DEFER_CEILING_SECONDS if _answer_live(state) else max_defer
             # The bound lifts the interactive reserve only, never the width cap:
             # forcing past the width put every long waiter into the runtime queue.
-            if not forced and waited >= max_defer and _held_for_interactive(state, reserve):
+            if not forced and waited >= bound and _held_for_interactive(state, reserve):
                 forced = True
                 state.forced_admissions += 1
                 logger.warning(
