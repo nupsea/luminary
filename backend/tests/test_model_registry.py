@@ -232,29 +232,21 @@ def test_the_suite_reads_the_shipped_defaults_not_a_developer_env_file():
         )
 
 
-# A card's own memory decides the upgrade to the large text model, never RAM
-# alone. 8GB (RTX 4060 laptop) declines 9.67GB; 12GB (RTX 3060/4070) holds it.
-@pytest.mark.parametrize(
-    ("ram_gb", "card_gb", "expected_text"),
-    [
-        (64, 0, "ollama/qwen3.5:4b"),  # no card: 14B answered in 2-4 minutes
-        (32, 8, "ollama/qwen3.5:4b"),
-        (32, 12, "ollama/qwen2.5:14b-instruct"),
-        (16, 24, "ollama/qwen3.5:4b"),  # the card fits, the machine's RAM does not
-    ],
-)
-def test_the_large_text_model_needs_the_card_to_hold_it(ram_gb, card_gb, expected_text):
+# Off Apple Silicon the default text model is qwen3.5:4b whatever the host holds;
+# a larger one is picked in Settings. 14B chosen by RAM on a 64GB machine with no
+# card answered in 2-4 minutes.
+@pytest.mark.parametrize("ram_gb", [16, 32, 64])
+def test_off_apple_silicon_the_text_model_is_never_upgraded(ram_gb):
     from app.model_registry import recommended_assignment
 
-    pair = recommended_assignment(ram_gb, accelerator_bytes=card_gb * 1024**3)
+    pair = recommended_assignment(ram_gb, apple_silicon=False)
     assert pair is not None
-    assert pair[0] == expected_text
+    assert pair[0] == "ollama/qwen3.5:4b"
 
 
-def test_unified_memory_keeps_the_ram_rule():
-    """Apple Silicon has no separate card memory, so nothing changes there."""
+def test_apple_silicon_keeps_the_ram_rule():
     from app.model_registry import recommended_assignment
 
-    pair = recommended_assignment(36, accelerator_bytes=None)
+    pair = recommended_assignment(36, apple_silicon=True)
     assert pair is not None
     assert pair[0] == "ollama/qwen2.5:14b-instruct"

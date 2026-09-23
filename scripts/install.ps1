@@ -352,38 +352,13 @@ Write-Host "[install] ${MemGB}GB RAM -> '$LumProfile' profile (OLLAMA_NUM_PARALL
 # NOTE: try/catch cannot detect native command failure in PS 5.1 -- non-zero
 # exit codes do not throw -- so check $LASTEXITCODE instead.
 $PublicGeneralist = "qwen3.5:4b"
-# The strongest text model, pulled only on `performance`: 9.67GB resident, and it
-# does not read figures, so it is always a second model alongside the reader.
-$LargeTextModel = "qwen2.5:14b-instruct"
-# The band is a policy choice; this is a measurement. The backend keeps its
-# resident set to half of RAM, and this model plus the generalist is 12.88GB, so
-# the pair needs 25.76GB -- 25GB fails and 26GB fits. Below this the installer
-# downloads 9.67GB the backend then refuses to load. Mirrors
-# LARGE_TEXT_MIN_RAM_GB in install.sh; test_installer_models.py fails on drift.
-$LargeTextMinRamGB = 26
-# It must also fit the card's own memory, or it answers from the processor
-# (minutes per answer). Its resident size in MiB: an 8GB card declines it, a
-# 12GB card holds it. Mirrors LARGE_TEXT_MIN_CARD_MIB in install.sh.
-$LargeTextMinCardMiB = 9903
-
-function Get-LargestCardMiB {
-    $smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
-    if (-not $smi) { return 0 }
-    $out = & $smi.Source --query-gpu=memory.total --format=csv,noheader,nounits 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $out) { return 0 }
-    return ($out | ForEach-Object { [int]("$_".Trim()) } | Measure-Object -Maximum).Maximum
-}
-
 $chatModel = $env:LUMINARY_CHAT_MODEL
 $visionModel = $env:LUMINARY_VISION_MODEL
 if (-not $chatModel) {
-    if ($LumProfile -eq "performance" -and $MemGB -ge $LargeTextMinRamGB -and
-        (Get-LargestCardMiB) -ge $LargeTextMinCardMiB) {
-        # The only band with room for a text model that cannot read figures.
-        $chatModel = $LargeTextModel
-    } else {
-        $chatModel = $PublicGeneralist
-    }
+    # Every Windows host starts on the generalist; a larger model is the user's
+    # pick in Settings. RAM alone chose 14B on a 64GB box with no card and
+    # answers took 2-4 minutes. Mirrors model_registry.recommended_assignment.
+    $chatModel = $PublicGeneralist
 }
 # Outside the block above on purpose. While it was nested inside
 # `if (-not $chatModel)`, setting LUMINARY_CHAT_MODEL alone skipped it, and a

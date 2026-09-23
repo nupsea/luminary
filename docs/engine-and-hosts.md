@@ -63,14 +63,12 @@ behind it (#100); do not take a second latency win out of content.
 
 ## Default model on a host
 
-`model_registry.recommended_assignment` upgrades the default text model from `qwen3.5:4b` to
-`qwen2.5:14b-instruct` only where the larger one runs from graphics memory: Apple Silicon by the
-half-of-RAM rule (memory is unified), elsewhere only when the largest NVIDIA card's own memory
-(`host_support.accelerator_memory_bytes`, read from `nvidia-smi`) holds its 9.67GB. An 8GB card
-declines it; a 12GB card holds it. AMD cards and built-in graphics report nothing and keep `qwen3.5:4b`
-until measured. RAM alone chose 14B on a 64GB machine with no card, and answers took 2-4 minutes.
-`install.sh` and `install.ps1` apply the same gate (`LARGE_TEXT_MIN_CARD_MIB`); `test_installer_models.py`
-fails on drift. A user may still pick 14B in Settings.
+Off Apple Silicon the default text model is `qwen3.5:4b` on every host, whatever its RAM or card.
+Any other model is the user's pick in Settings (`configured_chat_override`), never the app's. RAM
+alone chose `qwen2.5:14b-instruct` on a 64GB Windows machine with no card, and answers took 2-4
+minutes. On Apple Silicon `model_registry.recommended_assignment` still upgrades to 14B where it and
+a reader fit in half of unified memory. `install.sh` and `install.ps1` pull the same default;
+`test_installer_models.py` fails on drift.
 
 ## Supported hosts
 

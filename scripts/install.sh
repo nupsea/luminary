@@ -37,11 +37,6 @@ LARGE_TEXT_MODEL="qwen2.5:14b-instruct"
 # would download 9.67GB the backend then refuses to load.
 # test_installer_models.py recomputes this from the registry and fails on drift.
 LARGE_TEXT_MIN_RAM_GB=26
-# Off Apple Silicon the large model must also fit the card's own memory, or it
-# answers from the processor (minutes per answer). Its resident size in MiB:
-# an 8GB card declines it, a 12GB card holds it. Mirrors the backend's
-# `_runs_from_accelerator`; test_installer_models.py fails on drift.
-LARGE_TEXT_MIN_CARD_MIB=9903
 # Used where two models can be resident. Same id as the generalist today: the
 # structural matrix put it ahead of llama3.2 on every metric it measured, and
 # llama3.2 held the default only on an HHEM comparison this repo ruled
@@ -216,19 +211,6 @@ _mem_gb() {
     fi
 }
 
-# Whether the large text model runs from graphics memory: Apple Silicon's is
-# unified, elsewhere it is the largest NVIDIA card's own.
-_card_holds_large_model() {
-    if [ "$OS" = "Darwin" ]; then
-        [ "$(uname -m)" = "arm64" ]
-        return
-    fi
-    command -v nvidia-smi >/dev/null 2>&1 || return 1
-    _mib="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null \
-        | tr -d ' ' | sort -n | tail -1)"
-    [ "${_mib:-0}" -ge "$LARGE_TEXT_MIN_CARD_MIB" ] 2>/dev/null
-}
-
 # 16GB is the supported floor. A smaller machine still installs and runs on
 # `standard`; the backend reports the mismatch rather than narrowing itself to a
 # one-model profile, which is what made the experience fall flat off macOS.
@@ -332,8 +314,10 @@ if [ -z "$CHAT_MODEL" ]; then
         # read figures. Everywhere else one model does both, which is what the
         # backend resolves to -- pulling anything else downloads a model that
         # never loads.
+        # Only Apple Silicon: elsewhere the generalist is the default and a larger
+        # model is the user's pick in Settings (model_registry.recommended_assignment).
         if [ "$PROFILE" = "performance" ] && [ "$(_mem_gb)" -ge "$LARGE_TEXT_MIN_RAM_GB" ] \
-           && _card_holds_large_model; then
+           && [ "$OS" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
             CHAT_MODEL="$LARGE_TEXT_MODEL"
         else
             CHAT_MODEL="$DEFAULT_CHAT_MODEL"

@@ -276,17 +276,18 @@ class TestOneModelServesEveryRole:
         )
         assert model_router.resolve("chat").model == "ollama/qwen2.5:14b-instruct"
 
-    def test_a_host_with_room_upgrades_the_text_model(self, monkeypatch):
+    def test_an_apple_silicon_host_with_room_upgrades_the_text_model(self, monkeypatch):
         """The shipped default is sized for the machine that cannot hold two.
 
-        Above 24GB the extra memory is there to be used: the strongest measured
-        text model plus a reader fits, and leaving the small default in place
-        would spend the band on nothing.
+        Above 24GB of unified memory the strongest measured text model plus a
+        reader fits, and leaving the small default in place would spend the band
+        on nothing.
         """
         from app import memory_profile
         from app.model_registry import TEXT_PREFERENCE
 
         monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 32)
+        monkeypatch.setattr("app.host_support.is_apple_silicon", lambda: True)
         monkeypatch.setattr(
             "app.model_registry.get_settings",
             # An empty `model_fields_set` is the load-bearing half: it means
@@ -300,10 +301,12 @@ class TestOneModelServesEveryRole:
         )
         assert default_chat_model() == TEXT_PREFERENCE[0]
 
-    def test_a_host_without_room_keeps_the_small_default(self, monkeypatch):
+    @pytest.mark.parametrize(("ram_gb", "apple_silicon"), [(16, True), (64, False)])
+    def test_a_host_without_room_keeps_the_small_default(self, monkeypatch, ram_gb, apple_silicon):
         from app import memory_profile
 
-        monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 16)
+        monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: ram_gb)
+        monkeypatch.setattr("app.host_support.is_apple_silicon", lambda: apple_silicon)
         monkeypatch.setattr(
             "app.model_registry.get_settings",
             # An empty `model_fields_set` is the load-bearing half: it means

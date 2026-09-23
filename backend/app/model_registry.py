@@ -313,23 +313,8 @@ def fits_together(models: tuple[ModelProfile, ...], ram_gb: int | None = None) -
     return total <= ram * _GB * _RESIDENT_SET_FRACTION
 
 
-def _runs_from_accelerator(text: ModelProfile, accelerator_bytes: int | None) -> bool:
-    """Whether the text model runs from graphics memory rather than the processor.
-
-    Off Apple Silicon a model larger than the card's own memory answers on the
-    processor: `qwen2.5:14b-instruct` chosen by RAM on a 64GB host with no card
-    took 2-4 minutes per answer. The default model (`GENERALIST_PREFERENCE[0]`)
-    always passes, so this only ever declines an upgrade.
-    """
-    if accelerator_bytes is None:
-        return True
-    if text.id == GENERALIST_PREFERENCE[0]:
-        return True
-    return text.resident_bytes <= accelerator_bytes
-
-
 def recommended_assignment(
-    ram_gb: int | None = None, accelerator_bytes: int | None | Literal["host"] = "host"
+    ram_gb: int | None = None, apple_silicon: bool | None = None
 ) -> tuple[str, str] | None:
     """(text model, vision model) -- the best pair this machine can actually hold.
 
@@ -343,16 +328,20 @@ def recommended_assignment(
     of pairs, the preference order is measured and written down
     (`TEXT_PREFERENCE`, `VISION_PREFERENCE`), and a reader can check the result by
     eye -- which a solver's answer would not allow.
-    """
-    if accelerator_bytes == "host":
-        from app.host_support import accelerator_memory_bytes  # noqa: PLC0415
 
-        accelerator_bytes = accelerator_memory_bytes()
+    Off Apple Silicon the text model is `GENERALIST_PREFERENCE[0]` whatever the
+    machine holds: a larger one is the user's pick in Settings, never ours. RAM
+    alone chose 14B on a 64GB host with no card and answers took 2-4 minutes.
+    """
+    if apple_silicon is None:
+        from app.host_support import is_apple_silicon  # noqa: PLC0415
+
+        apple_silicon = is_apple_silicon()
     for text_id in TEXT_PREFERENCE:
         text = REGISTRY.get(text_id)
         if text is None or not fits_host(text, ram_gb):
             continue
-        if not _runs_from_accelerator(text, accelerator_bytes):
+        if not apple_silicon and text_id != GENERALIST_PREFERENCE[0]:
             continue
         for vision_id in VISION_PREFERENCE:
             vision = REGISTRY.get(vision_id)
