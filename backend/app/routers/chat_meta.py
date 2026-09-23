@@ -197,6 +197,53 @@ def _template_to_items(suggestions: list[str]) -> list[SuggestionItem]:
     return [SuggestionItem(id="", text=s) for s in suggestions]
 
 
+def _topped_up(generated: list[dict], templates: list[str]) -> SuggestionResponse:
+    """Generated suggestions first, then templates until there are 4.
+
+    The history dedup and a small model's own count can leave fewer than 4.
+    """
+    items = [SuggestionItem(**g) for g in generated]
+    seen = {i.text for i in items}
+    for text in templates:
+        if len(items) >= 4:
+            break
+        if text not in seen:
+            items.append(SuggestionItem(id="", text=text))
+            seen.add(text)
+    return SuggestionResponse(suggestions=items)
+
+
+def _doc_templates(
+    doc: DocumentModel, entities: dict[str, list[str]], headings: list[str]
+) -> list[str]:
+    content_type = doc.content_type or "unknown"
+    if content_type == "book":
+        if _book_is_technical(doc.title or "", entities):
+            suggestions = _technical_suggestions(entities, headings)
+        else:
+            suggestions = _book_suggestions(entities, headings)
+    elif content_type in ("tech_book", "tech_article", "code"):
+        suggestions = _technical_suggestions(entities, headings)
+    elif content_type in ("video", "audio"):
+        suggestions = _video_suggestions(entities, headings)
+    else:
+        suggestions = _generic_suggestions(entities, headings)
+
+    fallbacks = [
+        "What are the key takeaways from this document?",
+        "Summarize the main ideas",
+        "What questions should I be asking about this content?",
+        "Help me understand the structure of this document",
+    ]
+    seen = set(suggestions)
+    for fb in fallbacks:
+        if len(suggestions) >= 4:
+            break
+        if fb not in seen:
+            suggestions.append(fb)
+    return suggestions[:4]
+
+
 # NOTE: POST /chat/suggestions/{id}/asked registered BEFORE any /{param} route
 @router.post("/suggestions/{suggestion_id}/asked", status_code=204)
 async def mark_suggestion_asked(
@@ -287,7 +334,7 @@ async def _handle_all_scope(svc) -> SuggestionResponse:  # noqa: ANN001
         )
         if candidates:
             items = await svc.persist_shown(candidates[:4], document_id=None)
-            return SuggestionResponse(suggestions=[SuggestionItem(**i) for i in items])
+            return _topped_up(items, _cross_document_suggestions(shared))
         return SuggestionResponse(
             suggestions=_template_to_items(_cross_document_suggestions(shared))
         )
@@ -359,37 +406,11 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
             )
             if candidates:
                 items = await svc.persist_shown(candidates[:4], document_id=document_id)
-                return SuggestionResponse(suggestions=[SuggestionItem(**i) for i in items])
+                return _topped_up(items, _doc_templates(doc, entities, headings))
     except LLMUnavailableError:
         logger.info("LLM unavailable, falling back to template suggestions for doc=%s", document_id)
 
-    # Fallback to template logic
-    if content_type == "book":
-        if _book_is_technical(doc.title or "", entities):
-            suggestions = _technical_suggestions(entities, headings)
-        else:
-            suggestions = _book_suggestions(entities, headings)
-    elif content_type in ("tech_book", "tech_article", "code"):
-        suggestions = _technical_suggestions(entities, headings)
-    elif content_type in ("video", "audio"):
-        suggestions = _video_suggestions(entities, headings)
-    else:
-        suggestions = _generic_suggestions(entities, headings)
-
-    fallbacks = [
-        "What are the key takeaways from this document?",
-        "Summarize the main ideas",
-        "What questions should I be asking about this content?",
-        "Help me understand the structure of this document",
-    ]
-    seen = set(suggestions)
-    for fb in fallbacks:
-        if len(suggestions) >= 4:
-            break
-        if fb not in seen:
-            suggestions.append(fb)
-
-    return SuggestionResponse(suggestions=_template_to_items(suggestions[:4]))
+    return SuggestionResponse(suggestions=_template_to_items(_doc_templates(doc, entities, headings)))
 
 
 @router.get("/explorations", response_model=list[ExplorationSuggestion])
