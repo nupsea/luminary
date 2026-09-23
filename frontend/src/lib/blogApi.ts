@@ -21,6 +21,7 @@ export interface BlogConfig {
   ahead?: number | null
   existing_slugs: string[]
   url_base: string
+  available_projects?: string[]
 }
 
 export interface BlogPushResult {
@@ -47,6 +48,10 @@ export interface BlogDraft {
   warnings: string[]
   assets: BlogAsset[]
   collision: boolean
+  project?: string | null
+  series?: string | null
+  tags?: string[]
+  featured?: boolean
 }
 
 export interface BlogDraftRequest {
@@ -57,6 +62,10 @@ export interface BlogDraftRequest {
   slug?: string
   updated_date?: string
   hero_image?: string
+  project?: string | null
+  series?: string | null
+  tags?: string[]
+  featured?: boolean
 }
 
 export interface BlogPublishRequest {
@@ -68,6 +77,10 @@ export interface BlogPublishRequest {
   pub_date: string
   updated_date?: string
   hero_image?: string
+  project?: string | null
+  series?: string | null
+  tags?: string[]
+  featured?: boolean
   markdown: string
   mermaid_svgs: Record<string, string>
   overwrite: boolean
@@ -91,6 +104,10 @@ export interface BlogLivePreviewRequest {
   pub_date: string
   updated_date?: string
   hero_image?: string
+  project?: string | null
+  series?: string | null
+  tags?: string[]
+  featured?: boolean
   markdown: string
   mermaid_svgs: Record<string, string>
 }
@@ -160,6 +177,10 @@ export interface BlogPostSummary {
   description: string
   pub_date: string
   updated_date?: string | null
+  project?: string | null
+  series?: string | null
+  tags?: string[]
+  featured?: boolean
   url: string
 }
 
@@ -174,6 +195,10 @@ export interface BlogPostUpdateRequest {
   pub_date: string
   updated_date?: string
   hero_image?: string
+  project?: string | null
+  series?: string | null
+  tags?: string[]
+  featured?: boolean
   body: string
 }
 

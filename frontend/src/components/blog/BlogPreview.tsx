@@ -41,6 +41,9 @@ export function BlogPreview({
   pubDate,
   updatedDate,
   heroImage,
+  project,
+  series,
+  tags = [],
   markdown,
 }: {
   title: string
@@ -48,11 +51,29 @@ export function BlogPreview({
   pubDate: string
   updatedDate?: string
   heroImage?: string
+  project?: string | null
+  series?: string | null
+  tags?: string[]
   markdown: string
 }) {
   return (
     <div className="blog-preview rounded-lg border border-slate-200">
       <article className="mx-auto max-w-3xl px-6 py-10">
+        {(project || series) && (
+          <div className="mb-6 flex items-center justify-end gap-2 flex-wrap text-xs font-mono">
+            {project && (
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-300 dark:border-indigo-500/20">
+                Project: {project} &rarr;
+              </span>
+            )}
+            {series && (
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-medium bg-purple-50 text-purple-700 border border-purple-200 dark:bg-purple-500/10 dark:text-purple-300 dark:border-purple-500/20">
+                Series: {series}
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="mb-8 text-center">
           <div className="mb-3 text-slate-500">
             <time>{formatHeaderDate(pubDate)}</time>
@@ -66,6 +87,20 @@ export function BlogPreview({
           {description && (
             <p className="mx-auto max-w-2xl text-xl text-slate-600">{description}</p>
           )}
+
+          {tags && tags.length > 0 && (
+            <div className="mt-4 flex items-center justify-center flex-wrap gap-1.5">
+              {tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="text-xs font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:border-slate-700/60"
+                >
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          )}
+
           <hr className="mt-6 border-slate-200" />
         </div>
         {heroImage && (

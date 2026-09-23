@@ -90,6 +90,10 @@ export function BlogPublishDialog({
   const [updatedDate, setUpdatedDate] = useState("")
   const [heroImage, setHeroImage] = useState("")
   const [subdir, setSubdir] = useState("")
+  const [project, setProject] = useState("")
+  const [series, setSeries] = useState("")
+  const [tags, setTags] = useState("")
+  const [featured, setFeatured] = useState(false)
   const [body, setBody] = useState("")
 
   const [mermaidSvgs, setMermaidSvgs] = useState<Record<string, string>>({})
@@ -126,6 +130,10 @@ export function BlogPublishDialog({
         setDescription(d.description)
         setSlug(d.slug)
         setPubDate(d.pub_date)
+        setProject(d.project ?? (kind === "blog" ? "Luminary" : ""))
+        setSeries(d.series ?? "")
+        setTags((d.tags ?? []).join(", "))
+        setFeatured(d.featured ?? false)
         setBody(initialBody ?? d.markdown)
         setMermaidSvgs(await renderMermaidSvgs(noteContent))
       } catch (err) {
@@ -188,6 +196,11 @@ export function BlogPublishDialog({
     }
   }
 
+  const parsedTags = useMemo(
+    () => tags.split(",").map((t) => t.trim()).filter(Boolean),
+    [tags],
+  )
+
   async function handleLivePreview() {
     setLivePreviewing(true)
     try {
@@ -200,6 +213,10 @@ export function BlogPublishDialog({
           pub_date: pubDate,
           updated_date: updatedDate || undefined,
           hero_image: heroImage || undefined,
+          project: project || undefined,
+          series: series || undefined,
+          tags: parsedTags,
+          featured: featured,
           markdown: body,
           mermaid_svgs: mermaidSvgs,
         },
@@ -227,6 +244,10 @@ export function BlogPublishDialog({
           pub_date: pubDate,
           updated_date: updatedDate || undefined,
           hero_image: heroImage || undefined,
+          project: project || undefined,
+          series: series || undefined,
+          tags: parsedTags,
+          featured: featured,
           markdown: body,
           mermaid_svgs: mermaidSvgs,
           overwrite: collision,
@@ -377,6 +398,55 @@ export function BlogPublishDialog({
                   />
                 </Field>
 
+                {kind === "blog" && (
+                  <>
+                    <Field label="Project (optional)">
+                      <input
+                        list="blog-available-projects"
+                        value={project}
+                        onChange={(e) => setProject(e.target.value)}
+                        placeholder="e.g. Luminary"
+                        className={inputCls}
+                      />
+                      <datalist id="blog-available-projects">
+                        {(config?.available_projects ?? ["Luminary"]).map((p) => (
+                          <option key={p} value={p} />
+                        ))}
+                      </datalist>
+                    </Field>
+
+                    <Field label="Series (optional)">
+                      <input
+                        value={series}
+                        onChange={(e) => setSeries(e.target.value)}
+                        placeholder="e.g. Luminary Chronicles"
+                        className={inputCls}
+                      />
+                    </Field>
+                  </>
+                )}
+
+                <Field label="Tags (comma-separated)">
+                  <input
+                    value={tags}
+                    onChange={(e) => setTags(e.target.value)}
+                    placeholder="e.g. Luminary, Local AI, RAG"
+                    className={inputCls}
+                  />
+                </Field>
+
+                {kind === "blog" && (
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-foreground pt-1">
+                    <input
+                      type="checkbox"
+                      checked={featured}
+                      onChange={(e) => setFeatured(e.target.checked)}
+                      className="rounded border-input"
+                    />
+                    <span>Featured post (highlighted on site)</span>
+                  </label>
+                )}
+
                 {draft && draft.warnings.length > 0 && (
                   <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
                     <p className="mb-1 font-semibold">Conversion notes</p>
@@ -413,6 +483,9 @@ export function BlogPublishDialog({
                     pubDate={pubDate}
                     updatedDate={updatedDate || undefined}
                     heroImage={heroImage || undefined}
+                    project={project || undefined}
+                    series={series || undefined}
+                    tags={parsedTags}
                     markdown={previewMarkdown}
                   />
                 }
