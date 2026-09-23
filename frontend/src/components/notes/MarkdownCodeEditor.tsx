@@ -36,6 +36,8 @@ import {
 import { liveMarkdown } from "./liveMarkdown"
 import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { slashCommandSource, type SlashCommandConfig } from "./slashCommands"
+import { toast } from "sonner"
+import { logger } from "@/lib/logger"
 
 export interface MarkdownEditorHandle {
   insertBlock: (markdown: string) => void
@@ -172,6 +174,40 @@ const mdHighlight = HighlightStyle.define([
   { tag: t.labelName, color: "hsl(var(--primary))" },
 ])
 
+function extractImageFile(dataTransfer: DataTransfer | null): File | null {
+  if (!dataTransfer) return null
+
+  // 1. Check files list (standard for image files and desktop screenshot paste)
+  const files = dataTransfer.files
+  if (files && files.length > 0) {
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i]
+      if (f.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(f.name)) {
+        return f
+      }
+    }
+  }
+
+  // 2. Check items list
+  const items = dataTransfer.items
+  if (items && items.length > 0) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.type.startsWith("image/") || item.kind === "file") {
+        const file = item.getAsFile()
+        if (
+          file &&
+          (file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file.name))
+        ) {
+          return file
+        }
+      }
+    }
+  }
+
+  return null
+}
+
 export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeEditorProps>(
   function MarkdownCodeEditor(
     { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live, onEditDiagram },
@@ -302,21 +338,47 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
                 latest.current.onScroll?.()
               },
               paste: (event, v) => {
-                const items = event.clipboardData?.items
                 const handler = latest.current.onPasteImage
-                if (!items || !handler) return false
-                for (let i = 0; i < items.length; i++) {
-                  if (!items[i].type.startsWith("image")) continue
-                  const file = items[i].getAsFile()
-                  if (!file) continue
+                if (!handler) return false
+
+                const file = extractImageFile(event.clipboardData)
+                if (file) {
                   event.preventDefault()
                   handler(file)
                     .then((md) => {
                       v.dispatch(insertInlineSpec(v.state, md))
                     })
-                    .catch(() => {})
+                    .catch((err) => {
+                      toast.error("Failed to upload pasted image")
+                      logger.warn("Failed to upload pasted image", err)
+                    })
                   return true
                 }
+
+                // If no file was found in event.clipboardData, check if navigator.clipboard has an image
+                // (only when no text is being pasted, so we do not interfere with text paste)
+                const hasText = Boolean(event.clipboardData?.getData("text/plain")?.trim())
+                if (!hasText && typeof navigator !== "undefined" && navigator.clipboard?.read) {
+                  navigator.clipboard
+                    .read()
+                    .then(async (clipboardItems) => {
+                      for (const cItem of clipboardItems) {
+                        for (const type of cItem.types) {
+                          if (type.startsWith("image/")) {
+                            const blob = await cItem.getType(type)
+                            const fallbackFile = new File([blob], "screenshot.png", { type })
+                            const md = await handler(fallbackFile)
+                            v.dispatch(insertInlineSpec(v.state, md))
+                            return
+                          }
+                        }
+                      }
+                    })
+                    .catch(() => {
+                      // Clipboard read permission denied or no image; ignore
+                    })
+                }
+
                 return false
               },
             }),

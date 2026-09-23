@@ -107,6 +107,11 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
 
     if ext == ".json" and filename.endswith(".excalidraw.json"):
         ext = ".excalidraw.json"
+    elif not ext and content_type.startswith("image/"):
+        subtype = content_type.split("/")[-1].split("+")[0].lower()
+        if subtype == "jpeg":
+            subtype = "jpg"
+        ext = f".{subtype}" if subtype in {"png", "jpg", "gif", "webp", "svg", "bmp"} else ".png"
     unique_filename = f"{uuid.uuid4()}{ext}"
     target_path = notes_img_dir / unique_filename
 
