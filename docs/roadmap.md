@@ -343,8 +343,9 @@ learner record stay local in every mode and are reported as such by `llm_routing
 hosted embedder is a full re-embed behind I-9, not a setting, and routing extraction or reranking to a
 provider would put document text rather than a question on the wire.
 
-**Carried to 0.13.1** (0.13.0 shipped with the Linux T4 first run, `make ci`, `verify-dock` and
-`verify-citation` green; these were not run or not fixed):
+**Still open after 0.13.1** (0.13.1 carried reader and keychain fixes only; 0.13.0 shipped with the
+Linux T4 first run, `make ci`, `verify-dock` and `verify-citation` green; these were not run or not
+fixed):
 
 - A first run of the 0.13.0 installer on a real Windows machine, and `make smoke` there. CI installs
   it, ingests and searches (`desktop-installers.yml`); nothing has run the app past that.

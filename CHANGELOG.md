@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-09-23
+
+### Fixed
+- **With a PDF open, the nav rail and "Open full note" did nothing.** The PDF viewer re-ran its search effects on every render, an update loop that starved route changes; `goToPage` is now stable.
+- **The PDF page flickered at some pane widths when macOS shows scroll bars always.** Fitting the page toggled its own scrollbar, which refit it again; the fit now measures the border box, with a stable gutter.
+- **Dragging a reader divider stuttered.** The width is applied once per frame and committed on release, instead of re-rendering the reader on every pointer move.
+- **The docked chat header was cut off beside a document**; its controls now wrap.
+- **The enrichment status covered the PDF pager.** It is now an icon with a task count in the nav rail.
+- **The test suite could write API keys into the developer's login keychain**, which made the desktop app ask for keychain access again. Every test now gets an in-memory keyring.
+
 ## [0.13.0] - 2026-09-22
 
 ### Added
