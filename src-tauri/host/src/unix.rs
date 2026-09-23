@@ -95,6 +95,28 @@ pub fn on_termination(on_signal: impl FnOnce(i32) + Send + 'static) -> std::io::
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+pub fn end_with_appimage_runtime() {
+    let Some(image) = std::env::var_os("APPIMAGE").and_then(|p| std::fs::canonicalize(p).ok())
+    else {
+        return;
+    };
+    // SAFETY: getppid, prctl and raise take no pointers.
+    let parent = unsafe { libc::getppid() };
+    // Only when the runtime itself is the parent (extract-and-run). Under FUSE
+    // the parent is the desktop launcher, which may exit the moment it spawns us.
+    if std::fs::read_link(format!("/proc/{parent}/exe")).ok() != Some(image) {
+        return;
+    }
+    unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) };
+    if unsafe { libc::getppid() } != parent {
+        unsafe { libc::raise(libc::SIGTERM) };
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn end_with_appimage_runtime() {}
+
 pub fn describe_exit(status: ExitStatus) -> String {
     use std::os::unix::process::ExitStatusExt;
 

@@ -418,6 +418,9 @@ fn main() {
                 sup.shutdown();
                 handle.exit(0);
             });
+            if installed.is_ok() {
+                luminary_host::end_with_appimage_runtime();
+            }
             if let Err(e) = installed {
                 logging::write(
                     "shell",

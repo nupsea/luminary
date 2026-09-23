@@ -119,3 +119,14 @@ pub fn describe_exit(status: ExitStatus) -> String {
 pub fn on_termination(on_signal: impl FnOnce(i32) + Send + 'static) -> std::io::Result<()> {
     sys::on_termination(on_signal)
 }
+
+/// Deliver SIGTERM to this process when the AppImage runtime that launched it
+/// dies. Call after [`on_termination`].
+///
+/// Run with `--appimage-extract-and-run` (how an AppImage runs without FUSE),
+/// the runtime is the parent and does not forward a signal it receives, so
+/// killing the app by its pid used to leave the shell and its children running.
+/// A no-op everywhere else.
+pub fn end_with_appimage_runtime() {
+    sys::end_with_appimage_runtime();
+}

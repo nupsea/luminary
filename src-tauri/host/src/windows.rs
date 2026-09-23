@@ -197,6 +197,8 @@ pub fn on_termination(_on_signal: impl FnOnce(i32) + Send + 'static) -> std::io:
     Ok(())
 }
 
+pub fn end_with_appimage_runtime() {}
+
 pub fn describe_exit(status: ExitStatus) -> String {
     // No signals here, so there is no second case to report.
     match status.code() {
