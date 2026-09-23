@@ -10,6 +10,7 @@
 
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+smoke_requires_repo_toolchain
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"

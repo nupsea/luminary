@@ -9,6 +9,7 @@
 # 2. POST /qa with scope='all' summary query — asserts HTTP 200, non-empty answer
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+smoke_requires_local_model
 
 # ---- Ingest two small documents so scope='all' retrieval has content ----
 echo "Sherlock Holmes examined the room carefully. The mystery deepened each moment." > "$SMOKE_TMP/smoke_s83_a.txt"

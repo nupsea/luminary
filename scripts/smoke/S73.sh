@@ -19,6 +19,7 @@
 #   3. no taxonomy term has crept back in
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+smoke_requires_repo_toolchain
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$(cd "$SCRIPT_DIR/../../backend" && pwd)"

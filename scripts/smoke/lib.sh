@@ -61,6 +61,31 @@ smoke_requires_internet() {
     fi
 }
 
+# smoke_requires_repo_toolchain: the script runs the repo's own Python through uv rather
+# than calling the server, so a machine with only the installed app skips it.
+smoke_requires_repo_toolchain() {
+    if ! command -v uv >/dev/null 2>&1; then
+        echo "SKIP: runs the repo's Python through uv, which this machine does not have"
+        exit "$SMOKE_SKIP"
+    fi
+}
+
+# smoke_requires_local_model: skip when the server refuses local inference on its host
+# and is in Local mode. The refusal itself is the product working; it is not a pass.
+smoke_requires_local_model() {
+    local refused mode
+    refused="$(curl -sf --max-time 10 "$BASE/setup/host-support" | python3 -c \
+        'import json, sys; d = json.load(sys.stdin); print("" if d.get("supported") else d.get("reason") or "refused")' \
+        2>/dev/null || true)"
+    [ -n "$refused" ] || return 0
+    mode="$(curl -sf --max-time 10 "$BASE/settings/llm" | python3 -c \
+        'import json, sys; print(json.load(sys.stdin).get("mode", ""))' 2>/dev/null || true)"
+    if [ "$mode" = "private" ]; then
+        echo "SKIP: this host refuses local inference ($refused) and the server is in Local mode"
+        exit "$SMOKE_SKIP"
+    fi
+}
+
 # smoke_wait_complete <document_id>: poll until stage=complete; fail on error or 404.
 # Long deadline: ingestion queues behind earlier scripts' LLM calls (#142).
 smoke_wait_complete() {
