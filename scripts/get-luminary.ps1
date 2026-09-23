@@ -72,7 +72,11 @@ function Install-Luminary {
             $version = if ($env:LUMINARY_VERSION) { $env:LUMINARY_VERSION } else { "latest" }
             $api = "https://api.github.com/repos/$repo/releases/latest"
             if ($version -ne "latest") { $api = "https://api.github.com/repos/$repo/releases/tags/v$($version.TrimStart('v'))" }
-            $release = Invoke-RestMethod -Uri $api -Headers @{ Accept = "application/vnd.github+json" }
+            if ($env:LUMINARY_RELEASE_JSON) {
+                $release = Get-Content $env:LUMINARY_RELEASE_JSON -Raw | ConvertFrom-Json
+            } else {
+                $release = Invoke-RestMethod -Uri $api -Headers @{ Accept = "application/vnd.github+json" }
+            }
 
             $asset = Get-ReleaseAsset $release "Luminary_*_x64-setup.exe"
             if (-not $asset) { throw "Release $($release.tag_name) has no Windows installer; it may predate one." }
