@@ -109,3 +109,13 @@ pub fn kill_stale_tree(pid: i32, group_id: i32) {
 pub fn describe_exit(status: ExitStatus) -> String {
     sys::describe_exit(status)
 }
+
+/// Run `on_signal` once, on a dedicated thread, when the shell is told to end
+/// (SIGTERM, SIGINT, SIGHUP on unix).
+///
+/// Without it the default action kills the shell outright and the children it
+/// started outlive it -- logout, `kill`, or a package upgrade left
+/// `llama-server` running. A no-op on Windows, where the job object covers it.
+pub fn on_termination(on_signal: impl FnOnce(i32) + Send + 'static) -> std::io::Result<()> {
+    sys::on_termination(on_signal)
+}

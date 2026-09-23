@@ -9,6 +9,7 @@ rust-version = "1.77"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+signal-hook = "0.4.4"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

@@ -76,6 +76,25 @@ pub fn executable_of(pid: i32) -> Option<String> {
     (!path.is_empty()).then_some(path)
 }
 
+pub fn on_termination(on_signal: impl FnOnce(i32) + Send + 'static) -> std::io::Result<()> {
+    use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
+
+    let mut signals = signal_hook::iterator::Signals::new([SIGTERM, SIGINT, SIGHUP])?;
+    std::thread::Builder::new()
+        .name("termination".into())
+        .spawn(move || {
+            let mut on_signal = Some(on_signal);
+            // Keeps the handlers registered, so a repeat signal during the
+            // bounded drain is absorbed rather than killing the shell mid-way.
+            for signal in signals.forever() {
+                if let Some(run) = on_signal.take() {
+                    run(signal);
+                }
+            }
+        })?;
+    Ok(())
+}
+
 pub fn describe_exit(status: ExitStatus) -> String {
     use std::os::unix::process::ExitStatusExt;
 

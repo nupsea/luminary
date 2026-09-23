@@ -410,6 +410,21 @@ fn main() {
                 .disable_drag_drop_handler()
                 .build()?;
 
+            // Drained here rather than via `RunEvent::Exit`, which a signal
+            // never delivers; the Exit arm then finds no children.
+            let (handle, sup) = (app.handle().clone(), for_setup.clone());
+            let installed = luminary_host::on_termination(move |signal| {
+                logging::write("shell", &format!("signal {signal} received, stopping"));
+                sup.shutdown();
+                handle.exit(0);
+            });
+            if let Err(e) = installed {
+                logging::write(
+                    "shell",
+                    &format!("no signal handler, a kill will orphan children: {e}"),
+                );
+            }
+
             start_boot(app.handle().clone(), for_setup.clone());
             Ok(())
         })
