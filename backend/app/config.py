@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     #       (`make luminary`). public: curated learner surfaces only, built SPA
     #       served with the API under /api on one port (no CORS).
     LUMINARY_MODE: Literal["full", "public"] = "full"
+    # Read here as well as from the environment: the desktop shell starts the
+    # backend with a cleared environment, so `.env` in the library is its only way in.
+    LUMINARY_HOST_SUPPORTED: bool = False
     # "Publish note as blog": target Astro content repo + layout. Full-mode-only.
     # Unset by default -- these ship to every installed copy, so they must not
     # carry a developer's home path or site, and an empty repo path leaves the

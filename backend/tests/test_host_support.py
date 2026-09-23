@@ -72,6 +72,21 @@ def test_bare_metal_without_an_accelerator_is_refused_the_same_way(host):
     assert v.reason == "no_accelerator"
 
 
+def test_the_declaration_is_read_from_the_library_env_file(host, monkeypatch, tmp_path):
+    """The desktop shell clears the backend's environment, so `.env` is its only way in."""
+    from app.config import get_settings
+
+    # The shell starts the backend with the library as its working directory.
+    (tmp_path / ".env").write_text("LUMINARY_HOST_SUPPORTED=1\n")
+    monkeypatch.chdir(tmp_path)
+    get_settings.cache_clear()
+    try:
+        v = host("Linux", "x86_64", container=False, accel=False)
+    finally:
+        get_settings.cache_clear()
+    assert v.supported is True
+
+
 def test_a_gpu_does_not_excuse_too_little_memory(host):
     # 16GB is memory_profile._STANDARD_MIN_RAM_GB. Docker Desktop hands its VM
     # roughly half the host, which is how a 16GB Mac presents as 7GB.

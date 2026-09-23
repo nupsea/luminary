@@ -64,7 +64,11 @@ _DECLARED = "LUMINARY_HOST_SUPPORTED"
 
 
 def _declared_supported() -> bool:
-    return os.environ.get(_DECLARED, "").strip().lower() in ("1", "true", "yes")
+    if os.environ.get(_DECLARED, "").strip().lower() in ("1", "true", "yes"):
+        return True
+    from app.config import get_settings  # noqa: PLC0415
+
+    return get_settings().LUMINARY_HOST_SUPPORTED
 
 
 def _in_container() -> bool:
