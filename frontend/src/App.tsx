@@ -33,7 +33,7 @@ import { StudyLauncher } from "./components/StudyLauncher"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
 import { IngestionTrackerProvider } from "./hooks/IngestionTrackerProvider"
-import { EnrichmentStatusPill } from "./components/EnrichmentStatusPill"
+import { EnrichmentStatus } from "./components/EnrichmentStatus"
 import { IngestionProgressPills } from "./components/IngestionProgressPills"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog"
 // All pages are lazy-loaded to reduce the initial bundle and improve tab-switch
@@ -255,7 +255,8 @@ function Sidebar({ mainTabs, devTabs }: { mainTabs: Surface[]; devTabs: Surface[
           )
         })}
         {/* Streak & XP widget */}
-        <div className="mt-auto mb-2">
+        <div className="mt-auto mb-2 flex flex-col items-center gap-3">
+          <EnrichmentStatus />
           <StreakXPWidget />
         </div>
         <div className="flex flex-col items-center gap-2">
@@ -657,7 +658,6 @@ function App() {
               the dev icons and the settings controls at the foot of it. */}
           <div className="pointer-events-none fixed bottom-5 left-[5.75rem] z-40 flex flex-col gap-3">
             <IngestionProgressPills />
-            <EnrichmentStatusPill />
           </div>
           <Toaster position="bottom-right" richColors />
         </IngestionTrackerProvider>
