@@ -52,6 +52,48 @@ def test_render_frontmatter_optional_fields_and_escaping():
         hero_image="/blog/x/h.png",
     )
     assert "updatedDate" in fm2 and "heroImage" in fm2
+    fm3 = blog_service.render_frontmatter(
+        title="t",
+        description="d",
+        pub_date="Jun 15 2026",
+        project="Luminary",
+        series="Luminary Chronicles",
+        tags=["Luminary", "RAG"],
+        featured=True,
+    )
+    assert 'project: "Luminary"' in fm3
+    assert 'series: "Luminary Chronicles"' in fm3
+    assert 'tags: ["Luminary", "RAG"]' in fm3
+    assert "featured: true" in fm3
+
+
+def test_available_projects_discovery(tmp_path):
+    repo = tmp_path / "site"
+    repo.mkdir(parents=True)
+    projects_astro = repo / "src/pages/projects.astro"
+    projects_astro.parent.mkdir(parents=True, exist_ok=True)
+    projects_astro.write_text("""
+        const projectGroups = [
+          {
+            projects: [
+              { name: "Headwater" },
+              { name: "Luminary" },
+              { name: "Fly-O-Myte" }
+            ]
+          }
+        ];
+    """)
+    blog_dir = repo / "src/content/blog"
+    blog_dir.mkdir(parents=True, exist_ok=True)
+    post_text = (
+        '---\ntitle: "c"\ndescription: "d"\npubDate: "Jun 1 2026"\nproject: "dkit"\n---\nbody'
+    )
+    (blog_dir / "custom.md").write_text(post_text)
+    projs = blog_service.available_projects(repo)
+    assert projs[0] == "Luminary"
+    assert "Headwater" in projs
+    assert "Fly-O-Myte" in projs
+    assert "dkit" in projs
 
 
 def test_transform_drops_links_strips_diagrams_registers_assets():
@@ -81,8 +123,8 @@ def test_transform_drops_links_strips_diagrams_registers_assets():
 def test_render_sized_images_floats_small_leaves_others_alone():
     md = (
         "before\n\n"
-        '![Pasted Image|small](/blog/p/asset1.png)\n\n'
-        '![Pasted Image|medium](/blog/p/asset2.png)\n\n'
+        "![Pasted Image|small](/blog/p/asset1.png)\n\n"
+        "![Pasted Image|medium](/blog/p/asset2.png)\n\n"
         "![diagram](/blog/p/diagram1.svg)\n\n"
         "![no size hint](/blog/p/asset3.png)\n"
     )
@@ -99,7 +141,7 @@ def test_render_sized_images_floats_small_leaves_others_alone():
 def test_render_sized_images_escapes_html_special_chars():
     md = '![Alt & <text>|small](/blog/p/a.png?x=1&y="2")\n'
     out = blog_service.render_sized_images(md)
-    assert "alt=\"Alt &amp; &lt;text&gt;\"" in out
+    assert 'alt="Alt &amp; &lt;text&gt;"' in out
     assert "&amp;y=" in out
 
 
@@ -205,10 +247,14 @@ def test_publish_flow_writes_commits_no_push(client, blog_repo):
     ).json()["id"]
 
     cfg = client.get("/blog/config").json()
-    assert cfg["is_git_repo"] is True
+    assert "available_projects" in cfg
+    assert "Luminary" in cfg["available_projects"]
 
     draft = client.post("/blog/draft", json={"note_id": note_id}).json()
     assert draft["slug"] == "post-one"
+    assert draft["project"] == "Luminary"
+    assert draft["series"] == "Luminary Chronicles"
+    assert draft["tags"] == ["Luminary"]
     assert any(a["kind"] == "mermaid" for a in draft["assets"])
     assert "/blog/post-one/diagram1.svg" in draft["markdown"]
 
@@ -220,6 +266,10 @@ def test_publish_flow_writes_commits_no_push(client, blog_repo):
             "title": draft["title"],
             "description": "A short description.",
             "pub_date": draft["pub_date"],
+            "project": draft["project"],
+            "series": draft["series"],
+            "tags": draft["tags"],
+            "featured": False,
             "markdown": draft["markdown"],
             "mermaid_svgs": {"mermaid-1": "<svg xmlns='http://www.w3.org/2000/svg'></svg>"},
             "overwrite": False,
@@ -231,7 +281,11 @@ def test_publish_flow_writes_commits_no_push(client, blog_repo):
     assert data["pushed"] is False
     assert "push origin master" in data["push_hint"]
 
+    written_post = (blog_repo / "src/content/blog/post-one.md").read_text()
     assert (blog_repo / "src/content/blog/post-one.md").exists()
+    assert 'project: "Luminary"' in written_post
+    assert 'series: "Luminary Chronicles"' in written_post
+    assert 'tags: ["Luminary"]' in written_post
     assert (blog_repo / "public/blog/post-one/diagram1.svg").exists()
 
     # second publish without overwrite -> 409
@@ -317,12 +371,20 @@ def test_posts_list_get_update_delete_lifecycle(client, blog_repo):
             "title": "Alpha v2",
             "description": "a2",
             "pub_date": "Jun 1 2026",
+            "project": "Luminary",
+            "series": "Chronicles",
+            "tags": ["AI", "Local"],
+            "featured": True,
             "body": "new body",
         },
     )
     assert upd.status_code == 200 and upd.json()["pushed"] is False
     reread = client.get("/blog/posts/alpha").json()
     assert reread["title"] == "Alpha v2" and reread["body"].strip() == "new body"
+    assert reread["project"] == "Luminary"
+    assert reread["series"] == "Chronicles"
+    assert reread["tags"] == ["AI", "Local"]
+    assert reread["featured"] is True
 
     # delete commits the removal (no push); 404 afterwards
     dele = client.request("DELETE", "/blog/posts/beta")
@@ -565,9 +627,7 @@ def test_refine_forwards_model_override_when_given(client, monkeypatch):
     monkeypatch.setattr(llm_module, "get_llm_service", lambda: _FakeLLM())
     note_id = client.post("/notes", json={"content": "rough text", "tags": []}).json()["id"]
 
-    resp = client.post(
-        "/blog/refine", json={"note_id": note_id, "model": "ollama/qwen3.5:4b"}
-    )
+    resp = client.post("/blog/refine", json={"note_id": note_id, "model": "ollama/qwen3.5:4b"})
     assert resp.status_code == 200
     assert seen["model"] == "ollama/qwen3.5:4b"
 

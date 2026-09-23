@@ -5,7 +5,7 @@
  * (both commit locally; the user pushes). Shown in the Notes page "Blogs" view.
  */
 
-import { Suspense, lazy, useState } from "react"
+import { Suspense, lazy, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ExternalLink, Loader2, Pencil, Send, Sparkles, Trash2 } from "lucide-react"
 import { toast } from "sonner"
@@ -45,6 +45,7 @@ function formatDate(value: string): string {
 export function BlogsPanel() {
   const qc = useQueryClient()
   const [kind, setKind] = useState<BlogKind>("blog")
+  const [selectedProject, setSelectedProject] = useState<string>("all")
   const [editing, setEditing] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
   const [publishing, setPublishing] = useState<string | null>(null)
@@ -102,6 +103,21 @@ export function BlogsPanel() {
 
   const posts = data ?? []
 
+  const availableProjects = useMemo(() => {
+    const projs = new Set<string>()
+    for (const p of posts) {
+      if (p.project) projs.add(p.project)
+    }
+    return Array.from(projs)
+  }, [posts])
+
+  const visiblePosts = useMemo(() => {
+    if (selectedProject === "all") return posts
+    return posts.filter(
+      (p) => (p.project || "").toLowerCase() === selectedProject.toLowerCase(),
+    )
+  }, [posts, selectedProject])
+
   let content: React.ReactNode
   if (isLoading) {
     content = (
@@ -148,13 +164,28 @@ export function BlogsPanel() {
   } else {
     content = (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {posts.map((post: BlogPostSummary) => (
+        {visiblePosts.map((post: BlogPostSummary) => (
           <div
             key={post.slug}
             className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4"
           >
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
               <span className="flex-1">{formatDate(post.pub_date)}</span>
+              {post.project && (
+                <span className="inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[10px] font-medium bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                  {post.project}
+                </span>
+              )}
+              {post.series && (
+                <span className="hidden sm:inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[10px] font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                  {post.series}
+                </span>
+              )}
+              {post.featured && (
+                <span className="inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  Featured
+                </span>
+              )}
               <a
                 href={post.url}
                 target="_blank"
@@ -186,6 +217,18 @@ export function BlogsPanel() {
               </h3>
             </button>
             <p className="line-clamp-3 text-sm text-muted-foreground">{post.description}</p>
+            {post.tags && post.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {post.tags.map((t) => (
+                  <span
+                    key={t}
+                    className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                  >
+                    #{t}
+                  </span>
+                ))}
+              </div>
+            )}
             <code className="mt-auto truncate rounded bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground">
               {post.slug}.md
             </code>
@@ -226,6 +269,7 @@ export function BlogsPanel() {
               key={k}
               onClick={() => {
                 setKind(k)
+                setSelectedProject("all")
                 setConfirming(null)
               }}
               className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
@@ -245,6 +289,39 @@ export function BlogsPanel() {
           <PushBlogButton />
         </div>
       </div>
+
+      {kind === "blog" && availableProjects.length > 0 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs font-mono scrollbar-none">
+          <button
+            onClick={() => setSelectedProject("all")}
+            className={`rounded-full px-2.5 py-1 transition-colors cursor-pointer ${
+              selectedProject === "all"
+                ? "bg-primary text-primary-foreground font-semibold"
+                : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            All Projects ({posts.length})
+          </button>
+          {availableProjects.map((proj) => {
+            const count = posts.filter(
+              (p) => (p.project || "").toLowerCase() === proj.toLowerCase(),
+            ).length
+            return (
+              <button
+                key={proj}
+                onClick={() => setSelectedProject(proj)}
+                className={`rounded-full px-2.5 py-1 transition-colors cursor-pointer ${
+                  selectedProject.toLowerCase() === proj.toLowerCase()
+                    ? "bg-indigo-600 text-white font-semibold"
+                    : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
+              >
+                {proj} ({count})
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {draftRows.length > 0 && (
         <section className="flex flex-col gap-2">

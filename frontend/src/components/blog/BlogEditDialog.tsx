@@ -21,6 +21,7 @@ import { ApiError } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import {
   deleteBlogPost,
+  getBlogConfig,
   getBlogPost,
   updateBlogPost,
   KIND_SINGULAR,
@@ -69,12 +70,23 @@ export function BlogEditDialog({
   const [pubDate, setPubDate] = useState("")
   const [updatedDate, setUpdatedDate] = useState("")
   const [heroImage, setHeroImage] = useState("")
+  const [project, setProject] = useState("")
+  const [series, setSeries] = useState("")
+  const [tags, setTags] = useState("")
+  const [featured, setFeatured] = useState(false)
   const [body, setBody] = useState("")
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [result, setResult] = useState<BlogPublishResult | null>(null)
   const qc = useQueryClient()
+
+  const { data: config } = useQuery({
+    queryKey: ["blog-config", kind],
+    queryFn: () => getBlogConfig(kind),
+    enabled: open,
+    staleTime: 10_000,
+  })
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["blog-post", kind, slug],
@@ -93,6 +105,11 @@ export function BlogEditDialog({
     [body, slug, kind],
   )
 
+  const parsedTags = useMemo(
+    () => tags.split(",").map((t) => t.trim()).filter(Boolean),
+    [tags],
+  )
+
   useEffect(() => {
     if (!data) return
     setTitle(data.title)
@@ -100,6 +117,10 @@ export function BlogEditDialog({
     setPubDate(data.pub_date)
     setUpdatedDate(data.updated_date ?? "")
     setHeroImage(data.hero_image ?? "")
+    setProject(data.project ?? "")
+    setSeries(data.series ?? "")
+    setTags((data.tags ?? []).join(", "))
+    setFeatured(data.featured ?? false)
     setBody(data.body)
   }, [data])
 
@@ -114,6 +135,10 @@ export function BlogEditDialog({
           pub_date: pubDate,
           updated_date: updatedDate || undefined,
           hero_image: heroImage || undefined,
+          project: project || undefined,
+          series: series || undefined,
+          tags: parsedTags,
+          featured: featured,
           body,
         },
         kind,
@@ -194,6 +219,56 @@ export function BlogEditDialog({
                 <Field label="Hero image URL (optional)">
                   <input value={heroImage} onChange={(e) => setHeroImage(e.target.value)} placeholder="/blog/…/hero.png" className={inputCls} />
                 </Field>
+
+                {kind === "blog" && (
+                  <>
+                    <Field label="Project (optional)">
+                      <input
+                        list="edit-available-projects"
+                        value={project}
+                        onChange={(e) => setProject(e.target.value)}
+                        placeholder="e.g. Luminary"
+                        className={inputCls}
+                      />
+                      <datalist id="edit-available-projects">
+                        {(config?.available_projects ?? ["Luminary"]).map((p) => (
+                          <option key={p} value={p} />
+                        ))}
+                      </datalist>
+                    </Field>
+
+                    <Field label="Series (optional)">
+                      <input
+                        value={series}
+                        onChange={(e) => setSeries(e.target.value)}
+                        placeholder="e.g. Luminary Chronicles"
+                        className={inputCls}
+                      />
+                    </Field>
+                  </>
+                )}
+
+                <Field label="Tags (comma-separated)">
+                  <input
+                    value={tags}
+                    onChange={(e) => setTags(e.target.value)}
+                    placeholder="e.g. Luminary, Local AI, RAG"
+                    className={inputCls}
+                  />
+                </Field>
+
+                {kind === "blog" && (
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-foreground pt-1">
+                    <input
+                      type="checkbox"
+                      checked={featured}
+                      onChange={(e) => setFeatured(e.target.checked)}
+                      className="rounded border-input"
+                    />
+                    <span>Featured post (highlighted on site)</span>
+                  </label>
+                )}
+
                 <p className="break-all rounded bg-muted/50 px-2 py-1 font-mono text-[11px] text-muted-foreground">
                   src/content/{kind}/{slug}.md
                 </p>
@@ -221,6 +296,9 @@ export function BlogEditDialog({
                   pubDate={pubDate}
                   updatedDate={updatedDate || undefined}
                   heroImage={heroImage || undefined}
+                  project={project || undefined}
+                  series={series || undefined}
+                  tags={parsedTags}
                   markdown={previewBody}
                 />
               }
