@@ -410,7 +410,8 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
     except LLMUnavailableError:
         logger.info("LLM unavailable, falling back to template suggestions for doc=%s", document_id)
 
-    return SuggestionResponse(suggestions=_template_to_items(_doc_templates(doc, entities, headings)))
+    templates = _doc_templates(doc, entities, headings)
+    return SuggestionResponse(suggestions=_template_to_items(templates))
 
 
 @router.get("/explorations", response_model=list[ExplorationSuggestion])
