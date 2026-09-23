@@ -123,6 +123,7 @@ async def get_blog_config(kind: str = "blog") -> BlogConfigResponse:
         url_base=get_settings().LUMINARY_BLOG_URL_BASE,
         existing_slugs=sorted(blog_service.existing_slugs(content_dir)),
         ahead=ahead,
+        available_projects=blog_service.available_projects(repo),
         **health,
     )
 
@@ -140,6 +141,25 @@ async def create_draft(
     pub_date = req.pub_date or blog_service.format_pub_date(datetime.now(UTC))
     description = req.description or ""
 
+    project = req.project
+    series = req.series
+    tags = list(req.tags)
+    featured = req.featured
+
+    if kind == "blog":
+        if project is None:
+            project = "Luminary"
+        if series is None and (project or "").lower() == "luminary":
+            series = "Luminary Chronicles"
+        if not tags:
+            clean_note_tags = [t for t in (note.tags or []) if t.lower() != "blog"]
+            tags = clean_note_tags or ["Luminary"]
+    elif kind == "thoughts":
+        project = None
+        series = None
+        if not tags:
+            tags = [t for t in (note.tags or []) if t.lower() != "thoughts"]
+
     draft = blog_service.transform_note_to_blog(note.content, slug, kind)
     frontmatter = blog_service.render_frontmatter(
         title=title,
@@ -147,6 +167,10 @@ async def create_draft(
         pub_date=pub_date,
         updated_date=req.updated_date,
         hero_image=req.hero_image,
+        project=project,
+        series=series,
+        tags=tags,
+        featured=featured,
     )
     return BlogDraftResponse(
         slug=slug,
@@ -158,6 +182,10 @@ async def create_draft(
         warnings=draft.warnings,
         assets=[BlogAssetItem(**a.__dict__) for a in draft.assets],
         collision=slug in blog_service.existing_slugs(_content_dir(kind)),
+        project=project,
+        series=series,
+        tags=tags,
+        featured=featured,
     )
 
 
@@ -271,6 +299,10 @@ async def publish(
             pub_date=req.pub_date,
             updated_date=updated_date,
             hero_image=req.hero_image,
+            project=req.project,
+            series=req.series,
+            tags=req.tags,
+            featured=req.featured,
         )
         body = blog_service.render_sized_images(req.markdown.strip())
         blog_service.write_text_file(md_path, f"{frontmatter}\n\n{body}\n")
@@ -367,6 +399,10 @@ async def update_post(
             pub_date=req.pub_date,
             updated_date=req.updated_date,
             hero_image=req.hero_image,
+            project=req.project,
+            series=req.series,
+            tags=req.tags,
+            featured=req.featured,
         )
         sized_body = blog_service.render_sized_images(body.strip())
         blog_service.write_text_file(md_path, f"{frontmatter}\n\n{sized_body}\n")
@@ -518,6 +554,10 @@ async def live_preview(
         pub_date=req.pub_date,
         updated_date=req.updated_date,
         hero_image=req.hero_image,
+        project=req.project,
+        series=req.series,
+        tags=req.tags,
+        featured=req.featured,
     )
     # The edited body references /<kind>/<real-slug>/...; rewrite to the preview
     # slug so its assets resolve under the preview asset dir.

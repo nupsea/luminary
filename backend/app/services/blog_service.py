@@ -13,6 +13,7 @@ All registered assets are rewritten to ``/blog/<slug>/<file>`` references.
 """
 
 import asyncio
+import logging
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -20,6 +21,8 @@ from datetime import date, datetime
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 # [[<uuid>|display text]] wiki-link between Luminary notes -- no public target.
 _NOTE_LINK_RE = re.compile(r"\[\[[0-9a-fA-F-]+\|[^\]]+\]\]")
@@ -135,6 +138,16 @@ def _meta_str(value: object) -> str | None:
     return str(value)
 
 
+def _parse_tags(value: object) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(t).strip() for t in value if str(t).strip()]
+    if isinstance(value, str):
+        return [t.strip() for t in value.split(",") if t.strip()]
+    return []
+
+
 def parse_frontmatter(text: str) -> tuple[dict, str]:
     """Split `---`-delimited YAML frontmatter from the markdown body."""
     if text.startswith("---"):
@@ -154,6 +167,10 @@ def _summarize_post(path: Path) -> dict:
         "description": str(meta.get("description") or ""),
         "pub_date": _meta_str(meta.get("pubDate")) or "",
         "updated_date": _meta_str(meta.get("updatedDate")),
+        "project": _meta_str(meta.get("project")),
+        "series": _meta_str(meta.get("series")),
+        "tags": _parse_tags(meta.get("tags")),
+        "featured": bool(meta.get("featured", False)),
     }
 
 
@@ -181,6 +198,10 @@ def read_post(content_dir: Path, slug: str) -> dict:
         "pub_date": _meta_str(meta.get("pubDate")) or "",
         "updated_date": _meta_str(meta.get("updatedDate")),
         "hero_image": _meta_str(meta.get("heroImage")),
+        "project": _meta_str(meta.get("project")),
+        "series": _meta_str(meta.get("series")),
+        "tags": _parse_tags(meta.get("tags")),
+        "featured": bool(meta.get("featured", False)),
         "body": body,
     }
 
@@ -196,6 +217,10 @@ def render_frontmatter(
     pub_date: str,
     updated_date: str | None = None,
     hero_image: str | None = None,
+    project: str | None = None,
+    series: str | None = None,
+    tags: list[str] | None = None,
+    featured: bool = False,
 ) -> str:
     lines = [
         "---",
@@ -207,8 +232,46 @@ def render_frontmatter(
         lines.append(f"updatedDate: {_yaml_str(updated_date)}")
     if hero_image:
         lines.append(f"heroImage: {_yaml_str(hero_image)}")
+    if project:
+        lines.append(f"project: {_yaml_str(project)}")
+    if series:
+        lines.append(f"series: {_yaml_str(series)}")
+    clean_tags = [str(t).strip() for t in (tags or []) if str(t).strip()]
+    if clean_tags:
+        rendered_tags = ", ".join(_yaml_str(t) for t in clean_tags)
+        lines.append(f"tags: [{rendered_tags}]")
+    if featured:
+        lines.append("featured: true")
     lines.append("---")
     return "\n".join(lines)
+
+
+def available_projects(repo: Path) -> list[str]:
+    """Discover projects defined in the Astro site's projects.astro and existing posts."""
+    projects: set[str] = {"Luminary"}
+    projects_astro = repo / "src/pages/projects.astro"
+    if projects_astro.is_file():
+        try:
+            content = projects_astro.read_text(encoding="utf-8")
+            names = re.findall(r'name:\s*["\']([^"\']+)["\']', content)
+            projects.update(n.strip() for n in names if n.strip())
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.debug("Failed reading projects.astro: %s", exc)
+
+    blog_dir = repo / "src/content/blog"
+    if blog_dir.is_dir():
+        for p in blog_dir.glob("*.md"):
+            try:
+                meta, _ = parse_frontmatter(p.read_text(encoding="utf-8"))
+                proj = meta.get("project")
+                if proj and isinstance(proj, str) and proj.strip():
+                    projects.add(proj.strip())
+            except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+                logger.debug("Failed reading post %s for project discovery: %s", p, exc)
+
+    others = sorted(p for p in projects if p.lower() != "luminary")
+    luminary_entry = next((p for p in projects if p.lower() == "luminary"), "Luminary")
+    return [luminary_entry, *others]
 
 
 def transform_note_to_blog(content: str, slug: str, kind: str = "blog") -> BlogDraft:

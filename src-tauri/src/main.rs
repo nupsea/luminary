@@ -400,6 +400,12 @@ fn main() {
             render::render_page
         ])
         .setup(move |app| {
+            #[cfg(target_os = "macos")]
+            {
+                let menu = tauri::menu::Menu::default(app.handle())?;
+                app.set_menu(menu)?;
+            }
+
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Luminary")
                 .inner_size(1280.0, 860.0)

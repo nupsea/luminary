@@ -13,6 +13,7 @@ class BlogConfigResponse(BaseModel):
     ahead: int | None = None
     existing_slugs: list[str]
     url_base: str
+    available_projects: list[str] = []
 
 
 class BlogPushResponse(BaseModel):
@@ -29,6 +30,10 @@ class BlogDraftRequest(BaseModel):
     slug: str | None = None
     updated_date: str | None = None
     hero_image: str | None = None
+    project: str | None = None
+    series: str | None = None
+    tags: list[str] = []
+    featured: bool = False
 
 
 class BlogAssetItem(BaseModel):
@@ -49,6 +54,10 @@ class BlogDraftResponse(BaseModel):
     warnings: list[str]
     assets: list[BlogAssetItem]
     collision: bool
+    project: str | None = None
+    series: str | None = None
+    tags: list[str] = []
+    featured: bool = False
 
 
 class SuggestDescriptionRequest(BaseModel):
@@ -83,6 +92,10 @@ class BlogPublishRequest(BaseModel):
     pub_date: str
     updated_date: str | None = None
     hero_image: str | None = None
+    project: str | None = None
+    series: str | None = None
+    tags: list[str] = []
+    featured: bool = False
     markdown: str
     # block key -> rendered SVG string, for mermaid diagrams rendered client-side
     mermaid_svgs: dict[str, str] = {}
@@ -107,6 +120,10 @@ class BlogLivePreviewRequest(BaseModel):
     pub_date: str
     updated_date: str | None = None
     hero_image: str | None = None
+    project: str | None = None
+    series: str | None = None
+    tags: list[str] = []
+    featured: bool = False
     markdown: str
     mermaid_svgs: dict[str, str] = {}
 
@@ -125,6 +142,10 @@ class BlogPostSummary(BaseModel):
     description: str
     pub_date: str
     updated_date: str | None = None
+    project: str | None = None
+    series: str | None = None
+    tags: list[str] = []
+    featured: bool = False
     url: str
 
 
@@ -153,4 +174,8 @@ class BlogPostUpdateRequest(BaseModel):
     pub_date: str
     updated_date: str | None = None
     hero_image: str | None = None
+    project: str | None = None
+    series: str | None = None
+    tags: list[str] = []
+    featured: bool = False
     body: str
