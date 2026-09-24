@@ -6,12 +6,14 @@
 [![Release](https://img.shields.io/github/v/release/nupsea/luminary?label=release)](https://github.com/nupsea/luminary/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-black?logo=apple)](#install)
+[![Windows](https://img.shields.io/badge/Windows-x64-0078D6?logo=windows)](#install)
+[![Linux](https://img.shields.io/badge/Linux-x86__64-FCC624?logo=linux&logoColor=black)](#install)
 [![Runs offline](https://img.shields.io/badge/runs-offline-success)](#it-keeps-working-with-the-wifi-off)
 
  Point it at a book, paper, video or article. Ask it questions and get answers that cite the passage, write down what you understand, turn what matters into flashcards, and let it schedule the review. Nothing ever leaves your machine unless you hand it an API key.
 
 <p align="center">
-  <img src="assets/images/demo.gif" alt="A quick journey in luminary" width="900">
+  <video src="assets/images/demo.mp4" autoplay loop muted playsinline width="100%"></video>
 </p>
 
 <p align="center"><a href="https://youtu.be/semZlbJde_Q"><b>Watch the two-minute tour</b></a></p>
@@ -56,7 +58,38 @@ macOS 14 (Sonoma) or newer.
 > **Speech to text** — which powers audio ingest and voice dictation — is another
 > the app fetches on request, because it carries GPL code Luminary may not ship.
 
-On Linux, Windows, or want it as a background service?
+**Windows 10 or 11 (x64)** — download `Luminary_<version>_x64-setup.exe` from the
+**[releases page](https://github.com/nupsea/luminary/releases)** and run it. It
+installs for your user only, so no administrator prompt. The installer is not yet
+code-signed: if Windows shows *Windows protected your PC*, choose **More info →
+Run anyway**. Or install from PowerShell in one command, which checks your
+machine first and verifies the download:
+
+```powershell
+irm https://raw.githubusercontent.com/nupsea/luminary/master/scripts/get-luminary.ps1 | iex
+```
+
+**Linux (x86_64)** — on Debian or Ubuntu, download `Luminary_<version>_amd64.deb`
+from the **[releases page](https://github.com/nupsea/luminary/releases)** and
+install it with `sudo apt install ./Luminary_<version>_amd64.deb`. On other
+distributions, use the `.AppImage` from the same page. Or install in one command,
+which picks the right one, checks your machine first and verifies the download:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nupsea/luminary/master/scripts/get-luminary.sh | bash
+```
+
+> The Windows download is ~300 MB and installs to ~1.6 GB; the `.deb` is ~670 MB
+> and installs to ~2.1 GB. As on macOS, the models download on first launch. If
+> you already run Ollama, the one-command install can reuse the models it has,
+> and it leaves your Ollama as it is: Luminary runs its own copy on a private port.
+
+To remove the Windows or Linux app, run the same command with
+`LUMINARY_UNINSTALL=1` set (`$env:LUMINARY_UNINSTALL = "1"` in PowerShell). It
+keeps your library unless you type `DELETE`. If an install fails, the command
+saves a report and asks before opening it as an email to the developer.
+
+Want it as a background service, or to build from source?
 **[Every other install path is below.](#other-ways-to-install)**
 
 ### What Luminary needs
@@ -251,10 +284,11 @@ to text** from Settings, and `ffmpeg` from apt for video.
 </details>
 
 <details>
-<summary><b>Windows — native (recommended), or Docker</b></summary>
+<summary><b>Windows — from source, or Docker</b></summary>
 
-**Use the native install.** It installs Ollama for Windows, which uses your GPU
-(CUDA on NVIDIA, ROCm on AMD) with no configuration. The Docker image cannot:
+For most people the [setup `.exe`](#install) is the way to install. From a
+source checkout, use the native script. It installs Ollama for Windows, which
+uses your GPU (CUDA on NVIDIA, ROCm on AMD) with no configuration. The Docker image cannot:
 the compose stack reserves no GPU device, so inference there is **CPU-only on
 every machine**.
 
@@ -322,6 +356,7 @@ server next boots.
 |---|---|
 | One-command script (`bootstrap.sh`) | `luminary update` — re-runs the installer against the latest release |
 | DMG | Download the new DMG and replace the app |
+| Windows `.exe`, Linux `.deb` or `.AppImage` | Run the new release's installer, or the one-command install again. It refuses to install an older version over a newer one |
 | From source | `git pull && make install` — `install.sh` is idempotent |
 | Docker | `git pull && make docker-run-gpu` — it passes `--build`, so this rebuilds |
 
