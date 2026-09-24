@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **The one-command installers remove Luminary too.** `LUMINARY_UNINSTALL=1` deletes only files Luminary wrote. Your library, your models and anything it does not recognise are left in place, listed with the command to delete them.
+- **The one-command installers remove Luminary too.** `LUMINARY_UNINSTALL=1` lists what it will remove and what it keeps, and asks first (`LUMINARY_ASSUME_YES=1` for scripts). It deletes only files Luminary wrote. Your library, your models and anything it does not recognise are left in place, listed with the command to delete them.
+- **Every install ends by saying where the app went, where your library lives and how to remove the app.**
+
+### Changed
+- **The Windows uninstaller asks twice before deleting your library.** Tauri's "Delete the application data" box deleted the whole library with no second prompt. It is now labelled "Also delete my library", and ticking it brings up a confirmation that defaults to No. When the library is kept, the uninstaller says where it is.
 - **Your own Ollama is left as it is, and its models can be reused.** The installer says when it finds one, warns if it is running, and offers to reuse matching models so they are not downloaded again. Every file is checked against its digest.
 - **A failed install saves a report and offers to email it.** User and computer names are removed; your mail app opens with it filled in, and nothing is sent until you press Send.
 

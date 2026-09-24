@@ -13,7 +13,8 @@
 # LUMINARY_INSTALLER=<file> install a local .deb/.AppImage, no download
 # LUMINARY_NO_LAUNCH=1      install without opening the app
 # LUMINARY_INSTALL_ANYWAY=1 install on a host that cannot run local models, without asking
-# LUMINARY_UNINSTALL=1      remove the app; your library is kept, with the commands to delete it
+# LUMINARY_UNINSTALL=1      remove the app, after listing what goes and asking; your library is kept
+# LUMINARY_ASSUME_YES=1     remove without asking, for scripts (the library is still kept)
 # LUMINARY_REUSE_MODELS=1   reuse your own Ollama's models without asking (0: never)
 # LUMINARY_ALLOW_DOWNGRADE=1 install an older version over a newer one
 #
@@ -259,10 +260,13 @@ luminary_pids() {
     done
 }
 
+refuse_if_running() {
+    [ -z "$(luminary_pids app)" ] || refuse "Luminary is running. Close it, then run this again; your library is kept."
+}
+
 stop_leftovers() {
     local pids
-    pids="$(luminary_pids app)"
-    [ -z "$pids" ] || refuse "Luminary is running. Close it, then run this again; your library is kept."
+    refuse_if_running
     pids="$(luminary_pids helpers)"
     [ -n "$pids" ] || return 0
     say "Stopping Luminary's background processes left from an earlier run"
@@ -464,6 +468,14 @@ launch() {
     fi
 }
 
+# What went where and how to undo it, so nobody has to guess what "removing" touches.
+tell_installed() {
+    say "Luminary ${TARGET_VERSION:+$TARGET_VERSION }is installed: $1"
+    printf '    Your library lives in %s: your documents, notes, flashcards,\n' "$DATA_DIR"
+    printf '    reviews, settings and downloaded models. Removing the app keeps it.\n'
+    printf '    To remove the app: %s\n' "$2"
+}
+
 install_deb() {
     local deb="$1" pkg exe
     need_space /usr "$NEED_DEB_MB" "the .deb"
@@ -478,7 +490,7 @@ install_deb() {
     fi
     exe="$(dpkg -L "$pkg" | grep '^/usr/bin/' | head -1)" || true
     [ -n "$exe" ] || die "$pkg installed but no executable was found in /usr/bin"
-    say "Installed. To remove it, run this again with LUMINARY_UNINSTALL=1; your library is kept."
+    tell_installed "the $pkg package ($exe)" "sudo apt remove $pkg   (or this command with LUMINARY_UNINSTALL=1)"
     [ ! -e "$PREFIX/lib/luminary/Luminary.AppImage" ] \
         || say "The AppImage build is installed too, so your menu lists Luminary twice; both open the same library."
     LAUNCH_CMD="$exe"
@@ -531,7 +543,7 @@ Terminal=false
 Categories=Education;Office;
 EOF
     command -v update-desktop-database >/dev/null && update-desktop-database "$apps" 2>/dev/null || true
-    say "Installed to $dir. To remove it, run this again with LUMINARY_UNINSTALL=1; your library is kept."
+    tell_installed "$dir, with a menu entry and the 'luminary' command" "run this command again with LUMINARY_UNINSTALL=1"
     case ":$PATH:" in *":$PREFIX/bin:"*) ;; *) say "Add $PREFIX/bin to PATH to run 'luminary' from a terminal." ;; esac
     [ -z "$(deb_package)" ] || say "The .deb build is installed too, so your menu lists Luminary twice; both open the same library."
     LAUNCH_CMD="$bin"
@@ -547,6 +559,9 @@ install() {
 
     stop_leftovers
     check_host
+    if [ -e "$DATA_DIR" ]; then
+        say "Found your library at $DATA_DIR ($(du -sh "$DATA_DIR" 2>/dev/null | cut -f1)); it is kept and this version opens it."
+    fi
 
     local file
     if [ -n "${LUMINARY_INSTALLER:-}" ]; then
@@ -614,28 +629,71 @@ tell_what_was_kept() {
     printf 'To delete it permanently:   rm -rf %q\n' "$DATA_DIR"
 }
 
+# The launcher and menu entry are Luminary's only when they are the ones this wrote.
+our_launcher() { [ -f "$PREFIX/bin/luminary" ] && grep -qF "$PREFIX/lib/luminary/Luminary.AppImage" "$PREFIX/bin/luminary"; }
+our_menu_entry() {
+    [ -f "$PREFIX/share/applications/luminary.desktop" ] \
+        && grep -qxF "Exec=$PREFIX/bin/luminary" "$PREFIX/share/applications/luminary.desktop"
+}
+
+# Lists what the uninstall removes and what it keeps, then asks. Returns 1 when
+# there is nothing to remove.
+confirm_uninstall() {
+    local pkg="$1" answer="" item items=()
+    [ -z "$pkg" ] || items+=("the $pkg package, through apt (asks for your password)")
+    if [ -e "$PREFIX/lib/luminary" ]; then items+=("the app in $PREFIX/lib/luminary"); fi
+    if our_launcher; then items+=("the 'luminary' command in $PREFIX/bin"); fi
+    if our_menu_entry; then items+=("the Luminary entry in your applications menu"); fi
+    if [ -f "$LOG_DIR/luminary.log" ]; then items+=("Luminary's log files in $LOG_DIR"); fi
+    if [ -e "$DATA_DIR/engine" ] || [ -e "$DATA_DIR/engine.new" ]; then
+        items+=("the copy of its engine in $DATA_DIR/engine, which it rebuilds when reinstalled")
+    fi
+    if [ "${#items[@]}" -eq 0 ]; then
+        say "Luminary is not installed here; nothing was removed."
+        return 1
+    fi
+    printf '\nThis removes:\n'
+    for item in "${items[@]}"; do printf '  - %s\n' "$item"; done
+    if [ -e "$DATA_DIR" ] || [ -L "$DATA_DIR" ]; then
+        printf '\nIt does not touch your library at %s (%s):\n' "$DATA_DIR" "$(du -sh "$DATA_DIR" 2>/dev/null | cut -f1)"
+        printf 'your documents, notes, flashcards, reviews, settings (including API keys)\n'
+        printf 'and downloaded models all stay, and reinstalling picks them up again.\n'
+    fi
+    printf '\n'
+    [ "${LUMINARY_ASSUME_YES:-0}" != 1 ] || return 0
+    has_tty || refuse "nothing was removed: there is no terminal to confirm in. To remove Luminary without asking, run again with LUMINARY_ASSUME_YES=1"
+    printf 'Remove Luminary? [y/N] ' >&2
+    read -r answer </dev/tty || true
+    case "$answer" in [yY] | [yY][eE][sS]) return 0 ;; esac
+    say "Nothing was removed."
+    exit 0
+}
+
 uninstall() {
-    local removed="" pkg others entry="$PREFIX/share/applications/luminary.desktop" bin="$PREFIX/bin/luminary"
-    stop_leftovers
+    local pkg others entry="$PREFIX/share/applications/luminary.desktop" bin="$PREFIX/bin/luminary"
+    refuse_if_running
     pkg="$(deb_package)"
     if [ -n "$pkg" ]; then
         # apt also removes whatever depends on a package; remove it only when it goes alone.
         others="$(apt-get -s remove "$pkg" 2>/dev/null | awk '/^Remv / {print $2}' | grep -vxF "$pkg" | paste -sd ' ' -)" || others=""
         [ -z "$others" ] || refuse "removing $pkg would also remove: $others. Nothing was removed. If that is what you want: sudo apt remove $pkg"
+    fi
+    if ! confirm_uninstall "$pkg"; then
+        tell_what_was_kept
+        return 0
+    fi
+    stop_leftovers
+    if [ -n "$pkg" ]; then
         say "Removing the $pkg package with apt (asks for your password once)"
         as_root apt-get remove -y -o DPkg::Lock::Timeout=300 "$pkg" </dev/null || die "apt could not remove $pkg; try: sudo apt remove $pkg"
-        removed=1
     fi
     if [ -e "$PREFIX/lib/luminary" ] || [ -e "$bin" ] || [ -e "$entry" ]; then
         say "Removing the AppImage from $PREFIX/lib/luminary"
         remove_files_then_dir "$PREFIX/lib/luminary" Luminary.AppImage Luminary.AppImage.new luminary.png VERSION
-        # The launcher and menu entry are removed only when they are the ones this wrote.
-        if [ -f "$bin" ] && grep -qF "$PREFIX/lib/luminary/Luminary.AppImage" "$bin"; then rm -f "$bin"; fi
-        if [ -f "$entry" ] && grep -qxF "Exec=$bin" "$entry"; then rm -f "$entry"; fi
+        if our_launcher; then rm -f "$bin"; fi
+        if our_menu_entry; then rm -f "$entry"; fi
         command -v update-desktop-database >/dev/null && update-desktop-database "$PREFIX/share/applications" 2>/dev/null || true
-        removed=1
     fi
-    [ -n "$removed" ] || say "Luminary's app is not installed; cleaning up what an earlier install left."
     # The relocated engine is the app's own copy, rebuilt on its next launch.
     remove_owned "$DATA_DIR/engine"
     remove_owned "$DATA_DIR/engine.new"

@@ -84,10 +84,15 @@ curl -fsSL https://raw.githubusercontent.com/nupsea/luminary/master/scripts/get-
 > you already run Ollama, the one-command install can reuse the models it has,
 > and it leaves your Ollama as it is: Luminary runs its own copy on a private port.
 
-To remove the Windows or Linux app, run the same command with
-`LUMINARY_UNINSTALL=1` set (`$env:LUMINARY_UNINSTALL = "1"` in PowerShell). It
-keeps your library unless you type `DELETE`. If an install fails, the command
-saves a report and asks before opening it as an email to the developer.
+To remove the app, uninstall it like any other: **Settings → Apps → Installed
+apps → Luminary → Uninstall** on Windows, `sudo apt remove luminary` for the
+`.deb`. Or run the one-command install again with `LUMINARY_UNINSTALL=1` set
+(`$env:LUMINARY_UNINSTALL = "1"` in PowerShell), which also covers the AppImage:
+it lists what it will remove and asks first. Uninstalling keeps your library —
+documents, notes, flashcards, settings and models — and prints where it is. The
+Windows uninstaller deletes it only if you tick **Also delete my library** and
+confirm a second time. If an install fails, the command saves a report and asks
+before opening it as an email to the developer.
 
 Want it as a background service, or to build from source?
 **[Every other install path is below.](#other-ways-to-install)**

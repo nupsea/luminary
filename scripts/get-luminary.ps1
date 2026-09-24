@@ -10,7 +10,8 @@
 # $env:LUMINARY_INSTALLER = "<file>"  install a local setup .exe, no download
 # $env:LUMINARY_NO_LAUNCH = "1"       install without opening the app
 # $env:LUMINARY_INSTALL_ANYWAY = "1"  install on a host that cannot run local models, without asking
-# $env:LUMINARY_UNINSTALL = "1"       remove the app; your library is kept, with the commands to delete it
+# $env:LUMINARY_UNINSTALL = "1"       remove the app, after listing what goes and asking; your library is kept
+# $env:LUMINARY_ASSUME_YES = "1"      remove without asking, for scripts (the library is still kept)
 # $env:LUMINARY_REUSE_MODELS = "1"    copy your own Ollama's models without asking ("0": never)
 # $env:LUMINARY_ALLOW_DOWNGRADE = "1" install an older version over a newer one
 #
@@ -253,20 +254,22 @@ function Test-Under([string]$path, [string]$root) {
     return $path.StartsWith($root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Assert-NotRunning([string]$dir) {
+    if (-not $dir) { return }
+    $app = Join-Path $dir $AppExeName
+    if (@(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -ieq $app }).Count -gt 0) {
+        Stop-Luminary "Luminary is running. Close it, then run this again; your library is kept."
+    }
+}
+
 # Refuses while the app's window is open, and stops the backend and engine a crash left
 # behind. Matched by exact executable path, never by name: a user's own `ollama serve`,
 # or anything else installed beside Luminary, survives.
 function Stop-LeftoverProcesses([string]$dir) {
-    $app = $null
+    Assert-NotRunning $dir
     $helpers = @((Join-Path $LibraryDir "engine"), (Join-Path $LibraryDir "engine.new"))
-    if ($dir) {
-        $app = Join-Path $dir $AppExeName
-        if (Test-OwnFolder $dir) { $helpers += @((Join-Path $dir "python"), (Join-Path $dir "ollama")) }
-    }
+    if (Test-OwnFolder $dir) { $helpers += @((Join-Path $dir "python"), (Join-Path $dir "ollama")) }
     $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path })
-    if ($app -and @($procs | Where-Object { $_.Path -ieq $app }).Count -gt 0) {
-        Stop-Luminary "Luminary is running. Close it, then run this again; your library is kept."
-    }
     $ours = @($procs | Where-Object { $p = $_.Path; @($helpers | Where-Object { Test-Under $p $_ }).Count -gt 0 })
     if ($ours.Count -eq 0) { return }
     Write-Step "Stopping Luminary's background processes left from an earlier run"
@@ -466,6 +469,9 @@ function Install-Luminary {
     if ($existing) { Stop-LeftoverProcesses $existing }
 
     Confirm-HostSupport
+    if (Test-Path -LiteralPath $LibraryDir) {
+        Write-Step "Found your library at $LibraryDir ($(Get-SizeText $LibraryDir)); it is kept and this version opens it."
+    }
 
     $work = Join-Path $env:TEMP ("luminary-setup-" + [guid]::NewGuid().ToString("N"))
     try {
@@ -516,7 +522,12 @@ function Install-Luminary {
     if (-not $dir) { throw "The installer finished but Luminary's install folder was not found." }
     $exe = Join-Path $dir $AppExeName
     if (-not (Test-Path -LiteralPath $exe)) { throw "The installer finished but $exe is missing." }
-    Write-Step "Installed to $dir. To remove it, run this again with `$env:LUMINARY_UNINSTALL = `"1`"; your library is kept."
+    $version = "$((Get-LuminaryEntry).DisplayVersion)"
+    Write-Step "Luminary $(if ($version) { "$version " })is installed in $dir"
+    Write-Host "    Your library lives in $($LibraryDir): your documents, notes, flashcards,"
+    Write-Host "    reviews, settings and downloaded models. Removing the app keeps it."
+    Write-Host "    To remove the app: Settings > Apps > Installed apps > Luminary > Uninstall,"
+    Write-Host "    or run this command again with `$env:LUMINARY_UNINSTALL = `"1`"."
     if (-not (Get-WebView2Version)) {
         Write-Warn "Microsoft Edge WebView2, which draws Luminary's window, was not found. If Luminary opens no window, install it from https://go.microsoft.com/fwlink/p/?LinkId=2124703 and open Luminary again."
     }
@@ -653,6 +664,34 @@ function Show-Kept([string[]]$candidates) {
     Write-Host "To delete it permanently:  Remove-Item -LiteralPath $(Format-Quoted $LibraryDir) -Recurse -Force"
 }
 
+# What an uninstall would remove, as lines for the user; empty when nothing is installed.
+function Get-UninstallItems([string]$dir) {
+    if ($dir) { "the app in $dir, its Start menu and desktop shortcuts, and its entry in Settings > Apps" }
+    if (Test-Path -LiteralPath (Join-Path $LogsDir "luminary.log")) { "Luminary's log files in $LogsDir" }
+    if ((Test-Path -LiteralPath (Join-Path $LibraryDir "engine")) -or (Test-Path -LiteralPath (Join-Path $LibraryDir "engine.new"))) {
+        "the copy of its engine in $(Join-Path $LibraryDir "engine"), which it rebuilds when reinstalled"
+    }
+}
+
+# Lists what goes and what stays, then asks; $false when the user says no.
+function Confirm-Uninstall([string[]]$items) {
+    Write-Host ""
+    Write-Host "This removes:"
+    $items | ForEach-Object { Write-Host "  - $_" }
+    if (Test-Path -LiteralPath $LibraryDir) {
+        Write-Host ""
+        Write-Host "It does not touch your library at $LibraryDir ($(Get-SizeText $LibraryDir)):"
+        Write-Host "your documents, notes, flashcards, reviews, settings (including API keys)"
+        Write-Host "and downloaded models all stay, and reinstalling picks them up again."
+    }
+    Write-Host ""
+    if ($env:LUMINARY_ASSUME_YES -eq "1") { return $true }
+    if (-not (Test-Interactive)) {
+        Stop-Luminary "Nothing was removed: there is no one here to confirm. To remove Luminary without asking, set `$env:LUMINARY_ASSUME_YES = `"1`" and run this again."
+    }
+    return ((Read-Host "Remove Luminary? [y/N]") -match '^(y|yes)$')
+}
+
 function Uninstall-Luminary {
     $dir = Find-LuminaryInstall
     if (-not $dir) {
@@ -660,6 +699,18 @@ function Uninstall-Luminary {
         if ($machine) {
             Stop-Luminary "Luminary is installed for all users ($($machine.InstallLocation)), which this does not remove. Remove it from Settings > Apps > Installed apps, as an administrator."
         }
+    }
+    Assert-NotRunning $dir
+    $items = @(Get-UninstallItems $dir)
+    if ($items.Count -eq 0) {
+        Remove-StaleEntries
+        Write-Step "Luminary is not installed here."
+        Show-Kept @()
+        return
+    }
+    if (-not (Confirm-Uninstall $items)) {
+        Write-Step "Nothing was removed."
+        return
     }
     Stop-LeftoverProcesses $dir
     if ($dir) {
@@ -670,8 +721,6 @@ function Uninstall-Luminary {
             # returns at once. Unquoted and last: NSIS takes the rest of the line.
             Invoke-Nsis $uninstaller "/S _?=$dir" "uninstaller"
         }
-    } else {
-        Write-Step "Luminary's app is not installed; cleaning up what an earlier install left."
     }
     Remove-StaleEntries
     # The relocated engine is the app's own copy, rebuilt on its next launch.

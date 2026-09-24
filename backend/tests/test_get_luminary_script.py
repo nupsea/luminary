@@ -97,6 +97,7 @@ def test_appimage_installs_launcher_and_menu_entry(tmp_path):
     assert ran.stdout.strip() == "luminary-ran x"
     entry = (prefix / "share/applications/luminary.desktop").read_text()
     assert f"Exec={launcher}" in entry
+    assert "Removing the app keeps it." in result.stdout
 
 
 @linux_only
@@ -200,7 +201,7 @@ def test_uninstall_removes_the_app_and_keeps_the_library(tmp_path):
     assert _run(tmp_path, release).returncode == 0
     data = _library(tmp_path)
 
-    result = _run(tmp_path, release, LUMINARY_UNINSTALL="1")
+    result = _run(tmp_path, release, LUMINARY_UNINSTALL="1", LUMINARY_ASSUME_YES="1")
 
     assert result.returncode == 0, result.stderr
     prefix = tmp_path / "prefix"
@@ -212,9 +213,27 @@ def test_uninstall_removes_the_app_and_keeps_the_library(tmp_path):
     assert (data / "luminary.db").exists()
     assert (data / "ollama/models/blobs/sha256-x").exists()
     assert "Your library was kept" in result.stdout
+    assert f"It does not touch your library at {data}" in result.stdout
     lines = result.stdout.splitlines()
+    assert f"  - the app in {prefix}/lib/luminary" in lines
     assert f"To delete it permanently:   rm -rf {data}" in lines
     assert f"To free only the models:    rm -rf {data}/ollama/models" in lines
+
+
+@linux_only
+def test_uninstall_without_a_terminal_or_consent_removes_nothing(tmp_path):
+    release = _release(tmp_path)
+    assert _run(tmp_path, release).returncode == 0
+    data = _library(tmp_path)
+
+    result = _run(tmp_path, release, LUMINARY_UNINSTALL="1")
+
+    assert result.returncode != 0
+    assert "nothing was removed" in result.stderr
+    assert "LUMINARY_ASSUME_YES=1" in result.stderr
+    assert (tmp_path / "prefix/lib/luminary/Luminary.AppImage").exists()
+    assert (data / "engine").exists()
+    assert (tmp_path / "home/.local/state/luminary/luminary.log").exists()
 
 
 @linux_only
@@ -228,7 +247,7 @@ def test_uninstall_leaves_files_it_did_not_install(tmp_path):
     (logs / "luminary.log").write_text("x")
     (logs / "other.txt").write_text("mine")
 
-    result = _run(tmp_path, release, LUMINARY_UNINSTALL="1")
+    result = _run(tmp_path, release, LUMINARY_UNINSTALL="1", LUMINARY_ASSUME_YES="1")
 
     assert result.returncode == 0, result.stderr
     assert theirs.read_text() == "mine"
@@ -246,7 +265,7 @@ def test_uninstall_leaves_a_launcher_it_did_not_write(tmp_path):
     bin_dir.mkdir(parents=True)
     (bin_dir / "luminary").write_text("#!/bin/sh\necho someone else's\n")
 
-    result = _run(tmp_path, _release(tmp_path), LUMINARY_UNINSTALL="1")
+    result = _run(tmp_path, _release(tmp_path), LUMINARY_UNINSTALL="1", LUMINARY_ASSUME_YES="1")
 
     assert result.returncode == 0, result.stderr
     assert (bin_dir / "luminary").exists()

@@ -109,7 +109,7 @@ jobs:
           cp -f "$HOME/.local/state/luminary/luminary.log" build/linux-luminary.log || true
           set -o pipefail
           echo "not Luminary's" > ~/.local/state/luminary/keep-me.txt
-          LUMINARY_UNINSTALL=1 bash scripts/get-luminary.sh | tee build/uninstall.out
+          LUMINARY_UNINSTALL=1 LUMINARY_ASSUME_YES=1 bash scripts/get-luminary.sh | tee build/uninstall.out
           if dpkg-query -S /usr/bin/luminary-desktop 2>/dev/null; then echo "the .deb is still installed"; exit 1; fi
           for p in ~/.local/lib/luminary ~/.local/bin/luminary ~/.local/share/applications/luminary.desktop \
                    ~/.local/share/sh.luminary.app/engine ~/.local/state/luminary/luminary.log; do
@@ -303,6 +303,12 @@ jobs:
           $mine = "$env:LOCALAPPDATA\Luminary\Logs\keep-me.txt"
           Set-Content $mine "not Luminary's"
           $env:LUMINARY_UNINSTALL = "1"
+          # Nobody here to confirm: nothing may be removed without the explicit flag.
+          $refused = $null
+          try { ./scripts/get-luminary.ps1 } catch { $refused = $_.Exception.Message }
+          if ($refused -notlike "*Nothing was removed*") { throw "expected an unconfirmed uninstall to be refused, got: $refused" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\Luminary\luminary-desktop.exe")) { throw "an unconfirmed uninstall removed the app" }
+          $env:LUMINARY_ASSUME_YES = "1"
           $out = ./scripts/get-luminary.ps1 *>&1 | Out-String -Width 4096
           $out
           # Out-String wraps at the console width; a command split across lines is still shown.
