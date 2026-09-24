@@ -257,13 +257,45 @@ the first launch created. The runners have no GPU: this proves the install, the
 layout and the CPU path, never which accelerator a real machine gets.
 
 **Remove through the same one-liner, not the OS alone.** `LUMINARY_UNINSTALL=1` with
-`get-luminary.ps1` / `.sh` stops leftover backend and engine processes (matched by
-executable path, never by name), removes the app, the engine copy in `<library>/engine`
-and the logs, and keeps the library unless the user types `DELETE`; a non-interactive
-run always keeps it. The NSIS uninstaller in Settings > Apps deletes only the files it
-installed, so `%LOCALAPPDATA%\Luminary` survives it — the logs live inside the install
-folder — and its "Delete app data" checkbox removes the whole library in one click.
-CI installs, launches and uninstalls through both scripts, and fails if the library is gone.
+`get-luminary.ps1` / `.sh` deletes only what Luminary wrote:
+
+- the app, through the NSIS uninstaller or `apt-get remove` (refused if apt would take any
+  other package with it), or the AppImage's own named files;
+- the engine copy in `<library>/engine`, which the app rebuilds;
+- `luminary.log` and its rotations;
+- a launcher or menu entry only if its contents are the ones the script wrote;
+- then any folder those removals left empty.
+
+It never deletes the library, the models, or a file it does not recognise. It prints each
+of those folders with the exact command to delete it. Processes are matched by exact
+executable path, never by name, so a user's own `ollama serve` survives. A Windows
+install folder not named `Luminary` may be shared with other software; only Luminary's
+exact files are touched there, and the folder is never offered for deletion. The NSIS
+uninstaller alone is not enough: it leaves `%LOCALAPPDATA%\Luminary` (the logs live
+there), and its "Delete app data" checkbox removes the whole library in one click.
+
+CI uninstalls through both scripts with a planted foreign file. It fails if that file,
+or the library, is gone.
+
+**A user's own Ollama is reported and never changed.** Luminary's engine runs on a
+private port with its own `OLLAMA_MODELS`, so the two share only GPU memory; the script
+warns when the user's is running. It offers to reuse the user's copies of the models
+`model_registry.REGISTRY` knows (`LUMINARY_REUSE_MODELS=1` without asking, `0` never).
+Each blob is checked against its digest before the manifest is copied, and a failure
+removes only what that run added.
+
+| | Linux | Windows |
+|---|---|---|
+| Method | Hard link | Copy |
+| Why | Costs no space, and deleting a link leaves the user's file | A hard link would stop the user's Ollama deleting a model while Luminary has it open |
+
+**The scripts refuse to install an older version over a newer one** (override:
+`LUMINARY_ALLOW_DOWNGRADE=1`). The older app does not have the newer migrations, so it
+may not open the library the newer one upgraded.
+
+**Every DLL the Windows install imports must ship with it or come with Windows**
+(`verify_dll_imports.ps1` in CI). The runners have the Visual C++ runtime installed, so a
+launch there cannot show that a clean machine lacks it.
 
 **A failed run writes `luminary-<install|uninstall>-report.txt`** to the Desktop (else
 home) with the home path, user and computer names removed. Only on a yes does it open a
@@ -286,6 +318,7 @@ on (unsupported host, too little disk, Luminary still open) writes no report.
 | `desktop/verify_stage.sh` | Windows and Linux: relocatability + import + real boot of the staged backend. |
 | `desktop/verify_ollama.sh` | Windows and Linux: structure + a real pull and generation. |
 | `desktop/verify_installed.sh` | Launches an installed app and waits for the shell's `ready` line. |
+| `desktop/verify_dll_imports.ps1` | Windows: every DLL the install imports ships with it or is part of Windows. |
 | `macos/stage_python.sh` | macOS runtime: the shared steps plus arm64 thinning and hardlink breaking. |
 | `macos/stage_ollama.sh` | Bundled inference server, thinned to arm64. |
 | `macos/verify_stage.sh` | Relocatability, Mach-O linkage, import + real boot of the staged backend. |

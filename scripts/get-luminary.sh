@@ -13,7 +13,9 @@
 # LUMINARY_INSTALLER=<file> install a local .deb/.AppImage, no download
 # LUMINARY_NO_LAUNCH=1      install without opening the app
 # LUMINARY_INSTALL_ANYWAY=1 install on a host that cannot run local models, without asking
-# LUMINARY_UNINSTALL=1      remove the app; the library is kept unless you type DELETE
+# LUMINARY_UNINSTALL=1      remove the app; your library is kept, with the commands to delete it
+# LUMINARY_REUSE_MODELS=1   reuse your own Ollama's models without asking (0: never)
+# LUMINARY_ALLOW_DOWNGRADE=1 install an older version over a newer one
 #
 # A failure saves a report and, if the user agrees, opens it as an email to the
 # developer. Everything runs from `main` on the last line, so a download cut short
@@ -31,6 +33,10 @@ RELEASES="https://github.com/$REPO/releases"
 # Where the app keeps its library and log (Tauri's app_local_data_dir, logging.rs).
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/sh.luminary.app"
 LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/luminary"
+MODELS_DIR="$DATA_DIR/ollama/models"
+# The Ollama tags model_registry.REGISTRY measures, which are the ones worth reusing
+# from a user's own Ollama. test_get_luminary_script.py fails when they drift.
+KNOWN_MODELS="llama3.2 qwen3.5:4b phi4-mini gemma3:4b qwen2.5vl:7b qwen2.5:14b-instruct"
 # The AppImage is built on Ubuntu 22.04 and runs only on a glibc this new or newer.
 MIN_GLIBC="2.35"
 # Measured on 0.13.2: the .deb unpacks to 2.07 GB, the AppImage is 0.62 GB, and the
@@ -46,6 +52,9 @@ UNSUPPORTED_MESSAGE="This system isn't supported for running local models at a u
 # Tests point this at a fake /dev and /proc.
 SYSROOT="${LUMINARY_SYSROOT:-}"
 WORK=""
+TARGET_VERSION=""
+LAUNCH_CMD=""
+KEPT=""
 
 log() { [ -z "$WORK" ] || printf '%s\n' "$*" >> "$WORK/steps.log" 2>/dev/null || true; }
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; log "==> $*"; }
@@ -267,6 +276,180 @@ stop_leftovers() {
     kill -9 $(luminary_pids helpers) 2>/dev/null || true
 }
 
+# The package that owns the .deb's executable, when the .deb is installed.
+deb_package() {
+    command -v dpkg-query >/dev/null || return 0
+    dpkg-query -S /usr/bin/luminary-desktop 2>/dev/null | cut -d: -f1 | head -1 || true
+}
+
+# The installed version: the .deb's, else the one install_appimage recorded.
+installed_version() {
+    local pkg v=""
+    pkg="$(deb_package)"
+    if [ -n "$pkg" ]; then
+        v="$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null)" || v=""
+    elif [ -r "$PREFIX/lib/luminary/VERSION" ]; then
+        v="$(head -1 "$PREFIX/lib/luminary/VERSION")"
+    fi
+    printf '%s' "${v%%[-+~]*}"
+}
+
+# The version inside a local installer: the .deb's control field, else its file name.
+file_version() {
+    local v=""
+    case "$1" in *.deb) v="$(dpkg-deb -f "$1" Version 2>/dev/null)" || v="" ;; esac
+    [ -n "$v" ] || v="$(basename "$1" | sed -n 's/^Luminary_\([0-9][0-9.]*[0-9]\)_.*/\1/p')"
+    printf '%s' "${v%%[-+~]*}"
+}
+
+# An older app does not know a newer one's migrations, so it may not open the library.
+check_version() {
+    local new="${1#v}" old
+    old="$(installed_version)"
+    [ -n "$new" ] && [ -n "$old" ] || return 0
+    if [ "$old" = "$new" ]; then
+        say "Luminary $old is already installed; installing it again"
+    elif [ "$(printf '%s\n%s\n' "$old" "$new" | sort -V | tail -1)" = "$new" ]; then
+        say "Upgrading Luminary $old to $new"
+    elif [ "${LUMINARY_ALLOW_DOWNGRADE:-0}" = 1 ]; then
+        warn "replacing Luminary $old with the older $new"
+    else
+        refuse "Luminary $old is installed and $new is older. An older version may not open a library that a newer one has upgraded. To install it anyway, run this again with LUMINARY_ALLOW_DOWNGRADE=1"
+    fi
+}
+
+# A user's own Ollama is named, never touched: Luminary's runs on a private port with
+# its own models folder, so the two share only the graphics card's memory.
+user_ollama_running() {
+    local p exe
+    if command -v systemctl >/dev/null && systemctl is-active --quiet ollama 2>/dev/null; then return 0; fi
+    for p in /proc/[0-9]*; do
+        exe="$(readlink "$p/exe" 2>/dev/null)" || continue
+        case "$exe" in
+            */usr/lib/Luminary/* | "$DATA_DIR/engine/"*) ;;
+            */ollama) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# Where a user's Ollama keeps models: OLLAMA_MODELS, a user install, and the home of
+# the system service that Ollama's installer and the distribution packages create.
+ollama_stores() {
+    local s own
+    own="$(cd "$MODELS_DIR" 2>/dev/null && pwd -P)" || own=""
+    for s in "${OLLAMA_MODELS:-}" "$HOME/.ollama/models" /usr/share/ollama/.ollama/models \
+             /var/lib/ollama/.ollama/models /var/lib/ollama/models; do
+        [ -n "$s" ] && [ -d "$s/manifests" ] && [ -d "$s/blobs" ] || continue
+        s="$(cd "$s" 2>/dev/null && pwd -P)" || continue
+        if [ "$s" != "$own" ]; then printf '%s\n' "$s"; fi
+    done | awk '!seen[$0]++'
+}
+
+manifest_rel() {
+    local name="${1%%:*}" tag=latest
+    case "$1" in *:*) tag="${1#*:}" ;; esac
+    printf 'manifests/registry.ollama.ai/library/%s/%s' "$name" "$tag"
+}
+
+manifest_digests() {
+    grep -o '"digest" *: *"sha256:[0-9a-f]\{64\}"' "$1" 2>/dev/null | grep -o '[0-9a-f]\{64\}' | sort -u || true
+}
+
+# Bytes of model $1's blobs in store $2; fails unless the manifest and every blob are readable.
+model_bytes() {
+    local rel d total=0 size digests
+    rel="$(manifest_rel "$1")"
+    [ -r "$2/$rel" ] || return 1
+    digests="$(manifest_digests "$2/$rel")"
+    [ -n "$digests" ] || return 1
+    for d in $digests; do
+        [ -r "$2/blobs/sha256-$d" ] || return 1
+        size="$(stat -c %s "$2/blobs/sha256-$d" 2>/dev/null)" || return 1
+        total=$((total + size))
+    done
+    printf '%s' "$total"
+}
+
+# A hard link shares the bytes and leaves the user's file as it was; a copy is the
+# fallback where a link is refused (another filesystem, or another user's file). Each
+# blob is checked against its digest before the manifest makes the model visible.
+reuse_model() {
+    local tag="$1" store="$2" rel d src dst have need added=() why=""
+    rel="$(manifest_rel "$tag")"
+    mkdir -p "$MODELS_DIR/blobs" "$(dirname "$MODELS_DIR/$rel")" || { warn "could not create $MODELS_DIR"; return 1; }
+    say "Reusing $tag from $store"
+    for d in $(manifest_digests "$store/$rel"); do
+        src="$store/blobs/sha256-$d"
+        dst="$MODELS_DIR/blobs/sha256-$d"
+        [ -e "$dst" ] && continue
+        rm -f "$dst.partial"
+        if ! ln "$src" "$dst.partial" 2>/dev/null; then
+            have="$(free_mb "$MODELS_DIR")"
+            need=$(( $(stat -c %s "$src") / 1048576 + 512 ))
+            if [ -n "$have" ] && [ "$have" -lt "$need" ]; then why="there is not enough free space to copy it"; break; fi
+            cp "$src" "$dst.partial" || { why="it could not be copied"; break; }
+        fi
+        if [ "$(sha256_of "$dst.partial")" != "$d" ]; then why="it does not match its checksum in your Ollama"; break; fi
+        mv -f "$dst.partial" "$dst" || { why="it could not be moved into place"; break; }
+        added+=("$dst")
+    done
+    if [ -z "$why" ]; then
+        { cp "$store/$rel" "$MODELS_DIR/$rel.partial" && mv -f "$MODELS_DIR/$rel.partial" "$MODELS_DIR/$rel"; } && return 0
+        why="its manifest could not be copied"
+    fi
+    # Only this run's links and copies go; the user's own files are other names for the bytes.
+    rm -f -- "$MODELS_DIR/$rel.partial" "${dst:-}.partial" ${added[@]+"${added[@]}"}
+    warn "$tag was not reused: $why. Luminary downloads its own copy instead"
+    return 1
+}
+
+offer_model_reuse() {
+    local stores store tag bytes found="" answer="${LUMINARY_REUSE_MODELS:-}"
+    [ "$answer" != 0 ] || return 0
+    command -v sha256sum >/dev/null || command -v shasum >/dev/null || command -v openssl >/dev/null || return 0
+    stores="$(ollama_stores)"
+    [ -n "$stores" ] || return 0
+    for tag in $KNOWN_MODELS; do
+        [ ! -e "$MODELS_DIR/$(manifest_rel "$tag")" ] || continue
+        while IFS= read -r store; do
+            if bytes="$(model_bytes "$tag" "$store")"; then
+                found+="$tag"$'\t'"$store"$'\t'"$bytes"$'\n'
+                break
+            fi
+        done <<< "$stores"
+    done
+    [ -n "$found" ] || return 0
+    say "Your Ollama already has models Luminary uses:"
+    while IFS=$'\t' read -r tag store bytes; do
+        [ -z "$tag" ] || printf '      %s (%s MB)\n' "$tag" "$((bytes / 1048576))"
+    done <<< "$found"
+    if [ "$answer" != 1 ]; then
+        if ! has_tty; then
+            say "To use them rather than download them again, run this again with LUMINARY_REUSE_MODELS=1."
+            return 0
+        fi
+        printf 'Use them rather than download them again? Your Ollama and its models are not changed. [Y/n] ' >&2
+        read -r answer </dev/tty || true
+        case "$answer" in
+            [nN] | [nN][oO]) say "Not reused; Luminary downloads its own."; return 0 ;;
+        esac
+    fi
+    while IFS=$'\t' read -r tag store bytes; do
+        [ -z "$tag" ] || reuse_model "$tag" "$store" || true
+    done <<< "$found"
+}
+
+note_user_ollama() {
+    local bin running=""
+    bin="$(command -v ollama 2>/dev/null)" || bin=""
+    if user_ollama_running; then running=1; fi
+    [ -n "$bin$running" ] || [ -n "$(ollama_stores)" ] || return 0
+    say "Found your own Ollama${bin:+ at $bin}. Luminary runs its own copy, on a private port with its own models folder, and leaves yours as it is."
+    [ -z "$running" ] || warn "your Ollama is running. While both hold a model they share the graphics card's memory and both slow down; if answers are slow, stop yours while you use Luminary."
+    offer_model_reuse
+}
+
 launch() {
     [ "${LUMINARY_NO_LAUNCH:-0}" = 1 ] && return
     if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
@@ -296,7 +479,9 @@ install_deb() {
     exe="$(dpkg -L "$pkg" | grep '^/usr/bin/' | head -1)" || true
     [ -n "$exe" ] || die "$pkg installed but no executable was found in /usr/bin"
     say "Installed. To remove it, run this again with LUMINARY_UNINSTALL=1; your library is kept."
-    launch "$exe"
+    [ ! -e "$PREFIX/lib/luminary/Luminary.AppImage" ] \
+        || say "The AppImage build is installed too, so your menu lists Luminary twice; both open the same library."
+    LAUNCH_CMD="$exe"
 }
 
 has_libfuse2() {
@@ -311,6 +496,7 @@ install_appimage() {
     mkdir -p "$dir" "$apps" "$PREFIX/bin" || die "could not create folders under $PREFIX"
     cp "$image" "$target.new" && chmod +x "$target.new" && mv -f "$target.new" "$target" \
         || die "could not copy the AppImage into $dir"
+    if [ -n "$TARGET_VERSION" ]; then printf '%s\n' "$TARGET_VERSION" > "$dir/VERSION"; else rm -f "$dir/VERSION"; fi
 
     # Without libfuse2 an AppImage cannot mount itself; extract-and-run is the
     # same program unpacked to /tmp first, and the shell ends with it.
@@ -347,7 +533,8 @@ EOF
     command -v update-desktop-database >/dev/null && update-desktop-database "$apps" 2>/dev/null || true
     say "Installed to $dir. To remove it, run this again with LUMINARY_UNINSTALL=1; your library is kept."
     case ":$PATH:" in *":$PREFIX/bin:"*) ;; *) say "Add $PREFIX/bin to PATH to run 'luminary' from a terminal." ;; esac
-    launch "$bin"
+    [ -z "$(deb_package)" ] || say "The .deb build is installed too, so your menu lists Luminary twice; both open the same library."
+    LAUNCH_CMD="$bin"
 }
 
 install() {
@@ -365,8 +552,12 @@ install() {
     if [ -n "${LUMINARY_INSTALLER:-}" ]; then
         [ -f "$LUMINARY_INSTALLER" ] || refuse "no such file: $LUMINARY_INSTALLER"
         file="$(cd "$(dirname "$LUMINARY_INSTALLER")" && pwd)/$(basename "$LUMINARY_INSTALLER")"
+        TARGET_VERSION="$(file_version "$file")"
+        check_version "$TARGET_VERSION"
     else
         release_json
+        TARGET_VERSION="$(grep -o '"tag_name": *"[^"]*"' "$WORK/release.json" | head -1 | sed 's/.*"v\{0,1\}\([^"]*\)"$/\1/')" || TARGET_VERSION=""
+        check_version "$TARGET_VERSION"
         if [ "$FORMAT" = deb ]; then
             file="$(fetch_verified _amd64.deb)"
         else
@@ -375,62 +566,69 @@ install() {
     fi
 
     if [ "$FORMAT" = deb ]; then install_deb "$file"; else install_appimage "$file"; fi
+    # Optional, so nothing in it may fail the install.
+    note_user_ollama || true
+    launch "$LAUNCH_CMD"
 }
 
-# Deletes only Luminary's own locations, and a link as a link (rm never follows one).
+# Deletes a folder Luminary rebuilds on its own, and a link as a link (rm never
+# follows one). Nothing a user made is ever passed here.
 remove_owned() {
     [ -e "$1" ] || [ -L "$1" ] || return 0
     case "$1" in
-        "$PREFIX/lib/luminary" | "$DATA_DIR" | "$DATA_DIR/"* | "$LOG_DIR") ;;
-        *) die "refusing to delete $1: it is not one of Luminary's folders" ;;
+        "$DATA_DIR/engine" | "$DATA_DIR/engine.new") ;;
+        *) die "refusing to delete $1: it is not a folder Luminary rebuilds" ;;
     esac
     rm -rf -- "$1" || warn "could not remove $1"
 }
 
-confirm_library_removal() {
-    [ -e "$DATA_DIR" ] || return 0
-    local answer="" models="$DATA_DIR/ollama/models"
-    printf '\nYour library is still at %s (%s).\n' "$DATA_DIR" "$(du -sh "$DATA_DIR" 2>/dev/null | cut -f1)"
+# Removes the named files from $1, then $1 itself only if that left it empty.
+# Whatever else is there is listed for the user, never deleted.
+remove_files_then_dir() {
+    local dir="$1" f
+    shift
+    [ -d "$dir" ] && [ ! -L "$dir" ] || return 0
+    for f in "$@"; do
+        [ ! -f "$dir/$f" ] || rm -f -- "$dir/$f" || warn "could not remove $dir/$f"
+    done
+    rmdir -- "$dir" 2>/dev/null && return 0
+    KEPT+="$dir"$'\n'
+}
+
+tell_what_was_kept() {
+    local dir
+    if [ -n "$KEPT" ]; then
+        printf '\nThese folders still hold files Luminary did not put there, so they were left alone:\n'
+        while IFS= read -r dir; do
+            [ -z "$dir" ] || printf '  %s\n    look:   ls -la %q\n    delete: rm -rf %q\n' "$dir" "$dir" "$dir"
+        done <<< "$KEPT"
+    fi
+    [ -e "$DATA_DIR" ] || [ -L "$DATA_DIR" ] || return 0
+    printf '\nYour library was kept at %s (%s).\n' "$DATA_DIR" "$(du -sh "$DATA_DIR" 2>/dev/null | cut -f1)"
     printf 'It holds every document, note, flashcard and review you have created, your settings\n'
-    printf '(including any API keys) and the downloaded models.\n'
+    printf '(including any API keys) and the downloaded models. Reinstalling picks it up again.\n'
     if [ -L "$DATA_DIR" ]; then
-        say "It is a link to $(readlink -f "$DATA_DIR"), so it was kept. Delete that folder yourself if you no longer want it."
-        return 0
+        printf 'It is a link to %s; that folder is the one holding the data.\n' "$(readlink -f "$DATA_DIR")"
     fi
-    if ! has_tty; then
-        say "Not running interactively: library kept. Delete it yourself with: rm -rf '$DATA_DIR'"
-        return 0
-    fi
-    printf 'Delete it permanently? Type DELETE to confirm, anything else keeps it: ' >&2
-    read -r answer </dev/tty || true
-    if [ "$answer" = DELETE ]; then
-        remove_owned "$DATA_DIR"
-        say "Library deleted."
-        return 0
-    fi
-    say "Library kept."
-    [ -d "$models" ] || return 0
-    answer=""
-    printf 'Remove just the downloaded models (%s) to free space? They download again if you reinstall. [y/N] ' \
-        "$(du -sh "$models" 2>/dev/null | cut -f1)" >&2
-    read -r answer </dev/tty || true
-    case "$answer" in
-        [yY] | [yY][eE][sS]) remove_owned "$models" && say "Models removed." ;;
-    esac
+    printf 'To free only the models:    rm -rf %q\n' "$MODELS_DIR"
+    printf 'To delete it permanently:   rm -rf %q\n' "$DATA_DIR"
 }
 
 uninstall() {
-    local removed="" pkg entry="$PREFIX/share/applications/luminary.desktop" bin="$PREFIX/bin/luminary"
+    local removed="" pkg others entry="$PREFIX/share/applications/luminary.desktop" bin="$PREFIX/bin/luminary"
     stop_leftovers
-    pkg="$(dpkg-query -S /usr/bin/luminary-desktop 2>/dev/null | cut -d: -f1)" || true
+    pkg="$(deb_package)"
     if [ -n "$pkg" ]; then
+        # apt also removes whatever depends on a package; remove it only when it goes alone.
+        others="$(apt-get -s remove "$pkg" 2>/dev/null | awk '/^Remv / {print $2}' | grep -vxF "$pkg" | paste -sd ' ' -)" || others=""
+        [ -z "$others" ] || refuse "removing $pkg would also remove: $others. Nothing was removed. If that is what you want: sudo apt remove $pkg"
         say "Removing the $pkg package with apt (asks for your password once)"
-        as_root apt-get remove -y "$pkg" </dev/null || die "apt could not remove $pkg; try: sudo apt remove $pkg"
+        as_root apt-get remove -y -o DPkg::Lock::Timeout=300 "$pkg" </dev/null || die "apt could not remove $pkg; try: sudo apt remove $pkg"
         removed=1
     fi
     if [ -e "$PREFIX/lib/luminary" ] || [ -e "$bin" ] || [ -e "$entry" ]; then
         say "Removing the AppImage from $PREFIX/lib/luminary"
-        remove_owned "$PREFIX/lib/luminary"
+        remove_files_then_dir "$PREFIX/lib/luminary" Luminary.AppImage Luminary.AppImage.new luminary.png VERSION
         # The launcher and menu entry are removed only when they are the ones this wrote.
         if [ -f "$bin" ] && grep -qF "$PREFIX/lib/luminary/Luminary.AppImage" "$bin"; then rm -f "$bin"; fi
         if [ -f "$entry" ] && grep -qxF "Exec=$bin" "$entry"; then rm -f "$entry"; fi
@@ -438,12 +636,14 @@ uninstall() {
         removed=1
     fi
     [ -n "$removed" ] || say "Luminary's app is not installed; cleaning up what an earlier install left."
-    # The app rebuilds these on its next launch, so they are never part of the library.
+    # The relocated engine is the app's own copy, rebuilt on its next launch.
     remove_owned "$DATA_DIR/engine"
     remove_owned "$DATA_DIR/engine.new"
-    remove_owned "$LOG_DIR"
+    local f logs=(luminary.log)
+    for f in "$LOG_DIR"/luminary.log.[0-9]*; do [ ! -f "$f" ] || logs+=("${f##*/}"); done
+    remove_files_then_dir "$LOG_DIR" "${logs[@]}"
     say "Luminary is removed."
-    confirm_library_removal
+    tell_what_was_kept
 }
 
 # Percent-encodes $1 byte by byte, for a mailto: link.

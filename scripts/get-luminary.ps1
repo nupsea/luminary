@@ -10,7 +10,9 @@
 # $env:LUMINARY_INSTALLER = "<file>"  install a local setup .exe, no download
 # $env:LUMINARY_NO_LAUNCH = "1"       install without opening the app
 # $env:LUMINARY_INSTALL_ANYWAY = "1"  install on a host that cannot run local models, without asking
-# $env:LUMINARY_UNINSTALL = "1"       remove the app; the library is kept unless you type DELETE
+# $env:LUMINARY_UNINSTALL = "1"       remove the app; your library is kept, with the commands to delete it
+# $env:LUMINARY_REUSE_MODELS = "1"    copy your own Ollama's models without asking ("0": never)
+# $env:LUMINARY_ALLOW_DOWNGRADE = "1" install an older version over a newer one
 #
 # Errors never exit: under `irm | iex`, exit closes the user's window. A failure
 # saves a report and, if the user agrees, opens it as an email to the developer.
@@ -30,6 +32,11 @@ $LuminaryRepo = if ($env:LUMINARY_REPO) { $env:LUMINARY_REPO } else { "nupsea/lu
 $ReleasesPage = "https://github.com/$LuminaryRepo/releases"
 $LibraryDir = Join-Path $env:LOCALAPPDATA "sh.luminary.app"
 $LogsDir = Join-Path $env:LOCALAPPDATA "Luminary\Logs"
+$ModelsDir = Join-Path $LibraryDir "ollama\models"
+$AppExeName = "luminary-desktop.exe"
+# The Ollama tags model_registry.REGISTRY measures, which are the ones worth reusing
+# from a user's own Ollama. test_get_luminary_script.py fails when they drift.
+$KnownModels = @("llama3.2", "qwen3.5:4b", "phi4-mini", "gemma3:4b", "qwen2.5vl:7b", "qwen2.5:14b-instruct")
 # The 0.13.2 install unpacks to 1.62 GB beside a 0.30 GB download: 1.9 GB free fails
 # partway, 2.5 GB leaves room for the installer's scratch copy.
 $NeedFreeGB = 2.5
@@ -210,29 +217,35 @@ function Assert-FreeSpace([long]$downloadBytes) {
     }
 }
 
-function Find-LuminaryInstall {
-    $keys = @(
-        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
-        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
-    )
-    foreach ($key in $keys) {
-        $entry = Get-ItemProperty $key -ErrorAction SilentlyContinue |
-            Where-Object { $_.DisplayName -eq "Luminary" } | Select-Object -First 1
-        if ($entry -and $entry.InstallLocation) {
-            $dir = $entry.InstallLocation.Trim('"').TrimEnd('\')
-            if (Test-Path -LiteralPath $dir) { return $dir }
-        }
-    }
-    # A folder holding only the logs is not an install.
-    foreach ($dir in @("$env:LOCALAPPDATA\Luminary", "$env:LOCALAPPDATA\Programs\Luminary")) {
-        if (Test-Path (Join-Path $dir "*.exe")) { return $dir }
-    }
-    return $null
+function Get-LuminaryEntry {
+    Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -eq "Luminary" -and $_.InstallLocation } | Select-Object -First 1
 }
 
-function Find-LuminaryExe([string]$dir) {
-    Get-ChildItem -Path $dir -Filter "*.exe" -File |
-        Where-Object { $_.Name -notlike "uninstall*" } | Select-Object -First 1
+function Get-MachineEntry {
+    Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -eq "Luminary" } | Select-Object -First 1
+}
+
+# The per-user install. A folder counts only while it holds the app or its uninstaller,
+# so a folder of logs is not an install.
+# A folder named for Luminary is its own; one chosen by hand may be shared with other
+# software, so only Luminary's exact files are touched there.
+function Test-OwnFolder([string]$dir) { return ($dir -and (Split-Path -Leaf $dir) -ieq "Luminary") }
+
+function Find-LuminaryInstall {
+    $entry = Get-LuminaryEntry
+    if ($entry) {
+        $dir = $entry.InstallLocation.Trim('"').TrimEnd('\')
+        if ((Test-Path -LiteralPath (Join-Path $dir $AppExeName)) -or (Test-Path -LiteralPath (Join-Path $dir "uninstall.exe"))) {
+            return $dir
+        }
+    }
+    foreach ($dir in @("$env:LOCALAPPDATA\Luminary", "$env:LOCALAPPDATA\Programs\Luminary")) {
+        if (Test-Path -LiteralPath (Join-Path $dir $AppExeName)) { return $dir }
+    }
+    return $null
 }
 
 function Test-Under([string]$path, [string]$root) {
@@ -241,20 +254,178 @@ function Test-Under([string]$path, [string]$root) {
 }
 
 # Refuses while the app's window is open, and stops the backend and engine a crash left
-# behind. Matched by executable path, never by name: a user's own `ollama serve` survives.
+# behind. Matched by exact executable path, never by name: a user's own `ollama serve`,
+# or anything else installed beside Luminary, survives.
 function Stop-LeftoverProcesses([string]$dir) {
-    $engine = Join-Path $LibraryDir "engine"
-    $ours = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
-        $_.Path -and ((Test-Under $_.Path $dir) -or (Test-Under $_.Path $engine))
-    })
-    $app = @($ours | Where-Object { $dir -and [IO.Path]::GetDirectoryName($_.Path) -ieq $dir })
-    if ($app.Count -gt 0) {
+    $app = $null
+    $helpers = @((Join-Path $LibraryDir "engine"), (Join-Path $LibraryDir "engine.new"))
+    if ($dir) {
+        $app = Join-Path $dir $AppExeName
+        if (Test-OwnFolder $dir) { $helpers += @((Join-Path $dir "python"), (Join-Path $dir "ollama")) }
+    }
+    $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path })
+    if ($app -and @($procs | Where-Object { $_.Path -ieq $app }).Count -gt 0) {
         Stop-Luminary "Luminary is running. Close it, then run this again; your library is kept."
     }
+    $ours = @($procs | Where-Object { $p = $_.Path; @($helpers | Where-Object { Test-Under $p $_ }).Count -gt 0 })
     if ($ours.Count -eq 0) { return }
     Write-Step "Stopping Luminary's background processes left from an earlier run"
     $ours | Stop-Process -Force -ErrorAction SilentlyContinue
     $ours | ForEach-Object { try { $null = $_.WaitForExit(10000) } catch { } }
+}
+
+# An older app does not know a newer one's migrations, so it may not open the library.
+function Confirm-Version([string]$new) {
+    $entry = Get-LuminaryEntry
+    if (-not $entry -or -not (Find-LuminaryInstall)) { return }
+    $old = $null; $next = $null
+    if (-not [version]::TryParse(("$($entry.DisplayVersion)" -replace '[-+].*$', ''), [ref]$old)) { return }
+    if (-not [version]::TryParse(($new -replace '^v', '' -replace '[-+].*$', ''), [ref]$next)) { return }
+    if ($next -eq $old) {
+        Write-Step "Luminary $old is already installed; installing it again"
+    } elseif ($next -gt $old) {
+        Write-Step "Upgrading Luminary $old to $next"
+    } elseif ($env:LUMINARY_ALLOW_DOWNGRADE -eq "1") {
+        Write-Warn "replacing Luminary $old with the older $next"
+    } else {
+        Stop-Luminary "Luminary $old is installed and $next is older. An older version may not open a library that a newer one has upgraded. To install it anyway, set `$env:LUMINARY_ALLOW_DOWNGRADE = `"1`" and run this again."
+    }
+}
+
+# A user's own Ollama is named, never touched: Luminary's runs on a private port with
+# its own models folder, so the two share only the graphics card's memory.
+function Get-UserOllama {
+    $exe = $null
+    $cmd = Get-Command ollama -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { $exe = $cmd.Source }
+    elseif (Test-Path -LiteralPath "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe") { $exe = "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" }
+    $ours = @((Join-Path $LibraryDir "engine"), (Join-Path $LibraryDir "engine.new"))
+    $dir = Find-LuminaryInstall
+    if ($dir) { $ours += Join-Path $dir "ollama" }  # only ever excluded, never stopped
+    $running = @(Get-Process -Name "ollama", "ollama app" -ErrorAction SilentlyContinue | Where-Object {
+        $p = $_.Path
+        -not ($p -and @($ours | Where-Object { Test-Under $p $_ }).Count -gt 0)
+    })
+    return [pscustomobject]@{ Exe = $exe; Running = ($running.Count -gt 0) }
+}
+
+function Get-OllamaStores {
+    $own = [IO.Path]::GetFullPath($ModelsDir).TrimEnd('\')
+    $seen = @{}
+    foreach ($candidate in @($env:OLLAMA_MODELS,
+            [Environment]::GetEnvironmentVariable("OLLAMA_MODELS", "User"),
+            [Environment]::GetEnvironmentVariable("OLLAMA_MODELS", "Machine"),
+            (Join-Path $env:USERPROFILE ".ollama\models"))) {
+        if (-not $candidate) { continue }
+        try { $full = [IO.Path]::GetFullPath($candidate).TrimEnd('\') } catch { continue }
+        if ($seen.ContainsKey($full) -or $full -ieq $own) { continue }
+        $seen[$full] = $true
+        if ((Test-Path -LiteralPath (Join-Path $full "manifests")) -and (Test-Path -LiteralPath (Join-Path $full "blobs"))) { $full }
+    }
+}
+
+function Get-ManifestPath([string]$store, [string]$model) {
+    $name, $tag = $model -split ':', 2
+    if (-not $tag) { $tag = "latest" }
+    return (Join-Path $store "manifests\registry.ollama.ai\library\$name\$tag")
+}
+
+# Model $model in $store, with every blob its manifest names; $null unless all are there.
+function Get-StoredModel([string]$store, [string]$model) {
+    $manifest = Get-ManifestPath $store $model
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { return $null }
+    try { $m = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json } catch { return $null }
+    $digests = @(@($m.config) + @($m.layers) | ForEach-Object { "$($_.digest)" } |
+        Where-Object { $_ -match '^sha256:[0-9a-f]{64}$' } | ForEach-Object { $_.Substring(7) } | Select-Object -Unique)
+    if ($digests.Count -eq 0) { return $null }
+    $blobs = foreach ($d in $digests) {
+        $file = Join-Path $store "blobs\sha256-$d"
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $null }
+        [pscustomobject]@{ Digest = $d; Path = $file; Bytes = (Get-Item -LiteralPath $file).Length }
+    }
+    return [pscustomobject]@{
+        Model = $model; Store = $store; Manifest = $manifest; Blobs = @($blobs)
+        Bytes = (@($blobs) | Measure-Object -Property Bytes -Sum).Sum
+    }
+}
+
+# Copied, never linked: a hard link would stop the user's Ollama deleting its own file
+# while Luminary has the model open. Each blob is checked against its digest before the
+# manifest makes the model visible.
+function Copy-StoredModel($found) {
+    $blobDir = Join-Path $ModelsDir "blobs"
+    $manifest = Get-ManifestPath $ModelsDir $found.Model
+    $added = New-Object System.Collections.Generic.List[string]
+    $partial = $null
+    Write-Step "Copying $($found.Model) from $($found.Store)"
+    try {
+        New-Item -ItemType Directory -Force -Path $blobDir, (Split-Path $manifest) | Out-Null
+        foreach ($blob in $found.Blobs) {
+            $dst = Join-Path $blobDir "sha256-$($blob.Digest)"
+            if (Test-Path -LiteralPath $dst) { continue }
+            $partial = "$dst.partial"
+            [IO.File]::Copy($blob.Path, $partial, $true)
+            if ((Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLowerInvariant() -ne $blob.Digest) {
+                throw "it does not match its checksum in your Ollama"
+            }
+            Move-Item -LiteralPath $partial -Destination $dst -Force
+            $added.Add($dst)
+        }
+        $partial = "$manifest.partial"
+        Copy-Item -LiteralPath $found.Manifest -Destination $partial -Force
+        Move-Item -LiteralPath $partial -Destination $manifest -Force
+    } catch {
+        # Only this run's copies go.
+        foreach ($file in @($added) + @($partial)) {
+            if ($file) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
+        }
+        Write-Warn "$($found.Model) was not copied: $($_.Exception.Message). Luminary downloads its own copy instead"
+    }
+}
+
+function Invoke-ModelReuse {
+    if ($env:LUMINARY_REUSE_MODELS -eq "0") { return }
+    $stores = @(Get-OllamaStores)
+    if ($stores.Count -eq 0) { return }
+    $found = @(foreach ($model in $KnownModels) {
+        if (Test-Path -LiteralPath (Get-ManifestPath $ModelsDir $model)) { continue }
+        foreach ($store in $stores) {
+            $stored = Get-StoredModel $store $model
+            if ($stored) { $stored; break }
+        }
+    })
+    if ($found.Count -eq 0) { return }
+    Write-Step "Your Ollama already has models Luminary uses:"
+    $found | ForEach-Object { Write-Host ("      {0} ({1:N0} MB)" -f $_.Model, ($_.Bytes / 1MB)) }
+    $total = ($found | Measure-Object -Property Bytes -Sum).Sum
+    $free = Get-FreeBytes $env:LOCALAPPDATA
+    if ($null -ne $free -and $free -lt $total + 2GB) {
+        Write-Warn ("copying them needs {0:N1} GB and {1:N1} GB is free; Luminary downloads what it needs instead" -f ($total / 1GB), ($free / 1GB))
+        return
+    }
+    if ($env:LUMINARY_REUSE_MODELS -ne "1") {
+        if (-not (Test-Interactive)) {
+            Write-Step "To copy them rather than download them again, set `$env:LUMINARY_REUSE_MODELS = `"1`" and run this again."
+            return
+        }
+        $answer = Read-Host ("Copy them ({0:N1} GB) rather than download them again? Your Ollama and its models are not changed. [Y/n]" -f ($total / 1GB))
+        if ($answer -match '^(n|no)$') {
+            Write-Step "Not copied; Luminary downloads its own."
+            return
+        }
+    }
+    foreach ($stored in $found) { Copy-StoredModel $stored }
+}
+
+function Show-UserOllama {
+    $ollama = Get-UserOllama
+    if (-not $ollama.Exe -and -not $ollama.Running -and @(Get-OllamaStores).Count -eq 0) { return }
+    $where = if ($ollama.Exe) { " at $($ollama.Exe)" } else { "" }
+    Write-Step "Found your own Ollama$where. Luminary runs its own copy, on a private port with its own models folder, and leaves yours as it is."
+    if ($ollama.Running) {
+        Write-Warn "your Ollama is running. While both hold a model they share the graphics card's memory and both slow down; if answers are slow, quit yours while you use Luminary."
+    }
+    Invoke-ModelReuse
 }
 
 function Get-WebView2Version {
@@ -306,9 +477,11 @@ function Install-Luminary {
         if ($env:LUMINARY_INSTALLER) {
             if (-not (Test-Path -LiteralPath $env:LUMINARY_INSTALLER)) { Stop-Luminary "No such file: $env:LUMINARY_INSTALLER" }
             $setup = (Resolve-Path -LiteralPath $env:LUMINARY_INSTALLER).Path
+            if ([IO.Path]::GetFileName($setup) -match '^Luminary_(\d+(\.\d+)+)_') { Confirm-Version $Matches[1] }
             Assert-FreeSpace 0
         } else {
             $release = Get-Release
+            Confirm-Version "$($release.tag_name)"
             $asset = Get-ReleaseAsset $release "Luminary_*_x64-setup.exe"
             if (-not $asset) { Stop-Luminary "Release $($release.tag_name) has no Windows installer; it may predate one." }
             $sum = Get-ReleaseAsset $release "$($asset.name).sha256"
@@ -341,25 +514,29 @@ function Install-Luminary {
 
     $dir = Find-LuminaryInstall
     if (-not $dir) { throw "The installer finished but Luminary's install folder was not found." }
-    $exe = Find-LuminaryExe $dir
-    if (-not $exe) { throw "No Luminary executable in $dir." }
+    $exe = Join-Path $dir $AppExeName
+    if (-not (Test-Path -LiteralPath $exe)) { throw "The installer finished but $exe is missing." }
     Write-Step "Installed to $dir. To remove it, run this again with `$env:LUMINARY_UNINSTALL = `"1`"; your library is kept."
     if (-not (Get-WebView2Version)) {
         Write-Warn "Microsoft Edge WebView2, which draws Luminary's window, was not found. If Luminary opens no window, install it from https://go.microsoft.com/fwlink/p/?LinkId=2124703 and open Luminary again."
     }
 
+    # Optional, so nothing in it may fail the install.
+    try { Show-UserOllama } catch { Write-Warn "could not check for your own Ollama ($($_.Exception.Message))" }
+
     if ($env:LUMINARY_NO_LAUNCH -ne "1") {
         Write-Step "Opening Luminary. First launch downloads its models and takes a few minutes."
         try {
-            Start-Process -FilePath $exe.FullName
+            Start-Process -FilePath $exe
         } catch {
             throw "Luminary is installed, but Windows would not open it ($($_.Exception.Message)). Open it from the Start menu."
         }
     }
 }
 
-# Deletes only what Luminary owns: a path under %LOCALAPPDATA% or %TEMP%, never a root,
-# and a link as a link. Returns $false when something could not be removed.
+# Deletes a folder Luminary rebuilds or left in %TEMP%: never a root, never outside
+# %LOCALAPPDATA% or %TEMP%, and a link as a link. Nothing a user made is passed here.
+# Returns $false when something could not be removed.
 function Remove-OwnedItem([string]$path) {
     if (-not $path -or -not (Test-Path -LiteralPath $path)) { return $true }
     $full = [IO.Path]::GetFullPath($path).TrimEnd('\')
@@ -424,36 +601,66 @@ function Remove-StaleEntries {
         } | Remove-Item -Recurse -Force
 }
 
-function Confirm-LibraryRemoval {
+function Format-Quoted([string]$path) { return "'" + ($path -replace "'", "''") + "'" }
+
+# Deletes empty folders under $path, bottom up, without entering a link.
+function Remove-EmptyFolders([string]$path) {
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    if (-not $item -or -not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return }
+    foreach ($child in @(Get-ChildItem -LiteralPath $path -Directory -Force -ErrorAction SilentlyContinue)) {
+        Remove-EmptyFolders $child.FullName
+    }
+    if (-not (Get-ChildItem -LiteralPath $path -Force -ErrorAction SilentlyContinue)) {
+        try { [IO.Directory]::Delete($path, $false) } catch { }
+    }
+}
+
+# Removes the named files from $dir, then whatever folders that left empty. Anything
+# else stays, and Show-Kept lists it for the user.
+function Remove-FilesThenFolders([string]$dir, [string[]]$names) {
+    if (-not $dir -or -not (Test-Path -LiteralPath $dir -PathType Container)) { return }
+    foreach ($name in $names) {
+        $file = Join-Path $dir $name
+        if (Test-Path -LiteralPath $file -PathType Leaf) {
+            try { Remove-Item -LiteralPath $file -Force } catch { Write-Warn "could not remove $file ($($_.Exception.Message))" }
+        }
+    }
+    Remove-EmptyFolders $dir
+}
+
+function Show-Kept([string[]]$candidates) {
+    $left = @($candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Sort-Object -Unique)
+    $left = @($left | Where-Object { $p = $_; -not ($left | Where-Object { Test-Under $p $_ }) })
+    if ($left.Count -gt 0) {
+        Write-Host ""
+        Write-Host "These folders still hold files Luminary did not put there, so they were left alone:"
+        foreach ($p in $left) {
+            Write-Host "  $p"
+            Write-Host "    look:   Get-ChildItem -LiteralPath $(Format-Quoted $p) -Recurse -Force"
+            Write-Host "    delete: Remove-Item -LiteralPath $(Format-Quoted $p) -Recurse -Force"
+        }
+    }
     if (-not (Test-Path -LiteralPath $LibraryDir)) { return }
     Write-Host ""
-    Write-Host "Your library is still at $LibraryDir ($(Get-SizeText $LibraryDir))."
+    Write-Host "Your library was kept at $LibraryDir ($(Get-SizeText $LibraryDir))."
     Write-Host "It holds every document, note, flashcard and review you have created, your settings"
-    Write-Host "(including any API keys) and the downloaded models."
-    if ((Get-Item -LiteralPath $LibraryDir -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
-        Write-Step "It is a link to another folder, so it was kept. Delete that folder yourself if you no longer want it."
-        return
+    Write-Host "(including any API keys) and the downloaded models. Reinstalling picks it up again."
+    $item = Get-Item -LiteralPath $LibraryDir -Force
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        Write-Host "It is a link to $($item.Target); that folder is the one holding the data."
     }
-    if (-not (Test-Interactive)) {
-        Write-Step "Not running interactively: library kept. Delete the folder above yourself if you no longer want it."
-        return
-    }
-    $answer = Read-Host "Delete it permanently? Type DELETE to confirm, anything else keeps it"
-    if ($answer -ceq "DELETE") {
-        if (Remove-OwnedItem $LibraryDir) { Write-Step "Library deleted." }
-        return
-    }
-    Write-Step "Library kept."
-    $models = Join-Path $LibraryDir "ollama\models"
-    if (-not (Test-Path -LiteralPath $models)) { return }
-    $answer = Read-Host "Remove just the downloaded models ($(Get-SizeText $models)) to free space? They download again if you reinstall. [y/N]"
-    if ($answer -match '^(y|yes)$') {
-        if (Remove-OwnedItem $models) { Write-Step "Models removed." }
-    }
+    Write-Host "To free only the models:   Remove-Item -LiteralPath $(Format-Quoted $ModelsDir) -Recurse -Force"
+    Write-Host "To delete it permanently:  Remove-Item -LiteralPath $(Format-Quoted $LibraryDir) -Recurse -Force"
 }
 
 function Uninstall-Luminary {
     $dir = Find-LuminaryInstall
+    if (-not $dir) {
+        $machine = Get-MachineEntry
+        if ($machine) {
+            Stop-Luminary "Luminary is installed for all users ($($machine.InstallLocation)), which this does not remove. Remove it from Settings > Apps > Installed apps, as an administrator."
+        }
+    }
     Stop-LeftoverProcesses $dir
     if ($dir) {
         Write-Step "Removing Luminary from $dir"
@@ -463,25 +670,30 @@ function Uninstall-Luminary {
             # returns at once. Unquoted and last: NSIS takes the rest of the line.
             Invoke-Nsis $uninstaller "/S _?=$dir" "uninstaller"
         }
-        # The uninstaller removes only the files it installed: not itself, the logs, or
-        # anything written at runtime.
-        if (-not (Remove-OwnedItem $dir)) {
-            throw "Some files in $dir are in use. Restart Windows, then run this again."
-        }
     } else {
         Write-Step "Luminary's app is not installed; cleaning up what an earlier install left."
     }
     Remove-StaleEntries
-    # The app rebuilds these on its next launch, so they are never part of the library.
+    # The relocated engine is the app's own copy, rebuilt on its next launch.
     foreach ($copy in @("engine", "engine.new")) { $null = Remove-OwnedItem (Join-Path $LibraryDir $copy) }
-    $null = Remove-OwnedItem $LogsDir
+    $logs = @(Get-ChildItem -LiteralPath $LogsDir -File -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^luminary\.log(\.\d+)?$' } | ForEach-Object { $_.Name })
+    Remove-FilesThenFolders $LogsDir $logs
     $shared = Join-Path $env:LOCALAPPDATA "Luminary"
-    if ((Test-Path -LiteralPath $shared) -and -not (Get-ChildItem -LiteralPath $shared -Force)) { $null = Remove-OwnedItem $shared }
+    Remove-FilesThenFolders $shared @()
+    # With `_?=` the uninstaller cannot delete itself.
+    if (Test-OwnFolder $dir) {
+        Remove-FilesThenFolders $dir @("uninstall.exe")
+    } elseif ($dir) {
+        Remove-Item -LiteralPath (Join-Path $dir "uninstall.exe") -Force -ErrorAction SilentlyContinue
+    }
     Get-ChildItem -LiteralPath $env:TEMP -Directory -Filter "luminary-setup-*" -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -match '^luminary-setup-[0-9a-f]{32}$' } |
         ForEach-Object { $null = Remove-OwnedItem $_.FullName }
     Write-Step "Luminary is removed."
-    Confirm-LibraryRemoval
+    # A hand-picked folder may be shared, so it is never offered for deletion.
+    $own = if (Test-OwnFolder $dir) { $dir } else { $null }
+    Show-Kept @($own, $LogsDir, $shared)
 }
 
 function Get-FailureReport($err, [string]$action) {
@@ -540,7 +752,7 @@ function Send-FailureReport($err, [string]$action) {
     }
     Write-Host "It lists your Windows version, graphics card, memory, free disk space and the steps above;"
     Write-Host "no documents or files of yours, and your user and computer names are removed."
-    $answer = Read-Host "Email it to the Luminary developer at $ReportAddress? Your mail app opens with the report filled in, and nothing is sent until you press Send. [y/N]"
+    $answer = Read-Host "Email it to the Luminary developer at $($ReportAddress)? Your mail app opens with the report filled in, and nothing is sent until you press Send. [y/N]"
     if ($answer -notmatch '^(y|yes)$') {
         Write-Host "Not sent."
         return

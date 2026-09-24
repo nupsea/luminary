@@ -107,12 +107,16 @@ jobs:
         run: |
           mkdir -p build
           cp -f "$HOME/.local/state/luminary/luminary.log" build/linux-luminary.log || true
-          LUMINARY_UNINSTALL=1 bash scripts/get-luminary.sh
+          set -o pipefail
+          echo "not Luminary's" > ~/.local/state/luminary/keep-me.txt
+          LUMINARY_UNINSTALL=1 bash scripts/get-luminary.sh | tee build/uninstall.out
           if dpkg-query -S /usr/bin/luminary-desktop 2>/dev/null; then echo "the .deb is still installed"; exit 1; fi
           for p in ~/.local/lib/luminary ~/.local/bin/luminary ~/.local/share/applications/luminary.desktop \
-                   ~/.local/share/sh.luminary.app/engine ~/.local/state/luminary; do
+                   ~/.local/share/sh.luminary.app/engine ~/.local/state/luminary/luminary.log; do
             if [ -e "$p" ]; then echo "left behind: $p"; exit 1; fi
           done
+          [ -f ~/.local/state/luminary/keep-me.txt ] || { echo "a file Luminary did not write was deleted"; exit 1; }
+          grep -qxF "    delete: rm -rf $HOME/.local/state/luminary" build/uninstall.out || { echo "the kept folder was not listed"; exit 1; }
           [ -d ~/.local/share/sh.luminary.app ] || { echo "the library was deleted"; exit 1; }
 
       # The download size; printed, not gated (no known Linux ceiling).
@@ -200,14 +204,59 @@ jobs:
 
       # Windows PowerShell 5.1, the shell a user's `irm | iex` runs in, not pwsh.
       # The runner has no GPU, so the host check is declared past as an operator would.
+      # A fake user Ollama holds phi4-mini, which the app does not load by default: the
+      # install must copy it and leave the user's files byte for byte as they were.
       - name: Install through get-luminary.ps1
         shell: powershell
         run: |
+          $store = "$env:USERPROFILE\.ollama\models"
+          $sha = [Security.Cryptography.SHA256]::Create()
+          $layers = foreach ($body in @("weights", "template")) {
+            $bytes = [Text.Encoding]::ASCII.GetBytes($body)
+            $hex = -join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") })
+            New-Item -ItemType Directory -Force "$store\blobs" | Out-Null
+            [IO.File]::WriteAllBytes("$store\blobs\sha256-$hex", $bytes)
+            @{ digest = "sha256:$hex"; size = $bytes.Length }
+          }
+          New-Item -ItemType Directory -Force "$store\manifests\registry.ollama.ai\library\phi4-mini" | Out-Null
+          @{ config = $layers[1]; layers = @($layers[0]) } | ConvertTo-Json -Depth 4 |
+            Set-Content "$store\manifests\registry.ollama.ai\library\phi4-mini\latest"
+          $before = Get-ChildItem "$store\blobs" | Get-FileHash | ForEach-Object { $_.Hash }
+
           $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
           $env:LUMINARY_INSTALLER = $setup.FullName
           $env:LUMINARY_NO_LAUNCH = "1"
           $env:LUMINARY_HOST_SUPPORTED = "1"
+          $env:LUMINARY_REUSE_MODELS = "1"
           ./scripts/get-luminary.ps1
+
+          $ours = "$env:LOCALAPPDATA\sh.luminary.app\ollama\models"
+          if (-not (Test-Path "$ours\manifests\registry.ollama.ai\library\phi4-mini\latest")) { throw "the model was not copied" }
+          $copied = Get-ChildItem "$ours\blobs" | Get-FileHash | ForEach-Object { $_.Hash }
+          if (Compare-Object $before $copied) { throw "the copies differ from the user's files" }
+          $after = Get-ChildItem "$store\blobs" | Get-FileHash | ForEach-Object { $_.Hash }
+          if (Compare-Object $before $after) { throw "the user's Ollama files changed" }
+          if (Get-ChildItem "$ours\blobs" -Filter *.partial) { throw "a partial copy was left behind" }
+          # The fake model must not reach the launch below.
+          Remove-Item -Recurse -Force "$ours", "$env:USERPROFILE\.ollama"
+
+      # Refused before anything runs: an older app may not open a library a newer one upgraded.
+      - name: Refuse to install an older version over it
+        shell: powershell
+        run: |
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          $older = Join-Path $env:RUNNER_TEMP "Luminary_0.0.1_x64-setup.exe"
+          Copy-Item $setup.FullName $older
+          $env:LUMINARY_INSTALLER = $older
+          $env:LUMINARY_HOST_SUPPORTED = "1"
+          $refused = $null
+          try { ./scripts/get-luminary.ps1 } catch { $refused = $_.Exception.Message }
+          if ($refused -notlike "*0.0.1 is older*") { throw "expected the downgrade to be refused, got: $refused" }
+
+      # The runners carry the Visual C++ runtime, so only this shows a clean machine lacks it.
+      - name: Check every imported DLL ships or is part of Windows
+        shell: pwsh
+        run: ./scripts/desktop/verify_dll_imports.ps1 -Root "$env:LOCALAPPDATA\Luminary"
 
       # `|| true`: one root is missing and find would kill the step under -e.
       - name: Open the installed app
@@ -246,14 +295,21 @@ jobs:
           cp -f "$(cygpath -u "$LOCALAPPDATA")/Luminary/Logs/luminary.log" build/ || true
 
       # After the log is collected: the uninstall removes it. The library the launch
-      # built must survive; an uninstall is not consent to delete it.
+      # built must survive; an uninstall is not consent to delete it. A file Luminary
+      # did not write must survive too, and be listed with the command to delete it.
       - name: Uninstall through get-luminary.ps1
         shell: powershell
         run: |
+          $mine = "$env:LOCALAPPDATA\Luminary\Logs\keep-me.txt"
+          Set-Content $mine "not Luminary's"
           $env:LUMINARY_UNINSTALL = "1"
-          ./scripts/get-luminary.ps1
-          $left = @("$env:LOCALAPPDATA\Luminary", "$env:LOCALAPPDATA\sh.luminary.app\engine") | Where-Object { Test-Path $_ }
-          if ($left) { throw "left behind: $left" }
+          $out = ./scripts/get-luminary.ps1 *>&1 | Out-String
+          $out
+          $left = @(Get-ChildItem "$env:LOCALAPPDATA\Luminary" -Recurse -Force -File | ForEach-Object { $_.FullName })
+          if ($left.Count -ne 1 -or $left[0] -ne $mine) { throw "expected only $mine to be left, found: $left" }
+          if ($out -notlike "*Remove-Item -LiteralPath '$env:LOCALAPPDATA\Luminary' -Recurse -Force*") { throw "the kept folder was not listed" }
+          if ($out -notlike "*Remove-Item -LiteralPath '$env:LOCALAPPDATA\sh.luminary.app' -Recurse -Force*") { throw "the library's delete command was not shown" }
+          if (Test-Path "$env:LOCALAPPDATA\sh.luminary.app\engine") { throw "left behind: the engine" }
           $entry = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
               Where-Object { $_.DisplayName -eq "Luminary" }
           if ($entry) { throw "the Apps entry was left behind" }

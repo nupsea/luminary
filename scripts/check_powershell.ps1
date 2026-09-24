@@ -6,6 +6,9 @@
 # variable, so a script that GENERATES another script (install.ps1 -> start.ps1)
 # is validated too. No code is executed — parse only.
 #
+# Also fails on a variable whose name ends in `?`: PowerShell reads "$name?" in a
+# string as one variable, so the text prints empty rather than as the value and a `?`.
+#
 # Usage:  pwsh -NoProfile -File scripts/check_powershell.ps1
 
 $ErrorActionPreference = "Stop"
@@ -33,7 +36,7 @@ function Test-ParseErrors([string]$label, [string]$path, [string]$source) {
     return $true
 }
 
-$files = Get-ChildItem -Path $scriptsDir -Filter "*.ps1" -File
+$files = Get-ChildItem -Path $scriptsDir -Filter "*.ps1" -File -Recurse
 if ($files.Count -eq 0) {
     Write-Host "No .ps1 files found under $scriptsDir" -ForegroundColor Yellow
     exit 0
@@ -52,6 +55,16 @@ foreach ($file in $files) {
         ($n.Left.Extent.Text -match 'ScriptContent$') -and
         ($n.Right.Expression -is [System.Management.Automation.Language.StringConstantExpressionAst])
     }, $true)
+    $questioned = $ast.FindAll({
+        param($n)
+        ($n -is [System.Management.Automation.Language.VariableExpressionAst]) -and
+        ($n.VariablePath.UserPath -match '.\?$')
+    }, $true)
+    foreach ($v in $questioned) {
+        Write-Host ("FAIL  {0}" -f $file.Name) -ForegroundColor Red
+        Write-Host ("        line {0}: `${1} includes the '?'; write `$(`${2})? if the '?' is text" -f $v.Extent.StartLineNumber, $v.VariablePath.UserPath, $v.VariablePath.UserPath.TrimEnd('?'))
+        $failed = $true
+    }
     foreach ($a in $assignments) {
         $label = "{0} -> {1} (generated)" -f $file.Name, $a.Left.Extent.Text
         if (-not (Test-ParseErrors $label $null $a.Right.Expression.Value)) { $failed = $true }

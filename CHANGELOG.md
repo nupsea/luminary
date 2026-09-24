@@ -7,11 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **The one-command installers remove Luminary too.** `LUMINARY_UNINSTALL=1` stops leftover background processes, removes the app, its engine copy and logs, and keeps the library unless you type `DELETE`.
+- **The one-command installers remove Luminary too.** `LUMINARY_UNINSTALL=1` deletes only files Luminary wrote. Your library, your models and anything it does not recognise are left in place, listed with the command to delete them.
+- **Your own Ollama is left as it is, and its models can be reused.** The installer says when it finds one, warns if it is running, and offers to reuse matching models so they are not downloaded again. Every file is checked against its digest.
 - **A failed install saves a report and offers to email it.** User and computer names are removed; your mail app opens with it filled in, and nothing is sent until you press Send.
 
 ### Fixed
-- **The installers stop before what used to fail halfway**: too little disk, a missing release or GitHub rate limit, Luminary still running, sudo, musl, PowerShell constrained mode. Downloads retry, and a quarantined or truncated download is named as such.
+- **The installers stop before what used to fail halfway**: too little disk, a missing release or GitHub rate limit, Luminary still running, sudo, musl, PowerShell constrained mode, an older version over a newer one. Downloads retry, and a quarantined or truncated download is named as such.
 
 ## [0.13.2] - 2026-09-24
 

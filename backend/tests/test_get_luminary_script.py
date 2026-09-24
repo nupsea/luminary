@@ -211,7 +211,33 @@ def test_uninstall_removes_the_app_and_keeps_the_library(tmp_path):
     assert not (tmp_path / "home/.local/state/luminary").exists()
     assert (data / "luminary.db").exists()
     assert (data / "ollama/models/blobs/sha256-x").exists()
-    assert "library kept" in result.stdout
+    assert "Your library was kept" in result.stdout
+    lines = result.stdout.splitlines()
+    assert f"To delete it permanently:   rm -rf {data}" in lines
+    assert f"To free only the models:    rm -rf {data}/ollama/models" in lines
+
+
+@linux_only
+def test_uninstall_leaves_files_it_did_not_install(tmp_path):
+    release = _release(tmp_path)
+    assert _run(tmp_path, release).returncode == 0
+    theirs = tmp_path / "prefix/lib/luminary/notes.txt"
+    theirs.write_text("mine")
+    logs = tmp_path / "home/.local/state/luminary"
+    logs.mkdir(parents=True)
+    (logs / "luminary.log").write_text("x")
+    (logs / "other.txt").write_text("mine")
+
+    result = _run(tmp_path, release, LUMINARY_UNINSTALL="1")
+
+    assert result.returncode == 0, result.stderr
+    assert theirs.read_text() == "mine"
+    assert not (tmp_path / "prefix/lib/luminary/Luminary.AppImage").exists()
+    assert (logs / "other.txt").exists()
+    assert not (logs / "luminary.log").exists()
+    lines = [line.strip() for line in result.stdout.splitlines()]
+    assert f"delete: rm -rf {theirs.parent}" in lines
+    assert f"delete: rm -rf {logs}" in lines
 
 
 @linux_only
@@ -224,6 +250,95 @@ def test_uninstall_leaves_a_launcher_it_did_not_write(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert (bin_dir / "luminary").exists()
+
+
+@linux_only
+def test_an_older_version_is_not_installed_over_a_newer_one(tmp_path):
+    release = _release(tmp_path)
+    assert _run(tmp_path, release).returncode == 0
+    recorded = tmp_path / "prefix/lib/luminary/VERSION"
+    assert recorded.read_text().strip() == "9.9.9"
+    recorded.write_text("10.0.0\n")
+
+    refused = _run(tmp_path, release)
+    assert refused.returncode != 0
+    assert "Luminary 10.0.0 is installed and 9.9.9 is older" in refused.stderr
+    assert "Downloading" not in refused.stderr
+    assert not (tmp_path / "home/luminary-install-report.txt").exists()
+
+    allowed = _run(tmp_path, release, LUMINARY_ALLOW_DOWNGRADE="1")
+    assert allowed.returncode == 0, allowed.stderr
+    assert recorded.read_text().strip() == "9.9.9"
+
+
+def _user_ollama(tmp_path: Path, *, corrupt: bool = False) -> tuple[Path, list[Path]]:
+    store = tmp_path / "home/.ollama/models"
+    blobs = []
+    layers = []
+    for body in (b"weights", b"template"):
+        digest = hashlib.sha256(body).hexdigest()
+        blob = store / f"blobs/sha256-{digest}"
+        blob.parent.mkdir(parents=True, exist_ok=True)
+        blob.write_bytes(b"damaged" if corrupt and body == b"weights" else body)
+        blobs.append(blob)
+        layers.append({"digest": f"sha256:{digest}", "size": len(body)})
+    manifest = store / "manifests/registry.ollama.ai/library/qwen3.5/4b"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({"config": layers[1], "layers": layers[:1]}))
+    return store, blobs
+
+
+@linux_only
+def test_models_from_the_users_ollama_are_linked_and_theirs_left_alone(tmp_path):
+    store, blobs = _user_ollama(tmp_path)
+    before = {b: (b.read_bytes(), b.stat().st_mode) for b in blobs}
+
+    result = _run(tmp_path, _release(tmp_path), LUMINARY_REUSE_MODELS="1")
+
+    assert result.returncode == 0, result.stderr
+    assert "Found your own Ollama" in result.stdout
+    ours = tmp_path / "home/.local/share/sh.luminary.app/ollama/models"
+    assert (ours / "manifests/registry.ollama.ai/library/qwen3.5/4b").exists()
+    for blob in blobs:
+        linked = ours / "blobs" / blob.name
+        assert linked.stat().st_ino == blob.stat().st_ino
+        assert (blob.read_bytes(), blob.stat().st_mode) == before[blob]
+    assert not list(ours.glob("blobs/*.partial"))
+
+
+@linux_only
+def test_a_damaged_model_is_not_reused_and_the_install_still_succeeds(tmp_path):
+    _, blobs = _user_ollama(tmp_path, corrupt=True)
+
+    result = _run(tmp_path, _release(tmp_path), LUMINARY_REUSE_MODELS="1")
+
+    assert result.returncode == 0, result.stderr
+    assert "does not match its checksum" in result.stderr
+    assert all(b.exists() for b in blobs)
+    ours = tmp_path / "home/.local/share/sh.luminary.app/ollama/models"
+    assert not (ours / "manifests/registry.ollama.ai/library/qwen3.5/4b").exists()
+    assert not list(ours.glob("blobs/*"))
+
+
+@linux_only
+def test_models_are_not_reused_without_being_asked(tmp_path):
+    _user_ollama(tmp_path)
+
+    result = _run(tmp_path, _release(tmp_path))
+
+    assert result.returncode == 0, result.stderr
+    assert "LUMINARY_REUSE_MODELS=1" in result.stdout
+    assert not (tmp_path / "home/.local/share/sh.luminary.app").exists()
+
+
+def test_both_installers_offer_the_models_the_app_knows():
+    from app.model_registry import REGISTRY
+
+    known = {key.split("/", 1)[1] for key in REGISTRY if key.startswith("ollama/")}
+    sh = _assigned(SCRIPT.read_text(encoding="utf-8"), r'^KNOWN_MODELS="(.+)"$')
+    ps1 = _assigned(PS1.read_text(encoding="utf-8"), r'^\$KnownModels = @\((.+)\)$')
+    assert set(sh.split()) == known
+    assert {m.strip().strip('"') for m in ps1.split(",")} == known
 
 
 def _assigned(text: str, pattern: str) -> str:
