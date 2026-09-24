@@ -29,6 +29,7 @@ import { hasAuthoredHeading, sectionTitle, usableSections } from "./sectionTitle
 import { parseSpeakerTurns, type SpeakerTurn } from "./speakerTurns"
 import { useReaderPreferences } from "./useReaderPreferences"
 import { usePanelZoomStore } from "@/store/panelZoomStore"
+import { PanelZoomResetButton } from "@/components/PanelZoomResetButton"
 import type { AnnotationItem, SectionContentItem } from "./types"
 import {
   CITATION_MARK_CLASS,
@@ -931,7 +932,8 @@ export function ReadView({
           spec.tinted && "bg-[#faf6ec] dark:bg-[#1b1917]",
         )}
       >
-        <div className="sticky top-0 z-40 flex justify-end">
+        <div className="sticky top-0 z-40 flex items-center justify-end gap-1.5">
+          <PanelZoomResetButton panelId="reader" />
           <ReaderSettings
             open={settingsOpen}
             onOpenChange={setSettingsOpen}

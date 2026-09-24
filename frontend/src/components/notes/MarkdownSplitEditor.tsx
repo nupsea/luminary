@@ -14,6 +14,7 @@ import {
 import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { SOURCE_LINE_ATTR } from "@/lib/rehypeSourceLine"
 import { usePanelZoomStore } from "@/store/panelZoomStore"
+import { PanelZoomResetButton } from "@/components/PanelZoomResetButton"
 
 export type MarkdownSplitLayout = "splitter" | "tabs" | "editor"
 
@@ -256,6 +257,7 @@ export function MarkdownSplitEditor({
           <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
             {previewLabel}
           </span>
+          <PanelZoomResetButton panelId="note-preview" />
         </div>
       )}
       <div
@@ -283,6 +285,7 @@ export function MarkdownSplitEditor({
             <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
               {editorLabel}
             </span>
+            <PanelZoomResetButton panelId="note-editor" />
           </div>
           {writePane}
         </div>
@@ -300,29 +303,32 @@ export function MarkdownSplitEditor({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <div className="flex shrink-0 items-center gap-1 border-b border-border">
-        <button
-          type="button"
-          onClick={() => setActiveTab("write")}
-          className={`px-3 py-1.5 text-xs font-medium ${
-            activeTab === "write"
-              ? "border-b-2 border-primary text-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Write
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("preview")}
-          className={`px-3 py-1.5 text-xs font-medium ${
-            activeTab === "preview"
-              ? "border-b-2 border-primary text-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Preview
-        </button>
+      <div className="flex shrink-0 items-center justify-between border-b border-border pr-2">
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setActiveTab("write")}
+            className={`px-3 py-1.5 text-xs font-medium ${
+              activeTab === "write"
+                ? "border-b-2 border-primary text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Write
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("preview")}
+            className={`px-3 py-1.5 text-xs font-medium ${
+              activeTab === "preview"
+                ? "border-b-2 border-primary text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Preview
+          </button>
+        </div>
+        <PanelZoomResetButton panelId={activeTab === "write" ? "note-editor" : "note-preview"} />
       </div>
       {activeTab === "write" ? writePane : previewPane}
     </div>

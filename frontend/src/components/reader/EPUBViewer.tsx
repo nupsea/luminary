@@ -20,6 +20,7 @@ import type { components } from "@/types/api"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
 import { PanelResizer } from "./PanelResizer"
 import { usePanelZoomStore } from "@/store/panelZoomStore"
+import { PanelZoomResetButton } from "@/components/PanelZoomResetButton"
 
 type EpubTocItem = components["schemas"]["EpubChapterTocItem"]
 type EpubChapter = components["schemas"]["EpubChapterResponse"]
@@ -339,9 +340,12 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
               Prev
             </button>
 
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {activeChapter + 1} / {totalChapters}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {activeChapter + 1} / {totalChapters}
+              </span>
+              <PanelZoomResetButton panelId="reader" />
+            </div>
 
             <button
               onClick={goToNext}

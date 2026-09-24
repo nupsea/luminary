@@ -67,6 +67,28 @@ describe("usePanelZoomShortcut", () => {
       expect(resolveTargetPanel(null, null, "docked-panel")).toBe("docked-panel")
     })
 
+    it("returns null when target is inside data-zoom-ignore without an inner data-zoom-panel", () => {
+      const ignoredDiv = {
+        closest: (sel: string) => {
+          if (sel === "[data-zoom-panel]") return null
+          if (sel === "[data-zoom-ignore]") return {}
+          return null
+        },
+      }
+      expect(resolveTargetPanel(ignoredDiv as unknown as HTMLElement, "reader")).toBeNull()
+    })
+
+    it("allows inner data-zoom-panel inside data-zoom-ignore container (e.g. inline note)", () => {
+      const inlineNoteDiv = {
+        closest: (sel: string) => {
+          if (sel === "[data-zoom-panel]") return { getAttribute: () => "note-editor" }
+          if (sel === "[data-zoom-ignore]") return {}
+          return null
+        },
+      }
+      expect(resolveTargetPanel(inlineNoteDiv as unknown as HTMLElement, null)).toBe("note-editor")
+    })
+
     it("falls back to 'reader' if nothing else is specified", () => {
       expect(resolveTargetPanel(null, null)).toBe("reader")
     })

@@ -26,6 +26,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { usePanelZoomStore } from "@/store/panelZoomStore"
+import { PanelZoomResetButton } from "@/components/PanelZoomResetButton"
 import { NoteConceptChips } from "@/components/NoteConceptChips"
 import { TagAutocomplete } from "@/components/TagAutocomplete"
 import { type MarkdownEditorHandle } from "@/components/notes/MarkdownCodeEditor"
@@ -441,6 +442,7 @@ export default function NotePage() {
               }}
               title="Dictate into note (Whisper)"
             />
+            <PanelZoomResetButton panelId={readingView ? "note-preview" : "note-editor"} />
           </div>
           <div
             role="status"

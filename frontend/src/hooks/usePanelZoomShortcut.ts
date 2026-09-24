@@ -40,13 +40,17 @@ export function resolveTargetPanel(
   target: EventTarget | null,
   activePanelId: string | null,
   defaultPanelId?: string
-): string {
+): string | null {
   if (target && typeof (target as { closest?: unknown }).closest === "function") {
     const el = target as unknown as { closest: (selector: string) => { getAttribute: (attr: string) => string | null } | null }
     const panelEl = el.closest("[data-zoom-panel]")
     if (panelEl) {
       const id = panelEl.getAttribute("data-zoom-panel")
       if (id) return id
+    }
+    // Explicitly ignored container (and not inside an inner zoom panel)
+    if (el.closest("[data-zoom-ignore]")) {
+      return null
     }
   }
   if (activePanelId) return activePanelId
@@ -91,6 +95,8 @@ export function usePanelZoomShortcut({
         if (id && id !== usePanelZoomStore.getState().activePanelId) {
           setActivePanelId(id)
         }
+      } else if (el.closest("[data-zoom-ignore]")) {
+        setActivePanelId(null)
       }
     }
 
@@ -103,6 +109,9 @@ export function usePanelZoomShortcut({
       e.stopPropagation()
 
       const targetPanel = resolveTargetPanel(e.target, usePanelZoomStore.getState().activePanelId, defaultPanelId)
+      if (!targetPanel) {
+        return
+      }
 
       // Allow caller option to intercept
       if (onCustomZoom && onCustomZoom(action, targetPanel) === true) {

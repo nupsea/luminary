@@ -17,6 +17,7 @@ import { useAppStore } from "@/store"
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
 import { PracticePanel } from "./PracticePanel"
 import { isSurfaceVisible } from "@/lib/surfaceManifest"
+import { PanelZoomResetButton } from "@/components/PanelZoomResetButton"
 
 // Full-mode only, folded at BUILD time. FEYNMAN_VISIBLE below gates rendering,
 // which hid the button but still compiled the panel and its /feynman/* calls
@@ -1447,6 +1448,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 <Search size={14} />
               </button>
             )}
+            <PanelZoomResetButton panelId="reader" />
             {/* Highlight visibility toggle + dropdown */}
             <div className="relative flex items-center">
               <button
@@ -1729,7 +1731,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             change, and it may not cost a streaming answer or an unsaved note
             draft. */}
         <div
-          data-zoom-panel="docked-panel"
+          data-zoom-ignore=""
           className={`flex shrink-0 flex-col overflow-hidden ${insightsCollapsed ? "hidden" : ""}`}
           ref={attachInsights}
           style={{ width: insights.width }}
