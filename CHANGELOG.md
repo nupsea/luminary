@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`LUMINARY_HOST_SUPPORTED` could not be set on a desktop install**; it is now read from the library's `.env`, and an empty value no longer stops the backend.
 - **Hybrid mode with no API key failed card generation with a bare HTTP 500**; it is now a 503 that says to add the key in Settings.
 - **Background work could delay a live answer**: figure analysis counted as a waiting user, and overdue background calls were admitted into a question's own call (one delayed the next question by 28 s on a 4-vCPU host).
+- **Every ingest contacted the sites its suggested references linked to**, about 25 outside hosts per three documents, with web search off; 0.13.0 said a running app contacts no third party. Links are now checked only with web search enabled.
 - **A host that refuses local models was offered the chat-model download.**
 - **Chat suggestions showed fewer than four pills** when generation yielded fewer.
 - **The AppImage menu entry had no icon**, and an AppImage that would not extract ended the install silently.

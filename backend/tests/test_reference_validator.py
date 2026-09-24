@@ -25,6 +25,18 @@ from app.main import app
 from app.models import DocumentModel, SectionSummaryModel, WebReferenceModel
 from app.services.reference_validator import ReferenceValidatorService
 
+
+@pytest.fixture(autouse=True)
+def _link_checks_on(monkeypatch):
+    """Every test here checks links, which only happens with web access enabled (I-58)."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("WEB_SEARCH_PROVIDER", "duckduckgo")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 # Shared fixture
 
 
@@ -350,3 +362,30 @@ async def test_validate_urls_returns_dict():
 
     assert result["https://good.com"] is True
     assert result["https://bad.com"] is False
+
+
+@pytest.mark.asyncio
+async def test_no_link_check_without_web_access(test_db, monkeypatch):
+    """With web access off, neither entry point contacts the linked site (I-58)."""
+    from app.config import get_settings
+
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_document(factory, doc_id)
+    ref_id = await _insert_ref(factory, doc_id, url="https://docs.python.org")
+    monkeypatch.setenv("WEB_SEARCH_PROVIDER", "none")
+    get_settings.cache_clear()
+
+    with patch("app.services.reference_validator.httpx.AsyncClient") as mock_httpx:
+        svc = ReferenceValidatorService()
+        counts = await svc.validate_references(doc_id)
+        urls = await svc.validate_urls(["https://docs.python.org"])
+
+    mock_httpx.assert_not_called()
+    assert counts == {"valid": 0, "invalid": 0}
+    assert urls == {}
+    async with factory() as session:
+        ref = (
+            await session.execute(select(WebReferenceModel).where(WebReferenceModel.id == ref_id))
+        ).scalar_one()
+    assert ref.is_valid is None

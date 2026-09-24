@@ -4,7 +4,7 @@ Generates LLM-suggested canonical web references for key concepts and terms
 extracted from section summaries. Works across all document types (technical,
 philosophy, history, science, literature, etc.). Stored in WebReferenceModel.
 
-No live HTTP calls when WEB_SEARCH_PROVIDER == 'none' (default).
+Links are checked only when web access is enabled (I-58); otherwise they stay unchecked.
 """
 
 import logging
@@ -143,9 +143,7 @@ async def _extract_references(section_content: str) -> list[dict]:
 class ReferenceEnricherService:
     """Generate web references for all SectionSummaryModel rows of a document.
 
-    When WEB_SEARCH_PROVIDER == 'none' (default) all rows have is_llm_suggested=True.
-    When a non-none provider is configured, a HEAD request is issued per URL and
-    is_llm_suggested is set False for reachable URLs.
+    Every row is is_llm_suggested=True; is_valid is set only when link checks are on.
     """
 
     async def enrich(self, document_id: str) -> int:
@@ -155,7 +153,6 @@ class ReferenceEnricherService:
         Raises LLMUnavailableError (propagates to worker to mark job failed).
         """
         settings = get_settings()
-        provider = settings.WEB_SEARCH_PROVIDER
 
         async with get_session_factory()() as session:
             summaries_result = await session.execute(
@@ -215,12 +212,7 @@ class ReferenceEnricherService:
             if not refs:
                 continue
 
-            # Validate URLs via HEAD request
             url_validity = await self._validate_urls(refs)
-
-            # Optionally verify URLs via HEAD request (legacy provider check)
-            if provider != "none":
-                refs = await self._verify_urls(refs)
 
             # Sort and limit
             sorted_refs = sort_by_quality(refs)[:_MAX_REFS_PER_SECTION]
@@ -269,9 +261,6 @@ class ReferenceEnricherService:
 
         Returns count of new rows created.
         """
-        settings = get_settings()
-        provider = settings.WEB_SEARCH_PROVIDER
-
         # Delete existing refs
         async with get_session_factory()() as session:
             existing_result = await session.execute(
@@ -311,11 +300,7 @@ class ReferenceEnricherService:
         if not refs:
             return 0
 
-        # Validate URLs via HEAD request
         url_validity = await self._validate_urls(refs)
-
-        if provider != "none":
-            refs = await self._verify_urls(refs)
 
         sorted_refs = sort_by_quality(refs)[:_MAX_REFS_PER_SECTION]
 
@@ -344,7 +329,7 @@ class ReferenceEnricherService:
         return len(sorted_refs)
 
     async def _validate_urls(self, refs: list[dict]) -> dict[str, bool]:
-        """Validate URLs via HEAD requests Returns {url: is_reachable}."""
+        """{url: is_reachable}; empty when link checks are off."""
         from app.services.reference_validator import ReferenceValidatorService  # noqa: PLC0415
 
         urls = [str(r.get("url", "")) for r in refs if r.get("url")]
@@ -352,33 +337,6 @@ class ReferenceEnricherService:
             return {}
         svc = ReferenceValidatorService()
         return await svc.validate_urls(urls)
-
-    async def _verify_urls(self, refs: list[dict]) -> list[dict]:
-        """Issue HEAD requests to verify URLs when provider != 'none'.
-
-        Sets is_llm_suggested=False on dicts for reachable URLs.
-        Non-fatal: any error leaves is_llm_suggested=True.
-        """
-        try:
-            import httpx  # noqa: PLC0415
-        except ImportError:
-            logger.warning("reference_enricher: httpx not available, skipping URL verification")
-            return refs
-
-        verified = []
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
-            for ref in refs:
-                url = ref.get("url", "")
-                is_llm_suggested = True
-                if url:
-                    try:
-                        resp = await client.head(url)
-                        if resp.status_code < 400:
-                            is_llm_suggested = False
-                    except Exception:
-                        logger.debug("reference HEAD failed: %s", url, exc_info=True)
-                verified.append({**ref, "is_llm_suggested": is_llm_suggested})
-        return verified
 
 
 async def web_refs_handler(document_id: str, job_id: str) -> None:

@@ -3,7 +3,7 @@
 AC2: Unit test: mock LLM; assert >=3 references extracted from 3+ term section summary
 AC3: Unit test: sort_by_quality orders official_docs before tutorial before blog
 AC4: Integration test: enrichment runs for a tech document; rows have source_quality set
-AC5: When provider='none', all references have is_llm_suggested=True; no HTTP calls made
+AC5: When provider='none', all references are unchecked and no HTTP call is made (I-58)
 AC6: GET /references/documents/{id} returns [] for a fiction book (empty state, not error)
 """
 
@@ -239,36 +239,18 @@ async def test_no_http_calls_when_provider_none(test_db, monkeypatch):
         },
     ]
 
-    http_call_count = 0
-
-    async def _fake_head(*args, **kwargs):  # noqa: ANN001
-        nonlocal http_call_count
-        http_call_count += 1
-        raise AssertionError("httpx.AsyncClient.head should NOT be called when provider=none")
-
+    # The validator itself is left real: mocking it away is how its HEAD requests went unseen.
     with (
         patch(
             "app.services.llm.litellm.acompletion",
             new_callable=AsyncMock,
             return_value=_make_mock_llm_response(mock_refs),
         ),
-        patch("httpx.AsyncClient") as mock_httpx,
-        # S194: _validate_urls always runs; mock it to avoid real HTTP calls
-        patch.object(
-            ReferenceEnricherService,
-            "_validate_urls",
-            new_callable=AsyncMock,
-            return_value={},
-        ),
+        patch("app.services.reference_validator.httpx.AsyncClient") as mock_httpx,
     ):
-        # Ensure httpx.AsyncClient is not instantiated by _verify_urls
-        mock_httpx.return_value.__aenter__ = AsyncMock(
-            side_effect=AssertionError("httpx.AsyncClient should not be called when provider=none")
-        )
         svc = ReferenceEnricherService()
         await svc.enrich(doc_id)
 
-    # Verify no httpx instantiation happened (from _verify_urls)
     mock_httpx.assert_not_called()
 
     async with factory() as session:
@@ -281,6 +263,7 @@ async def test_no_http_calls_when_provider_none(test_db, monkeypatch):
     assert all(r.is_llm_suggested for r in rows), (
         "All rows should have is_llm_suggested=True when provider=none"
     )
+    assert all(r.is_valid is None and r.last_checked_at is None for r in rows)
 
     get_settings.cache_clear()
 
