@@ -371,7 +371,9 @@ download that it cannot, as an Intel Mac is today, and pointed at a cloud key or
 | SIGTERM drains the process tree on Linux and macOS; an AppImage without FUSE ends with its runtime | built |
 | Off Apple Silicon the default text model is `qwen3.5:4b` whatever the host holds; other models are the user's pick in Settings | built |
 | The one-command installers refuse before downloading where `host_support.local_inference_support` would, with its message, and offer to continue for reading, search and notes (`LUMINARY_INSTALL_ANYWAY=1` without asking); `test_get_luminary_script.py` fails if they disagree | built |
-| A release job attaches the Windows setup, `.deb`, AppImage and their `.sha256` files; README carries the one-liners once a release does | built: `desktop-installers.yml` `publish`, on a `v*` tag; not yet run on a real tag. README one-liners open |
+| A release job attaches the Windows setup, `.deb`, AppImage and their `.sha256` files; README carries the one-liners | built: `desktop-installers.yml` `publish` attached all four to the `v0.13.2` prerelease; the README one-liners point at `master`, which has the scripts once this branch merges |
+| Uninstall deletes only files Luminary wrote; the library, models and anything unrecognised are listed with the command to delete them | built, CI uninstalls on Windows and Linux with a planted foreign file |
+| An installed Ollama is reported, and its models the app knows are reused after a digest check, never written to | built: the Windows installer job and `test_get_luminary_script.py` reuse a planted model; not run against a real Ollama install |
 | One timing script over the installed app: doc ingest, web-article ingest, Ask idle and while a later doc ingests, flashcards, teach-back, store sizes, on `qwen3.5:4b`; its baseline is the M3 Pro | built: `scripts/time_flows.py`; M3 Pro baseline below |
 | Hard limits checked before any cloud run: installer size budget, path length, driver mode | checked, below |
 
