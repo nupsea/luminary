@@ -13,7 +13,7 @@
  Point it at a book, paper, video or article. Ask it questions and get answers that cite the passage, write down what you understand, turn what matters into flashcards, and let it schedule the review. Nothing ever leaves your machine unless you hand it an API key.
 
 <p align="center">
-  <video src="assets/images/demo.mp4" autoplay loop muted playsinline width="100%"></video>
+  <a href="assets/images/demo.mp4"><img src="assets/images/demo.gif" alt="A quick journey in luminary" width="900"></a>
 </p>
 
 <p align="center"><a href="https://youtu.be/semZlbJde_Q"><b>Watch the two-minute tour</b></a></p>
