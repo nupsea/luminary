@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.13.2]
+## [0.13.2] - 2026-09-24
 
 ### Added
 - **One-command installs on Windows and Linux.** `get-luminary.ps1` (`irm | iex`, per-user, no admin) and `get-luminary.sh` (`curl | bash`: the `.deb` on Debian/Ubuntu, else the AppImage) install the latest or a pinned release and refuse an asset without a matching `.sha256`.
