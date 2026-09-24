@@ -360,8 +360,6 @@ fixed):
 - Web articles keep Wikipedia's `[edit]` links in the chunk text.
 - YouTube ingest unverified this release: YouTube refused the test machine as a bot, and the Linux
   box has no ffmpeg.
-- `make measure-ttft` cannot run: `scripts/measure_ttft.py` was deleted in `97c3a78c` and the
-  Makefile target still calls it.
 
 **0.13.2: one-command installs on Windows and Linux** (on `feat/windows-linux-release`). The aim
 for 1.0 is reach: any recent Windows or Linux machine either runs well or is told before the
@@ -374,7 +372,7 @@ download that it cannot, as an Intel Mac is today, and pointed at a cloud key or
 | Off Apple Silicon the default text model is `qwen3.5:4b` whatever the host holds; other models are the user's pick in Settings | built |
 | The one-command installers refuse before downloading where `host_support.local_inference_support` would, with its message, and offer to continue for reading, search and notes (`LUMINARY_INSTALL_ANYWAY=1` without asking); `test_get_luminary_script.py` fails if they disagree | built |
 | A release job attaches the Windows setup, `.deb`, AppImage and their `.sha256` files; README carries the one-liners once a release does | built: `desktop-installers.yml` `publish`, on a `v*` tag; not yet run on a real tag. README one-liners open |
-| One timing script over the installed app: book ingest (Think Python), Ask, flashcards, teach-back, on `qwen3.5:4b`; its baseline is the M3 Pro | open |
+| One timing script over the installed app: book ingest, Ask, flashcards, teach-back, on `qwen3.5:4b`; its baseline is the M3 Pro | built: `scripts/time_flows.py`; M3 Pro baseline below |
 | Hard limits checked before any cloud run: installer size budget, path length, driver mode | checked, below; the GPU quota blocks two boxes at once |
 
 **Cloud runs: two boxes, same card, same model.** A Linux and a Windows `g4dn.xlarge` (T4), both on
@@ -395,6 +393,25 @@ refused, so timing it measures nothing. Parity is proposed as each timing within
 | On-demand G-instance vCPU quota | 4 | two `g4dn.xlarge` need 8: run the boxes one after the other, or raise the quota first |
 | Root volume | Ubuntu AMI 8GB, Windows 30GB by default | the app needs ~9GB beyond the OS and driver (install 2.1GB, CUDA 0.6GB, `qwen3.5:4b` 3.4GB, encoders 1.5GB, installer 0.7GB): launch Linux with 40GB, Windows with 60GB |
 | T4 in WDDM | AWS's gaming driver only | with the stock driver the 0.13.0 Windows box ran on the CPU; gaming driver not yet tried, ten-minute cut-off above |
+
+**M3 Pro baseline** (36GB, `qwen3.5:4b` pinned in Settings, `DATA/books/frankenstein.txt` into an
+empty library, dev backend at `448669ae`; two runs, each on a fresh library):
+
+| Flow | Run 1 | Run 2 |
+|---|---|---|
+| Upload to ingest `complete` | 73.0s | 72.7s |
+| Upload to background work settled | 380s | 386s |
+| Ask, time to first token (3 questions) | 4.3 / 3.9 / 3.9s | 4.4 / 3.9 / 4.0s |
+| Ask, full answer | 11.4 / 15.8 / 23.6s | 12.9 / 23.4 / 25.0s |
+| 5 flashcards | 46.3s (one card dropped by the grounding check, refilled) | 22.2s |
+| Teach-back evaluation | 4.1s | 3.8s |
+
+`time_flows.py` times the reader flows only after background work has settled: section summaries
+run for about five minutes after `complete`. Timed before that, Ask's first token came 3s late
+behind them, and the starvation guard forced three background calls into flashcard generation.
+Card time has two modes (22s, or about 46s when a card is refilled), so hosts are compared mode to mode.
+A second run started three minutes after a first, with identical prompts, got first tokens in 0.3-0.6s;
+most likely Ollama's prompt cache, not verified.
 
 **Not in 0.13.2.** Intel and AMD integrated graphics are refused as `no_accelerator`, though Ollama
 serves them through Vulkan. That covers most current Windows laptops, and whether to admit them is
