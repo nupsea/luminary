@@ -6,6 +6,7 @@ import type { ChunkItem, DocumentDetail } from "./types"
 import { relativeDate } from "@/components/library/utils"
 import { cn } from "@/lib/utils"
 import { CITATION_MARK_TOKEN, formatTimestamp } from "@/lib/citation"
+import { usePanelZoomStore } from "@/store/panelZoomStore"
 
 const fetchChunks = (documentId: string): Promise<ChunkItem[]> =>
   apiGet<ChunkItem[]>(`/documents/${documentId}/chunks`)
@@ -49,6 +50,7 @@ interface YouTubeTranscriptViewProps {
 }
 
 export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }: YouTubeTranscriptViewProps) {
+  const readerZoom = usePanelZoomStore((s) => s.getZoom("reader"))
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -136,7 +138,7 @@ export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }:
     : null
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div data-zoom-panel="reader" className="flex flex-col h-full overflow-hidden">
       {/* Video metadata header */}
       <div className="px-6 py-4 border-b border-border bg-muted/30 shrink-0">
         <h2 className="text-base font-semibold text-foreground mb-1">
@@ -189,7 +191,7 @@ export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }:
       )}
 
       {/* Transcript content */}
-      <div ref={contentRef} className="flex-1 overflow-auto px-8 py-6">
+      <div ref={contentRef} style={{ fontSize: `${readerZoom * 0.875}rem` }} className="flex-1 overflow-auto px-8 py-6">
         <div className="max-w-3xl mx-auto">
           {isLoading && (
             <div className="flex items-center justify-center py-12">

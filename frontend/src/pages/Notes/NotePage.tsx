@@ -25,6 +25,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { usePanelZoomStore } from "@/store/panelZoomStore"
 import { NoteConceptChips } from "@/components/NoteConceptChips"
 import { TagAutocomplete } from "@/components/TagAutocomplete"
 import { type MarkdownEditorHandle } from "@/components/notes/MarkdownCodeEditor"
@@ -142,6 +143,8 @@ export default function NotePage() {
     retry: false,
     staleTime: 10_000,
   })
+
+  const notePreviewZoom = usePanelZoomStore((s) => s.getZoom("note-preview"))
 
   const { data: documents = [] } = useQuery({
     queryKey: ["notes-documents"],
@@ -567,7 +570,11 @@ export default function NotePage() {
         )}
 
         {readingView ? (
-          <div className="flex-1 overflow-auto">
+          <div
+            data-zoom-panel="note-preview"
+            style={{ fontSize: `${notePreviewZoom}rem` }}
+            className="flex-1 overflow-auto"
+          >
             <div ref={proseRef} className="mx-auto max-w-3xl px-8 py-6">
               {editContent.trim() ? (
                 <MarkdownRenderer

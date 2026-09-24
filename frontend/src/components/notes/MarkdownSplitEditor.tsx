@@ -13,6 +13,7 @@ import {
 } from "@/components/notes/scrollSync"
 import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { SOURCE_LINE_ATTR } from "@/lib/rehypeSourceLine"
+import { usePanelZoomStore } from "@/store/panelZoomStore"
 
 export type MarkdownSplitLayout = "splitter" | "tabs" | "editor"
 
@@ -65,6 +66,7 @@ export function MarkdownSplitEditor({
   const internalEditorRef = useRef<MarkdownEditorHandle | null>(null)
   const editorRef = externalEditorRef ?? internalEditorRef
   const previewRef = useRef<HTMLDivElement>(null)
+  const notePreviewZoom = usePanelZoomStore((s) => s.getZoom("note-preview"))
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const syncingRef = useRef<"write" | "preview" | null>(null)
   const anchorsRef = useRef<{ signature: string; anchors: SourceAnchor[] }>({
@@ -244,7 +246,11 @@ export function MarkdownSplitEditor({
   )
 
   const previewPane = (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    <div
+      data-zoom-panel="note-preview"
+      style={{ fontSize: `${notePreviewZoom}rem` }}
+      className="flex min-h-0 flex-1 flex-col gap-2"
+    >
       {layout === "splitter" && (
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">

@@ -32,6 +32,7 @@ import { SearchDialog } from "./components/SearchDialog"
 import { StudyLauncher } from "./components/StudyLauncher"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
+import { usePanelZoomShortcut } from "./hooks/usePanelZoomShortcut"
 import { IngestionTrackerProvider } from "./hooks/IngestionTrackerProvider"
 import { EnrichmentStatus } from "./components/EnrichmentStatus"
 import { IngestionProgressPills } from "./components/IngestionProgressPills"
@@ -446,6 +447,9 @@ function AppShell() {
 
   // review reminder notifications
   useReviewNotification()
+
+  // global per-panel font zoom shortcut (Cmd/Ctrl + / - / 0)
+  usePanelZoomShortcut()
 
   // cross-tab navigation from tag graph node click or tag chip click
   useEffect(() => {

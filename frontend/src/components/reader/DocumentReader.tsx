@@ -1549,7 +1549,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
               if (sec && sec.page_start > 0) targetPdfPage = sec.page_start
             }
             return (
-              <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
+              <div data-zoom-panel="reader" className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
                 <PDFViewer ref={pdfViewerRef} citationWords={citationWords} citationPage={citationPdfPage} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} initialSearch={initialSearch} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
               </div>
             )
@@ -1557,7 +1557,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
           {/* Book View — lazy-mounted for EPUB documents */}
           {bookViewVisited && (
-            <div className={cn("flex-1 overflow-hidden", leftTab !== "bookview" && "hidden")}>
+            <div data-zoom-panel="reader" className={cn("flex-1 overflow-hidden", leftTab !== "bookview" && "hidden")}>
               <EPUBViewer documentId={documentId} />
             </div>
           )}
@@ -1567,6 +1567,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
               as reading: the contents list carries data-section-id too, and scrolling
               a table of contents is not reading the document. */}
           <div
+            data-zoom-panel="reader"
             data-reading-surface=""
             className={cn("flex-1 overflow-hidden", leftTab !== "read" && "hidden")}
           >
@@ -1728,6 +1729,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             change, and it may not cost a streaming answer or an unsaved note
             draft. */}
         <div
+          data-zoom-panel="docked-panel"
           className={`flex shrink-0 flex-col overflow-hidden ${insightsCollapsed ? "hidden" : ""}`}
           ref={attachInsights}
           style={{ width: insights.width }}
