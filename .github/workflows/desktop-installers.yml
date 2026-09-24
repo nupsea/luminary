@@ -303,8 +303,10 @@ jobs:
           $mine = "$env:LOCALAPPDATA\Luminary\Logs\keep-me.txt"
           Set-Content $mine "not Luminary's"
           $env:LUMINARY_UNINSTALL = "1"
-          $out = ./scripts/get-luminary.ps1 *>&1 | Out-String
+          $out = ./scripts/get-luminary.ps1 *>&1 | Out-String -Width 4096
           $out
+          # Out-String wraps at the console width; a command split across lines is still shown.
+          $out = $out -replace '\s+', ' '
           $left = @(Get-ChildItem "$env:LOCALAPPDATA\Luminary" -Recurse -Force -File | ForEach-Object { $_.FullName })
           if ($left.Count -ne 1 -or $left[0] -ne $mine) { throw "expected only $mine to be left, found: $left" }
           if ($out -notlike "*Remove-Item -LiteralPath '$env:LOCALAPPDATA\Luminary' -Recurse -Force*") { throw "the kept folder was not listed" }
