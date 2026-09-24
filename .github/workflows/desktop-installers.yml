@@ -7,6 +7,10 @@ name: Desktop installers
 on:
   workflow_dispatch:
   push:
+    # Tags publish (path filters are ignored for tag pushes); naming only tags
+    # would stop branch pushes from running it.
+    branches: ["**"]
+    tags: ["v*"]
     paths:
       - "scripts/desktop/**"
       - "scripts/get-luminary.*"
@@ -237,3 +241,58 @@ jobs:
             build/*.log
             build/installed-app.out
           retention-days: 7
+
+  # Each job uploads its installers only after every install check in it passed.
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: luminary-{linux,windows}
+          path: dist
+          merge-multiple: true
+
+      # A tag on an unbumped commit would ship an older build under a newer name.
+      # The .sha256 files are what the get-luminary wrappers verify against.
+      - name: Check versions and write checksums
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          mkdir -p out
+          for suffix in "_amd64.deb" "_amd64.AppImage" "_x64-setup.exe"; do
+            file="$(find dist -type f -name "Luminary_${version}${suffix}" | head -1)"
+            [ -n "$file" ] || { echo "no Luminary_${version}${suffix} in the artifacts" >&2; exit 1; }
+            cp "$file" out/
+            (cd out && sha256sum "$(basename "$file")" > "$(basename "$file").sha256")
+          done
+          ls -l out
+
+      # Three workflows fire on one tag; whichever finishes first creates the release,
+      # and a create that loses the race falls back to the release the winner made.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --generate-notes \
+            || gh release view "$TAG" >/dev/null
+          for attempt in 1 2 3; do
+            if gh release upload "$TAG" out/* --clobber; then
+              exit 0
+            fi
+            [ "$attempt" -lt 3 ] || break
+            echo "upload attempt $attempt failed; retrying in $((attempt * 30))s" >&2
+            sleep $((attempt * 30))
+          done
+          echo "release upload failed after 3 attempts" >&2
+          exit 1

@@ -373,7 +373,7 @@ download that it cannot, as an Intel Mac is today, and pointed at a cloud key or
 | SIGTERM drains the process tree on Linux and macOS; an AppImage without FUSE ends with its runtime | built |
 | Off Apple Silicon the default text model is `qwen3.5:4b` whatever the host holds; other models are the user's pick in Settings | built |
 | The one-command installers refuse before downloading where `host_support.local_inference_support` would, with its message, and offer to continue for reading, search and notes (`LUMINARY_INSTALL_ANYWAY=1` without asking); `test_get_luminary_script.py` fails if they disagree | built |
-| A release job attaches the Windows setup, `.deb`, AppImage and their `.sha256` files; README carries the one-liners once a release does | open: a `publish` job for `desktop-installers.yml` is drafted, adding it needs the maintainer |
+| A release job attaches the Windows setup, `.deb`, AppImage and their `.sha256` files; README carries the one-liners once a release does | built: `desktop-installers.yml` `publish`, on a `v*` tag; not yet run on a real tag. README one-liners open |
 | One timing script over the installed app: book ingest (Think Python), Ask, flashcards, teach-back, on `qwen3.5:4b`; its baseline is the M3 Pro | open |
 | Hard limits checked before any cloud run: installer size budget, path length, driver mode | open |
 
