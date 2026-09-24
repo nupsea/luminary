@@ -375,7 +375,7 @@ download that it cannot, as an Intel Mac is today, and pointed at a cloud key or
 | The one-command installers refuse before downloading where `host_support.local_inference_support` would, with its message, and offer to continue for reading, search and notes (`LUMINARY_INSTALL_ANYWAY=1` without asking); `test_get_luminary_script.py` fails if they disagree | built |
 | A release job attaches the Windows setup, `.deb`, AppImage and their `.sha256` files; README carries the one-liners once a release does | built: `desktop-installers.yml` `publish`, on a `v*` tag; not yet run on a real tag. README one-liners open |
 | One timing script over the installed app: book ingest (Think Python), Ask, flashcards, teach-back, on `qwen3.5:4b`; its baseline is the M3 Pro | open |
-| Hard limits checked before any cloud run: installer size budget, path length, driver mode | open |
+| Hard limits checked before any cloud run: installer size budget, path length, driver mode | checked, below; the GPU quota blocks two boxes at once |
 
 **Cloud runs: two boxes, same card, same model.** A Linux and a Windows `g4dn.xlarge` (T4), both on
 `qwen3.5:4b`, so they differ by OS only. Each runs the one-command install, a first run with no
@@ -383,6 +383,18 @@ terminal, `make smoke` against the installed app, and the timing script. Windows
 driver, which runs the card in WDDM mode; if Ollama still reports no VRAM after ten minutes, the box
 is terminated and the Windows GPU path goes to a volunteer. No CPU-only box is run: such a host is
 refused, so timing it measures nothing. Parity is proposed as each timing within 1.5x of the M3 Pro.
+
+**Hard limits for the release and the cloud runs** (0.13.1 installer run `35927916664`, the
+`personal` account in `ap-southeast-2`):
+
+| Limit | Ceiling | Measured |
+|---|---|---|
+| NSIS pack size | ~2048MB; `verify_stage.sh` fails at 1900MB | Windows stage 1616MB |
+| Windows MAX_PATH | 260, less ~60 for the install root; `verify_stage.sh` fails past 190 | longest 165 (Linux 154) |
+| GitHub release asset | 2GiB per file | largest 667MB (`.deb`); AppImage 619MB, setup 301MB |
+| On-demand G-instance vCPU quota | 4 | two `g4dn.xlarge` need 8: run the boxes one after the other, or raise the quota first |
+| Root volume | Ubuntu AMI 8GB, Windows 30GB by default | the app needs ~9GB beyond the OS and driver (install 2.1GB, CUDA 0.6GB, `qwen3.5:4b` 3.4GB, encoders 1.5GB, installer 0.7GB): launch Linux with 40GB, Windows with 60GB |
+| T4 in WDDM | AWS's gaming driver only | with the stock driver the 0.13.0 Windows box ran on the CPU; gaming driver not yet tried, ten-minute cut-off above |
 
 **Not in 0.13.2.** Intel and AMD integrated graphics are refused as `no_accelerator`, though Ollama
 serves them through Vulkan. That covers most current Windows laptops, and whether to admit them is
