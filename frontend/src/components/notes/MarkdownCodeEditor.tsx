@@ -89,9 +89,11 @@ export interface MarkdownCodeEditorProps {
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
 }
 
+import { usePanelZoomStore } from "@/store/panelZoomStore"
+
 // Colors come from the shadcn CSS variables so dark mode flips for free.
 const editorTheme = EditorView.theme({
-  "&": { height: "100%", fontSize: "13.5px", backgroundColor: "transparent" },
+  "&": { height: "100%", fontSize: "var(--note-editor-font-size, 13.5px)", backgroundColor: "transparent" },
   ".cm-scroller": {
     fontFamily: "var(--font-mono)",
     lineHeight: "1.65",
@@ -215,6 +217,7 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
   ) {
     const hostRef = useRef<HTMLDivElement>(null)
     const viewRef = useRef<EditorView | null>(null)
+    const noteEditorZoom = usePanelZoomStore((s) => s.getZoom("note-editor"))
     // The preview pane is a toggle, so live rendering has to be switchable on a
     // view that is already built.
     const liveRoom = useRef(new Compartment()).current
@@ -490,6 +493,13 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
       [],
     )
 
-    return <div ref={hostRef} className={className} />
+    return (
+      <div
+        ref={hostRef}
+        data-zoom-panel="note-editor"
+        style={{ "--note-editor-font-size": `${13.5 * noteEditorZoom}px` } as React.CSSProperties}
+        className={className}
+      />
+    )
   },
 )

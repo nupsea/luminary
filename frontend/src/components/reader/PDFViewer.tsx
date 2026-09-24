@@ -9,6 +9,8 @@ import { useIsDark } from "@/hooks/useIsDark"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
 import { PanelResizer } from "./PanelResizer"
 import { Skeleton } from "@/components/ui/skeleton"
+import { toast } from "sonner"
+import { registerCustomZoomHandler } from "@/store/panelZoomStore"
 import type { AnnotationItem, SectionItem } from "./types"
 import {
   type OutlineEntry,
@@ -1002,6 +1004,37 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     }, [zoomMode, pdfDoc, fitTo])
     const fitToPage = useCallback(() => void fitTo("page"), [fitTo])
 
+    // Register custom zoom handler for PDF canvas when reader panel is active
+    useEffect(() => {
+      return registerCustomZoomHandler("reader", (action) => {
+        if (action === "in") {
+          setZoomMode("manual")
+          setZoom((currentZoom) => {
+            const next = stepZoom(currentZoom, 1)
+            toast(`PDF: ${Math.round(next * 100)}%`, { id: "panel-zoom-reader", duration: 1200 })
+            return next
+          })
+          return true
+        }
+        if (action === "out") {
+          setZoomMode("manual")
+          setZoom((currentZoom) => {
+            const next = stepZoom(currentZoom, -1)
+            toast(`PDF: ${Math.round(next * 100)}%`, { id: "panel-zoom-reader", duration: 1200 })
+            return next
+          })
+          return true
+        }
+        if (action === "reset") {
+          setZoomMode("readable")
+          void fitTo("readable")
+          toast("PDF: Fit to readable", { id: "panel-zoom-reader", duration: 1200 })
+          return true
+        }
+        return false
+      })
+    }, [fitTo])
+
     // Which match on this page is the active one. Derived here so the effect
     // below depends on a number rather than on the identity of `globalMatches`,
     // which progressive extraction replaces once per ten-page batch.
@@ -1127,7 +1160,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const useOutline = shouldUseOutline(pdfOutline.length, tocSections.length)
 
     return (
-      <div className="flex h-full">
+      <div data-zoom-panel="reader" className="flex h-full">
         {toc.collapsed ? (
           <button
             type="button"

@@ -19,6 +19,8 @@ import { apiGet } from "@/lib/apiClient"
 import type { components } from "@/types/api"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
 import { PanelResizer } from "./PanelResizer"
+import { usePanelZoomStore } from "@/store/panelZoomStore"
+import { PanelZoomResetButton } from "@/components/PanelZoomResetButton"
 
 type EpubTocItem = components["schemas"]["EpubChapterTocItem"]
 type EpubChapter = components["schemas"]["EpubChapterResponse"]
@@ -91,6 +93,7 @@ interface EPUBViewerProps {
 }
 
 export function EPUBViewer({ documentId }: EPUBViewerProps) {
+  const readerZoom = usePanelZoomStore((s) => s.getZoom("reader"))
   const { attachPanel: attachTocPanel, ...tocPanel } = useResizablePanel({
     storageKey: "luminary-epub-toc",
     defaultWidth: 224,
@@ -187,7 +190,7 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div data-zoom-panel="reader" className="flex h-full overflow-hidden">
       {/* Left: TOC panel */}
       {tocPanel.collapsed ? (
         <button
@@ -317,6 +320,7 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
                 // `pre` text with a dark background, which does not hold here.
                 "prose-pre:bg-muted/50 prose-pre:text-foreground prose-pre:border prose-pre:border-border",
               )}
+              style={{ fontSize: `${readerZoom}rem` }}
               // Safe: HTML is sanitized server-side by bleach + BeautifulSoup
               dangerouslySetInnerHTML={{ __html: chapter.html }}
               onClick={handleContentClick}
@@ -336,9 +340,12 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
               Prev
             </button>
 
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {activeChapter + 1} / {totalChapters}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {activeChapter + 1} / {totalChapters}
+              </span>
+              <PanelZoomResetButton panelId="reader" />
+            </div>
 
             <button
               onClick={goToNext}

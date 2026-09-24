@@ -28,6 +28,8 @@ import {
 import { hasAuthoredHeading, sectionTitle, usableSections } from "./sectionTitle"
 import { parseSpeakerTurns, type SpeakerTurn } from "./speakerTurns"
 import { useReaderPreferences } from "./useReaderPreferences"
+import { usePanelZoomStore } from "@/store/panelZoomStore"
+import { PanelZoomResetButton } from "@/components/PanelZoomResetButton"
 import type { AnnotationItem, SectionContentItem } from "./types"
 import {
   CITATION_MARK_CLASS,
@@ -599,6 +601,7 @@ export function ReadView({
   }
   // The section at the top of the port before the window moves, restored after.
   const anchorRef = useRef<{ id: string; top: number } | null>(null)
+  const readerZoom = usePanelZoomStore((s) => s.getZoom("reader"))
   const { attachPanel: attachToc, ...toc } = useResizablePanel({
     storageKey: "luminary-read-toc",
     defaultWidth: 224,
@@ -864,7 +867,7 @@ export function ReadView({
   }
 
   return (
-    <div className="flex h-full">
+    <div data-zoom-panel="reader" className="flex h-full">
       {/* TOC sidebar */}
       {toc.collapsed ? (
         <button
@@ -929,7 +932,8 @@ export function ReadView({
           spec.tinted && "bg-[#faf6ec] dark:bg-[#1b1917]",
         )}
       >
-        <div className="sticky top-0 z-40 flex justify-end">
+        <div className="sticky top-0 z-40 flex items-center justify-end gap-1.5">
+          <PanelZoomResetButton panelId="reader" />
           <ReaderSettings
             open={settingsOpen}
             onOpenChange={setSettingsOpen}
@@ -945,7 +949,7 @@ export function ReadView({
           className="mx-auto -mt-6 w-full text-[length:var(--reader-size)] [&_p]:leading-[var(--reader-leading)]"
           style={{
             maxWidth: `${spec.measureCh}ch`,
-            ["--reader-size" as string]: `${spec.fontScale}rem`,
+            ["--reader-size" as string]: `${spec.fontScale * readerZoom}rem`,
             ["--reader-leading" as string]: spec.lineHeight,
           }}
         >
