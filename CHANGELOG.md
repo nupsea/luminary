@@ -6,6 +6,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.2]
+
+### Added
+- **One-command installs on Windows and Linux.** `get-luminary.ps1` (`irm | iex`, per-user, no admin) and `get-luminary.sh` (`curl | bash`: the `.deb` on Debian/Ubuntu, else the AppImage) install the latest or a pinned release and refuse an asset without a matching `.sha256`.
+- **A `v*` tag publishes the Windows setup, `.deb` and AppImage** with their checksums, only after each installed, opened and ingested in CI.
+
+### Changed
+- **`qwen3.5:4b` is the default text model off Apple Silicon**, whatever the RAM or card; a larger model is the user's pick in Settings. RAM alone chose 14B on a 64 GB machine with no card, and answers took 2-4 minutes.
+- **An unsupported host is told before the download**, with the app's own message; it can still install for reading, search and notes.
+
+### Fixed
+- **A SIGTERM left the backend and engine running** on Linux and macOS, and an AppImage run without FUSE left them running when killed. Both now drain the process tree.
+- **`LUMINARY_HOST_SUPPORTED` could not be set on a desktop install**; it is now read from the library's `.env`, and an empty value no longer stops the backend.
+- **Hybrid mode with no API key failed card generation with a bare HTTP 500**; it is now a 503 that says to add the key in Settings.
+- **Background work could delay a live answer**: figure analysis counted as a waiting user, and overdue background calls were admitted into a question's own call (one delayed the next question by 28 s on a 4-vCPU host).
+- **A host that refuses local models was offered the chat-model download.**
+- **Chat suggestions showed fewer than four pills** when generation yielded fewer.
+- **The AppImage menu entry had no icon**, and an AppImage that would not extract ended the install silently.
+
 ## [0.13.1] - 2026-09-23
 
 ### Fixed
