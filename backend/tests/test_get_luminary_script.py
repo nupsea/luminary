@@ -62,6 +62,7 @@ def _sysroot(
 
 
 def _run(tmp_path: Path, release: Path, **env: str) -> subprocess.CompletedProcess:
+    (tmp_path / "home").mkdir(exist_ok=True)
     full_env = {
         "PATH": os.environ["PATH"],
         "HOME": str(tmp_path / "home"),
@@ -161,6 +162,68 @@ def test_a_refused_host_can_still_install(tmp_path, env):
     result = _run(tmp_path, _release(tmp_path), LUMINARY_SYSROOT=str(root), **env)
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "prefix/lib/luminary/Luminary.AppImage").exists()
+
+
+@linux_only
+def test_a_failure_saves_a_report_without_the_home_path(tmp_path):
+    result = _run(tmp_path, _release(tmp_path, checksum="wrong"))
+    assert result.returncode != 0
+    report = (tmp_path / "home/luminary-install-report.txt").read_text()
+    assert "Error: checksum mismatch" in report
+    assert "==> Downloading" in report
+    assert "library ~/.local/share/sh.luminary.app" in report
+    assert str(tmp_path / "home") not in report
+    assert "eanups@yahoo.com" in result.stderr
+
+
+@linux_only
+def test_a_refusal_saves_no_report(tmp_path):
+    result = _run(tmp_path, _release(tmp_path), LUMINARY_FORMAT="rpm")
+    assert result.returncode != 0
+    assert not (tmp_path / "home/luminary-install-report.txt").exists()
+
+
+def _library(tmp_path: Path) -> Path:
+    data = tmp_path / "home/.local/share/sh.luminary.app"
+    for piece in ("luminary.db", "engine/ollama/ollama", "ollama/models/blobs/sha256-x"):
+        (data / piece).parent.mkdir(parents=True, exist_ok=True)
+        (data / piece).write_text("x")
+    logs = tmp_path / "home/.local/state/luminary"
+    logs.mkdir(parents=True)
+    (logs / "luminary.log").write_text("x")
+    return data
+
+
+@linux_only
+def test_uninstall_removes_the_app_and_keeps_the_library(tmp_path):
+    release = _release(tmp_path)
+    assert _run(tmp_path, release).returncode == 0
+    data = _library(tmp_path)
+
+    result = _run(tmp_path, release, LUMINARY_UNINSTALL="1")
+
+    assert result.returncode == 0, result.stderr
+    prefix = tmp_path / "prefix"
+    assert not (prefix / "lib/luminary").exists()
+    assert not (prefix / "bin/luminary").exists()
+    assert not (prefix / "share/applications/luminary.desktop").exists()
+    assert not (data / "engine").exists()
+    assert not (tmp_path / "home/.local/state/luminary").exists()
+    assert (data / "luminary.db").exists()
+    assert (data / "ollama/models/blobs/sha256-x").exists()
+    assert "library kept" in result.stdout
+
+
+@linux_only
+def test_uninstall_leaves_a_launcher_it_did_not_write(tmp_path):
+    bin_dir = tmp_path / "prefix/bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "luminary").write_text("#!/bin/sh\necho someone else's\n")
+
+    result = _run(tmp_path, _release(tmp_path), LUMINARY_UNINSTALL="1")
+
+    assert result.returncode == 0, result.stderr
+    assert (bin_dir / "luminary").exists()
 
 
 def _assigned(text: str, pattern: str) -> str:

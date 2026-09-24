@@ -101,6 +101,20 @@ jobs:
           SCREENSHOT=build/linux-appimage.png xvfb-run -a -s "-screen 0 1440x900x24" \
             bash scripts/desktop/verify_installed.sh "$HOME/.local/bin/luminary"
 
+      # Removes both installs at once. The library the two launches built must survive:
+      # an uninstall is not consent to delete it.
+      - name: Uninstall through get-luminary.sh
+        run: |
+          mkdir -p build
+          cp -f "$HOME/.local/state/luminary/luminary.log" build/linux-luminary.log || true
+          LUMINARY_UNINSTALL=1 bash scripts/get-luminary.sh
+          if dpkg-query -S /usr/bin/luminary-desktop 2>/dev/null; then echo "the .deb is still installed"; exit 1; fi
+          for p in ~/.local/lib/luminary ~/.local/bin/luminary ~/.local/share/applications/luminary.desktop \
+                   ~/.local/share/sh.luminary.app/engine ~/.local/state/luminary; do
+            if [ -e "$p" ]; then echo "left behind: $p"; exit 1; fi
+          done
+          [ -d ~/.local/share/sh.luminary.app ] || { echo "the library was deleted"; exit 1; }
+
       # The download size; printed, not gated (no known Linux ceiling).
       - name: Report installer sizes
         if: ${{ !cancelled() }}
@@ -230,6 +244,20 @@ jobs:
         run: |
           mkdir -p build
           cp -f "$(cygpath -u "$LOCALAPPDATA")/Luminary/Logs/luminary.log" build/ || true
+
+      # After the log is collected: the uninstall removes it. The library the launch
+      # built must survive; an uninstall is not consent to delete it.
+      - name: Uninstall through get-luminary.ps1
+        shell: powershell
+        run: |
+          $env:LUMINARY_UNINSTALL = "1"
+          ./scripts/get-luminary.ps1
+          $left = @("$env:LOCALAPPDATA\Luminary", "$env:LOCALAPPDATA\sh.luminary.app\engine") | Where-Object { Test-Path $_ }
+          if ($left) { throw "left behind: $left" }
+          $entry = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+              Where-Object { $_.DisplayName -eq "Luminary" }
+          if ($entry) { throw "the Apps entry was left behind" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\sh.luminary.app")) { throw "the library was deleted" }
 
       - name: Upload screenshots and logs
         if: always()

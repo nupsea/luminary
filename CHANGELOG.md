@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The one-command installers remove Luminary too.** `LUMINARY_UNINSTALL=1` stops leftover background processes, removes the app, its engine copy and logs, and keeps the library unless you type `DELETE`.
+- **A failed install saves a report and offers to email it.** User and computer names are removed; your mail app opens with it filled in, and nothing is sent until you press Send.
+
+### Fixed
+- **The installers stop before what used to fail halfway**: too little disk, a missing release or GitHub rate limit, Luminary still running, sudo, musl, PowerShell constrained mode. Downloads retry, and a quarantined or truncated download is named as such.
+
 ## [0.13.2] - 2026-09-24
 
 ### Added

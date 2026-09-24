@@ -256,6 +256,21 @@ Linux job opens the `.deb` first and the AppImage second, against the library
 the first launch created. The runners have no GPU: this proves the install, the
 layout and the CPU path, never which accelerator a real machine gets.
 
+**Remove through the same one-liner, not the OS alone.** `LUMINARY_UNINSTALL=1` with
+`get-luminary.ps1` / `.sh` stops leftover backend and engine processes (matched by
+executable path, never by name), removes the app, the engine copy in `<library>/engine`
+and the logs, and keeps the library unless the user types `DELETE`; a non-interactive
+run always keeps it. The NSIS uninstaller in Settings > Apps deletes only the files it
+installed, so `%LOCALAPPDATA%\Luminary` survives it — the logs live inside the install
+folder — and its "Delete app data" checkbox removes the whole library in one click.
+CI installs, launches and uninstalls through both scripts, and fails if the library is gone.
+
+**A failed run writes `luminary-<install|uninstall>-report.txt`** to the Desktop (else
+home) with the home path, user and computer names removed. Only on a yes does it open a
+`mailto:` to the maintainer with the report filled in; the script never sends anything
+itself, because a public script cannot hold a mail credential. A refusal the user can act
+on (unsupported host, too little disk, Luminary still open) writes no report.
+
 ## Scripts
 
 `scripts/desktop/` is shared by every platform and decides what ships;
