@@ -170,7 +170,7 @@ def local_inference_support() -> HostSupport:
     if _declared_supported():
         return HostSupport(True, None, f"{where}, {_DECLARED} set", None)
 
-    if system == "Darwin" and machine not in ("arm64", "aarch64"):
+    if system == "Darwin" and not is_apple_silicon():
         return HostSupport(False, "intel_mac", where, UNSUPPORTED_MESSAGE)
 
     if not _has_accelerator():
