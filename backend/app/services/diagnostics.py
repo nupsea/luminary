@@ -8,10 +8,13 @@ served from the backend's own origin, where Tauri IPC is not granted -- and
 because a browser or Docker install has no shell to ask.
 """
 
+import asyncio
 import os
 import platform
 import re
 import subprocess
+import sys
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -27,6 +30,7 @@ from app.services.settings_service import get_local_chat_model, get_vision_model
 # Reports can come from a work computer, so anything naming a person, an organisation or a
 # place is removed before the user sees it. The key shapes match the desktop shell's report.rs.
 REPORT_EMAIL = "eanups@yahoo.com"
+REPORT_ISSUES = "https://github.com/nupsea/luminary/issues/new/choose"
 _LOG_LINES = 150
 _KEY_SHAPES = re.compile(
     r"sk-ant-[A-Za-z0-9_\-]{16,}|sk-[A-Za-z0-9_\-]{16,}|gh[pousr]_[A-Za-z0-9]{16,}"
@@ -261,4 +265,69 @@ async def problem_report(problem: str = "", detail: str = "") -> dict:
         "detail": redact(detail, names),
         "log": redact(log, names),
         "email": REPORT_EMAIL,
+        "issues": REPORT_ISSUES,
     }
+
+
+def report_text(report: dict) -> str:
+    """The file the user reads, edits and sends; how to send it comes first."""
+    lines = [
+        "Luminary problem report",
+        "",
+        "Read this through and delete anything you would rather not share. Names of people,",
+        "computers, company networks, folders, web servers and documents, keys and email",
+        "addresses have already been removed.",
+        "",
+        "Send it any way you like, for example:",
+        f"  email   {report['email']}",
+        f"  GitHub  {report['issues']}   (public)",
+        "",
+        "-" * 72,
+        f"What happened: {report['problem']}",
+    ]
+    if report["detail"]:
+        lines.append(f"Details: {report['detail']}")
+    lines += ["", report["environment"], "", "Recent log:", report["log"] or "(no log available)"]
+    return "\n".join(lines) + "\n"
+
+
+def _reports_dir() -> Path:
+    log = os.environ.get("LUMINARY_LOG_FILE", "")
+    return Path(log).parent if log else Path(get_settings().DATA_DIR).expanduser() / "reports"
+
+
+def _open_in_editor(path: Path) -> bool:
+    """Hand the file to the system's default text editor; False where there is none."""
+    try:
+        if sys.platform == "win32":
+            os.startfile(path)  # type: ignore[attr-defined]  # noqa: S606 -- our own file
+            return True
+        if sys.platform == "darwin":
+            args = ["/usr/bin/open", "-t", str(path)]
+        else:
+            args = ["xdg-open", str(path)]
+        done = subprocess.run(args, timeout=15, check=False, capture_output=True)  # noqa: S603 -- fixed argv
+        return done.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _save_and_open(text: str) -> tuple[Path, bool]:
+    folder = _reports_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"luminary-report-{datetime.now():%Y-%m-%d-%H%M%S}.txt"
+    path.write_text(text, encoding="utf-8")
+    return path, _open_in_editor(path)
+
+
+async def open_problem_report(problem: str = "", detail: str = "") -> dict:
+    """Write the redacted report to a text file and open it for the user to read and send.
+
+    A hosted server never opens anything: its editor would be on the server, not the user's
+    machine, so the text is returned for the page to show instead.
+    """
+    text = report_text(await problem_report(problem, detail))
+    if get_settings().LUMINARY_MODE != "full":
+        return {"text": text, "path": None, "opened": False}
+    path, opened = await asyncio.to_thread(_save_and_open, text)
+    return {"text": text, "path": str(path), "opened": opened}

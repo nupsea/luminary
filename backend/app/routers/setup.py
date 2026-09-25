@@ -9,6 +9,7 @@ import logging
 
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from app.services.components import (
     capabilities,
@@ -17,7 +18,7 @@ from app.services.components import (
     install_component,
     remove_component,
 )
-from app.services.diagnostics import problem_report
+from app.services.diagnostics import open_problem_report, problem_report
 from app.services.enrichment_worker import requeue_skipped_jobs
 from app.services.lifecycle import request_shutdown
 from app.services.startup_status import get_startup_status
@@ -41,6 +42,22 @@ async def environment_report_endpoint(problem: str = "", detail: str = "") -> di
     work computer.
     """
     return await problem_report(problem[:500], detail[:2000])
+
+
+class ProblemReportRequest(BaseModel):
+    problem: str = Field("", max_length=500)
+    detail: str = Field("", max_length=2000)
+
+
+@router.post("/report/open")
+async def open_report(req: ProblemReportRequest) -> dict:
+    """Save the redacted report as a text file and open it in the user's own editor.
+
+    The user reads it there and sends it however they like; nothing leaves the machine
+    from here. `opened` is false where no editor could be started, and `text` is then
+    shown in the page instead.
+    """
+    return await open_problem_report(req.problem, req.detail)
 
 
 @router.get("/host-support")

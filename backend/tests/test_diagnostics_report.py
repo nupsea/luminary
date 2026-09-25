@@ -248,3 +248,72 @@ async def test_an_unreadable_library_drops_the_lines_that_could_name_a_document(
     monkeypatch.setenv("LUMINARY_LOG_FILE", str(log))
     report = await diagnostics.problem_report("x")
     assert report["log"] == "[ollama] pull stalled"
+
+
+@pytest.fixture
+def opened(monkeypatch):
+    calls: list[Path] = []
+
+    def _fake_open(path):
+        calls.append(path)
+        return True
+
+    monkeypatch.setattr(diagnostics, "_open_in_editor", _fake_open)
+    return calls
+
+
+async def test_the_report_opens_as_a_text_file_saying_how_to_send_it(
+    no_ollama, opened, tmp_path, monkeypatch
+):
+    log = tmp_path / "luminary.log"
+    log.write_text(f"[ollama] pull stalled in {Path.home()}/Documents/x\n")
+    monkeypatch.setenv("LUMINARY_LOG_FILE", str(log))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        resp = await c.post(
+            "/setup/report/open", json={"problem": "Chat model download failed", "detail": "0 MB"}
+        )
+
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["opened"] is True
+    saved = Path(body["path"])
+    assert opened == [saved]
+    assert saved.parent == tmp_path
+    text = saved.read_text(encoding="utf-8")
+    assert text == body["text"]
+    assert text.startswith("Luminary problem report")
+    assert diagnostics.REPORT_EMAIL in text
+    assert diagnostics.REPORT_ISSUES in text
+    assert "What happened: Chat model download failed" in text
+    assert "[ollama] pull stalled in <path>" in text
+    assert str(Path.home()) not in text
+
+
+async def test_no_editor_still_saves_the_file_and_returns_the_text(
+    no_ollama, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(diagnostics, "_open_in_editor", lambda path: False)
+    monkeypatch.setenv("LUMINARY_LOG_FILE", str(tmp_path / "luminary.log"))
+    report = await diagnostics.open_problem_report("x")
+    assert report["opened"] is False
+    assert Path(report["path"]).read_text(encoding="utf-8") == report["text"]
+
+
+async def test_a_hosted_server_never_opens_or_writes_a_report(no_ollama, opened, monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setenv("LUMINARY_MODE", "public")
+    get_settings.cache_clear()
+    try:
+        report = await diagnostics.open_problem_report("x")
+    finally:
+        monkeypatch.delenv("LUMINARY_MODE")
+        get_settings.cache_clear()
+    assert report == {"text": report["text"], "path": None, "opened": False}
+    assert opened == []
+
+
+def test_a_missing_editor_is_reported_not_raised(monkeypatch, tmp_path):
+    monkeypatch.setattr(diagnostics.sys, "platform", "linux")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert diagnostics._open_in_editor(tmp_path / "r.txt") is False

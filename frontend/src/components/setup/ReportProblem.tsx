@@ -1,28 +1,29 @@
-// A failure the user can send to the developer in two clicks, log included.
+// A failure the user can send to the developer, any way they choose.
 //
-// Email only: a report can come from a work computer, so it never goes anywhere public.
-// The backend redacts it before it is shown and the user can still edit it.
+// The backend redacts the report and opens it as a text file in the user's own editor,
+// so they read exactly what they send. Luminary itself never sends anything.
 
 import { useState } from "react"
-import { Check, Copy, Loader2, Mail, MessageSquareWarning } from "lucide-react"
+import { Check, Copy, Loader2, MessageSquareWarning } from "lucide-react"
 import { toast } from "sonner"
 
-import { apiGet } from "@/lib/apiClient"
-import { compose, emailUrl, type ProblemReport } from "@/lib/problemReport"
+import { apiPost } from "@/lib/apiClient"
+
+interface OpenedReport {
+  text: string
+  path: string | null
+  opened: boolean
+}
 
 export function ReportProblem({ problem, detail }: { problem: string; detail?: string }) {
-  const [text, setText] = useState<string | null>(null)
-  const [email, setEmail] = useState("")
+  const [report, setReport] = useState<OpenedReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
 
   async function open() {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ problem, detail: detail ?? "" })
-      const report = await apiGet<ProblemReport>(`/setup/report?${params.toString()}`)
-      setEmail(report.email)
-      setText(compose(report))
+      setReport(await apiPost<OpenedReport>("/setup/report/open", { problem, detail: detail ?? "" }))
     } catch {
       toast.error("Couldn't put the report together. Is Luminary still running?")
     } finally {
@@ -30,81 +31,76 @@ export function ReportProblem({ problem, detail }: { problem: string; detail?: s
     }
   }
 
-  async function copy(): Promise<boolean> {
-    if (text === null) return false
+  async function copy() {
+    if (!report) return
     try {
-      await navigator.clipboard.writeText(text)
-      return true
+      await navigator.clipboard.writeText(report.text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
     } catch {
-      return false
+      toast.error("Couldn't copy. Select the text and copy it yourself.")
     }
   }
 
-  async function send(url: string) {
-    await copy()
-    window.open(url, "_blank", "noopener")
-  }
+  const trigger = (
+    <button
+      type="button"
+      onClick={() => void open()}
+      disabled={loading}
+      className="inline-flex items-center gap-1.5 self-start text-xs font-medium text-foreground underline underline-offset-2 hover:text-primary disabled:opacity-60"
+    >
+      {loading ? <Loader2 size={13} className="animate-spin" /> : <MessageSquareWarning size={13} />}
+      {report ? "Open the report again" : "Report this problem"}
+    </button>
+  )
 
-  if (text === null) {
+  if (!report) return trigger
+
+  if (report.opened) {
     return (
-      <button
-        type="button"
-        onClick={() => void open()}
-        disabled={loading}
-        className="inline-flex items-center gap-1.5 self-start text-xs font-medium text-foreground underline underline-offset-2 hover:text-primary disabled:opacity-60"
-      >
-        {loading ? <Loader2 size={13} className="animate-spin" /> : <MessageSquareWarning size={13} />}
-        Report this problem
-      </button>
+      <div className="mt-1 space-y-1.5 rounded-md border border-border bg-muted/30 p-2.5 text-xs text-muted-foreground">
+        <p>
+          The report is open in your text editor. Read it, delete anything you would rather not
+          share, and send it any way you like: the file says where. Luminary does not send it.
+        </p>
+        {report.path && (
+          <p>
+            Saved as <span className="break-all font-mono text-foreground">{report.path}</span>
+          </p>
+        )}
+        {trigger}
+      </div>
     )
   }
 
   return (
     <div className="mt-1 space-y-2 rounded-md border border-border bg-muted/30 p-2.5">
       <p className="text-xs text-muted-foreground">
-        Read the report before sending it, and delete anything you would rather not share.
-        Names of people, computers, company networks, folders, web servers and documents, and any
-        keys or email addresses, are already removed.
+        Couldn't open a text editor, so here is the report. Read it, delete anything you would
+        rather not share, then copy it and send it any way you like: the text says where.
+        {report.path && (
+          <>
+            {" "}It is also saved as{" "}
+            <span className="break-all font-mono text-foreground">{report.path}</span>.
+          </>
+        )}
       </p>
       <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        rows={8}
+        value={report.text}
+        onChange={(e) => setReport({ ...report, text: e.target.value })}
+        rows={10}
         spellCheck={false}
         aria-label="Problem report"
         className="w-full resize-y rounded-md border border-border bg-background p-2 font-mono text-[11px] leading-relaxed text-foreground"
       />
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void send(emailUrl(email, problem, text))}
-          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          <Mail size={13} /> Email to the developer
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            void copy().then((ok) => {
-              if (!ok) {
-                toast.error("Couldn't copy. Select the text and copy it yourself.")
-                return
-              }
-              setCopied(true)
-              setTimeout(() => setCopied(false), 2000)
-            })
-          }
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:bg-accent"
-        >
-          {copied ? <Check size={13} /> : <Copy size={13} />}
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        The report goes privately to {email}, and only when you press Send in your mail app. On a
-        work computer that app may use your work account: to send from a personal address
-        instead, press Copy and paste the report into an email to {email}.
-      </p>
+      <button
+        type="button"
+        onClick={() => void copy()}
+        className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:bg-accent"
+      >
+        {copied ? <Check size={13} /> : <Copy size={13} />}
+        {copied ? "Copied" : "Copy"}
+      </button>
     </div>
   )
 }

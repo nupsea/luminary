@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **The one-command installers remove Luminary too.** `LUMINARY_UNINSTALL=1` lists what it will remove and what it keeps, and asks first (`LUMINARY_ASSUME_YES=1` for scripts). It deletes only files Luminary wrote. Your library, your models and anything it does not recognise are left in place, listed with the command to delete them.
 - **Every install ends by saying where the app went, where your library lives and how to remove the app.**
-- **"Report this problem" on a failed download or setup step.** It emails a report privately to the developer, never to a public tracker, after the user has read and edited it. The report already has names of people, computers, company networks, folders, web servers and documents removed, along with timezones, keys and email addresses.
+- **"Report this problem" on a failed download or setup step.** It opens a redacted report as a text file in the default text editor, saying where to send it. The user reads and edits exactly what they send, by any means; Luminary sends nothing. Names of people, computers, company networks, folders, web servers and documents are removed, along with timezones, keys and email addresses.
 
 ### Changed
 - **The Windows uninstaller asks twice before deleting your library.** Tauri's "Delete the application data" box deleted the whole library with no second prompt. It is now labelled "Also delete my library", and ticking it brings up a confirmation that defaults to No. When the library is kept, the uninstaller says where it is.
