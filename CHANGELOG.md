@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.7] - 2026-09-26
+
+### Fixed
+- **On a computer that cannot run local models, the home screen said "Answers are being written on this machine"** under the banner saying they are not. It now says answers need an API key there.
+
 ## [0.13.6] - 2026-09-26
 
 ### Fixed
