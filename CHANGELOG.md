@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.6] - 2026-09-26
+
+### Fixed
+- **The "can't run local models" banner did not appear in the session that found the graphics card unused.** The page trusted the previous launch's result and stopped asking; it now asks again while the chat model is loading.
+
 ## [0.13.5] - 2026-09-26
 
 ### Fixed
