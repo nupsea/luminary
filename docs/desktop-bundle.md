@@ -457,6 +457,14 @@ it on first run, which is why a test pins that set.
 
 ## Model provisioning
 
+**Setup fetches the embedder alone.** The entity model and the reranker are
+`ModelSpec.on_request`: their phases read `missing` until the user installs them
+(`hf_model` components), and their loaders already fail soft without them. What
+Luminary suggests for a host is `components._advice`: it recommends, the user
+decides, and a local model is not offered at all on a host
+`local_inference_support` refuses, whose chat and vision phases read
+`unavailable` rather than failed.
+
 `warmup.py` runs one task per model: fetch if absent, then construct. Downloads
 overlap; construction still serialises on the single-worker executor and
 `MODEL_LOAD_LOCK`, whose invariant — `from_pretrained` mutates process-global

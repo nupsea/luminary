@@ -69,6 +69,7 @@ dependencies = [
     "scikit-learn>=1.8.0",
     "zstandard>=0.25.0",
     "curl-cffi>=0.7.0",
+    "truststore>=0.10.4",
 ]
 
 

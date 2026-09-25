@@ -147,8 +147,26 @@ def test_ollama_missing_model_is_classified_as_not_installed():
     unreachable = Exception("APIConnectionError: [Errno 61] Connection refused")
     assert _model_not_installed(unreachable) is False
     # And whatever we do show a user is a sentence, not a traceback.
+    assert _friendly(unreachable, engine=True) == "Could not reach the local model server."
     assert "Errno" not in _friendly(unreachable)
     assert _friendly(unreachable).endswith(".")
+
+
+def test_a_refused_certificate_is_never_blamed_on_the_local_server():
+    """A company network's inspecting proxy broke every model download on one laptop,
+    and the setup screen said the local model server was unreachable."""
+    from app.services.warmup import _friendly
+
+    inspected = Exception(
+        "HTTPSConnectionPool(host='huggingface.co', port=443): Max retries exceeded with url: "
+        "/api/models/BAAI/bge-small-en-v1.5/revision/main (Caused by SSLError("
+        "SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify "
+        "failed: self-signed certificate in certificate chain (_ssl.c:1032)')))"
+    )
+    for engine in (False, True):
+        said = _friendly(inspected, engine=engine)
+        assert "local model server" not in said
+        assert "certificate" in said
 
 
 def test_download_progress_reports_percent():

@@ -43,11 +43,12 @@ from app.model_registry import (
     profile_for,
 )
 from app.paths import engine_source_path
+from app.services import model_prefetch, network_errors
 from app.services.component_download import install_archive_subset
 
 logger = logging.getLogger(__name__)
 
-Kind = str  # "ollama_model" | "python_extra" | "tool" | "engine_runner"
+Kind = str  # "ollama_model" | "python_extra" | "tool" | "engine_runner" | "hf_model"
 
 
 @dataclass(frozen=True)
@@ -201,6 +202,7 @@ def catalogue() -> tuple[Component, ...]:
             enables=("MP4 ingestion", "YouTube transcription"),
         ),
     )
+    entries = (*entries, *_encoder_components())
     # Only where the stage recorded an archive, and only to an NVIDIA host.
     source = engine_source()
     if source is None:
@@ -210,6 +212,44 @@ def catalogue() -> tuple[Component, ...]:
     if not has_nvidia_accelerator():
         return entries
     return (*entries, _engine_runner_component(source))
+
+
+_ENCODERS = {
+    "reranker": (
+        "Answer ranking",
+        "Reads each passage against your question and puts the ones that answer it first.",
+        ("Better search results", "Better answers"),
+    ),
+    "ner": (
+        "Concept extraction",
+        "Finds the people, places and ideas in your documents and links them together.",
+        ("Knowledge graph", "Entity tags", "Graph flashcards"),
+    ),
+}
+
+
+def _encoder_components() -> tuple[Component, ...]:
+    """The encoder models setup no longer fetches on its own (`ModelSpec.on_request`)."""
+    out = []
+    for key, (label, description, enables) in _ENCODERS.items():
+        spec = model_prefetch.spec_for(key)
+        if spec is None or not spec.on_request:
+            continue
+        if key == "ner" and not get_settings().GLINER_ENABLED:
+            continue
+        out.append(
+            Component(
+                id=key,
+                label=label,
+                description=description,
+                kind="hf_model",
+                ref=spec.repo_id,
+                size_bytes=spec.size_bytes,
+                licence="See the model's own licence",
+                enables=enables,
+            )
+        )
+    return tuple(out)
 
 
 # The id a registry model gets when it is not one of the catalogue's current
@@ -407,6 +447,9 @@ def _installed_locally(comp) -> bool:
         return installed
     if comp.kind == "engine_runner":
         return (engine_lib_dir() / comp.ref).is_dir()
+    if comp.kind == "hf_model":
+        spec = model_prefetch.spec_for(comp.id)
+        return spec is not None and model_prefetch.is_cached(spec)
     return resolve_tool(comp.ref) is not None
 
 
@@ -422,6 +465,7 @@ async def component_status() -> list[dict]:
     # pulls in transformers and torch; on the loop it stalled every request 10-16s.
     comps, local_installed = await asyncio.to_thread(_probe_catalogue)
 
+    host = await asyncio.to_thread(_host_facts)
     out = []
     for comp in comps:
         if comp.kind == "ollama_model":
@@ -443,9 +487,79 @@ async def component_status() -> list[dict]:
                 "default": comp.default,
                 "enables": list(comp.enables),
                 "installed": installed,
+                **_advice(comp, host),
             }
         )
     return out
+
+
+@dataclass(frozen=True)
+class _Host:
+    local_models: bool
+    refusal: str | None
+    ram_gb: int
+
+
+def _host_facts() -> _Host:
+    from app.host_support import local_inference_support  # noqa: PLC0415
+    from app.memory_profile import host_ram_gb  # noqa: PLC0415
+
+    verdict = local_inference_support()
+    return _Host(verdict.supported, verdict.message, host_ram_gb())
+
+
+# The entity model is the one large encoder; under this much memory it competes with
+# everything else the app holds. The same floor local inference uses (I-56).
+_NER_RECOMMENDED_RAM_GB = 16
+
+
+def _advice(comp: Component, host: _Host) -> dict:
+    """Whether to offer *comp* on this computer, whether to recommend it, and why.
+
+    Luminary suggests; the user decides. The one refusal is a local model on a host
+    that refuses local inference, where an install could only fail at first use.
+    """
+    if comp.kind == "ollama_model":
+        if not host.local_models:
+            return {"offered": False, "recommended": False, "advice": host.refusal or ""}
+        if comp.id == "chat_model":
+            return {
+                "offered": True,
+                "recommended": True,
+                "advice": "Recommended: answers and flashcards stay on this computer.",
+            }
+        return {
+            "offered": True,
+            "recommended": False,
+            "advice": "Optional: only needed to read figures and diagrams.",
+        }
+    if comp.id == "reranker":
+        return {
+            "offered": True,
+            "recommended": True,
+            "advice": "Recommended for every computer: a small download that improves "
+            "which passages answers are built from.",
+        }
+    if comp.id == "ner":
+        if host.ram_gb >= _NER_RECOMMENDED_RAM_GB:
+            return {
+                "offered": True,
+                "recommended": True,
+                "advice": "Recommended for this computer.",
+            }
+        return {
+            "offered": True,
+            "recommended": False,
+            "advice": "Optional: a large model that needs more memory than this computer "
+            "comfortably has.",
+        }
+    if comp.kind == "engine_runner":
+        return {
+            "offered": True,
+            "recommended": True,
+            "advice": "Recommended: this computer has an NVIDIA graphics card.",
+        }
+    return {"offered": True, "recommended": False, "advice": ""}
 
 
 async def capabilities() -> dict:
@@ -543,7 +657,8 @@ async def install_ollama_model(model: str) -> AsyncIterator[dict]:
                     continue
 
                 if error := event.get("error"):
-                    yield {"state": "failed", "detail": error}
+                    logger.warning("pull of %s failed: %s", model, error)
+                    yield {"state": "failed", "detail": network_errors.explain(error) or error}
                     return
 
                 completed = int(event.get("completed") or 0)
@@ -660,6 +775,31 @@ async def install_python_extra(comp: Component) -> AsyncIterator[dict]:
     yield {"state": "ready", "detail": comp.label}
 
 
+async def install_encoder_model(comp: Component) -> AsyncIterator[dict]:
+    """Download an encoder into the cache its loader reads (I-57), reporting bytes."""
+    spec = model_prefetch.spec_for(comp.id)
+    if spec is None:
+        yield {"state": "failed", "detail": f"unknown model: {comp.id}"}
+        return
+    if not await asyncio.to_thread(model_prefetch.hub_reachable):
+        yield {"state": "failed", "detail": "No internet connection. Connect, then try again."}
+        return
+
+    task = asyncio.ensure_future(asyncio.to_thread(model_prefetch.prefetch, [spec]))
+    while not task.done():
+        await asyncio.wait({task}, timeout=1.0)
+        yield {
+            "state": "downloading",
+            "detail": spec.repo_id,
+            "completed_bytes": min(model_prefetch.downloaded_bytes(spec), spec.size_bytes),
+            "total_bytes": spec.size_bytes,
+        }
+    if error := task.result().get(spec.key):
+        yield {"state": "failed", "detail": network_errors.explain(error) or error[:300]}
+        return
+    yield {"state": "ready", "detail": spec.repo_id}
+
+
 async def install_engine_runner(comp: Component) -> AsyncIterator[dict]:
     """Fetch an accelerator runner out of the release archive, beside the shipped ones."""
     source = engine_source()
@@ -699,8 +839,18 @@ async def install_component(component_id: str) -> AsyncIterator[dict]:
         yield {"state": "failed", "detail": f"unknown component: {component_id}"}
         return
 
+    advice = _advice(comp, await asyncio.to_thread(_host_facts))
+    if not advice["offered"]:
+        yield {"state": "failed", "detail": advice["advice"]}
+        return
+
     if comp.kind == "ollama_model":
         async for event in install_ollama_model(comp.ref):
+            yield event
+        return
+
+    if comp.kind == "hf_model":
+        async for event in install_encoder_model(comp):
             yield event
         return
 
@@ -731,6 +881,14 @@ async def remove_component(component_id: str) -> None:
         raise ValueError(f"unknown component: {component_id}")
     if comp.kind == "ollama_model":
         await remove_ollama_model(comp.ref)
+        return
+    if comp.kind == "hf_model":
+        spec = model_prefetch.spec_for(comp.id)
+        if spec is not None:
+            # This repo's own entry only: the directory can hold a sibling model and
+            # the tokenizer base it shares.
+            repo_dir = model_prefetch.cache_dir(spec) / f"models--{spec.repo_id.replace('/', '--')}"
+            await asyncio.to_thread(shutil.rmtree, repo_dir, True)
         return
     if comp.kind == "engine_runner":
         # Holds only what was unpacked into it.

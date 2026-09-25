@@ -26,6 +26,7 @@ from sqlalchemy import update as _update
 
 from app.config import get_settings as _get_settings
 from app.database import get_session_factory
+from app.exceptions import ModelNotDownloaded
 from app.models import ChunkModel, DocumentModel
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services import ner as _ner_module  # indirect: get_entity_extractor is patched
@@ -327,6 +328,12 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 chunks,
                 state.get("content_type") or "",
                 is_technical,
+            )
+        except ModelNotDownloaded:
+            # Optional, installed from Settings; the document is complete without it.
+            logger.info(
+                "entity_extract_node: skipped, entity model not installed",
+                extra={"doc_id": doc_id},
             )
         except MemoryError as exc:
             logger.exception(

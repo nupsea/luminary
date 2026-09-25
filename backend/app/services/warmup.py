@@ -15,7 +15,7 @@ import logging
 import time
 
 from app.config import get_settings
-from app.services import model_keepwarm, model_prefetch
+from app.services import model_keepwarm, model_prefetch, network_errors
 from app.services.executors import get_model_executor
 from app.services.startup_status import get_startup_status
 
@@ -81,15 +81,19 @@ def _model_not_installed(exc: Exception) -> bool:
     return "not found" in text and "model" in text
 
 
-def _friendly(exc: Exception) -> str:
-    """A sentence for a person, not a traceback.
+def _friendly(exc: Exception, *, engine: bool = False) -> str:
+    """A sentence for a person, not a traceback; the detail is logged in full.
 
-    Raw exception text reached the setup screen and read as a crash;
-    the detail is still logged in full.
+    *engine* marks a call to the local model server. Only there may a failed
+    connection be blamed on it: a certificate refusal on a model download once
+    read "Could not reach the local model server" while that server was fine.
     """
     text = str(exc)
     lowered = text.lower()
-    if "connection" in lowered or "connect" in lowered:
+    found = network_errors.kind(text)
+    if found in ("inspected", "proxy", "dns") or (found and not engine):
+        return network_errors.explain(text) or text
+    if engine and "connect" in lowered:
         return "Could not reach the local model server."
     if "timeout" in lowered or "timed out" in lowered:
         return "Timed out while starting."
@@ -134,7 +138,7 @@ async def _warm_llm() -> None:
                 if _model_not_installed(exc):
                     status.set_state("chat_model", "missing", model or "")
                 else:
-                    status.set_state("chat_model", "failed", _friendly(exc))
+                    status.set_state("chat_model", "failed", _friendly(exc, engine=True))
             logger.warning("Warmup: failed to warm %s LLM: %s", label, exc)
 
     try:
@@ -145,9 +149,27 @@ async def _warm_llm() -> None:
     except Exception:
         fg, bg = None, None
 
-    await _one(None, "interactive")
-    if bg and bg != fg:
+    from app.services.llm_routing import refusal  # noqa: PLC0415
+
+    if not _unavailable_here("chat", "chat_model"):
+        await _one(None, "interactive")
+    if bg and bg != fg and refusal("background") is None:
         await _one(bg, "background")
+
+
+def _unavailable_here(role: str, phase: str) -> bool:
+    """Mark *phase* unavailable when this host refuses the local model *role* uses.
+
+    Not a failure: nothing will fix it by retrying, and offering an install or a
+    problem report for it sent a user down both.
+    """
+    from app.host_support import local_inference_support  # noqa: PLC0415
+    from app.services.llm_routing import refusal  # noqa: PLC0415
+
+    if refusal(role) is None:
+        return False
+    get_startup_status().set_state(phase, "unavailable", local_inference_support().message or "")
+    return True
 
 
 async def _check_vision_model() -> None:
@@ -159,11 +181,13 @@ async def _check_vision_model() -> None:
     from app.services.components import component_status  # noqa: PLC0415
     from app.services.settings_service import get_vision_model  # noqa: PLC0415
 
+    if _unavailable_here("vision", "vision_model"):
+        return
     status = get_startup_status()
     try:
         installed = {c["id"]: c["installed"] for c in await component_status()}
     except Exception as exc:
-        status.set_state("vision_model", "failed", _friendly(exc))
+        status.set_state("vision_model", "failed", _friendly(exc, engine=True))
         return
 
     if installed.get("vision_model"):
@@ -185,7 +209,7 @@ async def run_warmup(only: set[str] | None = None) -> None:
         if only is not None:
             wanted = tuple(s for s in wanted if s.key in only)
 
-        missing = [s for s in wanted if not model_prefetch.is_cached(s)]
+        missing = [s for s in wanted if not s.on_request and not model_prefetch.is_cached(s)]
         reachable = True
         if missing:
             loop = asyncio.get_running_loop()
@@ -205,6 +229,9 @@ async def run_warmup(only: set[str] | None = None) -> None:
             """
             spec = model_prefetch.spec_for(key)
             if spec is not None and not model_prefetch.is_cached(spec):
+                if spec.on_request:
+                    status.set_state(key, "missing", spec.repo_id)
+                    return
                 if not reachable:
                     # Constructing would only rediscover this, slowly, and
                     # replace the message that tells the user what to do.

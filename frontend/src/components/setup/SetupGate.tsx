@@ -10,13 +10,19 @@
 
 import { useState, type ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, Check, Download, Loader2, RotateCw } from "lucide-react"
+import { AlertTriangle, Check, Download, Info, Loader2, RotateCw } from "lucide-react"
 
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
 import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import { ReportProblem } from "@/components/setup/ReportProblem"
-import { useStartupStatus } from "@/hooks/useSetup"
-import { formatBytes, retrySetup, type StartupPhase } from "@/lib/setupApi"
+import { useComponents, useStartupStatus } from "@/hooks/useSetup"
+import {
+  failureSummary,
+  formatBytes,
+  retrySetup,
+  type Component,
+  type StartupPhase,
+} from "@/lib/setupApi"
 import { principleOfTheDay } from "@/lib/studyPrinciples"
 import { cn } from "@/lib/utils"
 
@@ -25,12 +31,15 @@ import { cn } from "@/lib/utils"
 const PHASE_COMPONENT: Record<string, string> = {
   chat_model: "chat_model",
   vision_model: "vision_model",
+  ner: "ner",
+  reranker: "reranker",
 }
 
-function PhaseRow({ phase }: { phase: StartupPhase }) {
+function PhaseRow({ phase, component }: { phase: StartupPhase; component?: Component }) {
   const done = phase.state === "ready" || phase.state === "skipped"
   const failed = phase.state === "failed"
   const missing = phase.state === "missing"
+  const unavailable = phase.state === "unavailable"
   const busy = phase.state === "downloading" || phase.state === "loading"
   const componentId = PHASE_COMPONENT[phase.key]
 
@@ -41,6 +50,8 @@ function PhaseRow({ phase }: { phase: StartupPhase }) {
           <Check size={16} className="text-emerald-600 dark:text-emerald-500" />
         ) : failed ? (
           <AlertTriangle size={16} className="text-amber-600 dark:text-amber-500" />
+        ) : unavailable ? (
+          <Info size={16} className="text-muted-foreground" />
         ) : missing ? (
           <Download size={16} className="text-muted-foreground" />
         ) : busy ? (
@@ -62,7 +73,12 @@ function PhaseRow({ phase }: { phase: StartupPhase }) {
             <span className="shrink-0 text-xs text-muted-foreground">Not needed</span>
           )}
           {missing && (
-            <span className="shrink-0 text-xs text-muted-foreground">Optional</span>
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {component?.recommended ? "Recommended" : "Optional"}
+            </span>
+          )}
+          {unavailable && (
+            <span className="shrink-0 text-xs text-muted-foreground">Not on this computer</span>
           )}
         </span>
 
@@ -78,21 +94,24 @@ function PhaseRow({ phase }: { phase: StartupPhase }) {
         {/* detail carries the thing being fetched (model repo id, engine, URL).
             Showing it only on failure meant a 5GB first run never said what it
             was downloading. */}
-        {phase.detail && !done && (
-          <span className={cn("mt-1 block text-xs text-muted-foreground", !failed && "truncate")}>
+        {phase.detail && !done && !(missing && component?.advice) && (
+          <span
+            className={cn(
+              "mt-1 block text-xs text-muted-foreground",
+              !failed && !unavailable && "truncate",
+            )}
+          >
             {phase.detail}
           </span>
         )}
 
-        {failed && (
-          <span className="mt-1.5 block">
-            <ReportProblem problem={`${phase.label} failed`} detail={phase.detail} />
-          </span>
+        {missing && component?.advice && (
+          <span className="mt-1 block text-xs text-muted-foreground">{component.advice}</span>
         )}
 
         {missing && componentId && (
           <span className="mt-1.5 block">
-            <InstallComponentButton componentId={componentId} />
+            <InstallComponentButton componentId={componentId} reportable={false} />
           </span>
         )}
       </span>
@@ -135,6 +154,7 @@ function SetupPill() {
 
 export function SetupGate({ children }: { children: ReactNode }) {
   const { data, isError } = useStartupStatus()
+  const { data: components } = useComponents()
   const queryClient = useQueryClient()
   const [dismissed, setDismissed] = useState(false)
   const [retrying, setRetrying] = useState(false)
@@ -204,7 +224,11 @@ export function SetupGate({ children }: { children: ReactNode }) {
         {data && (
           <ul className="mt-6 divide-y divide-border/60 border-y border-border/60">
             {data.phases.map((phase) => (
-              <PhaseRow key={phase.key} phase={phase} />
+              <PhaseRow
+                key={phase.key}
+                phase={phase}
+                component={components?.find((c) => c.id === PHASE_COMPONENT[phase.key])}
+              />
             ))}
           </ul>
         )}
@@ -231,6 +255,9 @@ export function SetupGate({ children }: { children: ReactNode }) {
               {retrying ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}
               {retrying ? "Retrying" : "Try again"}
             </button>
+            {data && (
+              <ReportProblem problem="Setup did not finish" detail={failureSummary(data.phases)} />
+            )}
           </div>
         )}
 

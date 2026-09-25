@@ -17,9 +17,16 @@ interface Props {
   componentId: string
   className?: string
   onInstalled?: () => void
+  /** False where the surrounding screen already offers one report for everything. */
+  reportable?: boolean
 }
 
-export function InstallComponentButton({ componentId, className, onInstalled }: Props) {
+export function InstallComponentButton({
+  componentId,
+  className,
+  onInstalled,
+  reportable = true,
+}: Props) {
   const queryClient = useQueryClient()
   const { data: components } = useComponents()
   const [progress, setProgress] = useState<string | null>(null)
@@ -27,7 +34,7 @@ export function InstallComponentButton({ componentId, className, onInstalled }: 
   const [busy, setBusy] = useState(false)
 
   const component = components?.find((c) => c.id === componentId)
-  if (!component || component.installed) return null
+  if (!component || component.installed || !component.offered) return null
 
   async function run() {
     setBusy(true)
@@ -76,7 +83,9 @@ export function InstallComponentButton({ componentId, className, onInstalled }: 
       {error && (
         <>
           <span className="text-xs text-muted-foreground">{error}</span>
-          <ReportProblem problem={`${component.label} download failed`} detail={error} />
+          {reportable && (
+            <ReportProblem problem={`${component.label} download failed`} detail={error} />
+          )}
         </>
       )}
     </span>

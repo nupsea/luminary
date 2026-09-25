@@ -158,4 +158,7 @@ async def uninstall(component_id: str) -> dict:
         await remove_component(component_id)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    status = get_startup_status()
+    if status.has_phase(component_id):
+        status.set_state(component_id, "missing")
     return {"removed": component_id}

@@ -55,8 +55,16 @@ function ComponentRow({ component }: { component: Component }) {
                 <Check size={12} /> Installed
               </span>
             )}
+            {!component.installed && component.recommended && (
+              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                Recommended
+              </span>
+            )}
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground">{component.description}</p>
+          {component.advice && !component.installed && (
+            <p className="mt-1 text-xs text-foreground/80">{component.advice}</p>
+          )}
         </div>
         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
           {formatBytes(component.size_bytes)}

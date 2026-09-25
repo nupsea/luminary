@@ -163,6 +163,9 @@ CPython maps `os.kill` onto TerminateProcess for everything but `CTRL_C_EVENT`/`
 **I-56. Reported RAM is installed RAM minus reservations on every OS but macOS, so every site that converts it to GB rounds up.**
 A 16 GiB AWS g4dn.xlarge reported 15GB and was refused local inference (#139): all five readers truncated (`memory_profile.host_ram_gb`, `install.sh`, `install.ps1`, `bootstrap.sh`, `supervisor.rs`), and macOS's exact `hw.memsize` hid it. `get-luminary.sh` and `get-luminary.ps1` read it too, to refuse before the download. The reported figure never exceeds installed, so rounding up errs safely (Docker's 7.7 GiB VM is 8, still refused). `test_host_support.py::test_the_floor_reads_the_bytes_the_os_reports` and `test_installer_models.py::test_every_ram_reader_rounds_up` guard it.
 
+**I-59. TLS is verified against the operating system's trust store, never a bundled CA list alone.**
+On a company laptop behind a TLS-inspecting proxy every model download and every URL ingest failed with `CERTIFICATE_VERIFY_FAILED: self-signed certificate in certificate chain`: Windows trusted the company's root, certifi's bundle did not, and the setup screen blamed the local model server. `app/__init__.py` calls `truststore.inject_into_ssl()` before any client builds a context, so `requests` (huggingface_hub), `httpx` and `urllib3` verify as the browser does. A failure that remains is named by `network_errors`, never guessed: only a call to the local engine may blame it. `tests/test_network_trust_and_optional_models.py::test_tls_is_verified_against_the_os_trust_store` and `test_setup_and_paths.py::test_a_refused_certificate_is_never_blamed_on_the_local_server` fail CI otherwise.
+
 ## Retired numbers
 
 Kept so existing references resolve.
