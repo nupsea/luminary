@@ -249,3 +249,22 @@ def test_changing_the_gpu_runner_measures_again(monkeypatch, tmp_path):
     runner.kind = "engine_runner"
     asyncio.run(components.remove_component("cuda_runner"))
     assert host_support.measured_offload() is None
+
+
+async def test_the_page_is_told_to_look_again_while_the_chat_model_loads():
+    # A saved `measured` from the last launch cannot end the watch: every launch
+    # measures again, and the banner missed the turn on a real T4 that way.
+    from app.main import app  # noqa: PLC0415
+
+    status = get_startup_status()
+    host_support.record_offload(_MODEL, _SIZE, _SIZE)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        status.set_state("chat_model", "loading", "")
+        loading = (await client.get("/setup/host-support")).json()
+        status.set_state("chat_model", "ready", "")
+        settled = (await client.get("/setup/host-support")).json()
+    assert loading["measured"] is True
+    assert loading["settling"] is True
+    assert settled["settling"] is False

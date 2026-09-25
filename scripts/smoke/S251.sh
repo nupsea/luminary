@@ -11,7 +11,7 @@
 #
 # Verifies:
 #   1. backend is healthy
-#   2. GET /setup/host-support answers with all five fields
+#   2. GET /setup/host-support answers with all six fields
 #   3. a supported host carries no message and an unsupported one must
 #   4. the verdict names a reason from the known set, never a free-form string
 #   5. the message names both ways forward (I-16: no key still means a working app)
@@ -38,7 +38,7 @@ check "backend healthy" "200" "$HTTP"
 check "the host verdict is complete and self-consistent" "ok" "$(curl -s "$BASE/setup/host-support" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-missing = [f for f in ['supported', 'reason', 'host', 'message', 'measured'] if f not in d]
+missing = [f for f in ['supported', 'reason', 'host', 'message', 'measured', 'settling'] if f not in d]
 if missing:
     print('missing fields: %s' % missing)
     raise SystemExit
@@ -57,8 +57,8 @@ known = [None, 'intel_mac', 'container_without_accelerator', 'no_accelerator', '
 if d['reason'] not in known:
     print('unknown reason %r; a verdict nobody can act on' % d['reason'])
     raise SystemExit
-if not isinstance(d['measured'], bool):
-    print('measured is not a bool')
+if not isinstance(d['measured'], bool) or not isinstance(d['settling'], bool):
+    print('measured or settling is not a bool')
     raise SystemExit
 if not d['host']:
     print('host is empty -- the verdict does not say what it looked at')

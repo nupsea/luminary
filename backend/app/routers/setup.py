@@ -70,16 +70,23 @@ async def host_support() -> dict:
     far, so the case this endpoint exists for is the container.
     """
     from app.host_support import local_inference_support, measured_offload  # noqa: PLC0415
+    from app.services.startup_status import get_startup_status  # noqa: PLC0415
 
     verdict = local_inference_support()
+    chat = next(
+        (p["state"] for p in get_startup_status().snapshot()["phases"] if p["key"] == "chat_model"),
+        None,
+    )
     return {
         "supported": verdict.supported,
         "reason": verdict.reason,
         "host": verdict.detail,
         "message": verdict.message,
-        # False until a loaded model has shown whether the graphics card is used;
-        # until then a supported verdict can still turn.
         "measured": measured_offload() is not None,
+        # A chat-model load is under way, and its measurement can still turn a
+        # supported verdict (I-60). A saved `measured` cannot say that: every
+        # launch measures again.
+        "settling": chat in ("pending", "loading"),
     }
 
 

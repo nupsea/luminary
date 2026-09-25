@@ -92,8 +92,9 @@ states the verdict wherever the user is. It refuses on four grounds:
   `/api/ps` after the first local answer and keep the result in `DATA_DIR/gpu_offload.json`, per app
   version, so an upgrade measures again, and installing or removing the CUDA runner clears it: the T4's
   fix is that runner, so a verdict taken without it must not outlive it. Only a model with nothing on the card is refused; a split
-  model is slower, not refused. `/setup/host-support` reports `measured`, and the frontend polls
-  it while a supported verdict is unmeasured.
+  model is slower, not refused. `/setup/host-support` reports `settling` while a chat-model load is
+  under way, and the frontend polls only then; a saved `measured` does not end it, because every
+  launch measures again.
 - **The refusal sits in `LLMService._resolve_model`**, keyed on the model that will actually run, so
   a pinned local model is refused on the same terms. Not in `get_effective_routing`: that function
   describes routes as often as it picks one, and raising there broke

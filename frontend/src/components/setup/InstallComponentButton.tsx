@@ -56,6 +56,8 @@ export function InstallComponentButton({
         }
       })
       await queryClient.invalidateQueries({ queryKey: ["setup"] })
+      // A chat-model install loads it, which can turn the host verdict.
+      await queryClient.invalidateQueries({ queryKey: ["host-support"] })
       if (!failed) onInstalled?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Install failed")

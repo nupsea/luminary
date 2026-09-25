@@ -69,9 +69,9 @@ export interface HostVerdict {
   supported: boolean
   host: string
   message: string | null
-  /** Whether a loaded model has shown the graphics card is used. Until then a
-   * supported verdict can still turn. */
   measured?: boolean
+  /** A chat-model load is under way whose measurement can still turn the verdict. */
+  settling?: boolean
 }
 
 /**

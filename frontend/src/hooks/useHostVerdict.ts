@@ -19,11 +19,11 @@ export function useHostVerdict(): HostVerdict | undefined {
     },
     staleTime: Infinity,
     gcTime: Infinity,
-    // A supported verdict turns when the first loaded model lands on the
-    // processor, which can happen minutes into a session.
+    // A supported verdict turns if the chat model loading now lands on the
+    // processor (I-60).
     refetchInterval: (query) => {
       const v = query.state.data
-      return v?.supported && v.measured === false ? 30_000 : false
+      return v?.supported && v.settling ? 5_000 : false
     },
   })
   return data
