@@ -73,13 +73,14 @@ a reader fit in half of unified memory. `install.sh` and `install.ps1` pull the 
 ## Supported hosts
 
 `app/host_support.py` decides whether local inference is worth offering, and `HostSupportBanner`
-states the verdict wherever the user is. It refuses on three grounds:
+states the verdict wherever the user is. It refuses on four grounds:
 
 | Reason | Case that decided it |
 |---|---|
 | `intel_mac` | no lancedb wheel for a native install; Docker on macOS never reaches Metal. ~6 tok/s, ~121s per question |
 | `no_accelerator` / `container_without_accelerator` | a CPU-only host or container |
 | `under_memory_floor` | under `memory_profile._STANDARD_MIN_RAM_GB` (16). Docker Desktop presents a 16 GB Mac as ~7 GB. Reported RAM is rounded up (I-56), so a 16 GiB Linux box is not refused |
+| `gpu_unused` | the device check passed, but the first loaded chat model had 0 B on the card (I-60). A Windows T4 in TCC mode had `nvcuda.dll` and ran on the CPU |
 
 - **The check is the accelerator, never the install method.** Refusing containers would refuse Linux
   with the NVIDIA container toolkit, the fastest way to run this app. `test_host_support.py` fails CI
@@ -87,6 +88,12 @@ states the verdict wherever the user is. It refuses on three grounds:
 - One probe with a branch per vendor and platform (`has_nvidia_accelerator`, `_has_amd_accelerator`).
   Windows reads the driver DLLs Ollama loads, since it has no `/dev`. A second copy of the policy
   would eventually disagree with this one.
+- **A load can only narrow the device verdict (I-60).** Warm-up, and a chat-model install, read
+  `/api/ps` after the first local answer and keep the result in `DATA_DIR/gpu_offload.json`, per app
+  version, so an upgrade measures again, and installing or removing the CUDA runner clears it: the T4's
+  fix is that runner, so a verdict taken without it must not outlive it. Only a model with nothing on the card is refused; a split
+  model is slower, not refused. `/setup/host-support` reports `measured`, and the frontend polls
+  it while a supported verdict is unmeasured.
 - **The refusal sits in `LLMService._resolve_model`**, keyed on the model that will actually run, so
   a pinned local model is refused on the same terms. Not in `get_effective_routing`: that function
   describes routes as often as it picks one, and raising there broke

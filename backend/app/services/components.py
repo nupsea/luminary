@@ -829,6 +829,10 @@ async def install_engine_runner(comp: Component) -> AsyncIterator[dict]:
         if event["state"] != "ready":
             yield event
             continue
+        # A load on the old runners may have found the card unused; measure again.
+        from app.host_support import clear_offload  # noqa: PLC0415
+
+        clear_offload()
         # Ollama enumerates runners at start.
         yield {**event, "detail": f"{comp.label} installed. Restart Luminary to use it."}
 
@@ -847,6 +851,10 @@ async def install_component(component_id: str) -> AsyncIterator[dict]:
     if comp.kind == "ollama_model":
         async for event in install_ollama_model(comp.ref):
             yield event
+            if comp.id == "chat_model" and event["state"] == "ready":
+                from app.services.warmup import warm_chat_model  # noqa: PLC0415
+
+                warm_chat_model()
         return
 
     if comp.kind == "hf_model":
@@ -893,6 +901,9 @@ async def remove_component(component_id: str) -> None:
     if comp.kind == "engine_runner":
         # Holds only what was unpacked into it.
         await asyncio.to_thread(shutil.rmtree, engine_lib_dir() / comp.ref, True)
+        from app.host_support import clear_offload  # noqa: PLC0415
+
+        clear_offload()
         return
     if comp.kind == "python_extra":
         # Deliberately not implemented: pip --target has no uninstall, and

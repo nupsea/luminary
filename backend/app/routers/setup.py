@@ -69,7 +69,7 @@ async def host_support() -> dict:
     is stated -- the native installers refuse macOS x86_64 before they get this
     far, so the case this endpoint exists for is the container.
     """
-    from app.host_support import local_inference_support  # noqa: PLC0415
+    from app.host_support import local_inference_support, measured_offload  # noqa: PLC0415
 
     verdict = local_inference_support()
     return {
@@ -77,6 +77,9 @@ async def host_support() -> dict:
         "reason": verdict.reason,
         "host": verdict.detail,
         "message": verdict.message,
+        # False until a loaded model has shown whether the graphics card is used;
+        # until then a supported verdict can still turn.
+        "measured": measured_offload() is not None,
     }
 
 

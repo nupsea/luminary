@@ -166,6 +166,9 @@ A 16 GiB AWS g4dn.xlarge reported 15GB and was refused local inference (#139): a
 **I-59. TLS is verified against the operating system's trust store, never a bundled CA list alone.**
 On a company laptop behind a TLS-inspecting proxy every model download and every URL ingest failed with `CERTIFICATE_VERIFY_FAILED: self-signed certificate in certificate chain`: Windows trusted the company's root, certifi's bundle did not, and the setup screen blamed the local model server. `app/__init__.py` calls `truststore.inject_into_ssl()` before any client builds a context, so `requests` (huggingface_hub), `httpx` and `urllib3` verify as the browser does. A failure that remains is named by `network_errors`, never guessed: only a call to the local engine may blame it. `tests/test_network_trust_and_optional_models.py::test_tls_is_verified_against_the_os_trust_store` and `test_setup_and_paths.py::test_a_refused_certificate_is_never_blamed_on_the_local_server` fail CI otherwise.
 
+**I-60. A graphics driver on disk is not a card the model server uses; the first load decides.**
+The device check passed a Windows T4 (`nvcuda.dll` present), and Ollama put 0 B of `qwen3.5:4b` on it: the data-center driver runs in TCC mode, which the runtime cannot see. The same shape fits any driver whose card the runtime cannot serve. So `warmup._measure_offload` reads `/api/ps` after the first local answer and `host_support.record_offload` keeps it; a model held wholly by the processor makes `local_inference_support` refuse with `gpu_unused`, and the model is unloaded. The measurement narrows the device verdict, never widens it, is taken again after an upgrade or a CUDA runner change, and `LUMINARY_HOST_SUPPORTED` still outranks it. `tests/test_gpu_offload.py` fails CI otherwise.
+
 ## Retired numbers
 
 Kept so existing references resolve.

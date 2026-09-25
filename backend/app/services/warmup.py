@@ -14,6 +14,8 @@ import asyncio
 import logging
 import time
 
+import httpx
+
 from app.config import get_settings
 from app.services import model_keepwarm, model_prefetch, network_errors
 from app.services.executors import get_model_executor
@@ -100,6 +102,53 @@ def _friendly(exc: Exception, *, engine: bool = False) -> str:
     return text.split("\n", 1)[0][:160]
 
 
+async def _measure_offload() -> bool:
+    """Ask the model server where it put the chat model it just loaded.
+
+    Returns True when it ran on the processor, which makes this host unsupported
+    from here on (`host_support.local_inference_support`). A model the server no
+    longer lists, or a server that will not say, records nothing.
+    """
+    from app import host_support  # noqa: PLC0415
+    from app.services.model_router import resolve  # noqa: PLC0415
+
+    choice = resolve("chat")
+    if not choice.is_local:
+        return False
+    name = choice.model.removeprefix("ollama/")
+    url = get_settings().OLLAMA_URL
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{url}/api/ps")
+            resp.raise_for_status()
+            loaded = resp.json().get("models") or []
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Warmup: could not read where %s is loaded: %s", name, exc)
+        return False
+
+    wanted = {name, f"{name}:latest"}
+    entry = next((m for m in loaded if {m.get("name"), m.get("model")} & wanted), None)
+    if entry is None:
+        return False
+    found = host_support.record_offload(
+        name, int(entry.get("size") or 0), int(entry.get("size_vram") or 0)
+    )
+    logger.info(
+        "Warmup: %s holds %d of %d bytes on the graphics card", name, found.size_vram, found.size
+    )
+    # Asked of the verdict rather than read off the measurement, so a deployment
+    # that declared its accelerator keeps it and this phase cannot disagree.
+    if host_support.local_inference_support().supported:
+        return False
+    # A model on the processor holds gigabytes of memory for nothing now refused.
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            await client.post(f"{url}/api/generate", json={"model": name, "keep_alive": 0})
+    except httpx.HTTPError:
+        pass
+    return True
+
+
 async def _warm_llm() -> None:
     """Fire a tiny generation so the first real question does not pay the load.
 
@@ -121,6 +170,12 @@ async def _warm_llm() -> None:
                 "ping", model=model, timeout=get_settings().LLM_WARMUP_TIMEOUT_SECONDS
             )
             elapsed = time.perf_counter() - t0
+            if interactive and await _measure_offload():
+                from app.host_support import UNSUPPORTED_MESSAGE  # noqa: PLC0415
+
+                status.set_state("chat_model", "unavailable", UNSUPPORTED_MESSAGE)
+                logger.warning("Warmup: the chat model ran on the processor; local models off")
+                return
             if interactive:
                 status.set_state("chat_model", "ready", model or "")
                 # The one local generation at start-up that something already
@@ -155,6 +210,21 @@ async def _warm_llm() -> None:
         await _one(None, "interactive")
     if bg and bg != fg and refusal("background") is None:
         await _one(bg, "background")
+
+
+_background: set[asyncio.Task] = set()
+
+
+def warm_chat_model() -> None:
+    """Load the chat model just installed, in the background.
+
+    Without this the first load -- and the offload measurement -- waits for the
+    user's first question or the next launch.
+    """
+    get_startup_status().set_state("chat_model", "loading", "")
+    task = asyncio.get_running_loop().create_task(_warm_llm())
+    _background.add(task)
+    task.add_done_callback(_background.discard)
 
 
 def _unavailable_here(role: str, phase: str) -> bool:
