@@ -595,6 +595,8 @@ pub fn spawn_backend(
         // getting the chance to stop it.
         .env("LUMINARY_PARENT_PID", std::process::id().to_string())
         .env("LUMINARY_SHUTDOWN_TOKEN", &token)
+        // The in-app "Report this problem" attaches the tail of this file.
+        .env("LUMINARY_LOG_FILE", logging::path().unwrap_or_default())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 

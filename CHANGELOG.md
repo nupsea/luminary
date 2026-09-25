@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **The one-command installers remove Luminary too.** `LUMINARY_UNINSTALL=1` lists what it will remove and what it keeps, and asks first (`LUMINARY_ASSUME_YES=1` for scripts). It deletes only files Luminary wrote. Your library, your models and anything it does not recognise are left in place, listed with the command to delete them.
 - **Every install ends by saying where the app went, where your library lives and how to remove the app.**
+- **"Report this problem" on a failed download or setup step.** It emails a report privately to the developer, never to a public tracker, after the user has read and edited it. The report already has names of people, computers, company networks, folders, web servers and documents removed, along with timezones, keys and email addresses.
 
 ### Changed
 - **The Windows uninstaller asks twice before deleting your library.** Tauri's "Delete the application data" box deleted the whole library with no second prompt. It is now labelled "Also delete my library", and ticking it brings up a confirmation that defaults to No. When the library is kept, the uninstaller says where it is.
@@ -16,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A failed install saves a report and offers to email it.** User and computer names are removed; your mail app opens with it filled in, and nothing is sent until you press Send.
 
 ### Fixed
+- **A model download stuck at 0 MB never ended.** Ollama kept repeating the same byte count, so no timeout fired. A download with no new bytes for 60 seconds now fails, says what to check, and offers Try again, which resumes it.
+- **Links that open a new window in the desktop app now go to the default browser or mail app.** With no handler, macOS's webview drops them and Windows' opens a bare webview window.
 - **The installers stop before what used to fail halfway**: too little disk, a missing release or GitHub rate limit, Luminary still running, sudo, musl, PowerShell constrained mode, an older version over a newer one. Downloads retry, and a quarantined or truncated download is named as such.
 
 ## [0.13.2] - 2026-09-24

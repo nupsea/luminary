@@ -14,6 +14,7 @@ import { AlertTriangle, Check, Download, Loader2, RotateCw } from "lucide-react"
 
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
 import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
+import { ReportProblem } from "@/components/setup/ReportProblem"
 import { useStartupStatus } from "@/hooks/useSetup"
 import { formatBytes, retrySetup, type StartupPhase } from "@/lib/setupApi"
 import { principleOfTheDay } from "@/lib/studyPrinciples"
@@ -78,8 +79,14 @@ function PhaseRow({ phase }: { phase: StartupPhase }) {
             Showing it only on failure meant a 5GB first run never said what it
             was downloading. */}
         {phase.detail && !done && (
-          <span className="mt-1 block truncate text-xs text-muted-foreground">
+          <span className={cn("mt-1 block text-xs text-muted-foreground", !failed && "truncate")}>
             {phase.detail}
+          </span>
+        )}
+
+        {failed && (
+          <span className="mt-1.5 block">
+            <ReportProblem problem={`${phase.label} failed`} detail={phase.detail} />
           </span>
         )}
 

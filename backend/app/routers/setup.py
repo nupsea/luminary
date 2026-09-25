@@ -17,7 +17,7 @@ from app.services.components import (
     install_component,
     remove_component,
 )
-from app.services.diagnostics import environment_report
+from app.services.diagnostics import problem_report
 from app.services.enrichment_worker import requeue_skipped_jobs
 from app.services.lifecycle import request_shutdown
 from app.services.startup_status import get_startup_status
@@ -34,9 +34,13 @@ async def list_components() -> dict:
 
 
 @router.get("/report")
-async def environment_report_endpoint() -> dict:
-    """The environment block for a bug report, scrubbed of the account name."""
-    return {"environment": await environment_report()}
+async def environment_report_endpoint(problem: str = "", detail: str = "") -> dict:
+    """A bug report for the user to review: environment, the problem, the log tail.
+
+    Every field is redacted here, before the user sees it, because it may come from a
+    work computer.
+    """
+    return await problem_report(problem[:500], detail[:2000])
 
 
 @router.get("/host-support")

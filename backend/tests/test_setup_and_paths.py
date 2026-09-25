@@ -5,7 +5,9 @@ silently rather than loudly if it regresses.
 """
 
 import asyncio
+import json
 
+import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -686,3 +688,72 @@ async def test_component_probes_run_off_the_event_loop(monkeypatch):
     assert probed_on, "the weights probe never ran, so this test checked nothing"
     assert loop_thread not in probed_on
     assert next(c for c in status if c["id"] == "transcription")["installed"] is True
+
+
+# --- model pull stall ------------------------------------------------------
+
+
+class _PullStream(httpx.AsyncByteStream):
+    """Ollama's /api/pull as a script of (delay, event) pairs, then an optional hang."""
+
+    def __init__(self, script, hang_after=False):
+        self.script = script
+        self.hang_after = hang_after
+
+    async def __aiter__(self):
+        for delay, event in self.script:
+            await asyncio.sleep(delay)
+            yield (json.dumps(event) + "\n").encode()
+        if self.hang_after:
+            await asyncio.sleep(30)
+
+
+def _pull_with(monkeypatch, stream, stall_seconds=0.3):
+    real = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, stream=stream))
+    monkeypatch.setattr(
+        components_module.httpx, "AsyncClient", lambda **kw: real(transport=transport, **kw)
+    )
+    monkeypatch.setattr(components_module, "PULL_STALL_SECONDS", stall_seconds)
+
+    async def run():
+        return [e async for e in components_module.install_ollama_model("qwen3.5:4b")]
+
+    return asyncio.run(asyncio.wait_for(run(), timeout=10))
+
+
+def _layer(completed, status="pulling abc123"):
+    return {"status": status, "digest": "sha256:abc", "total": 2 * 10**9, "completed": completed}
+
+
+def test_a_pull_stuck_at_the_same_byte_count_fails_as_stalled(monkeypatch):
+    stuck = [(0.0, {"status": "pulling manifest"})] + [(0.05, _layer(0))] * 200
+    events = _pull_with(monkeypatch, _PullStream(stuck))
+    assert events[-1]["state"] == "failed"
+    assert events[-1]["stalled"] is True
+    assert "0 MB of 1,907 MB" in events[-1]["detail"]
+
+
+def test_a_pull_that_goes_silent_fails_as_stalled(monkeypatch):
+    events = _pull_with(
+        monkeypatch, _PullStream([(0.0, {"status": "pulling manifest"})], hang_after=True)
+    )
+    assert events[-1]["state"] == "failed"
+    assert events[-1]["stalled"] is True
+
+
+def test_a_slow_pull_that_keeps_moving_is_not_stalled(monkeypatch):
+    slow = [(0.1, _layer(n * 1000)) for n in range(1, 12)] + [(0.0, {"status": "success"})]
+    events = _pull_with(monkeypatch, _PullStream(slow))
+    assert events[-1] == {"state": "ready", "detail": "qwen3.5:4b"}
+
+
+def test_verifying_a_download_may_take_longer_than_the_stall_limit(monkeypatch):
+    script = [
+        (0.0, _layer(2_000_000_000)),
+        (0.0, {"status": "verifying sha256 digest"}),
+        (0.8, {"status": "writing manifest"}),
+        (0.0, {"status": "success"}),
+    ]
+    events = _pull_with(monkeypatch, _PullStream(script))
+    assert events[-1] == {"state": "ready", "detail": "qwen3.5:4b"}

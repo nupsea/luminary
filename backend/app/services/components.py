@@ -28,6 +28,7 @@ import os
 import shutil
 import site
 import sys
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -482,6 +483,18 @@ async def capabilities() -> dict:
     }
 
 
+# A stalled pull never ends on its own: Ollama keeps repeating the same byte count,
+# so the read timeout never fires. A working link, however slow, grows the count
+# within seconds; a Windows pull sat at 0 MB for minutes until the user quit.
+PULL_STALL_SECONDS = 60.0
+# Local work after the download (hashing a multi-GB file) moves no bytes.
+_LOCAL_PHASES = ("verifying", "writing", "removing")
+
+
+def _mb(n: int) -> str:
+    return f"{n / _MB:,.0f} MB"
+
+
 async def install_ollama_model(model: str) -> AsyncIterator[dict]:
     """Pull a model, yielding progress events.
 
@@ -493,36 +506,94 @@ async def install_ollama_model(model: str) -> AsyncIterator[dict]:
     payload = {"model": model, "stream": True}
 
     timeout = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
-    async with (
-        httpx.AsyncClient(timeout=timeout) as client,
-        client.stream("POST", f"{settings.OLLAMA_URL}/api/pull", json=payload) as resp,
-    ):
-        if resp.status_code != 200:
-            body = (await resp.aread()).decode(errors="replace")[:200]
-            yield {"state": "failed", "detail": f"{resp.status_code}: {body}"}
-            return
-
-        async for raw in resp.aiter_lines():
-            line = raw.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-            except ValueError:
-                continue
-
-            if error := event.get("error"):
-                yield {"state": "failed", "detail": error}
+    done: dict[str, int] = {}
+    totals: dict[str, int] = {}
+    status = ""
+    moved_at = time.monotonic()
+    try:
+        async with (
+            httpx.AsyncClient(timeout=timeout) as client,
+            client.stream("POST", f"{settings.OLLAMA_URL}/api/pull", json=payload) as resp,
+        ):
+            if resp.status_code != 200:
+                body = (await resp.aread()).decode(errors="replace")[:200]
+                yield {"state": "failed", "detail": f"{resp.status_code}: {body}"}
                 return
 
-            yield {
-                "state": "downloading",
-                "detail": event.get("status", ""),
-                "completed_bytes": int(event.get("completed") or 0),
-                "total_bytes": int(event.get("total") or 0),
-            }
+            lines = resp.aiter_lines()
+            while True:
+                watching = not status.startswith(_LOCAL_PHASES)
+                budget = PULL_STALL_SECONDS - (time.monotonic() - moved_at)
+                try:
+                    raw = await asyncio.wait_for(
+                        anext(lines), timeout=max(budget, 0.0) if watching else None
+                    )
+                except StopAsyncIteration:
+                    break
+                except TimeoutError:
+                    yield _stalled(done, totals)
+                    return
+
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+
+                if error := event.get("error"):
+                    yield {"state": "failed", "detail": error}
+                    return
+
+                completed = int(event.get("completed") or 0)
+                total = int(event.get("total") or 0)
+                if digest := event.get("digest"):
+                    totals[digest] = total
+                    if completed > done.get(digest, 0):
+                        done[digest] = completed
+                        moved_at = time.monotonic()
+                if event.get("status", "") != status:
+                    status = event.get("status", "")
+                    moved_at = time.monotonic()
+
+                yield {
+                    "state": "downloading",
+                    "detail": status,
+                    "completed_bytes": completed,
+                    "total_bytes": total,
+                }
+                if watching and time.monotonic() - moved_at > PULL_STALL_SECONDS:
+                    yield _stalled(done, totals)
+                    return
+    except httpx.ConnectError:
+        yield {
+            "state": "failed",
+            "detail": "Luminary's model engine (Ollama) is not running. Quit and reopen "
+            "Luminary, then try again.",
+        }
+        return
+    except httpx.TimeoutException:
+        yield {
+            "state": "failed",
+            "detail": f"Luminary's model engine stopped answering while '{status or 'starting'}'. "
+            "Quit and reopen Luminary, then try again.",
+        }
+        return
 
     yield {"state": "ready", "detail": model}
+
+
+def _stalled(done: dict[str, int], totals: dict[str, int]) -> dict:
+    progress = f" at {_mb(sum(done.values()))} of {_mb(sum(totals.values()))}" if totals else ""
+    return {
+        "state": "failed",
+        "stalled": True,
+        "detail": f"The download stopped{progress}: nothing arrived for "
+        f"{PULL_STALL_SECONDS:.0f} seconds. A VPN, antivirus software or your network "
+        "may be blocking the model download server. Try again to continue from where "
+        "it stopped.",
+    }
 
 
 async def remove_ollama_model(model: str) -> None:

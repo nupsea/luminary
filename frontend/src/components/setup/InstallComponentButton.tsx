@@ -8,6 +8,7 @@ import { useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { Download, Loader2 } from "lucide-react"
 
+import { ReportProblem } from "@/components/setup/ReportProblem"
 import { useComponents } from "@/hooks/useSetup"
 import { formatBytes, installComponent } from "@/lib/setupApi"
 import { cn } from "@/lib/utils"
@@ -31,9 +32,11 @@ export function InstallComponentButton({ componentId, className, onInstalled }: 
   async function run() {
     setBusy(true)
     setError(null)
+    let failed = false
     try {
       await installComponent(componentId, (event) => {
         if (event.state === "failed") {
+          failed = true
           setError(event.detail ?? "Install failed")
           return
         }
@@ -46,7 +49,7 @@ export function InstallComponentButton({ componentId, className, onInstalled }: 
         }
       })
       await queryClient.invalidateQueries({ queryKey: ["setup"] })
-      onInstalled?.()
+      if (!failed) onInstalled?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Install failed")
     } finally {
@@ -64,13 +67,18 @@ export function InstallComponentButton({ componentId, className, onInstalled }: 
         className="inline-flex items-center gap-1.5 self-start rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-60"
       >
         {busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-        {busy ? "Installing" : `Install ${component.label.toLowerCase()}`}
+        {busy ? "Installing" : error ? "Try again" : `Install ${component.label.toLowerCase()}`}
         {!busy && (
           <span className="text-muted-foreground">({formatBytes(component.size_bytes)})</span>
         )}
       </button>
       {progress && <span className="text-xs tabular-nums text-muted-foreground">{progress}</span>}
-      {error && <span className="text-xs text-muted-foreground">{error}</span>}
+      {error && (
+        <>
+          <span className="text-xs text-muted-foreground">{error}</span>
+          <ReportProblem problem={`${component.label} download failed`} detail={error} />
+        </>
+      )}
     </span>
   )
 }
