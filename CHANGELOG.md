@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Downloads and adding a web page failed on company networks that inspect secure traffic** with `CERTIFICATE_VERIFY_FAILED: self-signed certificate in certificate chain`. Luminary now trusts the certificates the operating system trusts, as a browser does (I-59).
 - **A network failure is named for what it is**: an untrusted certificate, a proxy, no internet, or a connection cut off by a firewall. A certificate refusal on a model download read "Could not reach the local model server".
 - **A computer set up to use a proxy was told it had no internet.** The connection check went around the proxy.
+- **Large model downloads failed behind proxies that scan files before passing them on.** The 1.1 GB entity model timed out after 10 seconds with no data; the wait is now 5 minutes.
+- **A proxy set in Windows' settings would have received Luminary's calls to its own local engine.** Local addresses now always bypass the proxy.
 
 ## [0.13.3] - 2026-09-25
 

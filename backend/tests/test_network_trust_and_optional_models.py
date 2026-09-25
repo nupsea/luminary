@@ -243,3 +243,13 @@ def test_an_explicit_proxy_keeps_its_bypass_list_and_gains_loopback(monkeypatch)
 
 def test_no_proxy_configured_changes_nothing(monkeypatch):
     assert _pin(monkeypatch, {}, {}, {}) == {}
+
+
+def test_a_scanning_proxy_has_time_to_release_a_large_model():
+    """Behind a proxy that holds the whole file before sending any of it, the 1.1GB
+    entity model failed at the hub's 10s read timeout and installed at 300s (61s)."""
+    from huggingface_hub import constants
+
+    import app  # noqa: F401  -- sets the default before huggingface_hub reads it
+
+    assert constants.HF_HUB_DOWNLOAD_TIMEOUT >= 300
