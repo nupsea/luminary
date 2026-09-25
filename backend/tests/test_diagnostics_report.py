@@ -299,9 +299,29 @@ async def test_no_editor_still_saves_the_file_and_returns_the_text(
     assert Path(report["path"]).read_text(encoding="utf-8") == report["text"]
 
 
+async def test_the_desktop_app_opens_the_report_although_it_runs_in_public_mode(
+    no_ollama, opened, tmp_path, monkeypatch
+):
+    """0.13.3 keyed this on mode alone, so the desktop app never opened an editor."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("LUMINARY_MODE", "public")
+    monkeypatch.setenv("LUMINARY_APP_ROOT", str(tmp_path))
+    monkeypatch.setenv("LUMINARY_LOG_FILE", str(tmp_path / "luminary.log"))
+    get_settings.cache_clear()
+    try:
+        report = await diagnostics.open_problem_report("x")
+    finally:
+        monkeypatch.delenv("LUMINARY_MODE")
+        get_settings.cache_clear()
+    assert report["opened"] is True
+    assert opened == [Path(report["path"])]
+
+
 async def test_a_hosted_server_never_opens_or_writes_a_report(no_ollama, opened, monkeypatch):
     from app.config import get_settings
 
+    monkeypatch.delenv("LUMINARY_APP_ROOT", raising=False)
     monkeypatch.setenv("LUMINARY_MODE", "public")
     get_settings.cache_clear()
     try:

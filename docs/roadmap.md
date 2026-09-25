@@ -440,6 +440,15 @@ serves them through Vulkan. That covers most current Windows laptops, and whethe
 decided in 0.13.3 once one has been timed on `qwen3.5:4b`; AWS has no such machine. Code signing
 (SmartScreen warns) is not in it either — see below.
 
+**0.13.4: company networks.** A company laptop behind a TLS-inspecting proxy failed every model
+download (I-59). Verified on AWS Windows Server 2022, m6i.xlarge with no GPU, behind mitmproxy with
+its CA in the machine store and set as the Windows proxy: 0.13.3 reproduced the laptop's screen;
+0.13.4 over it downloaded the embedder, installed both optional encoders, ingested a web article and
+an arXiv PDF by URL, reached OpenAI in Hybrid mode, opened the problem report in Notepad, and kept
+loopback off the proxy. Smoke there: 120 pass, 0 fail, 57 skip. Open: Ollama is Go and ignores the
+Windows system proxy, so a model pull needs a transparent proxy or `HTTPS_PROXY` (no effect on a
+refused host, which pulls nothing); PAC-file proxies are not read.
+
 **Signing.** The installers are unsigned, so Windows SmartScreen shows "unknown publisher"
 (click More info -> Run anyway). The free route is SignPath Foundation, which signs OSS builds at
 no cost; the repo qualifies (public, Apache-2.0). The application is the owner's to submit (it needs

@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A computer set up to use a proxy was told it had no internet.** The connection check went around the proxy.
 - **Large model downloads failed behind proxies that scan files before passing them on.** The 1.1 GB entity model timed out after 10 seconds with no data; the wait is now 5 minutes.
 - **A proxy set in Windows' settings would have received Luminary's calls to its own local engine.** Local addresses now always bypass the proxy.
+- **"Report this problem" never opened a text editor in the desktop app.** It was keyed on the server mode, and the desktop app runs in the same mode as a hosted server, so the report was shown in the page instead.
 
 ## [0.13.3] - 2026-09-25
 

@@ -324,10 +324,11 @@ async def open_problem_report(problem: str = "", detail: str = "") -> dict:
     """Write the redacted report to a text file and open it for the user to read and send.
 
     A hosted server never opens anything: its editor would be on the server, not the user's
-    machine, so the text is returned for the page to show instead.
+    machine, so the text is returned for the page to show instead. The desktop app runs in
+    public mode too, so mode alone cannot tell them apart: 0.13.3 opened no editor anywhere.
     """
     text = report_text(await problem_report(problem, detail))
-    if get_settings().LUMINARY_MODE != "full":
+    if not is_packaged() and get_settings().LUMINARY_MODE != "full":
         return {"text": text, "path": None, "opened": False}
     path, opened = await asyncio.to_thread(_save_and_open, text)
     return {"text": text, "path": str(path), "opened": opened}
