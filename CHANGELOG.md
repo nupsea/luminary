@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.5] - 2026-09-26
+
+### Fixed
+- **A computer whose graphics card the model engine cannot use was treated as able to run local models.** A driver on disk passed the check while the model ran on the processor, taking minutes per answer with no explanation. Luminary now checks where the engine put the model on its first load; if none of it is on the card, the computer is treated like one with no card, the model is unloaded and Hybrid or Cloud mode is offered (I-60).
+- **Installing the chat model now loads it straight away**, instead of at the first question or the next launch.
+
 ## [0.13.4] - 2026-09-25
 
 ### Changed
