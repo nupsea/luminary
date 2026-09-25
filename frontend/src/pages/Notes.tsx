@@ -20,17 +20,20 @@ import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { QuickNoteComposer } from "@/components/notes/QuickNoteComposer"
 import type { BlogKind } from "@/lib/blogApi"
 
-// Lazy, not folded: blog ships in every mode now, and both of these are heavy
-// enough that the Notes chunk should not carry them until one is opened.
-const BlogsPanel = lazy(() =>
-  import("@/components/blog/BlogsPanel").then((m) => ({ default: m.BlogsPanel })),
-)
-
-const BlogPublishDialog = lazy(() =>
-  import("@/components/blog/BlogPublishDialog").then((m) => ({
-    default: m.BlogPublishDialog,
-  })),
-)
+// Publishing to a personal site is a full-mode surface. Folded at build time,
+// as `FocusTimerPill` in App.tsx is: a public build drops these imports and
+// every /blog call with them.
+const BLOG = import.meta.env.VITE_LUMINARY_MODE === "full"
+const BlogsPanel = BLOG
+  ? lazy(() => import("@/components/blog/BlogsPanel").then((m) => ({ default: m.BlogsPanel })))
+  : null
+const BlogPublishDialog = BLOG
+  ? lazy(() =>
+      import("@/components/blog/BlogPublishDialog").then((m) => ({
+        default: m.BlogPublishDialog,
+      })),
+    )
+  : null
 import { useDebounce } from "@/hooks/useDebounce"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -490,8 +493,8 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
     () => new Set((note.collections ?? []).map((c) => c.name.toLowerCase())),
     [note.collections],
   )
-  const canPublishBlog = collectionNames.has("blog")
-  const canPublishThoughts = collectionNames.has("thoughts")
+  const canPublishBlog = BLOG && collectionNames.has("blog")
+  const canPublishThoughts = BLOG && collectionNames.has("thoughts")
 
   const deleteMut = useMutation({
     mutationFn: () => deleteNote(note.id),
@@ -681,7 +684,7 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         </div>
       )}
 
-      {publishKind && (
+      {publishKind && BlogPublishDialog && (
         <Suspense fallback={null}>
         <BlogPublishDialog
           open={!!publishKind}
@@ -931,7 +934,7 @@ export default function NotesPage() {
         navigate={navigate}
       />
     )
-  } else if (filter.type === "blogs") {
+  } else if (filter.type === "blogs" && BlogsPanel) {
     panelContent = (
       <Suspense fallback={null}>
         <BlogsPanel />
@@ -1197,6 +1200,7 @@ export default function NotesPage() {
           Reading Journal
         </button>
 
+        {BLOG && (
         <button
           onClick={() => {
             setFilter({ type: "blogs" })
@@ -1212,6 +1216,7 @@ export default function NotesPage() {
           <Newspaper size={13} />
           Blog & Thoughts
         </button>
+        )}
 
         {/* Collections section */}
         <div className="mt-3">

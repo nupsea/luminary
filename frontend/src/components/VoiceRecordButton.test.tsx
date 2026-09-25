@@ -16,11 +16,12 @@ function html(caps: Partial<Capabilities> | undefined) {
 }
 
 describe("VoiceRecordButton", () => {
-  it("is not offered on an install with no transcriber", () => {
-    // The distributed bundle ships no faster-whisper: it pulls GPL code, so it
-    // is a component the user installs afterwards. Offering the mic before then
-    // takes a recording and answers with a `uv sync` line.
-    expect(html({ dictation: { available: false, requires: ["transcription"] } })).toBe("")
+  it("offers the install, not a recording, on an install with no transcriber", () => {
+    // The bundle ships no faster-whisper (GPL). A hidden mic left users unaware
+    // dictation existed; a recording mic would record and then fail.
+    const out = html({ dictation: { available: false, requires: ["transcription"] } })
+    expect(out).toContain("Dictation needs speech to text")
+    expect(out).not.toContain("Dictate with voice")
   })
 
   it("is offered once the transcriber is installed", () => {

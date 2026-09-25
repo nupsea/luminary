@@ -2,18 +2,11 @@
 # S244 smoke: GET /blog/drafts lists collected-but-unpublished notes.
 #
 # `blog` is a full-mode surface, so this is a no-op against a public build --
-# the route is not mounted there and the script says so rather than failing.
+# the route is not mounted there and the script is skipped.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
-CT=$(curl -s -o /dev/null -w "%{content_type}" -m 10 "${BASE}/blog/config" || true)
-case "$CT" in
-  application/json*) ;;
-  *)
-    echo "SKIP: S244 -- /blog is not mounted (public mode); nothing to check"
-    exit "$SMOKE_SKIP"
-    ;;
-esac
+smoke_require_mode full
 
 for kind in blog thoughts; do
   BODY=$(curl -sf -m 30 "${BASE}/blog/drafts?kind=${kind}")

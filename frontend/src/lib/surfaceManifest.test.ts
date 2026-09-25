@@ -59,12 +59,13 @@ describe("surfaceManifest", () => {
   // What a note becomes when it is shared is the point of writing one, so blog
   // is not a full-mode extra. It stays a `feature`: reached from a note, never
   // from the rail.
-  it("blog ships in both modes and is not a rail item", async () => {
-    for (const mode of ["public", "full"]) {
-      const m = await loadWithMode(mode)
-      expect(m.isSurfaceVisible("blog")).toBe(true)
-      expect(m.navTabs().map((s) => s.id)).not.toContain("blog")
-    }
+  // Publishing to the owner's own site: it reached the desktop app (public mode)
+  // as "Blog & Thoughts" in Notes, and was taken back out in 0.13.4.
+  it("blog is full-mode only and is not a rail item", async () => {
+    expect((await loadWithMode("public")).isSurfaceVisible("blog")).toBe(false)
+    const full = await loadWithMode("full")
+    expect(full.isSurfaceVisible("blog")).toBe(true)
+    expect(full.navTabs().map((s) => s.id)).not.toContain("blog")
   })
 
   // The public rail is six items and the count is the claim. Ask was cut from it

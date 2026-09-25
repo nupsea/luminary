@@ -202,7 +202,7 @@
     },
     {
       "id": "blog",
-      "mode": "public",
+      "mode": "full",
       "kind": "feature",
       "frontend": {
         "components": [

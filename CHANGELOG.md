@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Setup downloads one model, the embedder (133 MB).** The entity model (1.1 GB) and the answer-ranking model are installed by choice, from the setup screen, Settings or a "Suggested for this computer" card. Luminary marks what it recommends for the computer; ingest and search work without either.
 - **A computer that cannot run local models is no longer offered them.** The chat and figure models read "Not on this computer", with the reason, instead of a failure, a problem report and a 3.2 GB install button.
 - **The setup screen has one "Report this problem"**, covering every step that failed. One link per step produced several copies of the same report.
+- **Blog and Thoughts publishing is a full-mode feature again.** It shipped in the desktop app, which runs in public mode; a public build now carries none of its code.
+- **The dictation mic shows before speech to text is installed.** It was hidden, so nobody learned dictation existed; clicking it now offers the one-time download instead of recording.
 
 ### Fixed
 - **Downloads and adding a web page failed on company networks that inspect secure traffic** with `CERTIFICATE_VERIFY_FAILED: self-signed certificate in certificate chain`. Luminary now trusts the certificates the operating system trusts, as a browser does (I-59).

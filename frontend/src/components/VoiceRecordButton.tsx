@@ -1,4 +1,13 @@
+import { useState } from "react"
 import { Loader2, Mic, Square } from "lucide-react"
+import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
 import { useCapability } from "@/hooks/useSetup"
 import { cn } from "@/lib/utils"
@@ -26,14 +35,53 @@ export function VoiceRecordButton({
     onTranscribed,
   })
   // The installer ships no transcriber -- faster-whisper pulls GPL code, so it
-  // is a component the user adds afterwards. Offering the mic before then gets
-  // a recording made and thrown away against a `uv sync` message.
+  // is a component the user adds afterwards. Until then the mic offers the
+  // install rather than recording: hidden, nobody learned dictation existed.
   const dictation = useCapability("dictation")
+  const [offering, setOffering] = useState(false)
 
   const isSmall = size === "sm"
   const isIcon = variant === "icon"
+  const sizing = isIcon
+    ? isSmall
+      ? "h-7 w-7 shrink-0"
+      : "h-8 w-8 shrink-0"
+    : isSmall
+      ? "h-7 px-2.5 text-xs"
+      : "h-8 px-3 text-xs"
 
-  if (!dictation.available) return null
+  if (!dictation.available) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setOffering(true)}
+          title="Dictation needs speech to text"
+          aria-label="Dictation needs speech to text"
+          className={cn(
+            "inline-flex items-center justify-center gap-1.5 rounded-md border border-dashed border-border/80 bg-background/80 font-medium text-muted-foreground/70 transition-all hover:bg-accent hover:text-foreground",
+            sizing,
+            className,
+          )}
+        >
+          <Mic size={isSmall ? 13 : 15} className="shrink-0" />
+          {!isIcon && label && <span>{label}</span>}
+        </button>
+        <Dialog open={offering} onOpenChange={setOffering}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Dictation needs speech to text</DialogTitle>
+              <DialogDescription>
+                A one-time download that turns your voice into text on this computer. Nothing
+                you say leaves it.
+              </DialogDescription>
+            </DialogHeader>
+            <InstallComponentButton componentId="transcription" onInstalled={() => setOffering(false)} />
+          </DialogContent>
+        </Dialog>
+      </>
+    )
+  }
 
   return (
     <button
@@ -44,13 +92,7 @@ export function VoiceRecordButton({
       aria-label={isRecording ? "Stop recording" : title}
       className={cn(
         "group relative inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50",
-        isIcon
-          ? isSmall
-            ? "h-7 w-7 shrink-0"
-            : "h-8 w-8 shrink-0"
-          : isSmall
-          ? "h-7 px-2.5 text-xs"
-          : "h-8 px-3 text-xs",
+        sizing,
         isRecording
           ? "border border-rose-500/40 bg-rose-500/10 text-rose-600 shadow-[0_0_12px_rgba(244,63,94,0.12)] hover:bg-rose-500/20 dark:border-rose-500/40 dark:bg-rose-950/40 dark:text-rose-400 dark:hover:bg-rose-950/60"
           : isTranscribing
