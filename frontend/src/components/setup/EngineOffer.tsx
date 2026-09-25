@@ -15,8 +15,9 @@ import { Cloud } from "lucide-react"
 import { useState } from "react"
 
 import { EngineChoice } from "@/components/setup/EngineChoice"
+import { useHostVerdict } from "@/hooks/useHostVerdict"
 import { apiGet, apiPatch } from "@/lib/apiClient"
-import { shouldOfferEngineChoice } from "@/lib/engineOffer"
+import { engineOfferCopy, shouldOfferEngineChoice } from "@/lib/engineOffer"
 
 interface LLMOfferState {
   mode: string
@@ -34,6 +35,8 @@ export function EngineOffer() {
     staleTime: 30_000,
   })
 
+  const host = useHostVerdict()
+
   const dismiss = useMutation({
     mutationFn: () => apiPatch("/settings/llm", { offer_dismissed: true }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["llm-settings"] }),
@@ -47,24 +50,18 @@ export function EngineOffer() {
     },
   )
   if (!offer) return null
+  const copy = engineOfferCopy(host?.supported)
 
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-border bg-card/60 p-4">
       <div className="flex items-start gap-2.5">
         <Cloud size={15} className="mt-0.5 shrink-0 text-blue-500" />
         <div className="flex flex-col gap-1">
-          <h2 className="text-sm font-semibold text-foreground">
-            Answers are being written on this machine
-          </h2>
+          <h2 className="text-sm font-semibold text-foreground">{copy.title}</h2>
           {/* What each mode sends is stated once, on its card in EngineChoice.
               A summary here promised "the question and the passages -- and
               nothing else", which Cloud mode does not keep. */}
-          <p className="max-w-2xl text-xs text-muted-foreground">
-            That is the default, and nothing here has ever left. It is also the slow
-            arm: a local model finishes an answer in tens of seconds. With an
-            Anthropic, OpenAI or Google key, Hybrid or Cloud mode answers in a few,
-            and each says exactly what it sends before you choose it.
-          </p>
+          <p className="max-w-2xl text-xs text-muted-foreground">{copy.body}</p>
         </div>
       </div>
 

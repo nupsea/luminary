@@ -449,6 +449,19 @@ loopback off the proxy. Smoke there: 120 pass, 0 fail, 57 skip. Open: Ollama is 
 Windows system proxy, so a model pull needs a transparent proxy or `HTTPS_PROXY` (no effect on a
 refused host, which pulls nothing); PAC-file proxies are not read.
 
+**0.13.5–0.13.7: a driver is not a usable card (I-60).** Verified on AWS g4dn.xlarge, Windows Server
+2022, T4 with the AWS GRID driver (WDDM), no proxy, installed by the one-command installer. Card
+enabled: the chat-model install loaded it at once, Ollama held all 3.44 GB on the T4 through Vulkan
+(17s warm), and with the CUDA runner through CUDA; three documents ingested (a Wikipedia article, 645
+chunks; an arXiv PDF, 81; a text file, 11), questions answered in 5-14s with citations, 2 of 5 cards
+survived the grounding check, a review rescheduled, teach-back scored 98 right and 0 wrong. Card
+disabled with the driver left on disk: warm-up measured 0 B on the card, refused with `gpu_unused`,
+unloaded the model and showed the banner in the same session; questions, cards and teach-back were
+refused with the key message, while reading, search, reviews and a new ingest worked, and Hybrid with
+a bad key said so. Installing the CUDA runner cleared the verdict and the next launch measured again.
+Open: a model split between card and processor is not refused; no consumer laptop GPU, Intel or AMD
+integrated graphics, or Linux host has been measured.
+
 **Signing.** The installers are unsigned, so Windows SmartScreen shows "unknown publisher"
 (click More info -> Run anyway). The free route is SignPath Foundation, which signs OSS builds at
 no cost; the repo qualifies (public, Apache-2.0). The application is the owner's to submit (it needs
