@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.3] - 2026-09-25
+
 ### Added
 - **The one-command installers remove Luminary too.** `LUMINARY_UNINSTALL=1` lists what it will remove and what it keeps, and asks first (`LUMINARY_ASSUME_YES=1` for scripts). It deletes only files Luminary wrote. Your library, your models and anything it does not recognise are left in place, listed with the command to delete them.
 - **Every install ends by saying where the app went, where your library lives and how to remove the app.**
