@@ -28,7 +28,7 @@ for root in /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib; do
     while IFS= read -r f; do drivers+=("$f"); done < <(
         find "$root" -maxdepth 2 \( -type f -o -type l \) \( \
             -name 'libEGL*.so*' -o -name 'libGL*.so*' -o -name 'libgbm.so*' \
-            -o -name 'libgallium*.so' -o -name 'libvulkan_*.so' \
+            -o -name 'libgallium*.so' -o -name 'libvulkan_*.so' -o -name 'libnvidia-egl*.so*' \
             -o -path '*/dri/*.so' -o -path '*/gbm/*.so' \) 2>/dev/null | sort -u)
 done
 # Measured nothing is not a pass.
