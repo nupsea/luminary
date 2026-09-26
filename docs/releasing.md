@@ -26,11 +26,10 @@ the only channel.
 # 1. Everything green, working tree clean.
 make ci
 
-# 2. Bump the version. This writes all four places it lives:
-#    backend/pyproject.toml, frontend/package.json,
-#    src-tauri/tauri.conf.json, src-tauri/Cargo.toml
+# 2. Bump the version. This writes every place it lives: the backend, frontend
+#    and desktop manifests, their lockfiles, and the README's download links.
 scripts/version.sh 0.3.0
-scripts/version.sh            # confirm all four agree
+scripts/version.sh            # confirm they all agree
 
 # 3. Note what changed, for the release page.
 $EDITOR CHANGELOG.md
@@ -41,6 +40,9 @@ git push
 # 4. Tag. This is the trigger.
 make release
 ```
+
+The README's download buttons point at the new version's files from the moment the bump reaches
+`master`, and 404 until the release workflows upload them — so tag promptly after merging.
 
 `make release` refuses a dirty tree, tags `v<version>` from
 `backend/pyproject.toml`, and pushes.
@@ -169,7 +171,7 @@ back. Say so in the release notes.
 ## Before tagging
 
 - `make ci` green.
-- `scripts/version.sh` shows the same version in all four files.
+- `scripts/version.sh` shows the same version everywhere.
 - `CHANGELOG.md` updated.
 - If the release carries an Alembic migration, say so in the notes — it is the
   point of no return described above.
