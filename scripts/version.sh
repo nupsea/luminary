@@ -27,11 +27,13 @@ CARGO="$REPO_ROOT/src-tauri/Cargo.toml"
 # on it.
 UV_LOCK="$REPO_ROOT/backend/uv.lock"
 CARGO_LOCK="$REPO_ROOT/src-tauri/Cargo.lock"
+# The README's download buttons link each release file by its versioned name.
+README="$REPO_ROOT/README.md"
 
 if [ "$#" -eq 0 ]; then
-    python3 - "$PYPROJECT" "$PKG" "$PKG_LOCK" "$TAURI_CONF" "$CARGO" "$UV_LOCK" "$CARGO_LOCK" <<'PY'
+    python3 - "$PYPROJECT" "$PKG" "$PKG_LOCK" "$TAURI_CONF" "$CARGO" "$UV_LOCK" "$CARGO_LOCK" "$README" <<'PY'
 import re, sys
-pyproject, pkg, pkg_lock, tauri_conf, cargo, uv_lock, cargo_lock = sys.argv[1:8]
+pyproject, pkg, pkg_lock, tauri_conf, cargo, uv_lock, cargo_lock, readme = sys.argv[1:9]
 
 
 def show(label, path, pattern):
@@ -52,6 +54,7 @@ show("cargo:", cargo, r'(?m)^version\s*=\s*"([^"]+)"')
 show("pkg-lock:", pkg_lock, r'"version"\s*:\s*"([^"]+)"')
 show("uv.lock:", uv_lock, lock_pattern("luminary-backend"))
 show("Cargo.lock:", cargo_lock, lock_pattern("luminary-desktop"))
+show("README:", readme, r'releases/download/v([^/]+)/')
 PY
     exit 0
 fi
@@ -62,9 +65,9 @@ if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+.].*)?$ ]]; then
     exit 1
 fi
 
-python3 - "$PYPROJECT" "$PKG" "$PKG_LOCK" "$TAURI_CONF" "$CARGO" "$UV_LOCK" "$CARGO_LOCK" "$VERSION" <<'PY'
+python3 - "$PYPROJECT" "$PKG" "$PKG_LOCK" "$TAURI_CONF" "$CARGO" "$UV_LOCK" "$CARGO_LOCK" "$README" "$VERSION" <<'PY'
 import re, sys
-pyproject, pkg, pkg_lock, tauri_conf, cargo, uv_lock, cargo_lock, version = sys.argv[1:9]
+pyproject, pkg, pkg_lock, tauri_conf, cargo, uv_lock, cargo_lock, readme, version = sys.argv[1:10]
 
 
 def bump(path, pattern, label):
@@ -118,9 +121,15 @@ bump(cargo, r'(?m)^(version\s*=\s*")[^"]+(")', "src-tauri/Cargo.toml")
 # not something a version bump should do quietly on the way to a tag.
 bump(uv_lock, lock_pattern("luminary-backend"), "backend/uv.lock")
 bump(cargo_lock, lock_pattern("luminary-desktop"), "src-tauri/Cargo.lock")
+
+text, n = re.subn(
+    r'(releases/download/v)[^/]+(/Luminary_)[^_]+(_)', rf'\g<1>{version}\g<2>{version}\g<3>', open(readme).read()
+)
+assert n > 0, "no download links found in README.md"
+open(readme, "w").write(text)
 PY
 
 echo "Set version to $VERSION"
 echo "  backend/pyproject.toml, frontend/package.json, frontend/package-lock.json,"
 echo "  src-tauri/tauri.conf.json, src-tauri/Cargo.toml,"
-echo "  backend/uv.lock, src-tauri/Cargo.lock"
+echo "  backend/uv.lock, src-tauri/Cargo.lock, README.md download links"

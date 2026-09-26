@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The README install starts with a download button per system, macOS first**; the Windows and Linux one-command installs follow as the alternative. `scripts/version.sh` moves the buttons' links to each new version.
+
 ## [0.13.8] - 2026-09-26
 
 ### Fixed

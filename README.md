@@ -26,28 +26,21 @@ Nothing leaves your machine unless you give it an API key.
 
 ## Install
 
-**Windows 10 or 11** — in PowerShell:
+Download the installer for your system and open it. Every file is also on the
+**[latest release](https://github.com/nupsea/luminary/releases/latest)**.
 
-```powershell
-irm https://raw.githubusercontent.com/nupsea/luminary/master/scripts/get-luminary.ps1 | iex
-```
+| System | Download | Then |
+|---|---|---|
+| **macOS** (Apple Silicon, macOS 14+) | [![Download .dmg](https://img.shields.io/badge/Download%20.dmg-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/nupsea/luminary/releases/download/v0.13.8/Luminary_0.13.8_aarch64.dmg) | Open it and drag Luminary to Applications |
+| **Windows 10 or 11** | [![Download .exe](https://img.shields.io/badge/Download%20.exe-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/nupsea/luminary/releases/download/v0.13.8/Luminary_0.13.8_x64-setup.exe) | Run it; installs for your user only, no administrator prompt |
+| **Linux** (Debian, Ubuntu) | [![Download .deb](https://img.shields.io/badge/Download%20.deb-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](https://github.com/nupsea/luminary/releases/download/v0.13.8/Luminary_0.13.8_amd64.deb) | Open it in your software installer, or `sudo apt install ./Luminary_*_amd64.deb` |
+| **Linux** (any x86_64) | [![Download AppImage](https://img.shields.io/badge/Download%20AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/nupsea/luminary/releases/download/v0.13.8/Luminary_0.13.8_amd64.AppImage) | `chmod +x` it and run it |
 
-**Linux (x86_64)** — in a terminal:
+The Windows installer is not yet code-signed: at *Windows protected your PC*, choose
+**More info → Run anyway**.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/nupsea/luminary/master/scripts/get-luminary.sh | bash
-```
-
-**macOS (Apple Silicon, macOS 14+)** — download the `.dmg` from the
-**[latest release](https://github.com/nupsea/luminary/releases/latest)**, open it and drag
-Luminary to Applications.
-
-The one-command installs check your machine before downloading anything, verify the download
-against its checksum and open the app. Windows installs for your user only, with no
-administrator prompt; on Debian and Ubuntu you get the `.deb` through apt (sudo once), elsewhere
-the AppImage in your home folder. Everything ships inside
-the app — Python, the local model server and every dependency — and first launch fetches the
-models.
+Everything ships inside the app — Python, the local model server and every dependency — and
+first launch fetches the models.
 
 | | Download | Installed | First launch fetches |
 |---|---|---|---|
@@ -55,11 +48,26 @@ models.
 | Windows | 0.3 GB | 1.6 GB | the same |
 | Linux | 0.6–0.7 GB | 2.1 GB | the same |
 
-Prefer to download the installer yourself? The Windows `-setup.exe`, the `.deb` and the
-`.AppImage` are on the **[latest release](https://github.com/nupsea/luminary/releases/latest)**.
-The Windows installer is not yet code-signed: at *Windows protected your PC*, choose
-**More info → Run anyway**. For a background service, source installs or Docker, see
-**[docs/install.md](docs/install.md)**.
+### Or install with one command
+
+On Windows and Linux, one command picks the right installer, checks your machine before
+downloading anything, verifies the download against its checksum and opens the app. On Debian
+and Ubuntu it installs the `.deb` through apt (sudo once), elsewhere the AppImage in your home
+folder.
+
+**Windows** — in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/nupsea/luminary/master/scripts/get-luminary.ps1 | iex
+```
+
+**Linux** — in a terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nupsea/luminary/master/scripts/get-luminary.sh | bash
+```
+
+For a background service, source installs or Docker, see **[docs/install.md](docs/install.md)**.
 
 ### What your machine needs
 
@@ -70,7 +78,8 @@ Luminary answers with a model on your machine, so it checks the machine can run 
 | **Runs local models** | Apple Silicon Mac · Windows or Linux with an NVIDIA or AMD graphics card that the model actually loads onto · at least 16 GB of memory |
 | **Does not** | Intel Mac · no graphics card, or only integrated graphics · under 16 GB · a card whose driver is present but which the model does not use (measured on the first answer) |
 
-On a machine that cannot, the installer says so before downloading and offers to install anyway.
+On a machine that cannot, the app says so at setup instead of offering local models, and the
+one-command install says so before downloading and offers to install anyway.
 Reading, search, notes, highlights and reviews all work there, and adding an API key in
 Settings makes answers and flashcards work too. Summaries and tags written during ingest stay
 off unless you choose Cloud mode, which sends document sections to your provider.
