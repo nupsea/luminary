@@ -2,6 +2,7 @@
 # Smoke test for S71: Summary caching — verify force_refresh and cached SSE events
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+smoke_requires_repo_toolchain
 
 BACKEND_DIR="$(cd "$(dirname "$0")/../../backend" && pwd)"
 

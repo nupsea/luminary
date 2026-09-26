@@ -21,6 +21,7 @@ import { useNavigate } from "react-router-dom"
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
 import { FirstRunGuide } from "@/components/FirstRunGuide"
 import { EngineOffer } from "@/components/setup/EngineOffer"
+import { ModelSuggestions } from "@/components/setup/ModelSuggestions"
 import { useStartupStatus } from "@/hooks/useSetup"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet, apiPost } from "@/lib/apiClient"
@@ -100,6 +101,7 @@ export default function Hub() {
           it shipped, and it is the only one that never got asked. Renders
           nothing once the question has an answer. */}
       <EngineOffer />
+      <ModelSuggestions />
 
       <WhereYouLeftOff resume={resume} action={data.today_action ?? null} />
 
@@ -776,6 +778,7 @@ function HubError({ onRetry }: { onRetry: () => void }) {
 function HubEmpty() {
   return (
     <PageSurface>
+      <ModelSuggestions />
       <FirstRunGuide />
     </PageSurface>
   )

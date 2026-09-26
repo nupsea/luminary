@@ -53,6 +53,13 @@ class ModelNotDownloaded(DependencyUnavailable):
     weights arrive only through setup or a component install."""
 
 
+class CloudKeyMissing(DependencyUnavailable, ValueError):
+    """Cloud routing is active and the provider has no API key.
+
+    Also a `ValueError` so the call sites that already catch that keep working.
+    """
+
+
 class LocalInferenceRefused(DependencyUnavailable):
     """A local model call on a host that cannot run one at a usable speed.
 

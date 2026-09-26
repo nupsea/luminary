@@ -230,3 +230,23 @@ def test_the_suite_reads_the_shipped_defaults_not_a_developer_env_file():
             f"{knob} is {actual!r} but the shipped default is {declared!r} -- "
             "a local .env is leaking into the suite"
         )
+
+
+# Off Apple Silicon the default text model is qwen3.5:4b whatever the host holds;
+# a larger one is picked in Settings. 14B chosen by RAM on a 64GB machine with no
+# card answered in 2-4 minutes.
+@pytest.mark.parametrize("ram_gb", [16, 32, 64])
+def test_off_apple_silicon_the_text_model_is_never_upgraded(ram_gb):
+    from app.model_registry import recommended_assignment
+
+    pair = recommended_assignment(ram_gb, apple_silicon=False)
+    assert pair is not None
+    assert pair[0] == "ollama/qwen3.5:4b"
+
+
+def test_apple_silicon_keeps_the_ram_rule():
+    from app.model_registry import recommended_assignment
+
+    pair = recommended_assignment(36, apple_silicon=True)
+    assert pair is not None
+    assert pair[0] == "ollama/qwen2.5:14b-instruct"

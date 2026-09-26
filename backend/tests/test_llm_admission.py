@@ -128,16 +128,19 @@ async def test_grace_window_holds_the_gap_between_two_turns(admission_settings):
 async def test_a_held_background_call_is_admitted_before_ingestion_stalls(
     admission_settings,
 ):
+    """Turn after turn inside the grace window: the bound admits it between turns."""
     admission_settings(
         OLLAMA_NUM_PARALLEL=1,
-        LLM_ADMISSION_GRACE_SECONDS=0.0,
+        LLM_ADMISSION_GRACE_SECONDS=0.3,
         LLM_ADMISSION_MAX_DEFER_SECONDS=0.5,
     )
-    release = asyncio.Event()
+    stop = asyncio.Event()
 
     async def chatting():
-        async with llm_admission.interactive_call():
-            await release.wait()
+        while not stop.is_set():
+            async with llm_admission.interactive_call():
+                await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
 
     task = asyncio.create_task(chatting())
     await asyncio.sleep(0)
@@ -145,8 +148,43 @@ async def test_a_held_background_call_is_admitted_before_ingestion_stalls(
     started = time.monotonic()
     async with llm_admission.background_call():
         waited = time.monotonic() - started
+        answers_live = llm_admission.current_state().interactive_inflight
 
     assert 0.4 <= waited < 3.0
+    assert answers_live == 0
+    assert llm_admission.admission_stats()["forced_admissions"] == 1
+
+    stop.set()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_a_live_answer_is_not_cut_into_before_the_ceiling(admission_settings, monkeypatch):
+    """A one-slot runtime serves a forced call ahead of the user's own question.
+
+    Measured on a CPU-only host: two background calls force-admitted 0.2s after a
+    question's LLM call began, and one delayed the next question by 28s.
+    """
+    admission_settings(
+        OLLAMA_NUM_PARALLEL=1,
+        LLM_ADMISSION_GRACE_SECONDS=0.0,
+        LLM_ADMISSION_MAX_DEFER_SECONDS=0.2,
+    )
+    monkeypatch.setattr(llm_admission, "_MAX_DEFER_CEILING_SECONDS", 1.0)
+    release = asyncio.Event()
+
+    async def answering():
+        async with llm_admission.interactive_call():
+            await release.wait()
+
+    task = asyncio.create_task(answering())
+    await asyncio.sleep(0)
+
+    started = time.monotonic()
+    async with llm_admission.background_call():
+        waited = time.monotonic() - started
+
+    assert 0.9 <= waited < 3.0
     assert llm_admission.admission_stats()["forced_admissions"] == 1
 
     release.set()
@@ -583,7 +621,7 @@ async def test_background_never_exceeds_the_serving_width(admission_settings):
 async def test_the_defer_bound_never_forces_past_the_width(admission_settings):
     admission_settings(
         OLLAMA_NUM_PARALLEL=1,
-        LLM_ADMISSION_GRACE_SECONDS=0.0,
+        LLM_ADMISSION_GRACE_SECONDS=0.3,
         LLM_ADMISSION_MAX_DEFER_SECONDS=0.2,
     )
     release_background = asyncio.Event()
@@ -597,8 +635,10 @@ async def test_the_defer_bound_never_forces_past_the_width(admission_settings):
             await release.wait()
 
     async def chatting():
-        async with llm_admission.interactive_call():
-            await release_chat.wait()
+        while not release_chat.is_set():
+            async with llm_admission.interactive_call():
+                await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
 
     first = asyncio.create_task(background(first_admitted, release_background))
     await asyncio.wait_for(first_admitted.wait(), timeout=1.0)

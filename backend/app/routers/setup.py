@@ -9,6 +9,7 @@ import logging
 
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from app.services.components import (
     capabilities,
@@ -17,7 +18,7 @@ from app.services.components import (
     install_component,
     remove_component,
 )
-from app.services.diagnostics import environment_report
+from app.services.diagnostics import open_problem_report, problem_report
 from app.services.enrichment_worker import requeue_skipped_jobs
 from app.services.lifecycle import request_shutdown
 from app.services.startup_status import get_startup_status
@@ -34,9 +35,29 @@ async def list_components() -> dict:
 
 
 @router.get("/report")
-async def environment_report_endpoint() -> dict:
-    """The environment block for a bug report, scrubbed of the account name."""
-    return {"environment": await environment_report()}
+async def environment_report_endpoint(problem: str = "", detail: str = "") -> dict:
+    """A bug report for the user to review: environment, the problem, the log tail.
+
+    Every field is redacted here, before the user sees it, because it may come from a
+    work computer.
+    """
+    return await problem_report(problem[:500], detail[:2000])
+
+
+class ProblemReportRequest(BaseModel):
+    problem: str = Field("", max_length=500)
+    detail: str = Field("", max_length=2000)
+
+
+@router.post("/report/open")
+async def open_report(req: ProblemReportRequest) -> dict:
+    """Save the redacted report as a text file and open it in the user's own editor.
+
+    The user reads it there and sends it however they like; nothing leaves the machine
+    from here. `opened` is false where no editor could be started, and `text` is then
+    shown in the page instead.
+    """
+    return await open_problem_report(req.problem, req.detail)
 
 
 @router.get("/host-support")
@@ -48,14 +69,24 @@ async def host_support() -> dict:
     is stated -- the native installers refuse macOS x86_64 before they get this
     far, so the case this endpoint exists for is the container.
     """
-    from app.host_support import local_inference_support  # noqa: PLC0415
+    from app.host_support import local_inference_support, measured_offload  # noqa: PLC0415
+    from app.services.startup_status import get_startup_status  # noqa: PLC0415
 
     verdict = local_inference_support()
+    chat = next(
+        (p["state"] for p in get_startup_status().snapshot()["phases"] if p["key"] == "chat_model"),
+        None,
+    )
     return {
         "supported": verdict.supported,
         "reason": verdict.reason,
         "host": verdict.detail,
         "message": verdict.message,
+        "measured": measured_offload() is not None,
+        # A chat-model load is under way, and its measurement can still turn a
+        # supported verdict (I-60). A saved `measured` cannot say that: every
+        # launch measures again.
+        "settling": chat in ("pending", "loading"),
     }
 
 
@@ -137,4 +168,7 @@ async def uninstall(component_id: str) -> dict:
         await remove_component(component_id)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    status = get_startup_status()
+    if status.has_phase(component_id):
+        status.set_state(component_id, "missing")
     return {"removed": component_id}

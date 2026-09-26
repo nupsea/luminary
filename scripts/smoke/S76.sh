@@ -9,6 +9,7 @@
 
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+smoke_requires_local_model
 
 FIXTURE="backend/tests/fixtures/art_of_unix_ch1.txt"
 

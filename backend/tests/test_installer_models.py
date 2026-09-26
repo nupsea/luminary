@@ -107,9 +107,11 @@ def test_install_sh_pulls_the_performance_pair(sh):
     )
 
 
-def test_install_ps1_pulls_the_performance_pair(ps1):
-    assert '$LargeTextModel = "qwen2.5:14b-instruct"' in ps1
-    assert "$chatModel = $LargeTextModel" in ps1
+def test_install_ps1_never_pulls_the_large_text_model(ps1):
+    """Windows starts on the generalist whatever the host holds; a larger model is
+    the user's pick in Settings."""
+    assert "qwen2.5:14b-instruct" not in ps1
+    assert "$chatModel = $PublicGeneralist" in ps1
     assert "$visionModel = $PublicGeneralist" in ps1
 
 
@@ -187,7 +189,7 @@ def test_the_desktop_shell_agrees_about_the_residency_band():
 
 
 def test_every_ram_reader_rounds_up(sh, ps1):
-    """Five sites turn reported bytes into GB, and all five must round up (I-56).
+    """Seven sites turn reported bytes into GB, and all must round up (I-56).
 
     Linux and Windows report installed RAM minus firmware and kernel reservations,
     so a truncating reader puts a 16GB machine at 15 -- under the floor it names as
@@ -199,6 +201,8 @@ def test_every_ram_reader_rounds_up(sh, ps1):
     rust_body = rust[start : rust.index("\n}\n", start)]
     bootstrap = _BOOTSTRAP.read_text(encoding="utf-8")
     mem_gb = sh[sh.index("_mem_gb() {") : sh.index("\n}\n", sh.index("_mem_gb() {"))]
+    get_sh = (_SCRIPTS / "get-luminary.sh").read_text(encoding="utf-8")
+    get_ps1 = (_SCRIPTS / "get-luminary.ps1").read_text(encoding="utf-8")
 
     for name, text, rounded_up, truncating in (
         ("supervisor.rs", rust_body, "div_ceil(1_073_741_824)", "/ 1_073_741_824"),
@@ -206,6 +210,8 @@ def test_every_ram_reader_rounds_up(sh, ps1):
         ("install.sh (Linux)", mem_gb, "(_k + 1048575) / 1048576", "_k / 1048576"),
         ("install.ps1", ps1, "[math]::Ceiling((Get-CimInstance", "[math]::Floor((Get-CimInstance"),
         ("bootstrap.sh", bootstrap, "+ 1073741823) / 1073741824", "hw.memsize) / 1073741824"),
+        ("get-luminary.sh", get_sh, "(${kb:-0} + 1048575) / 1048576", "${kb:-0} / 1048576"),
+        ("get-luminary.ps1", get_ps1, "[math]::Ceiling((Get-CimInstance", "[math]::Floor("),
     ):
         assert rounded_up in text, f"{name} no longer rounds reported RAM up"
         assert truncating not in text, f"{name} truncates reported RAM again"
@@ -257,18 +263,6 @@ def test_the_serving_width_band_agrees_across_every_install_path(sh, ps1):
             f"{name} sets a vision concurrency of 4; I-31 sizes every semaphore "
             f"at the slot count, and the slot count never exceeds 2 automatically"
         )
-
-
-def test_the_chat_model_is_chosen_after_the_profile_is_known(ps1):
-    """PowerShell compares an undefined variable as 0, so a profile test evaluated
-    before the profile exists takes the wrong branch silently. The band block has
-    to be hoisted above the model pull that reads it."""
-    defined = ps1.index('$LumProfile = "performance"')
-    # Matched on the variable rather than the whole condition: the test read the
-    # condition verbatim, so adding the RAM gate to it broke an ordering check
-    # that had nothing to do with the gate.
-    used = ps1.index('if ($LumProfile -eq "performance"')
-    assert defined < used, "the profile block must be hoisted above the model pull"
 
 
 # --- every path that names a model, not just the two installers --------------
@@ -496,23 +490,6 @@ def test_ps1_vision_default_is_not_nested_in_the_chat_model_block():
     )
 
 
-def test_ps1_gates_the_large_text_model_on_actual_ram():
-    """Keying on the profile alone pulled 9.67GB onto a machine that cannot load it.
-
-    `LUMINARY_PROFILE=performance` on an 8GB box is a supported override, so the
-    band cannot be the only condition.
-    """
-    text = _PS1.read_text(encoding="utf-8")
-    declared = int(_assign(text, r"^\$LargeTextMinRamGB = (\d+)"))
-    sh_declared = int(_assign(_SH.read_text(encoding="utf-8"), r"^LARGE_TEXT_MIN_RAM_GB=(\d+)"))
-    assert declared == sh_declared, (
-        f"install.ps1 gates at {declared}GB and install.sh at {sh_declared}GB"
-    )
-    assert "$MemGB -ge $LargeTextMinRamGB" in text, (
-        "install.ps1 declares the threshold but does not test actual RAM against it"
-    )
-
-
 def test_ps1_refuses_an_unknown_profile():
     """`switch` has a `default` arm, so an unknown value was taken silently and
     written to backend/.env. PowerShell's `switch` is also case-insensitive, so
@@ -672,3 +649,9 @@ def test_bootstrap_does_not_write_a_key_the_template_already_sets():
     assert re.search(r"grep -vE '\^\(LITELLM_DEFAULT_MODEL\|VISION_MODEL", text), (
         "bootstrap.sh appends model keys without stripping the template's copies"
     )
+
+
+def test_install_sh_pulls_the_large_text_model_only_on_apple_silicon(sh):
+    """Off Apple Silicon a RAM-only gate pulled 9.67GB onto a machine with no card,
+    and every answer ran on the processor for 2-4 minutes."""
+    assert '&& [ "$OS" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then' in sh

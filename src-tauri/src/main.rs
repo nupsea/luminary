@@ -414,7 +414,36 @@ fn main() {
                 // sees it -- so the app's HTML5 drop handlers never fired and
                 // dragging a file in did nothing at all.
                 .disable_drag_drop_handler()
+                // Without this a `target="_blank"` link or `window.open` does
+                // nothing on macOS and opens a bare webview on Windows. Other
+                // schemes (file:, custom handlers) are refused.
+                .on_new_window(|url, _features| {
+                    if matches!(url.scheme(), "http" | "https" | "mailto") {
+                        if let Err(e) = tauri_plugin_opener::open_url(url.as_str(), None::<&str>) {
+                            logging::write("shell", &format!("could not open a link: {e}"));
+                        }
+                    }
+                    tauri::webview::NewWindowResponse::Deny
+                })
                 .build()?;
+
+            // Drained here rather than via `RunEvent::Exit`, which a signal
+            // never delivers; the Exit arm then finds no children.
+            let (handle, sup) = (app.handle().clone(), for_setup.clone());
+            let installed = luminary_host::on_termination(move |signal| {
+                logging::write("shell", &format!("signal {signal} received, stopping"));
+                sup.shutdown();
+                handle.exit(0);
+            });
+            if installed.is_ok() {
+                luminary_host::end_with_appimage_runtime();
+            }
+            if let Err(e) = installed {
+                logging::write(
+                    "shell",
+                    &format!("no signal handler, a kill will orphan children: {e}"),
+                );
+            }
 
             start_boot(app.handle().clone(), for_setup.clone());
             Ok(())

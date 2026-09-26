@@ -30,6 +30,7 @@ LOCAL_ONLY_CALL_SITES = [
     ("app/services/document_tagger.py", "complete"),
     ("app/workflows/ingestion_nodes/parse.py", "generate"),
     ("app/workflows/concept_nodes/score_concepts.py", "complete"),
+    ("app/services/image_enricher.py", "complete"),
     # User-triggered, but operating on the user's own notes / documents
     ("app/services/note_tagger.py", "complete"),
     ("app/services/note_title_generator.py", "complete"),
@@ -89,8 +90,11 @@ def test_local_only_call_sites_declare_background(module_path, callee):
 
     for call in calls:
         kwargs = {k.arg for k in call.keywords if k.arg}
-        # An explicit model= pins routing directly and is equally acceptable.
-        assert "background" in kwargs or "model" in kwargs, (
+        # A pinned model= keeps routing local but not priority: the admission gate
+        # reads `background` alone, and without it the call holds other work back
+        # as if a user were waiting on it.
+        assert "background" in kwargs, (
             f"{module_path}:{call.lineno} calls .{callee}() without background=True; "
-            "in hybrid mode this routes user content to the cloud provider"
+            "in hybrid mode this routes user content to the cloud provider, and in "
+            "any mode it takes the interactive slot"
         )

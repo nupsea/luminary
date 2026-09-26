@@ -25,6 +25,34 @@ export function shouldOfferEngineChoice(state: EngineOfferState | undefined): bo
 }
 
 /**
+ * What the offer says. On a host that refuses local models nothing is being
+ * written on this machine, and saying so under the banner that refuses it
+ * contradicted the banner.
+ */
+export function engineOfferCopy(localSupported: boolean | undefined): {
+  title: string
+  body: string
+} {
+  if (localSupported === false) {
+    return {
+      title: "Answers need an API key on this computer",
+      body:
+        "This computer can't run a local model at a usable speed, so Local mode does " +
+        "not answer questions or write cards. With an Anthropic, OpenAI or Google key, " +
+        "Hybrid or Cloud mode does, and each says exactly what it sends before you choose it.",
+    }
+  }
+  return {
+    title: "Answers are being written on this machine",
+    body:
+      "That is the default, and nothing here has ever left. It is also the slow arm: a " +
+      "local model finishes an answer in tens of seconds. With an Anthropic, OpenAI or " +
+      "Google key, Hybrid or Cloud mode answers in a few, and each says exactly what it " +
+      "sends before you choose it.",
+  }
+}
+
+/**
  * Where a key comes from, per provider.
  *
  * The question asks for a key and, until now, said nothing about where to get

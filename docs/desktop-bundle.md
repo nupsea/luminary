@@ -256,6 +256,53 @@ Linux job opens the `.deb` first and the AppImage second, against the library
 the first launch created. The runners have no GPU: this proves the install, the
 layout and the CPU path, never which accelerator a real machine gets.
 
+**Remove through the same one-liner, not the OS alone.** `LUMINARY_UNINSTALL=1` with
+`get-luminary.ps1` / `.sh` deletes only what Luminary wrote:
+
+- the app, through the NSIS uninstaller or `apt-get remove` (refused if apt would take any
+  other package with it), or the AppImage's own named files;
+- the engine copy in `<library>/engine`, which the app rebuilds;
+- `luminary.log` and its rotations;
+- a launcher or menu entry only if its contents are the ones the script wrote;
+- then any folder those removals left empty.
+
+It never deletes the library, the models, or a file it does not recognise. It prints each
+of those folders with the exact command to delete it. Processes are matched by exact
+executable path, never by name, so a user's own `ollama serve` survives. A Windows
+install folder not named `Luminary` may be shared with other software; only Luminary's
+exact files are touched there, and the folder is never offered for deletion. The NSIS
+uninstaller alone is not enough: it leaves `%LOCALAPPDATA%\Luminary` (the logs live
+there), and its "Delete app data" checkbox removes the whole library in one click.
+
+CI uninstalls through both scripts with a planted foreign file. It fails if that file,
+or the library, is gone.
+
+**A user's own Ollama is reported and never changed.** Luminary's engine runs on a
+private port with its own `OLLAMA_MODELS`, so the two share only GPU memory; the script
+warns when the user's is running. It offers to reuse the user's copies of the models
+`model_registry.REGISTRY` knows (`LUMINARY_REUSE_MODELS=1` without asking, `0` never).
+Each blob is checked against its digest before the manifest is copied, and a failure
+removes only what that run added.
+
+| | Linux | Windows |
+|---|---|---|
+| Method | Hard link | Copy |
+| Why | Costs no space, and deleting a link leaves the user's file | A hard link would stop the user's Ollama deleting a model while Luminary has it open |
+
+**The scripts refuse to install an older version over a newer one** (override:
+`LUMINARY_ALLOW_DOWNGRADE=1`). The older app does not have the newer migrations, so it
+may not open the library the newer one upgraded.
+
+**Every DLL the Windows install imports must ship with it or come with Windows**
+(`verify_dll_imports.ps1` in CI). The runners have the Visual C++ runtime installed, so a
+launch there cannot show that a clean machine lacks it.
+
+**A failed run writes `luminary-<install|uninstall>-report.txt`** to the Desktop (else
+home) with the home path, user and computer names removed. Only on a yes does it open a
+`mailto:` to the maintainer with the report filled in; the script never sends anything
+itself, because a public script cannot hold a mail credential. A refusal the user can act
+on (unsupported host, too little disk, Luminary still open) writes no report.
+
 ## Scripts
 
 `scripts/desktop/` is shared by every platform and decides what ships;
@@ -271,6 +318,7 @@ layout and the CPU path, never which accelerator a real machine gets.
 | `desktop/verify_stage.sh` | Windows and Linux: relocatability + import + real boot of the staged backend. |
 | `desktop/verify_ollama.sh` | Windows and Linux: structure + a real pull and generation. |
 | `desktop/verify_installed.sh` | Launches an installed app and waits for the shell's `ready` line. |
+| `desktop/verify_dll_imports.ps1` | Windows: every DLL the install imports ships with it or is part of Windows. |
 | `macos/stage_python.sh` | macOS runtime: the shared steps plus arm64 thinning and hardlink breaking. |
 | `macos/stage_ollama.sh` | Bundled inference server, thinned to arm64. |
 | `macos/verify_stage.sh` | Relocatability, Mach-O linkage, import + real boot of the staged backend. |
@@ -408,6 +456,14 @@ pill in a working app. Marking a new phase required means every user waits for
 it on first run, which is why a test pins that set.
 
 ## Model provisioning
+
+**Setup fetches the embedder alone.** The entity model and the reranker are
+`ModelSpec.on_request`: their phases read `missing` until the user installs them
+(`hf_model` components), and their loaders already fail soft without them. What
+Luminary suggests for a host is `components._advice`: it recommends, the user
+decides, and a local model is not offered at all on a host
+`local_inference_support` refuses, whose chat and vision phases read
+`unavailable` rather than failed.
 
 `warmup.py` runs one task per model: fetch if absent, then construct. Downloads
 overlap; construction still serialises on the single-worker executor and

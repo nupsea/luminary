@@ -9,13 +9,13 @@ import { Cloud, GitMerge, HardDrive, Loader2 } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import { useHostVerdict } from "@/hooks/useHostVerdict"
 import { apiGet, apiPatch } from "@/lib/apiClient"
 import { PROVIDER_SETUP, providerSetup } from "@/lib/engineOffer"
 import {
   ALWAYS_LOCAL,
   ENGINE_MODES,
   type EngineMode,
-  type HostVerdict,
 } from "@/lib/engineModes"
 import { fetchRouting } from "@/lib/llmRouting"
 import { cn } from "@/lib/utils"
@@ -44,12 +44,7 @@ export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
     queryKey: ["llm-settings"],
     queryFn: () => apiGet<LLMModeState>("/settings/llm"),
   })
-  const { data: host } = useQuery({
-    queryKey: ["host-support"],
-    queryFn: () => apiGet<HostVerdict>("/setup/host-support"),
-    staleTime: Infinity,
-    gcTime: Infinity,
-  })
+  const host = useHostVerdict()
 
   // A choice already made is shown as made; a default nobody chose is not.
   const selected = pick ?? (llm?.mode_chosen ? llm.mode : null)

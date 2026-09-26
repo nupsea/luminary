@@ -314,7 +314,10 @@ if [ -z "$CHAT_MODEL" ]; then
         # read figures. Everywhere else one model does both, which is what the
         # backend resolves to -- pulling anything else downloads a model that
         # never loads.
-        if [ "$PROFILE" = "performance" ] && [ "$(_mem_gb)" -ge "$LARGE_TEXT_MIN_RAM_GB" ]; then
+        # Only Apple Silicon: elsewhere the generalist is the default and a larger
+        # model is the user's pick in Settings (model_registry.recommended_assignment).
+        if [ "$PROFILE" = "performance" ] && [ "$(_mem_gb)" -ge "$LARGE_TEXT_MIN_RAM_GB" ] \
+           && [ "$OS" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
             CHAT_MODEL="$LARGE_TEXT_MODEL"
         else
             CHAT_MODEL="$DEFAULT_CHAT_MODEL"

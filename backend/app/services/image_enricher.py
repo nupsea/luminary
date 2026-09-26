@@ -291,6 +291,7 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
                         }
                     ],
                     model=model,
+                    background=True,
                     temperature=0.0,
                     timeout=timeout_s,
                     api_base=api_base,

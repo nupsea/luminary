@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import { PROVIDER_SETUP, providerSetup, shouldOfferEngineChoice } from "./engineOffer"
+import {
+  engineOfferCopy,
+  PROVIDER_SETUP,
+  providerSetup,
+  shouldOfferEngineChoice,
+} from "./engineOffer"
 
 describe("shouldOfferEngineChoice", () => {
   const base = { mode: "private", modeChosen: false, offerDismissed: false }
@@ -24,6 +29,21 @@ describe("shouldOfferEngineChoice", () => {
 
   it("offers nothing while the settings are still loading", () => {
     expect(shouldOfferEngineChoice(undefined)).toBe(false)
+  })
+})
+
+describe("engineOfferCopy", () => {
+  it("never tells a host that refuses local models its answers are written locally", () => {
+    const copy = engineOfferCopy(false)
+    expect(copy.title).not.toMatch(/written on this machine/)
+    expect(copy.body).toMatch(/can't run a local model/)
+    expect(copy.body).toMatch(/Hybrid or Cloud/)
+  })
+
+  it("keeps the local-first wording where local models run, or before the host is known", () => {
+    for (const supported of [true, undefined]) {
+      expect(engineOfferCopy(supported).title).toBe("Answers are being written on this machine")
+    }
   })
 })
 

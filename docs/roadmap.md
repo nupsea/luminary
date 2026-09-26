@@ -92,7 +92,7 @@ against a rung are the ones its exit gate cannot pass without.
 | — | 0.10.0 | Smart Hybrid, and the privacy receipt — **shipped** | | Time to first token measured on both arms from a cold install and reported as a pair; a test proves that only the question and its packed passages leave the machine |
 | — | 0.11.0 | The docked reader — **shipped** | | A passage captured in the reader resolves back to its locus for page, video and web; no modal opens from the reader |
 | — | 0.12.0 | The Brief — **parked** | | None; no rung waits on it |
-| I. Every host | 0.13.0 | Every host is a first-class host — **in progress** on `feat/lighter-install`. **Checkpoint A** | #139, #24, #99, #79 (merges with it) | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator |
+| I. Every host | 0.13.0 | Every host is a first-class host — **0.13.8 released from `master`; exit gate open** (`make smoke` on Windows, Linux hardware). **Checkpoint A** | #139, #24, #99, #79 (merges with it) | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator |
 | II. Stability | 0.14.0 | Gates you can believe | #50, #101, #88, #110 | `make ci` and `make smoke` both green, nothing quarantined to keep them so |
 | | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it |
 | III. Reach | 0.16.0 | Capture, and device pairing | | Three source types round-trip from the browser to a readable document; an unpaired origin or a revoked device is refused |
@@ -350,9 +350,6 @@ fixed):
 - A first run of the 0.13.0 installer on a real Windows machine, and `make smoke` there. CI installs
   it, ingests and searches (`desktop-installers.yml`); nothing has run the app past that.
 - `make smoke` against the bundled macOS app, and the 0.13.0 DMG on a cleared data directory.
-- SIGTERM never drains the tree on Linux or macOS: the shell has no signal handler, so
-  `Supervisor::shutdown` (`src-tauri/src/supervisor.rs:190`) runs only on a window close
-  (`src-tauri/src/main.rs:421`). On the Linux box a SIGTERMed shell left `llama-server` behind.
 - Evals: `eval-ingest` reports a document this database lacks as "no chunks stored"
   (`evals/run_ingest_eval.py:115`); `eval-summary` replays stored summaries unless asked to refresh
   (`evals/run_summary_eval.py`, the `eval-summary` target); the flashcard judge's atomicity read
@@ -362,7 +359,129 @@ fixed):
   "Mercury's plan" is Jove's), though the passage that corrects it was retrieved.
 - Web articles keep Wikipedia's `[edit]` links in the chunk text.
 - YouTube ingest unverified this release: YouTube refused the test machine as a bot, and the Linux
-  box has no ffmpeg. `make measure-ttft`, both arms, not run.
+  box has no ffmpeg.
+
+**0.13.2: one-command installs on Windows and Linux** (on `feat/windows-linux-release`). The aim
+for 1.0 is reach: any recent Windows or Linux machine either runs well or is told before the
+download that it cannot, as an Intel Mac is today, and pointed at a cloud key or the hosted version.
+
+| Item | Status |
+|---|---|
+| `get-luminary.sh` / `.ps1` install the latest release in one command | built, CI installs through them |
+| SIGTERM drains the process tree on Linux and macOS; an AppImage without FUSE ends with its runtime | built |
+| Off Apple Silicon the default text model is `qwen3.5:4b` whatever the host holds; other models are the user's pick in Settings | built |
+| The one-command installers refuse before downloading where `host_support.local_inference_support` would, with its message, and offer to continue for reading, search and notes (`LUMINARY_INSTALL_ANYWAY=1` without asking); `test_get_luminary_script.py` fails if they disagree | built |
+| A release job attaches the Windows setup, `.deb`, AppImage and their `.sha256` files; README carries the one-liners | built: `desktop-installers.yml` `publish` attached all four to the `v0.13.2` prerelease; the README leads with the one-liners, which resolve the latest release; merged to `master` in 0.13.8 |
+| Uninstall deletes only files Luminary wrote; the library, models and anything unrecognised are listed with the command to delete them | built, CI uninstalls on Windows and Linux with a planted foreign file |
+| An installed Ollama is reported, and its models the app knows are reused after a digest check, never written to | built: the Windows installer job and `test_get_luminary_script.py` reuse a planted model; not run against a real Ollama install |
+| One timing script over the installed app: doc ingest, web-article ingest, Ask idle and while a later doc ingests, flashcards, teach-back, store sizes, on `qwen3.5:4b`; its baseline is the M3 Pro | built: `scripts/time_flows.py`; M3 Pro baseline below |
+| Hard limits checked before any cloud run: installer size budget, path length, driver mode | checked, below |
+
+**Cloud runs are on hold at the user's cap.** ~US$15 was spent on the 0.13.x AWS runs without a
+usable number; the ceiling is US$20, so the two-box `g6.2xlarge` plan (which needed a 16-vCPU
+increase) is off, and the pending increase is left unused. Real-hardware Windows validation comes
+from a friend's machine running the rc prerelease. If a controlled GPU timing is still wanted
+inside the cap, one `g6.xlarge` (4 vCPU, single L4) fits the existing 4-vCPU quota with no
+increase, Windows only, terminated the same session; it is not launched without the user asking.
+An L4 is the laptop class these hosts are (Ada, ~300GB/s against a laptop's 192-256), but its 4
+vCPUs make CPU-bound ingest read slow, and `g4dn`'s T4 ran Windows on the CPU.
+
+**Parity bar: every timing within 1.5x of the M3 Pro** (`time_flows.py compare` exits 2 past it).
+It also refuses a report whose per-core load reached 4.0 during timing: past that the number is
+the machine, not the app, and must be rerun on a quiet host.
+
+**Hard limits for the release and the cloud runs** (0.13.1 installer run `35927916664`, the
+`personal` account in `ap-southeast-2`):
+
+| Limit | Ceiling | Measured |
+|---|---|---|
+| NSIS pack size | ~2048MB; `verify_stage.sh` fails at 1900MB | Windows stage 1616MB |
+| Windows MAX_PATH | 260, less ~60 for the install root; `verify_stage.sh` fails past 190 | longest 165 (Linux 154) |
+| GitHub release asset | 2GiB per file | largest 667MB (`.deb`); AppImage 619MB, setup 301MB |
+| On-demand G-instance vCPU quota | 4 | a 16-vCPU increase was requested 2026-09-24 but is not pursued (cost cap); within 4 vCPUs a single `g6.xlarge` (one L4) is the only GPU box |
+| Root volume | Ubuntu AMI 8GB, Windows 30GB by default | the app needs ~9GB beyond the OS and driver (install 2.1GB, CUDA 0.6GB, `qwen3.5:4b` 3.4GB, encoders 1.5GB, installer 0.7GB): launch Linux with 40GB, Windows with 60GB |
+| GPU in WDDM on Windows | AWS's GRID driver (596.86 for Server 2022) | with the stock driver the 0.13.0 `g4dn` Windows box ran on the CPU; GRID on the L4 not yet tried, ten-minute cut-off above |
+
+**M3 Pro baseline** (36GB, `qwen3.5:4b` pinned in Settings, `scripts/time_flows.py` driven by
+`scripts/time_flows.plan.json`: a book `.txt`, a `.pdf`, and a Wikipedia URL, each into its own
+fresh empty library; two runs). Load stayed under 0.5/core in both runs, well under the `compare`
+refuse guard (4.0/core).
+
+| Flow | Doc | Run 1 | Run 2 |
+|---|---|---|---|
+| Upload to ingest `complete` | book (`.txt`) | 96.9s | 100.0s |
+| | book (`.pdf`) | 108.3s | 99.2s |
+| | web article | 90.9s | 82.2s |
+| Background work settled | book (`.txt`) | 451s | 414s |
+| | book (`.pdf`) | 1360s | 1320s |
+| | web article | 479s | 482s |
+| Ask, full answer (3 Qs) | book (`.txt`) | 14.1 / 16.8 / 18.0s | 15.5 / 13.4 / 21.7s |
+| | book (`.pdf`) | 13.5 / 20.2 / 31.0s | 12.0 / 19.5 / 28.7s |
+| Ask while a later doc ingests (3 Qs) | book (`.pdf`) | 17.6 / 11.9 / 27.7s | 18.1 / 23.8 / 45.2s |
+| Ask on the web article (1 Q) | web article | 119.3s | 16.3s |
+| 5 flashcards, fast mode | book (`.txt`) | 23.5s | 24.7s |
+| 5 flashcards, slow (a card refilled) | book (`.txt`) | 36.3s | 32.7s |
+| Teach-back evaluation | book (`.txt`) | 4.2s | 5.7s |
+| Store size, SQLite / vectors | book (`.txt`) | 6.4 / 2.0 MB | 6.3 / 2.0 MB |
+| | book (`.pdf`) | 9.9 / 3.9 MB | 9.9 / 3.9 MB |
+| | web article | 11.2 / 5.1 MB | 11.3 / 5.1 MB |
+
+`time_flows.py` times the reader flows only after background work has settled: section summaries
+run for minutes after `complete` (the `.pdf`'s take about 22). Card time is bimodal — about 24s, or
+33-40s when a card fails the grounding check and is refilled — so hosts are compared mode to mode,
+never averaged; the `.pdf` deck spiked once to 100s, so the slow mode has a long tail. **The single
+web-article Ask is not yet a trusted number**: the two runs gave 119s and 16s, and 16s matches every
+other Ask, so 119s is an outlier that more samples must confirm or discard before the figure gates
+anything. The only non-local traffic in either run was to the Wikipedia host the plan ingests; no
+reference-link checks fired (I-58).
+
+**Not in 0.13.2.** Intel and AMD integrated graphics are refused as `no_accelerator`, though Ollama
+serves them through Vulkan. That covers most current Windows laptops, and whether to admit them is
+decided in 0.13.3 once one has been timed on `qwen3.5:4b`; AWS has no such machine. Code signing
+(SmartScreen warns) is not in it either — see below.
+
+**0.13.4: company networks.** A company laptop behind a TLS-inspecting proxy failed every model
+download (I-59). Verified on AWS Windows Server 2022, m6i.xlarge with no GPU, behind mitmproxy with
+its CA in the machine store and set as the Windows proxy: 0.13.3 reproduced the laptop's screen;
+0.13.4 over it downloaded the embedder, installed both optional encoders, ingested a web article and
+an arXiv PDF by URL, reached OpenAI in Hybrid mode, opened the problem report in Notepad, and kept
+loopback off the proxy. Smoke there: 120 pass, 0 fail, 57 skip. Open: Ollama is Go and ignores the
+Windows system proxy, so a model pull needs a transparent proxy or `HTTPS_PROXY` (no effect on a
+refused host, which pulls nothing); PAC-file proxies are not read.
+
+**0.13.5–0.13.7: a driver is not a usable card (I-60).** Verified on AWS g4dn.xlarge, Windows Server
+2022, T4 with the AWS GRID driver (WDDM), no proxy, installed by the one-command installer. Card
+enabled: the chat-model install loaded it at once, Ollama held all 3.44 GB on the T4 through Vulkan
+(17s warm), and with the CUDA runner through CUDA; three documents ingested (a Wikipedia article, 645
+chunks; an arXiv PDF, 81; a text file, 11), questions answered in 5-14s with citations, 2 of 5 cards
+survived the grounding check, a review rescheduled, teach-back scored 98 right and 0 wrong. Card
+disabled with the driver left on disk: warm-up measured 0 B on the card, refused with `gpu_unused`,
+unloaded the model and showed the banner in the same session; questions, cards and teach-back were
+refused with the key message, while reading, search, reviews and a new ingest worked, and Hybrid with
+a bad key said so. Installing the CUDA runner cleared the verdict and the next launch measured again.
+Open: a model split between card and processor is not refused; no consumer laptop GPU, Intel or AMD
+integrated graphics, or Linux host has been measured.
+
+**0.13.8: private mode with no connection (I-61).** A desktop demo with Wi-Fi off showed an empty
+library with nothing in the backend log: TanStack Query paused every request after the webview's
+`offline` event. Verified in headless Chromium against the installed 0.13.1 UI (empty) and the fix
+(14 documents), and on a backend whose outbound traffic went to a refusing proxy: ingest, search,
+Ask with a citation, cards, review, teach-back, notes and summary, with zero outbound attempts. The
+macOS app itself was not run with Wi-Fi off.
+
+**Signing.** The installers are unsigned, so Windows SmartScreen shows "unknown publisher"
+(click More info -> Run anyway). The free route is SignPath Foundation, which signs OSS builds at
+no cost; the repo qualifies (public, Apache-2.0). The application is the owner's to submit (it needs
+a 2FA'd GitHub account); once approved, a signing step in the Windows job submits the built `.exe`
+and gets it back signed, publisher "SignPath Foundation". macOS has no free path (Apple Developer,
+US$99/yr), so it is out of scope here. Linux needs none: the `.deb`/AppImage ship `.sha256` files
+the wrappers verify.
+
+**Seams kept for the hosted version and mobile.** The host verdict has one owner,
+`host_support.py`, served over HTTP, and the installers copy it under test. The default model lives
+in `model_registry.py`. The engine is a setting (`llm_mode`) behind LiteLLM, and embedding,
+retrieval and the learner record never move with it. Desktop-only code stays in `luminary-host` and
+`src-tauri`, so the same backend can serve from a server.
 
 **Exit gate.** First run completes with no terminal on a Windows and a Linux machine that has never
 seen Luminary; each host's verdict names the accelerator it actually has, proven by a platform-pinned

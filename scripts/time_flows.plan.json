@@ -1,0 +1,33 @@
+{
+  "documents": [
+    {
+      "key": "frankenstein",
+      "path": "DATA/books/frankenstein.txt",
+      "cards": true,
+      "questions": [
+        "Why does Victor Frankenstein abandon the creature?",
+        "What does the creature learn from watching the De Lacey family?",
+        "How does Walton's voyage frame the story?"
+      ]
+    },
+    {
+      "key": "thinkpython",
+      "path": "DATA/books/thinkpython2.pdf",
+      "cards": true,
+      "ask_previous_while_ingesting": true,
+      "questions": [
+        "What is the difference between a list and a tuple?",
+        "How does recursion work, and what is a base case?",
+        "What does the book recommend when debugging a program?"
+      ]
+    },
+    {
+      "key": "article",
+      "url": "https://en.wikipedia.org/wiki/Python_(programming_language)",
+      "cards": false,
+      "questions": [
+        "Who created Python, and when was it first released?"
+      ]
+    }
+  ]
+}

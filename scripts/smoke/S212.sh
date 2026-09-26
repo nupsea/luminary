@@ -14,6 +14,7 @@
 
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+smoke_requires_repo_toolchain
 
 # Its manifest and history describe this server, not the developer's library.
 export LUMINARY_EVAL_STATE_DIR="$SMOKE_TMP/eval-state"

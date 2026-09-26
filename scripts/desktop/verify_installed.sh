@@ -80,6 +80,22 @@ check_ingest() {
     return "$result"
 }
 
+# Process groups under the app other than this script's own: the shell leads each
+# child in one, so a group with members after the shell exits is an orphaned tree.
+descendant_groups() {
+    local own
+    own="$(ps -o pgid= -p $$ | tr -d ' ')"
+    ps -A -o pid=,ppid=,pgid= | awk -v root="$APP" -v own="$own" '
+        { pid[NR] = $1; ppid[NR] = $2; pg[NR] = $3 }
+        END {
+            seen[root] = 1
+            do { grew = 0
+                for (i in pid) if (seen[ppid[i]] && !seen[pid[i]]) { seen[pid[i]] = 1; grew = 1 }
+            } while (grew)
+            for (i in pid) if (seen[pid[i]] && pg[i] != own) print pg[i]
+        }' | sort -u
+}
+
 _step "Launching $EXE"
 "$EXE" >"$BUILD_DIR/installed-app.out" 2>&1 &
 APP=$!
@@ -126,12 +142,31 @@ if [ -n "$SCREENSHOT" ]; then
 fi
 
 _step "Stopping the app"
+groups=""
+[ "$DESKTOP_OS" != windows ] && groups="$(descendant_groups)"
 kill "$APP" 2>/dev/null
 for _ in $(seq 1 30); do
     kill -0 "$APP" 2>/dev/null || break
     sleep 1
 done
-kill -0 "$APP" 2>/dev/null && { _warn "still running after 30s; killing"; kill -9 "$APP" 2>/dev/null; }
+kill -0 "$APP" 2>/dev/null && { _warn "still running after 30s; killing"; kill -9 "$APP" 2>/dev/null; FAILED=1; }
+
+if [ "$DESKTOP_OS" = windows ]; then
+    # MSYS ps cannot see native process groups; the job object ends the tree there.
+    _info "orphan check skipped on Windows"
+elif [ -z "$groups" ]; then
+    _warn "no process groups were recorded under the app, so the orphan check measured nothing"; FAILED=1
+else
+    sleep 2
+    left="$(ps -A -o pgid=,pid=,comm= | awk -v gs=" $(echo $groups) " 'index(gs, " " $1 " ") { print "    " $2 " " $3 }')"
+    if [ -n "$left" ]; then
+        _warn "SIGTERM left processes behind:"; echo "$left"; FAILED=1
+        # Not left running on the runner or a tester's machine.
+        for g in $groups; do kill -9 -- "-$g" 2>/dev/null; done
+    else
+        _info "SIGTERM ended every process the app started ($(echo $groups | wc -w | tr -d ' ') groups)"
+    fi
+fi
 
 _step "This launch's log"
 this_launch | tail -60 | sed 's/^/    /'

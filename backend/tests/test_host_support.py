@@ -15,6 +15,18 @@ import pytest
 from app.host_support import UNSUPPORTED_MESSAGE, has_nvidia_accelerator, local_inference_support
 
 
+@pytest.fixture(autouse=True)
+def _settings_follow_the_environment():
+    """The declaration is also read through the cached Settings, so a test that
+    unsets the variable must not see one built while it was set, nor leave its
+    own behind once the variable is restored."""
+    from app.config import get_settings  # noqa: PLC0415
+
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.fixture
 def host(monkeypatch):
     """Drive the three inputs the verdict reads."""
@@ -70,6 +82,21 @@ def test_bare_metal_without_an_accelerator_is_refused_the_same_way(host):
     v = host("Linux", "x86_64", container=False, accel=False)
     assert v.supported is False
     assert v.reason == "no_accelerator"
+
+
+def test_the_declaration_is_read_from_the_library_env_file(host, monkeypatch, tmp_path):
+    """The desktop shell clears the backend's environment, so `.env` is its only way in."""
+    from app.config import get_settings
+
+    # The shell starts the backend with the library as its working directory.
+    (tmp_path / ".env").write_text("LUMINARY_HOST_SUPPORTED=1\n")
+    monkeypatch.chdir(tmp_path)
+    get_settings.cache_clear()
+    try:
+        v = host("Linux", "x86_64", container=False, accel=False)
+    finally:
+        get_settings.cache_clear()
+    assert v.supported is True
 
 
 def test_a_gpu_does_not_excuse_too_little_memory(host):
@@ -149,7 +176,7 @@ async def test_the_endpoint_reports_this_host():
 
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"supported", "reason", "host", "message"}
+    assert set(body) == {"supported", "reason", "host", "message", "measured", "settling"}
     assert isinstance(body["supported"], bool)
     # Supported hosts carry no message; unsupported ones must carry one.
     assert (body["message"] is None) is body["supported"]

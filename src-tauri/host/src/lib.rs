@@ -109,3 +109,24 @@ pub fn kill_stale_tree(pid: i32, group_id: i32) {
 pub fn describe_exit(status: ExitStatus) -> String {
     sys::describe_exit(status)
 }
+
+/// Run `on_signal` once, on a dedicated thread, when the shell is told to end
+/// (SIGTERM, SIGINT, SIGHUP on unix).
+///
+/// Without it the default action kills the shell outright and the children it
+/// started (the backend, `llama-server`) outlive it. A no-op on Windows, where
+/// the job object covers it.
+pub fn on_termination(on_signal: impl FnOnce(i32) + Send + 'static) -> std::io::Result<()> {
+    sys::on_termination(on_signal)
+}
+
+/// Deliver SIGTERM to this process when the AppImage runtime that launched it
+/// dies. Call after [`on_termination`].
+///
+/// Run with `--appimage-extract-and-run` (how an AppImage runs without FUSE),
+/// the runtime is the parent and does not forward a signal it receives, so
+/// killing the app by its pid would leave the shell and its children running.
+/// A no-op everywhere else.
+pub fn end_with_appimage_runtime() {
+    sys::end_with_appimage_runtime();
+}

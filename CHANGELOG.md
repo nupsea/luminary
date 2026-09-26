@@ -6,6 +6,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.8] - 2026-09-26
+
+### Fixed
+- **With no internet connection the library showed no documents, and questions, cards and notes never answered.** The page paused every request to the local backend while the computer was offline; it no longer waits on the network.
+
+### Changed
+- **The README leads with the one-command installs** and plays the full demo; source, Docker, model and configuration reference moved to `docs/install.md`.
+
+## [0.13.7] - 2026-09-26
+
+### Fixed
+- **On a computer that cannot run local models, the home screen said "Answers are being written on this machine"** under the banner saying they are not. It now says answers need an API key there.
+
+## [0.13.6] - 2026-09-26
+
+### Fixed
+- **The "can't run local models" banner did not appear in the session that found the graphics card unused.** The page trusted the previous launch's result and stopped asking; it now asks again while the chat model is loading.
+
+## [0.13.5] - 2026-09-26
+
+### Fixed
+- **A computer whose graphics card the model engine cannot use was treated as able to run local models.** A driver on disk passed the check while the model ran on the processor, taking minutes per answer with no explanation. Luminary now checks where the engine put the model on its first load; if none of it is on the card, the computer is treated like one with no card, the model is unloaded and Hybrid or Cloud mode is offered (I-60).
+- **Installing the chat model now loads it straight away**, instead of at the first question or the next launch.
+
+## [0.13.4] - 2026-09-25
+
+### Changed
+- **Setup downloads one model, the embedder (133 MB).** The entity model (1.1 GB) and the answer-ranking model are installed by choice, from the setup screen, Settings or a "Suggested for this computer" card. Luminary marks what it recommends for the computer; ingest and search work without either.
+- **A computer that cannot run local models is no longer offered them.** The chat and figure models read "Not on this computer", with the reason, instead of a failure, a problem report and a 3.2 GB install button.
+- **The setup screen has one "Report this problem"**, covering every step that failed. One link per step produced several copies of the same report.
+- **Blog and Thoughts publishing is a full-mode feature again.** It shipped in the desktop app, which runs in public mode; a public build now carries none of its code.
+- **The dictation mic shows before speech to text is installed.** It was hidden, so nobody learned dictation existed; clicking it now offers the one-time download instead of recording.
+
+### Fixed
+- **Downloads and adding a web page failed on company networks that inspect secure traffic** with `CERTIFICATE_VERIFY_FAILED: self-signed certificate in certificate chain`. Luminary now trusts the certificates the operating system trusts, as a browser does (I-59).
+- **A network failure is named for what it is**: an untrusted certificate, a proxy, no internet, or a connection cut off by a firewall. A certificate refusal on a model download read "Could not reach the local model server".
+- **A computer set up to use a proxy was told it had no internet.** The connection check went around the proxy.
+- **Large model downloads failed behind proxies that scan files before passing them on.** The 1.1 GB entity model timed out after 10 seconds with no data; the wait is now 5 minutes.
+- **A proxy set in Windows' settings would have received Luminary's calls to its own local engine.** Local addresses now always bypass the proxy.
+- **"Report this problem" never opened a text editor in the desktop app.** It was keyed on the server mode, and the desktop app runs in the same mode as a hosted server, so the report was shown in the page instead.
+
+## [0.13.3] - 2026-09-25
+
+### Added
+- **The one-command installers remove Luminary too.** `LUMINARY_UNINSTALL=1` lists what it will remove and what it keeps, and asks first (`LUMINARY_ASSUME_YES=1` for scripts). It deletes only files Luminary wrote. Your library, your models and anything it does not recognise are left in place, listed with the command to delete them.
+- **Every install ends by saying where the app went, where your library lives and how to remove the app.**
+- **"Report this problem" on a failed download or setup step.** It opens a redacted report as a text file in the default text editor, saying where to send it. The user reads and edits exactly what they send, by any means; Luminary sends nothing. Names of people, computers, company networks, folders, web servers and documents are removed, along with timezones, keys and email addresses.
+
+### Changed
+- **The Windows uninstaller asks twice before deleting your library.** Tauri's "Delete the application data" box deleted the whole library with no second prompt. It is now labelled "Also delete my library", and ticking it brings up a confirmation that defaults to No. When the library is kept, the uninstaller says where it is.
+- **Your own Ollama is left as it is, and its models can be reused.** The installer says when it finds one, warns if it is running, and offers to reuse matching models so they are not downloaded again. Every file is checked against its digest.
+- **A failed install saves a report and offers to email it.** User and computer names are removed; your mail app opens with it filled in, and nothing is sent until you press Send.
+
+### Fixed
+- **A model download stuck at 0 MB never ended.** Ollama kept repeating the same byte count, so no timeout fired. A download with no new bytes for 60 seconds now fails, says what to check, and offers Try again, which resumes it.
+- **Links that open a new window in the desktop app now go to the default browser or mail app.** With no handler, macOS's webview drops them and Windows' opens a bare webview window.
+- **The installers stop before what used to fail halfway**: too little disk, a missing release or GitHub rate limit, Luminary still running, sudo, musl, PowerShell constrained mode, an older version over a newer one. Downloads retry, and a quarantined or truncated download is named as such.
+
+## [0.13.2] - 2026-09-24
+
+### Added
+- **One-command installs on Windows and Linux.** `get-luminary.ps1` (`irm | iex`, per-user, no admin) and `get-luminary.sh` (`curl | bash`: the `.deb` on Debian/Ubuntu, else the AppImage) install the latest or a pinned release and refuse an asset without a matching `.sha256`.
+- **A `v*` tag publishes the Windows setup, `.deb` and AppImage** with their checksums, only after each installed, opened and ingested in CI.
+
+### Changed
+- **`qwen3.5:4b` is the default text model off Apple Silicon**, whatever the RAM or card; a larger model is the user's pick in Settings. RAM alone chose 14B on a 64 GB machine with no card, and answers took 2-4 minutes.
+- **An unsupported host is told before the download**, with the app's own message; it can still install for reading, search and notes.
+
+### Fixed
+- **A SIGTERM left the backend and engine running** on Linux and macOS, and an AppImage run without FUSE left them running when killed. Both now drain the process tree.
+- **`LUMINARY_HOST_SUPPORTED` could not be set on a desktop install**; it is now read from the library's `.env`, and an empty value no longer stops the backend.
+- **Hybrid mode with no API key failed card generation with a bare HTTP 500**; it is now a 503 that says to add the key in Settings.
+- **Background work could delay a live answer**: figure analysis counted as a waiting user, and overdue background calls were admitted into a question's own call (one delayed the next question by 28 s on a 4-vCPU host).
+- **Every ingest contacted the sites its suggested references linked to**, about 25 outside hosts per three documents, with web search off; 0.13.0 said a running app contacts no third party. Links are now checked only with web search enabled.
+- **A host that refuses local models was offered the chat-model download.**
+- **Chat suggestions showed fewer than four pills** when generation yielded fewer.
+- **The AppImage menu entry had no icon**, and an AppImage that would not extract ended the install silently.
+
 ## [0.13.1] - 2026-09-23
 
 ### Fixed

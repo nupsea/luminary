@@ -2,6 +2,7 @@
 # Smoke test for S74: LLM provider mode — Private/Cloud settings with encrypted API keys
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+smoke_requires_repo_toolchain
 
 BACKEND_DIR="$(cd "$(dirname "$0")/../../backend" && pwd)"
 

@@ -155,6 +155,9 @@ prune_dependencies() {
     local site="$1"
     _step "Pruning dependencies"
     rm -rf "$site/torch/include"                                      # C++ headers
+    # Build-time tools needing a Visual C++ runtime not shipped beside them
+    # (verify_dll_imports.ps1). pip writes script wrappers with distlib's own launchers.
+    rm -f "$site/torch/bin"/protoc* "$site/setuptools"/cli*.exe "$site/setuptools"/gui*.exe
     # pip stays: it installs post-install components.
     rm -rf "$site/onnxruntime"/{transformers,quantization,tools}      # export/training helpers
     # NOT litellm/proxy: plain `import litellm` reaches litellm.proxy._types.

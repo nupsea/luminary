@@ -257,6 +257,38 @@ async def test_suggestions_returns_four(db_session):
     assert len(result.suggestions) == 4
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("document_id", [None, "doc-short-1"])
+async def test_fewer_generated_than_four_are_topped_up_from_templates(db_session, document_id):
+    """Dedup against history can leave 1-3 generated questions; the response still has 4."""
+    db_session.add(_make_doc("doc-short-1", "Short Doc", "notes"))
+    db_session.add(_make_section("doc-short-1", "Intro", 1))
+    await db_session.commit()
+    generated = [
+        {"question": "What does the intro claim?", "bloom_level": 2},
+        {"question": "Why does the intro matter?", "bloom_level": 2},
+    ]
+
+    with (
+        patch("app.routers.chat_meta.get_graph_service") as mock_graph,
+        patch.object(SuggestionService, "get_multi_doc_summaries", AsyncMock(return_value="s")),
+        patch.object(SuggestionService, "get_grounding_passages", AsyncMock(return_value=["p"])),
+        patch.object(SuggestionService, "generate_suggestions", AsyncMock(return_value=generated)),
+    ):
+        mock_graph.return_value.get_cross_document_entities.return_value = ["intro"]
+        mock_graph.return_value.get_entities_by_type_for_document.return_value = {
+            "CONCEPT": ["intro"]
+        }
+        from app.routers.chat_meta import get_suggestions
+
+        result = await get_suggestions(document_id=document_id)
+
+    assert len(result.suggestions) == 4
+    assert [s.text for s in result.suggestions[:2]] == [g["question"] for g in generated]
+    assert all(s.id for s in result.suggestions[:2])
+    assert len({s.text for s in result.suggestions}) == 4
+
+
 # (g) AC11: suggestions not in recent history
 
 

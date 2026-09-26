@@ -5,6 +5,7 @@
 
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+smoke_requires_local_model
 
 # BSD mktemp only substitutes Xs at the END of a template, so
 # `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked

@@ -7,6 +7,7 @@ from sqlalchemy import bindparam, text
 
 from app import config as _config_module  # indirect: get_settings is patched
 from app.database import get_session_factory
+from app.exceptions import ModelNotDownloaded
 from app.services import embedder as _embedder_module  # indirect: get_embedding_service is patched
 from app.services import query_spellcorrect as _spellcorrect_module
 from app.services import (
@@ -105,6 +106,9 @@ def _rerank_candidates(
         return candidates
     try:
         ce = [float(s) for s in _get_reranker().score(query, [c.text for c in candidates])]
+    except ModelNotDownloaded:
+        # Optional: installed from Settings. Not a fault, so not a warning per query.
+        return candidates[:k]
     except Exception as exc:
         logger.warning("rerank failed, falling back to RRF order: %s", exc)
         return candidates[:k]

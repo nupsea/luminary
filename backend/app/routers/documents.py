@@ -77,6 +77,7 @@ from app.services import graph as _graph_module  # indirect: get_graph_service i
 
 # indirect: tests patch `app.services.youtube_downloader.{check_ytdlp_available,
 # check_ffmpeg_available, fetch_metadata, download_audio}`.
+from app.services import network_errors
 from app.services import youtube_downloader as _yt_module
 from app.services.activity_service import ActivityService
 from app.services.article_extractor import get_article_extractor
@@ -1003,7 +1004,10 @@ async def ingest_url(
             raise HTTPException(status_code=413, detail=str(exc)) from exc
         except httpx.HTTPError as exc:
             logger.warning("Could not reach %s: %s", body.url, exc)
-            raise HTTPException(status_code=400, detail=f"Could not fetch that URL: {exc}") from exc
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not fetch that URL. {network_errors.explain(str(exc)) or exc}",
+            ) from exc
 
         if remote is not None:
             return await _ingest_remote_pdf(doc_id, remote, settings)

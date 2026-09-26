@@ -19,11 +19,12 @@ GPU passes, and a bare-metal box without one does not.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import platform
 import shutil
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,11 @@ _DECLARED = "LUMINARY_HOST_SUPPORTED"
 
 
 def _declared_supported() -> bool:
-    return os.environ.get(_DECLARED, "").strip().lower() in ("1", "true", "yes")
+    if os.environ.get(_DECLARED, "").strip().lower() in ("1", "true", "yes"):
+        return True
+    from app.config import get_settings  # noqa: PLC0415
+
+    return get_settings().LUMINARY_HOST_SUPPORTED
 
 
 def _in_container() -> bool:
@@ -110,6 +115,10 @@ def has_nvidia_accelerator() -> bool:
     return any(Path("/dev").glob("nvidia[0-9]*"))
 
 
+def is_apple_silicon() -> bool:
+    return platform.system() == "Darwin" and platform.machine() in ("arm64", "aarch64")
+
+
 def _has_amd_accelerator() -> bool:
     """AMD's HIP runtime on Windows, the ROCm node on Linux. Windows on ARM has
     neither, correctly: Ollama serves a Snapdragon on the CPU."""
@@ -129,14 +138,88 @@ def _has_accelerator() -> bool:
     if platform.system() == "Darwin":
         # Metal, and only on Apple Silicon. An Intel Mac's integrated or AMD GPU
         # is not a path the local runner uses.
-        return platform.machine() in ("arm64", "aarch64")
+        return is_apple_silicon()
     return has_nvidia_accelerator() or _has_amd_accelerator()
+
+
+@dataclass(frozen=True)
+class Offload:
+    """Where the local model server put a loaded model, in its own words (`/api/ps`)."""
+
+    model: str
+    size: int
+    size_vram: int
+    # The app that measured it. The runtime ships inside the app, so an upgrade
+    # measures again rather than trusting a verdict about a different runtime.
+    app_version: str
+
+    @property
+    def on_processor(self) -> bool:
+        return self.size > 0 and self.size_vram == 0
+
+
+_OFFLOAD_FILE = "gpu_offload.json"
+_UNREAD = object()
+_offload: Offload | None | object = _UNREAD
+
+
+def _offload_path() -> Path:
+    from app.config import get_settings  # noqa: PLC0415
+
+    return Path(get_settings().DATA_DIR) / _OFFLOAD_FILE
+
+
+def measured_offload() -> Offload | None:
+    """The last measurement this app version took, or None when there is none."""
+    global _offload
+    if _offload is _UNREAD:
+        _offload = None
+        try:
+            found = Offload(**json.loads(_offload_path().read_text()))
+        except (OSError, ValueError, TypeError):
+            found = None
+        from app.paths import app_version  # noqa: PLC0415
+
+        if found is not None and found.app_version == app_version():
+            _offload = found
+    return _offload  # type: ignore[return-value]
+
+
+def record_offload(model: str, size: int, size_vram: int) -> Offload:
+    """Keep what the model server reported, for this run and the next launch."""
+    global _offload
+    from app.paths import app_version  # noqa: PLC0415
+
+    found = Offload(model, size, size_vram, app_version())
+    path = _offload_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(asdict(found)))
+        tmp.replace(path)
+    except OSError:
+        logger.warning("could not save the GPU offload measurement", exc_info=True)
+    _offload = found
+    return found
+
+
+def clear_offload() -> None:
+    """Measure again at the next load: the runtime that was measured has changed."""
+    global _offload
+    _offload_path().unlink(missing_ok=True)
+    _offload = None
+
+
+def forget_offload() -> None:
+    """Drop the cached measurement. For tests, and for nothing else."""
+    global _offload
+    _offload = _UNREAD
 
 
 def local_inference_support() -> HostSupport:
     """Whether local inference on this host is worth offering.
 
-    Three refusals, each from a case that decided it:
+    Four refusals, each from a case that decided it:
 
     * **macOS on Intel.** No native install exists (no lancedb wheel) and the
       only remaining route, Docker, cannot reach a GPU on any Mac. ~6 tok/s.
@@ -145,6 +228,11 @@ def local_inference_support() -> HostSupport:
     * **Under the memory floor.** `memory_profile._STANDARD_MIN_RAM_GB` is 16,
       and Docker Desktop hands its VM roughly half the host -- which is how a
       16GB Mac presents as 7GB and swaps rather than refusing.
+
+    * **The model server ran on the processor anyway.** A driver on disk is not a
+      card the runtime can use: a Windows T4 had `nvcuda.dll`, and Ollama put 0 B
+      of the model on it. Only a load answers this, so it narrows the device
+      verdict after the first one and never widens it.
 
     A host with an accelerator and enough memory is supported, however it was
     installed. `host_ram_gb()` returns 0 when memory cannot be read, and an
@@ -162,7 +250,7 @@ def local_inference_support() -> HostSupport:
     if _declared_supported():
         return HostSupport(True, None, f"{where}, {_DECLARED} set", None)
 
-    if system == "Darwin" and machine not in ("arm64", "aarch64"):
+    if system == "Darwin" and not is_apple_silicon():
         return HostSupport(False, "intel_mac", where, UNSUPPORTED_MESSAGE)
 
     if not _has_accelerator():
@@ -172,5 +260,10 @@ def local_inference_support() -> HostSupport:
     ram = host_ram_gb()
     if 0 < ram < _STANDARD_MIN_RAM_GB:
         return HostSupport(False, "under_memory_floor", f"{where}, {ram}GB", UNSUPPORTED_MESSAGE)
+
+    offload = measured_offload()
+    if offload is not None and offload.on_processor:
+        detail = f"{where}, the model ran on the processor, not the graphics card"
+        return HostSupport(False, "gpu_unused", detail, UNSUPPORTED_MESSAGE)
 
     return HostSupport(True, None, where, None)

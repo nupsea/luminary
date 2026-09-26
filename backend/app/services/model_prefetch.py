@@ -24,6 +24,7 @@ import os
 import socket
 import threading
 import time
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -74,6 +75,9 @@ class ModelSpec:
     slug: str
     size_bytes: int
     ignore: tuple[str, ...] = _OTHER_FRAMEWORKS
+    # Fetched only when the user installs it. Setup fetches the rest, which is
+    # the embedder alone: nothing can be read without it.
+    on_request: bool = False
 
 
 EMBEDDER_REPO = "BAAI/bge-small-en-v1.5"
@@ -119,10 +123,11 @@ def specs() -> tuple[ModelSpec, ...]:
             _reranker_slug(),
             128 * _MB,
             ignore=_OTHER_FRAMEWORKS + _DUPLICATE_TORCH_WEIGHTS,
+            on_request=True,
         ),
         # GLiNER publishes only a torch checkpoint, so excluding it would leave
         # nothing to load.
-        ModelSpec("ner", _ner_repo(), "gliner", _ner_size_bytes()),
+        ModelSpec("ner", _ner_repo(), "gliner", _ner_size_bytes(), on_request=True),
     )
 
 
@@ -188,8 +193,7 @@ def require_snapshot(root: Path, repo_id: str) -> None:
         pending.wait()
     if not snapshot_present(root, repo_id):
         raise ModelNotDownloaded(
-            f"{repo_id} is not downloaded. Luminary fetches it during setup; "
-            "retry setup to download it.",
+            f"{repo_id} is not downloaded. Install it from Settings, or retry setup.",
             model=repo_id,
         )
 
@@ -211,11 +215,20 @@ def hub_reachable(timeout: float = 5.0) -> bool:
     """Fast reachability probe, so an offline run fails in seconds not minutes."""
     if os.environ.get("HF_HUB_OFFLINE", "").strip() not in ("", "0"):
         return False
+    # Behind a proxy a direct connection is expected to fail, and reported "no
+    # internet" to a machine whose downloads would have worked. Includes the
+    # Windows system proxy, which is what the download itself uses.
+    if urllib.request.getproxies().get("https"):
+        return True
     try:
         with socket.create_connection((_HUB_HOST, 443), timeout=timeout):
             return True
     except OSError:
         return False
+
+
+def downloaded_bytes(spec: ModelSpec) -> int:
+    return _dir_size(cache_dir(spec))
 
 
 def _dir_size(path: Path) -> int:
@@ -257,7 +270,7 @@ def _download(spec: ModelSpec, root: Path | None = None) -> None:
         done.set()
 
 
-def prefetch(to_fetch: list[ModelSpec], status) -> dict[str, str]:
+def prefetch(to_fetch: list[ModelSpec], status=None) -> dict[str, str]:
     """Download the given models concurrently. Returns key -> error for failures.
 
     Progress is sampled from the cache directory rather than from download
@@ -279,6 +292,8 @@ def prefetch(to_fetch: list[ModelSpec], status) -> dict[str, str]:
         logger.debug("Could not disable hub progress bars", exc_info=True)
 
     stop = threading.Event()
+    if status is None:
+        stop.set()
 
     def _report() -> None:
         while not stop.wait(1.0):
@@ -299,7 +314,8 @@ def prefetch(to_fetch: list[ModelSpec], status) -> dict[str, str]:
                 spec = futures[future]
                 try:
                     future.result()
-                    status.set_progress(spec.key, spec.size_bytes, spec.size_bytes)
+                    if status is not None:
+                        status.set_progress(spec.key, spec.size_bytes, spec.size_bytes)
                 except Exception as exc:
                     errors[spec.key] = str(exc)
                     logger.warning("Prefetch failed for %s: %s", spec.repo_id, exc)

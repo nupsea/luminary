@@ -1,7 +1,7 @@
 """Reference validator service for URL validation and dead link pruning.
 
-Performs async HEAD requests to verify web reference URLs.
-Concurrency limited via asyncio.Semaphore, max 20 URLs per run.
+Performs async HEAD requests to verify web reference URLs, only when web access is
+enabled (I-58). Concurrency limited via asyncio.Semaphore, max 20 URLs per run.
 """
 
 import asyncio
@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 import httpx
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.database import get_session_factory
 from app.models import WebReferenceModel
 
@@ -21,6 +22,11 @@ _MAX_URLS_PER_RUN = 20
 _TIMEOUT_SECONDS = 5.0
 
 
+def link_checks_enabled() -> bool:
+    """A link check contacts the linked site, so it rides on the user enabling web access."""
+    return get_settings().WEB_SEARCH_PROVIDER != "none"
+
+
 class ReferenceValidatorService:
     """Validate web reference URLs via async HEAD requests."""
 
@@ -29,6 +35,8 @@ class ReferenceValidatorService:
 
         Returns {"valid": N, "invalid": M}.
         """
+        if not link_checks_enabled():
+            return {"valid": 0, "invalid": 0}
         async with get_session_factory()() as session:
             result = await session.execute(
                 select(WebReferenceModel)
@@ -88,8 +96,11 @@ class ReferenceValidatorService:
     async def validate_urls(self, urls: list[str]) -> dict[str, bool]:
         """Validate a list of URLs and return {url: is_reachable}.
 
-        Used by reference extraction to pre-validate before persisting.
+        Used by reference extraction to pre-validate before persisting. Empty when link
+        checks are off, which leaves every reference unchecked.
         """
+        if not link_checks_enabled():
+            return {}
         semaphore = asyncio.Semaphore(_MAX_CONCURRENCY)
         results: dict[str, bool] = {}
 

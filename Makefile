@@ -93,6 +93,8 @@ desktop-test:
 	cd src-tauri && cargo fmt --all --check && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings
 	@command -v rustup >/dev/null && rustup target add x86_64-pc-windows-msvc >/dev/null || true
 	cd src-tauri && cargo clippy --target x86_64-pc-windows-msvc -p luminary-host --all-targets -- -D warnings
+	@command -v rustup >/dev/null && rustup target add x86_64-unknown-linux-gnu >/dev/null || true
+	cd src-tauri && cargo clippy --target x86_64-unknown-linux-gnu -p luminary-host --all-targets -- -D warnings
 
 # Run the shell against build/stage without bundling. Requires `make stage`.
 desktop-dev:

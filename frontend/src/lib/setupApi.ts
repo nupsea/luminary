@@ -12,6 +12,8 @@ export type PhaseState =
   /** Not installed yet, and there is an action for it. Not an error. */
   | "missing"
   | "skipped"
+  /** This computer cannot run it; `detail` says why. Not an error. */
+  | "unavailable"
 
 export interface StartupPhase {
   key: string
@@ -46,13 +48,18 @@ export interface Component {
   id: string
   label: string
   description: string
-  kind: "ollama_model" | "python_extra" | "tool" | "engine_runner"
+  kind: "ollama_model" | "python_extra" | "tool" | "engine_runner" | "hf_model"
   ref: string
   size_bytes: number
   licence: string
   default: boolean
   enables: string[]
   installed: boolean
+  /** False where this computer cannot run it; `advice` says why. */
+  offered: boolean
+  /** Luminary's suggestion for this computer. The user decides. */
+  recommended: boolean
+  advice: string
 }
 
 export interface Capability {
@@ -71,6 +78,17 @@ export type CapabilityKey =
   | "chat"
 
 export type Capabilities = Record<CapabilityKey, Capability>
+
+/** One problem report for the whole setup screen: every failed step with its reason.
+ *  A link per step produced five near-identical reports from one cause. Capped at
+ *  what `POST /setup/report/open` accepts. */
+export function failureSummary(phases: StartupPhase[]): string {
+  return phases
+    .filter((p) => p.state === "failed")
+    .map((p) => `${p.label}: ${p.detail || "failed"}`)
+    .join("\n")
+    .slice(0, 2000)
+}
 
 export function fetchStartupStatus(): Promise<StartupStatus> {
   return apiGet<StartupStatus>("/setup/status")

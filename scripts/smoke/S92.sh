@@ -4,6 +4,7 @@
 
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+smoke_requires_local_model
 
 NOTE_ID=""
 

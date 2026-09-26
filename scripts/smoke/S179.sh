@@ -2,6 +2,7 @@
 # Smoke test for S179: Context-aware flashcard generation
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+smoke_requires_local_model
 
 echo "=== S179 Smoke: Context-aware flashcard generation ==="
 

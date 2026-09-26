@@ -192,6 +192,13 @@ pub fn executable_of(pid: i32) -> Option<String> {
     Some(String::from_utf16_lossy(&buffer[..len as usize]))
 }
 
+pub fn on_termination(_on_signal: impl FnOnce(i32) + Send + 'static) -> std::io::Result<()> {
+    // No termination signals reach a GUI process; the job object ends the tree.
+    Ok(())
+}
+
+pub fn end_with_appimage_runtime() {}
+
 pub fn describe_exit(status: ExitStatus) -> String {
     // No signals here, so there is no second case to report.
     match status.code() {

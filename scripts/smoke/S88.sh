@@ -16,6 +16,7 @@
 # Does NOT run the slow pytest suite (that requires real ML).
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+smoke_requires_repo_toolchain
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
