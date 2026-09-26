@@ -95,6 +95,67 @@ pub fn on_termination(on_signal: impl FnOnce(i32) + Send + 'static) -> std::io::
     Ok(())
 }
 
+pub fn tee_stderr(on_line: impl Fn(&str) + Send + Sync + 'static) -> std::io::Result<()> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::fd::FromRawFd;
+    use std::sync::Arc;
+
+    let mut fds = [0; 2];
+    // SAFETY: pipe(2) writes two fds into a correctly sized array.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let (read_end, write_end) = (fds[0], fds[1]);
+    // SAFETY: dup(2) and dup2(2) on fds this function owns, plus fd 2. After
+    // dup2 the write end lives on as fd 2 only, which children inherit; the
+    // other two are close-on-exec so no child holds the pipe open.
+    let original = unsafe {
+        let original = libc::dup(libc::STDERR_FILENO);
+        if original < 0 || libc::dup2(write_end, libc::STDERR_FILENO) < 0 {
+            let err = std::io::Error::last_os_error();
+            libc::close(read_end);
+            libc::close(write_end);
+            if original >= 0 {
+                libc::close(original);
+            }
+            return Err(err);
+        }
+        libc::close(write_end);
+        libc::fcntl(read_end, libc::F_SETFD, libc::FD_CLOEXEC);
+        libc::fcntl(original, libc::F_SETFD, libc::FD_CLOEXEC);
+        original
+    };
+
+    let on_line = Arc::new(on_line);
+    let for_panic = on_line.clone();
+    std::panic::set_hook(Box::new(move |info| {
+        let text = format!("{info}\n");
+        // SAFETY: write(2) of an owned buffer to an fd kept open for the process lifetime.
+        unsafe { libc::write(original, text.as_ptr().cast(), text.len()) };
+        for_panic(text.trim_end());
+    }));
+
+    // SAFETY: the read end is owned here. `original` is never closed: the panic
+    // hook writes to it by number, and a reused fd would receive the panic.
+    let reader = unsafe { File::from_raw_fd(read_end) };
+    let mut terminal = std::mem::ManuallyDrop::new(unsafe { File::from_raw_fd(original) });
+    std::thread::Builder::new()
+        .name("stderr".into())
+        .spawn(move || {
+            for line in BufReader::new(reader).split(b'\n') {
+                let Ok(line) = line else { break };
+                let _ = terminal.write_all(&line);
+                let _ = terminal.write_all(b"\n");
+                let text = String::from_utf8_lossy(&line);
+                if !text.trim().is_empty() {
+                    on_line(text.trim_end());
+                }
+            }
+        })?;
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 pub fn end_with_appimage_runtime() {
     let Some(image) = std::env::var_os("APPIMAGE").and_then(|p| std::fs::canonicalize(p).ok())

@@ -232,6 +232,19 @@ platform only.
 new as the one it was built against, and 22.04 is the oldest base with
 WebKitGTK 4.1.
 
+**The AppImage never ships a library the host's graphics drivers link against.** AppRun puts
+`usr/lib` ahead of the system on the library path, while Mesa, EGL and the Vulkan drivers always
+come from the host. 0.13.8 bundled Ubuntu 22.04's libwayland 1.20; Mesa 26 needs
+`wl_display_create_queue_with_name` and two more symbols from 1.23+, so `libEGL_mesa` failed to
+load, WebKit's web process aborted with `EGL_BAD_PARAMETER`, and the window stayed blank on
+Fedora 44 and Bluefin. tauri's pinned linuxdeploy ignores `LINUXDEPLOY_EXCLUDED_LIBRARIES`, so
+[`prune_appimage.sh`](../scripts/desktop/prune_appimage.sh) removes `libwayland-*` and the driver
+libraries after the build and repacks the image.
+[`check_appimage_host_libs.sh`](../scripts/desktop/check_appimage_host_libs.sh) is the gate: it
+resolves every Mesa driver with the bundle first, in Fedora, Arch, Ubuntu 24.04 and Debian
+containers, and CI runs it once against the unpruned image, where it must fail. A library it
+reports goes into the prune list.
+
 **The engine ships CPU, Vulkan and CUDA 13 runners — not CUDA 12.** Ollama's
 archive for these platforms is ~1.4 GB because it carries both CUDA generations;
 CUDA 12 alone is 1152 MB of the Windows zip. A GPU that CUDA 13 cannot serve —
@@ -251,9 +264,13 @@ launcher left on the backend's `PATH` would be found by `shutil.which` and then 
 
 **CI launches what it built.** `desktop-installers.yml` installs each package on
 a clean runner and runs `verify_installed.sh`, which waits for the shell's
-`ready` line and fails on its failure line or on the engine not starting. The
-Linux job opens the `.deb` first and the AppImage second, against the library
-the first launch created. The runners have no GPU: this proves the install, the
+`ready` line, then for `page loaded: <backend>/` -- `ready` is only the backend, and 0.13.8
+passed it with a dead web process. It fails on the shell's failure line or on the engine not
+starting. The Linux job opens the `.deb` first and the AppImage second, against the library
+the first launch created, then the AppImage again on Fedora under a headless Wayland session
+([`wayland_session.sh`](../scripts/desktop/wayland_session.sh)): xvfb is X-only and runs the Mesa
+the image was built against, so it cannot show this class of failure. On Linux the shell copies its
+stderr, and WebKit's, into `luminary.log` as `[webview]` lines. The runners have no GPU: this proves the install, the
 layout and the CPU path, never which accelerator a real machine gets.
 
 **Remove through the same one-liner, not the OS alone.** `LUMINARY_UNINSTALL=1` with

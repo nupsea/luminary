@@ -38,7 +38,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
-            patchelf zstd xvfb imagemagick libfuse2
+            patchelf zstd xvfb imagemagick libfuse2 squashfs-tools
 
       - uses: actions/setup-node@v4
         with:
@@ -82,14 +82,60 @@ jobs:
           SCREENSHOT=build/linux-deb.png xvfb-run -a -s "-screen 0 1440x900x24" \
             bash scripts/desktop/verify_installed.sh "$exe"
 
-      # Driver libraries belong to the host; the engine's runners are staged separately.
       - name: Build the AppImage
         if: ${{ !cancelled() }}
         env:
           NO_STRIP: "true"
           APPIMAGE_EXTRACT_AND_RUN: "1"
-          LINUXDEPLOY_EXCLUDED_LIBRARIES: "libcuda.so.1;libnvidia-ml.so.1;libvulkan.so.1"
         run: make desktop-installer TAURI_BUILD_FLAGS="--verbose --bundles appimage"
+
+      # tauri's linuxdeploy ignores LINUXDEPLOY_EXCLUDED_LIBRARIES, so graphics libraries
+      # are removed after the build. The unpruned copy proves the gate below can fail.
+      - name: Remove host-owned libraries from the AppImage
+        run: |
+          appimage="$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
+          cp "$appimage" build/unpruned.AppImage
+          bash scripts/desktop/prune_appimage.sh "$appimage"
+
+      # I-62. The newest distros carry the newest drivers, so they are where it shows.
+      - name: Host graphics drivers load against the AppImage
+        run: |
+          appimage="$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
+          # Only the directories AppRun puts on the library path; the stage is not among them.
+          libs() { (cd build && rm -rf squashfs-root "$2" \
+            && "$1" --appimage-extract 'usr/lib/lib*' >/dev/null \
+            && "$1" --appimage-extract 'usr/lib/x86_64-linux-gnu/*' >/dev/null \
+            && mv squashfs-root "$2"); }
+          libs "$PWD/$appimage" appdir
+          libs "$PWD/build/unpruned.AppImage" unpruned-appdir
+          fedora="dnf -y -q install mesa-dri-drivers mesa-libEGL mesa-libGL mesa-libgbm mesa-vulkan-drivers"
+          apt="apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libegl-mesa0 libglx-mesa0 libgl1-mesa-dri libgbm1 mesa-vulkan-drivers >/dev/null"
+          check() { docker run --rm -v "$PWD:/w" -w /w "$1" bash -c "$2 && bash scripts/desktop/check_appimage_host_libs.sh $3"; }
+          if check fedora:latest "$fedora" build/unpruned-appdir; then
+            echo "the gate passed an unpruned AppImage, so it measures nothing"; exit 1
+          fi
+          check fedora:latest "$fedora" build/appdir
+          check archlinux:latest "pacman -Sy --noconfirm --needed -q mesa vulkan-radeon vulkan-intel >/dev/null" build/appdir
+          check ubuntu:24.04 "$apt" build/appdir
+          check debian:stable "$apt" build/appdir
+
+      # A Wayland desktop, a current Mesa and no FUSE: the setup I-62 came from.
+      - name: Open the AppImage under Wayland on Fedora
+        run: |
+          appimage="$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
+          docker run --rm --cap-add SYS_NICE -v "$PWD:/w" -w /w fedora:latest bash -c "
+            dnf -y -q install sway xorg-x11-server-Xwayland mesa-dri-drivers dbus-x11 grim \
+              procps-ng findutils which curl file xz util-linux gawk >/dev/null
+            useradd -m tester && mkdir -p build && chmod 777 build
+            runuser -u tester -- env BUILD_DIR=/w/build/fedora LUMINARY_HOST_SUPPORTED=1 \
+              LUMINARY_INSTALLER=$appimage LUMINARY_FORMAT=appimage LUMINARY_NO_LAUNCH=1 \
+              bash scripts/get-luminary.sh
+            runuser -u tester -- env BUILD_DIR=/w/build/fedora SCREENSHOT=/w/build/fedora/fedora-wayland.png \
+              bash scripts/desktop/wayland_session.sh \
+              bash scripts/desktop/verify_installed.sh /home/tester/.local/bin/luminary
+            rc=\$?
+            cp /home/tester/.local/state/luminary/luminary.log build/fedora/fedora-luminary.log || true
+            exit \$rc"
 
       # Second launch, against the library the first one created.
       - name: Open the AppImage
@@ -147,6 +193,8 @@ jobs:
             build/*.png
             build/*.log
             build/installed-app.out
+            build/fedora/*.png
+            build/fedora/*.log
             ~/.local/state/luminary/luminary.log
           retention-days: 7
 

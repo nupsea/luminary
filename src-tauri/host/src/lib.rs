@@ -120,6 +120,19 @@ pub fn on_termination(on_signal: impl FnOnce(i32) + Send + 'static) -> std::io::
     sys::on_termination(on_signal)
 }
 
+/// Pass every line written to this process's stderr -- and its children's, which
+/// inherit it -- to `on_line`, while still writing it to the original stderr.
+///
+/// WebKitGTK reports why it cannot draw (`Could not create default EGL display`)
+/// only on stderr, from a child process, so a launch from the desktop menu would
+/// otherwise lose the one line that explains a blank window. Children spawned with
+/// their own stderr pipe (the backend, ollama) are unaffected. A panic is passed on
+/// directly: with `panic = "abort"` the forwarding thread never runs again.
+/// A no-op on Windows.
+pub fn tee_stderr(on_line: impl Fn(&str) + Send + Sync + 'static) -> std::io::Result<()> {
+    sys::tee_stderr(on_line)
+}
+
 /// Deliver SIGTERM to this process when the AppImage runtime that launched it
 /// dies. Call after [`on_termination`].
 ///
