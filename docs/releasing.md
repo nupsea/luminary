@@ -335,11 +335,22 @@ until it is renewed.
 ## Demo assets
 
 
-The README's hero is a GIF, not a video. GitHub renders a video only from a
-`user-attachments` upload, never from a repo path, and never autoplays or loops
-it; it sanitizes animated SVG too. An animated GIF in a normal image tag is the
-only thing that plays on its own. The source `demo.mp4` and the YouTube tour are
-linked underneath it; GitHub's file view plays the mp4 when clicked.
+The README's hero is an animated WebP, not a video. GitHub renders a video only
+from a `user-attachments` upload, never from a repo path, and never autoplays or
+loops it, so an animated image is the only thing that plays on its own. WebP
+over GIF: GIF's 256-colour palette bands a dark UI and blurs small text, and the
+same 25s cut measured 12.6 MB as a 1000px GIF against 5.5 MB as a sharper 1400px
+WebP. The source `demo.mp4` and the YouTube tour are linked underneath; GitHub's
+file view plays the mp4 when clicked.
+
+`assets/images/demo.webp` is `demo.mp4` cropped to the app window (browser
+chrome out), cut to its beats, at 1400px and 15fps:
+
+```bash
+SEG="6:9 11.5:14 24:33 36:40 45.5:48 50.5:55"   # library, reader, ask + citations, note, practice
+# trim each segment, concat, crop=1844:1066:38:120, fps=15, scale=1400:-2 -> PNG frames, then
+img2webp -loop 0 -lossy -q 85 -m 4 -d 67 f*.png -o assets/images/demo.webp
+```
 
 ### Before recording anything
 
