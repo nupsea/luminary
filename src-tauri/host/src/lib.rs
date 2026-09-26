@@ -124,9 +124,9 @@ pub fn on_termination(on_signal: impl FnOnce(i32) + Send + 'static) -> std::io::
 /// inherit it -- to `on_line`, while still writing it to the original stderr.
 ///
 /// WebKitGTK reports why it cannot draw (`Could not create default EGL display`)
-/// only on stderr, from a child process, so a launch from the desktop menu used to
-/// lose the one line that explained a blank window. Children spawned with their
-/// own stderr pipe (the backend, ollama) are unaffected. A panic is passed on
+/// only on stderr, from a child process, so a launch from the desktop menu would
+/// otherwise lose the one line that explains a blank window. Children spawned with
+/// their own stderr pipe (the backend, ollama) are unaffected. A panic is passed on
 /// directly: with `panic = "abort"` the forwarding thread never runs again.
 /// A no-op on Windows.
 pub fn tee_stderr(on_line: impl Fn(&str) + Send + Sync + 'static) -> std::io::Result<()> {

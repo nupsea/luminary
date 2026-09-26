@@ -3,12 +3,10 @@
 #
 #   scripts/desktop/prune_appimage.sh <file.AppImage>
 #
-# The AppImage puts its usr/lib ahead of the system's on the library path, and the
-# host's Mesa is loaded from the system. Bundled libwayland 1.20 (Ubuntu 22.04) lacks
-# symbols Mesa 26 needs, so its EGL failed to load and WebKit's web process aborted:
-# a blank window on Fedora 44 and Bluefin. tauri's pinned linuxdeploy ignores
-# LINUXDEPLOY_EXCLUDED_LIBRARIES, so the exclusion happens here.
-# check_appimage_host_libs.sh is the gate for anything this list misses.
+# I-62: AppRun puts usr/lib ahead of the system, so a bundled copy of a library the
+# host's drivers link against shadows theirs. tauri's pinned linuxdeploy ignores
+# LINUXDEPLOY_EXCLUDED_LIBRARIES, so they are removed here; check_appimage_host_libs.sh
+# is the gate for anything this list misses.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 

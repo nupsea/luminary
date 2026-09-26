@@ -97,8 +97,7 @@ jobs:
           cp "$appimage" build/unpruned.AppImage
           bash scripts/desktop/prune_appimage.sh "$appimage"
 
-      # 0.13.8 drew a blank window on Fedora 44: its libwayland shadowed the one Mesa
-      # needs. The newest distros carry the newest drivers, so they are where it shows.
+      # I-62. The newest distros carry the newest drivers, so they are where it shows.
       - name: Host graphics drivers load against the AppImage
         run: |
           appimage="$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
@@ -120,7 +119,7 @@ jobs:
           check ubuntu:24.04 "$apt" build/appdir
           check debian:stable "$apt" build/appdir
 
-      # A Wayland desktop, a current Mesa and no FUSE: the setup 0.13.8 failed on.
+      # A Wayland desktop, a current Mesa and no FUSE: the setup I-62 came from.
       - name: Open the AppImage under Wayland on Fedora
         run: |
           appimage="$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"

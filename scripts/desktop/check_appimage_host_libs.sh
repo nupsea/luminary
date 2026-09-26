@@ -5,8 +5,7 @@
 #
 # Run it on the distro under test, with Mesa installed: CI runs it in containers of
 # the newest ones, whose drivers need the newest symbols. It resolves each driver the
-# way the AppImage's web process would, bundled directories first. On 0.13.8 it
-# reported libEGL_mesa's three missing wl_* symbols, the cause of the blank window.
+# way the AppImage's web process would, bundled directories first (I-62).
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run a command inside a headless Wayland session with XWayland, the way a GNOME or
-# KDE Wayland desktop hosts the app. xvfb cannot show the 0.13.8 blank window: it is
-# X only and its Mesa is the one the AppImage was built against.
+# KDE Wayland desktop hosts the app. xvfb on the runner cannot show an I-62 blank
+# window: its Mesa is the one the AppImage was built against.
 #
 #   scripts/desktop/wayland_session.sh <command> [args...]
 #

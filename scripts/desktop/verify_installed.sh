@@ -81,8 +81,8 @@ check_ingest() {
     return "$result"
 }
 
-# `ready` is the backend; 0.13.8 reached it on Fedora with a web process that had
-# aborted, so the window stayed blank. The page itself has to finish loading.
+# `ready` is the backend alone: it is reached even when the page's web process has
+# aborted and the window is blank (I-62).
 check_page_loaded() {
     local backend
     backend="$(this_launch | sed -n 's/.*\[shell\] backend: \(http[^ ]*\).*/\1/p' | tail -1)"
