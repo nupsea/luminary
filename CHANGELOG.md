@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.9] - 2026-09-27
+
 ### Fixed
 - **On Linux the AppImage opened a blank window on current distributions** (Fedora 44, Bluefin). It bundled an old libwayland that the system's graphics drivers could not load against; graphics libraries now always come from the system, and CI checks the AppImage against the newest Fedora, Arch, Ubuntu and Debian drivers and opens it under Wayland.
 
