@@ -92,7 +92,7 @@ against a rung are the ones its exit gate cannot pass without.
 | — | 0.10.0 | Smart Hybrid, and the privacy receipt — **shipped** | | Time to first token measured on both arms from a cold install and reported as a pair; a test proves that only the question and its packed passages leave the machine |
 | — | 0.11.0 | The docked reader — **shipped** | | A passage captured in the reader resolves back to its locus for page, video and web; no modal opens from the reader |
 | — | 0.12.0 | The Brief — **parked** | | None; no rung waits on it |
-| I. Every host | 0.13.0 | Every host is a first-class host — **in progress** on `feat/lighter-install`. **Checkpoint A** | #139, #24, #99, #79 (merges with it) | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator |
+| I. Every host | 0.13.0 | Every host is a first-class host — **0.13.8 released from `master`; exit gate open** (`make smoke` on Windows, Linux hardware). **Checkpoint A** | #139, #24, #99, #79 (merges with it) | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator |
 | II. Stability | 0.14.0 | Gates you can believe | #50, #101, #88, #110 | `make ci` and `make smoke` both green, nothing quarantined to keep them so |
 | | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it |
 | III. Reach | 0.16.0 | Capture, and device pairing | | Three source types round-trip from the browser to a readable document; an unpaired origin or a revoked device is refused |
@@ -371,7 +371,7 @@ download that it cannot, as an Intel Mac is today, and pointed at a cloud key or
 | SIGTERM drains the process tree on Linux and macOS; an AppImage without FUSE ends with its runtime | built |
 | Off Apple Silicon the default text model is `qwen3.5:4b` whatever the host holds; other models are the user's pick in Settings | built |
 | The one-command installers refuse before downloading where `host_support.local_inference_support` would, with its message, and offer to continue for reading, search and notes (`LUMINARY_INSTALL_ANYWAY=1` without asking); `test_get_luminary_script.py` fails if they disagree | built |
-| A release job attaches the Windows setup, `.deb`, AppImage and their `.sha256` files; README carries the one-liners | built: `desktop-installers.yml` `publish` attached all four to the `v0.13.2` prerelease; the README one-liners point at `master`, which has the scripts once this branch merges |
+| A release job attaches the Windows setup, `.deb`, AppImage and their `.sha256` files; README carries the one-liners | built: `desktop-installers.yml` `publish` attached all four to the `v0.13.2` prerelease; the README leads with the one-liners, which resolve the latest release; merged to `master` in 0.13.8 |
 | Uninstall deletes only files Luminary wrote; the library, models and anything unrecognised are listed with the command to delete them | built, CI uninstalls on Windows and Linux with a planted foreign file |
 | An installed Ollama is reported, and its models the app knows are reused after a digest check, never written to | built: the Windows installer job and `test_get_luminary_script.py` reuse a planted model; not run against a real Ollama install |
 | One timing script over the installed app: doc ingest, web-article ingest, Ask idle and while a later doc ingests, flashcards, teach-back, store sizes, on `qwen3.5:4b`; its baseline is the M3 Pro | built: `scripts/time_flows.py`; M3 Pro baseline below |
@@ -461,6 +461,13 @@ refused with the key message, while reading, search, reviews and a new ingest wo
 a bad key said so. Installing the CUDA runner cleared the verdict and the next launch measured again.
 Open: a model split between card and processor is not refused; no consumer laptop GPU, Intel or AMD
 integrated graphics, or Linux host has been measured.
+
+**0.13.8: private mode with no connection (I-61).** A desktop demo with Wi-Fi off showed an empty
+library with nothing in the backend log: TanStack Query paused every request after the webview's
+`offline` event. Verified in headless Chromium against the installed 0.13.1 UI (empty) and the fix
+(14 documents), and on a backend whose outbound traffic went to a refusing proxy: ingest, search,
+Ask with a citation, cards, review, teach-back, notes and summary, with zero outbound attempts. The
+macOS app itself was not run with Wi-Fi off.
 
 **Signing.** The installers are unsigned, so Windows SmartScreen shows "unknown publisher"
 (click More info -> Run anyway). The free route is SignPath Foundation, which signs OSS builds at

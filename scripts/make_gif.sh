@@ -37,11 +37,11 @@ TRIM=()
 FILTER="fps=${FPS},scale=${WIDTH}:-1:flags=lanczos"
 
 echo "==> palette (${FPS}fps, ${WIDTH}px)"
-ffmpeg -hide_banner -loglevel error -y "${TRIM[@]}" -i "$SRC" \
+ffmpeg -hide_banner -loglevel error -y ${TRIM[@]+"${TRIM[@]}"} -i "$SRC" \
   -vf "${FILTER},palettegen=stats_mode=diff" "$PAL"
 
 echo "==> encode"
-ffmpeg -hide_banner -loglevel error -y "${TRIM[@]}" -i "$SRC" -i "$PAL" \
+ffmpeg -hide_banner -loglevel error -y ${TRIM[@]+"${TRIM[@]}"} -i "$SRC" -i "$PAL" \
   -lavfi "${FILTER}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3" "$OUT"
 rm -f "$PAL"
 

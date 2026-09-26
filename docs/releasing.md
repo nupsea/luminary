@@ -335,10 +335,11 @@ until it is renewed.
 ## Demo assets
 
 
-The README's hero is a GIF, not a video. GitHub strips `<video>` tags from
-Markdown and sanitizes animated SVG, so an animated GIF referenced with a normal
-image tag is the only thing that reliably plays on the front page. A linked
-YouTube tour sits underneath it for anyone who wants more.
+The README's hero is a GIF, not a video. GitHub renders a video only from a
+`user-attachments` upload, never from a repo path, and never autoplays or loops
+it; it sanitizes animated SVG too. An animated GIF in a normal image tag is the
+only thing that plays on its own. The source `demo.mp4` and the YouTube tour are
+linked underneath it; GitHub's file view plays the mp4 when clicked.
 
 ### Before recording anything
 
