@@ -15,7 +15,7 @@ write down what you understand, turn what matters into flashcards, and let it sc
 Nothing leaves your machine unless you give it an API key.
 
 <p align="center">
-  <img src="assets/images/demo.gif" alt="Opening a document in the library, asking a question beside it, and following the citation to the passage" width="900">
+  <img src="assets/images/demo.webp" alt="The library, a document opened in the reader, a question answered beside it with citations that highlight their passages, a note with a diagram, and a teach-back practice session" width="900">
 </p>
 
 <p align="center">
