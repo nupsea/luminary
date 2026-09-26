@@ -3,9 +3,10 @@
 #
 #   scripts/desktop/verify_installed.sh <installed-executable> [deadline-seconds]
 #
-# Passes when the shell logs `ready`, the app stays up, and a document ingested
-# through it is found by vector search (then deleted). SCREENSHOT=<file.png>
-# captures the screen once ready (Linux needs ImageMagick's `import` and a display).
+# Passes when the shell logs `ready`, the window loads the page, the app stays up,
+# and a document ingested through it is found by vector search (then deleted).
+# SCREENSHOT=<file.png> captures the screen once ready (Linux needs a display and
+# ImageMagick's `import`, or `grim` under Wayland).
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -80,6 +81,24 @@ check_ingest() {
     return "$result"
 }
 
+# `ready` is the backend; 0.13.8 reached it on Fedora with a web process that had
+# aborted, so the window stayed blank. The page itself has to finish loading.
+check_page_loaded() {
+    local backend
+    backend="$(this_launch | sed -n 's/.*\[shell\] backend: \(http[^ ]*\).*/\1/p' | tail -1)"
+    [ -n "$backend" ] || { _warn "the shell never logged its backend address"; return 1; }
+    for _ in $(seq 1 "${PAGE_DEADLINE:-120}"); do
+        if this_launch | grep -qF "[shell] page loaded: $backend/"; then
+            _info "the window loaded $backend"
+            return 0
+        fi
+        sleep 1
+    done
+    _warn "the window never loaded $backend; what the page's process said:"
+    this_launch | grep -E '\[webview\]|web process' | tail -10 | sed 's/^/      /'
+    return 1
+}
+
 # Process groups under the app other than this script's own: the shell leads each
 # child in one, so a group with members after the shell exits is an orphaned tree.
 descendant_groups() {
@@ -116,6 +135,7 @@ case "$result" in
         if grep -q 'local model server unavailable' <<<"$lines"; then
             _warn "the bundled engine did not start"; FAILED=1
         fi
+        check_page_loaded || FAILED=1
         # Long enough for a backend that dies after its first connection to be seen dying.
         sleep 20
         kill -0 "$APP" 2>/dev/null || { _warn "the app exited after reporting ready"; FAILED=1; }
@@ -128,7 +148,12 @@ esac
 
 if [ -n "$SCREENSHOT" ]; then
     case "$DESKTOP_OS" in
-        linux) import -window root "$SCREENSHOT" 2>/dev/null ;;
+        linux)
+            if [ -n "${WAYLAND_DISPLAY:-}" ] && command -v grim >/dev/null; then
+                grim "$SCREENSHOT" 2>/dev/null
+            else
+                import -window root "$SCREENSHOT" 2>/dev/null
+            fi ;;
         windows)
             SHOT="$(cygpath -w "$SCREENSHOT")" powershell.exe -NoProfile -Command '
                 Add-Type -AssemblyName System.Windows.Forms, System.Drawing

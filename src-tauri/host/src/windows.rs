@@ -199,6 +199,10 @@ pub fn on_termination(_on_signal: impl FnOnce(i32) + Send + 'static) -> std::io:
 
 pub fn end_with_appimage_runtime() {}
 
+pub fn tee_stderr(_on_line: impl Fn(&str) + Send + Sync + 'static) -> std::io::Result<()> {
+    Ok(())
+}
+
 pub fn describe_exit(status: ExitStatus) -> String {
     // No signals here, so there is no second case to report.
     match status.code() {

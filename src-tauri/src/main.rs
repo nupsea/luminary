@@ -289,6 +289,27 @@ fn grant_spa_render(app: &AppHandle, port: u16) {
     }
 }
 
+/// Log the page's web process ending. When it dies the window stays blank and
+/// the shell has no other signal: the backend and `ready` are unaffected.
+#[cfg(target_os = "linux")]
+fn watch_web_process(window: &tauri::WebviewWindow) {
+    let watched = window.with_webview(|webview| {
+        use webkit2gtk::WebViewExt;
+        webview.inner().connect_web_process_terminated(|_, reason| {
+            logging::write(
+                "shell",
+                &format!("the page's web process ended ({reason:?}); the window is blank"),
+            );
+        });
+    });
+    if let Err(e) = watched {
+        logging::write(
+            "shell",
+            &format!("cannot watch the page's web process: {e}"),
+        );
+    }
+}
+
 /// Run `boot` on its own thread, at most once at a time.
 fn start_boot(app: AppHandle, sup: Arc<Supervisor>) {
     if let Some(state) = app.try_state::<BootState>() {
@@ -377,6 +398,13 @@ fn activate(app: &AppHandle) {
 
 fn main() {
     logging::init();
+    #[cfg(target_os = "linux")]
+    if let Err(e) = luminary_host::tee_stderr(|line| logging::write("webview", line)) {
+        logging::write(
+            "shell",
+            &format!("webview messages will not reach this log: {e}"),
+        );
+    }
 
     let supervisor = Arc::new(Supervisor::new());
     let for_setup = supervisor.clone();
@@ -425,7 +453,18 @@ fn main() {
                     }
                     tauri::webview::NewWindowResponse::Deny
                 })
+                // Contract: verify_installed.sh waits for this line with the backend's
+                // address. `ready` alone passed a window whose web process had died.
+                .on_page_load(|_, payload| {
+                    if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                        logging::write("shell", &format!("page loaded: {}", payload.url()));
+                    }
+                })
                 .build()?;
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("main") {
+                watch_web_process(&window);
+            }
 
             // Drained here rather than via `RunEvent::Exit`, which a signal
             // never delivers; the Exit arm then finds no children.

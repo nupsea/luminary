@@ -27,6 +27,10 @@ luminary-host = { path = "host" }
 percent-encoding = "2"
 regex = "1"
 
+# Only to watch the page's web process (`watch_web_process`); tauri pins the version.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "2.0"
+
 [profile.release]
 codegen-units = 1
 lto = true
