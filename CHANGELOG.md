@@ -6,8 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.8] - 2026-09-26
+
 ### Fixed
 - **With no internet connection the library showed no documents, and questions, cards and notes never answered.** The page paused every request to the local backend while the computer was offline; it no longer waits on the network.
+
+### Changed
+- **The README leads with the one-command installs** and plays the full demo; source, Docker, model and configuration reference moved to `docs/install.md`.
 
 ## [0.13.7] - 2026-09-26
 
