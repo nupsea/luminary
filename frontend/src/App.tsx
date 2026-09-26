@@ -1,6 +1,4 @@
 import {
-  QueryCache,
-  QueryClient,
   QueryClientProvider,
   useIsFetching,
   useQuery,
@@ -28,6 +26,7 @@ import { SetupGate } from "@/components/setup/SetupGate"
 import { LUMINARY_MODE, navTabs, routedSurfaces, isSurfaceVisible } from "./lib/surfaceManifest"
 import type { Surface } from "./lib/surfaceManifest"
 import { logger } from "./lib/logger"
+import { createQueryClient } from "./lib/queryClient"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
 import { StreakXPWidget } from "./components/StreakXPWidget"
 import { SearchDialog } from "./components/SearchDialog"
@@ -134,22 +133,7 @@ const PREFETCH: Record<string, PrefetchDef> = {
   progress: { key: ["study-due"], fn: prefetchProgressData },
 }
 
-const queryClient = new QueryClient({
-  queryCache: new QueryCache({
-    onError: (error, query) => {
-      logger.error("[Query]", String(query.queryKey), error instanceof Error ? error.message : String(error))
-    },
-  }),
-  defaultOptions: {
-    queries: {
-      staleTime: 60_000,
-      gcTime: 60_000,
-      refetchOnWindowFocus: false,
-      retry: 2,
-      retryDelay: 1000,
-    },
-  },
-})
+const queryClient = createQueryClient()
 
 // Global top-of-page loading bar
 

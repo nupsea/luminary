@@ -169,6 +169,9 @@ On a company laptop behind a TLS-inspecting proxy every model download and every
 **I-60. A graphics driver on disk is not a card the model server uses; the first load decides.**
 The device check passed a Windows T4 (`nvcuda.dll` present), and Ollama put 0 B of `qwen3.5:4b` on it: the data-center driver runs in TCC mode, which the runtime cannot see. The same shape fits any driver whose card the runtime cannot serve. So `warmup._measure_offload` reads `/api/ps` after the first local answer and `host_support.record_offload` keeps it; a model held wholly by the processor makes `local_inference_support` refuse with `gpu_unused`, and the model is unloaded. The measurement narrows the device verdict, never widens it, is taken again after an upgrade or a CUDA runner change, and `LUMINARY_HOST_SUPPORTED` still outranks it. `tests/test_gpu_offload.py` fails CI otherwise.
 
+**I-61. The frontend's requests never wait on the machine's internet connection.**
+A demo of the desktop app with Wi-Fi off showed an empty library: "0 books", "No documents match your filters", no error, and no request in the backend log. TanStack Query's default `networkMode: "online"` pauses every query and mutation once the webview fires an `offline` event, and the backend it would have reached is on localhost. So `createQueryClient` sets `networkMode: "always"` for both, and a request fails on its own merits or not at all. `frontend/src/lib/queryClient.test.ts` fails CI otherwise.
+
 ## Retired numbers
 
 Kept so existing references resolve.
