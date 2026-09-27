@@ -437,6 +437,18 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
         renderBlock(node.from, to, false, true)
         return false
       }
+      if (node.name === "Image") {
+        if (rendered.some((r) => node.from >= r.from && node.to <= r.to)) return false
+        const line = state.doc.lineAt(node.from)
+        const lineText = line.text.trim()
+        const nodeText = state.doc.sliceString(node.from, node.to).trim()
+        if (lineText === nodeText) {
+          const next = line.number < state.doc.lines ? state.doc.line(line.number + 1) : null
+          const to = next && EXCALIDRAW_COMMENT.test(next.text.trim()) ? next.to : line.to
+          renderBlock(line.from, to, false, true)
+          return false
+        }
+      }
       if (node.name === "Blockquote") {
         for (let pos = node.from; pos <= node.to; ) {
           const line = state.doc.lineAt(pos)

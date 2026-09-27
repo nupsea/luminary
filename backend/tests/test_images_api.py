@@ -347,6 +347,33 @@ async def test_upload_note_image_without_extension_derives_from_content_type(tes
 
 
 @pytest.mark.asyncio
+async def test_upload_note_image_tiff(test_db):
+    """POST /images/notes accepts tiff images and serves them with image/tiff."""
+    _, _, tmp_path = test_db
+    buf = BytesIO()
+    PILImage.new("RGB", (30, 30), color="blue").save(buf, format="TIFF")
+    payload = buf.getvalue()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/images/notes",
+            files={"file": ("screenshot.tiff", payload, "image/tiff")},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["path"].startswith("__LUMINARY_IMG__/notes/")
+    assert data["filename"].endswith(".tiff")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        served = await client.get(f"/images/local/notes/{data['filename']}")
+
+    assert served.status_code == 200
+    assert served.headers["content-type"] == "image/tiff"
+
+
+
+@pytest.mark.asyncio
 async def test_get_enrichment_returns_404_for_unknown_doc(test_db):
     """GET /documents/{unknown}/enrichment returns 404."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

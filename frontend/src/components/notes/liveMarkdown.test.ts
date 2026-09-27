@@ -60,6 +60,84 @@ describe("liveMarkdown decorations", () => {
     expect(widgets[1]).toContain("fb = f + b")
     expect(widgets[2]).toContain("![Diagram|large]")
   })
+
+  it("renders a standalone pasted image as a block widget", () => {
+    const doc = `## Heading
+
+Some text
+
+$$
+x = y + z
+$$
+
+![Pasted Image|medium](__LUMINARY_IMG__/notes/4b5f7f44-0389-4da9-a1fe-adb4c92fc1b0.png)
+`
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: doc.length },
+      extensions: [markdown({ base: markdownLanguage }), liveMarkdown()],
+    })
+
+    // Find decoration set
+    // @ts-expect-error private field access for test assertion
+    const fields = state.values as unknown[]
+    interface DecoRange {
+      spec?: { widget?: { source: string } }
+    }
+    interface TestDecoSet {
+      size: number
+      between: (from: number, to: number, f: (from: number, to: number, deco: DecoRange) => void) => void
+    }
+    const decoSets = fields.filter((val): val is TestDecoSet =>
+      Boolean(val && typeof val === "object" && "size" in val && typeof (val as { size: unknown }).size === "number" && (val as { size: number }).size > 0),
+    )
+
+    const widgets: string[] = []
+    for (const ds of decoSets) {
+      ds.between(0, state.doc.length, (_from, _to, deco) => {
+        if (deco.spec?.widget) {
+          widgets.push(deco.spec.widget.source)
+        }
+      })
+    }
+    expect(widgets.some((w) => w.includes("Pasted Image"))).toBe(true)
+  })
+
+  it("renders an image immediately following a math block without blank lines as a block widget", () => {
+    const doc = `$$
+x = y + z
+$$
+![Pasted Image|medium](__LUMINARY_IMG__/notes/4b5f7f44-0389-4da9-a1fe-adb4c92fc1b0.png)
+`
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: doc.length },
+      extensions: [markdown({ base: markdownLanguage }), liveMarkdown()],
+    })
+
+    // @ts-expect-error private field access for test assertion
+    const fields = state.values as unknown[]
+    interface DecoRange {
+      spec?: { widget?: { source: string } }
+    }
+    interface TestDecoSet {
+      size: number
+      between: (from: number, to: number, f: (from: number, to: number, deco: DecoRange) => void) => void
+    }
+    const decoSets = fields.filter((val): val is TestDecoSet =>
+      Boolean(val && typeof val === "object" && "size" in val && typeof (val as { size: unknown }).size === "number" && (val as { size: number }).size > 0),
+    )
+
+    const widgets: string[] = []
+    for (const ds of decoSets) {
+      ds.between(0, state.doc.length, (_from, _to, deco) => {
+        if (deco.spec?.widget) {
+          widgets.push(deco.spec.widget.source)
+        }
+      })
+    }
+    expect(widgets.some((w) => w.includes("Pasted Image"))).toBe(true)
+  })
 })
 
 describe("MarkdownRenderer table whitespace", () => {

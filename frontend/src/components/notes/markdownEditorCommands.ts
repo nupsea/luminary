@@ -6,8 +6,16 @@ export function insertBlockSpec(state: EditorState, markdown: string): Transacti
   const { from, to } = state.selection.main
   const before = state.sliceDoc(0, from)
   const after = state.sliceDoc(to)
-  const prefix = from > 0 && !before.endsWith("\n") ? "\n\n" : ""
-  const suffix = after.startsWith("\n") ? "" : "\n\n"
+  let prefix = ""
+  if (from > 0) {
+    if (before.endsWith("\n\n")) prefix = ""
+    else if (before.endsWith("\n")) prefix = "\n"
+    else prefix = "\n\n"
+  }
+  let suffix = ""
+  if (after.startsWith("\n\n")) suffix = ""
+  else if (after.startsWith("\n")) suffix = "\n"
+  else suffix = "\n\n"
   const insertion = `${prefix}${markdown}${suffix}`
   return {
     changes: { from, to, insert: insertion },

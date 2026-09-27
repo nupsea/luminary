@@ -55,6 +55,12 @@ describe("insertBlockSpec", () => {
     const next = apply(state, insertBlockSpec(state, "block"))
     expect(next.doc.toString()).toBe("a\n\nblock\n\nb")
   })
+
+  it("ensures a blank line before block when cursor follows a single newline", () => {
+    const state = mdState("$$\nx = y + z\n$$\n", 15)
+    const next = apply(state, insertBlockSpec(state, "![img](a.png)"))
+    expect(next.doc.toString()).toBe("$$\nx = y + z\n$$\n\n![img](a.png)\n\n")
+  })
 })
 
 describe("toggleInlineMarkSpec", () => {
