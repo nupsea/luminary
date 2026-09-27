@@ -68,6 +68,15 @@ def test_a_model_partly_on_the_card_is_not_refused():
     assert host_support.local_inference_support().supported
 
 
+def test_a_split_is_quoted_back_and_a_whole_card_is_not():
+    """#156: a split was invisible, so a slow laptop GPU reported "supported" and no more."""
+    host_support.record_offload(_MODEL, _SIZE, _SIZE // 4)
+    assert "25% of the model on the graphics card" in host_support.local_inference_support().detail
+
+    host_support.record_offload(_MODEL, _SIZE, _SIZE)
+    assert "graphics card" not in host_support.local_inference_support().detail
+
+
 def test_the_measurement_survives_a_relaunch():
     host_support.record_offload(_MODEL, _SIZE, 0)
     host_support.forget_offload()
@@ -183,12 +192,19 @@ async def test_the_endpoint_says_whether_the_card_was_measured():
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        assert (await client.get("/setup/host-support")).json()["measured"] is False
+        before = (await client.get("/setup/host-support")).json()
         host_support.record_offload(_MODEL, _SIZE, 0)
         body = (await client.get("/setup/host-support")).json()
+        host_support.record_offload(_MODEL, _SIZE, _SIZE // 2)
+        split = (await client.get("/setup/host-support")).json()
+    assert before["measured"] is False
+    assert before["gpu_share"] is None
     assert body["measured"] is True
     assert body["supported"] is False
     assert body["reason"] == "gpu_unused"
+    assert body["gpu_share"] == 0.0
+    assert split["supported"] is True
+    assert split["gpu_share"] == 0.5
 
 
 def test_installing_the_chat_model_loads_it(monkeypatch):
