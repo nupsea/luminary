@@ -472,20 +472,23 @@ const liveTheme = EditorView.theme({
     color: "hsl(var(--muted-foreground))",
   },
   ".cm-md-block": {
-    margin: "4px 0",
+    margin: "6px 0",
     position: "relative",
     whiteSpace: "normal",
+    fontSize: "inherit",
   },
   ".cm-md-block .prose": {
     margin: "0 !important",
     maxWidth: "none !important",
+    fontSize: "inherit !important",
+    lineHeight: "1.65 !important",
   },
   ".cm-md-block .prose > *": {
-    marginTop: "0.25rem !important",
-    marginBottom: "0.25rem !important",
+    marginTop: "0.35rem !important",
+    marginBottom: "0.35rem !important",
   },
   ".cm-md-block figure": {
-    margin: "0.35rem 0 !important",
+    margin: "0.5rem 0 !important",
   },
   ".cm-line": {
     lineHeight: "1.65",
@@ -498,7 +501,7 @@ const liveTheme = EditorView.theme({
   ".cm-md-fence": { color: "hsl(var(--muted-foreground))", opacity: "0.55" },
   ".cm-md-table-line": {
     fontFamily: "var(--font-mono)",
-    fontSize: "0.90em",
+    fontSize: "0.92em",
     letterSpacing: "-0.01em",
     lineHeight: "1.5",
     backgroundColor: "hsl(var(--muted) / 0.25)",
@@ -506,7 +509,7 @@ const liveTheme = EditorView.theme({
   },
   ".cm-md-math-line": {
     fontFamily: "var(--font-mono)",
-    fontSize: "0.92em",
+    fontSize: "0.95em",
     backgroundColor: "hsl(var(--primary) / 0.05)",
     borderLeft: "2px solid hsl(var(--primary) / 0.5)",
     paddingLeft: "8px",
@@ -514,19 +517,19 @@ const liveTheme = EditorView.theme({
   ".cm-md-block img": { maxWidth: "100%", height: "auto" },
   ".cm-md-block table": {
     width: "auto",
-    minWidth: "min(100%, 320px)",
+    minWidth: "min(100%, 360px)",
     maxWidth: "100%",
     borderCollapse: "collapse",
-    margin: "4px 0",
-    fontSize: "0.875rem",
-    lineHeight: "1.35",
+    margin: "6px 0",
+    fontSize: "0.95em",
+    lineHeight: "1.45",
   },
   ".cm-md-block th": {
-    padding: "5px 10px",
+    padding: "6px 12px",
     backgroundColor: "hsl(var(--muted) / 0.6)",
     color: "hsl(var(--foreground))",
     fontWeight: "600",
-    fontSize: "0.75rem",
+    fontSize: "0.85em",
     textTransform: "uppercase",
     letterSpacing: "0.04em",
     border: "1px solid hsl(var(--border))",
@@ -534,16 +537,37 @@ const liveTheme = EditorView.theme({
     whiteSpace: "nowrap",
   },
   ".cm-md-block td": {
-    padding: "5px 10px",
+    padding: "6px 12px",
     border: "1px solid hsl(var(--border))",
     color: "hsl(var(--foreground) / 0.9)",
     verticalAlign: "top",
+    fontSize: "inherit",
   },
   ".cm-md-block tr:nth-child(even) td": {
     backgroundColor: "hsl(var(--muted) / 0.15)",
   },
   ".cm-md-block tr:hover td": {
     backgroundColor: "hsl(var(--accent) / 0.3)",
+  },
+  ".cm-md-block pre": {
+    fontFamily: "var(--font-mono) !important",
+    fontSize: "0.92em !important",
+    lineHeight: "1.6 !important",
+    padding: "0.85em 1.15em !important",
+    margin: "0.5rem 0 !important",
+    borderRadius: "0.5rem !important",
+  },
+  ".cm-md-block pre code": {
+    fontFamily: "var(--font-mono) !important",
+    fontSize: "inherit !important",
+    lineHeight: "inherit !important",
+  },
+  ".cm-md-block .katex-display": {
+    margin: "0.75rem 0 !important",
+    padding: "0.4rem 0",
+  },
+  ".cm-md-block .katex-display > .katex": {
+    fontSize: "1.25em !important",
   },
 })
 

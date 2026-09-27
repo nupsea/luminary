@@ -257,7 +257,7 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium",
       // One typeface throughout, as everywhere else in the app; the two body
       // modes differ by rhythm. Reading mode keeps prose's generous default
       // spacing, chat tightens it so an answer does not sprawl.
-      "prose prose-base dark:prose-invert max-w-none font-sans leading-relaxed text-foreground/90",
+      "prose prose-base dark:prose-invert max-w-none font-sans leading-relaxed text-foreground/90 [font-size:inherit]",
       "prose-headings:font-sans prose-headings:font-semibold prose-headings:tracking-tight",
       reading ? "" : "prose-p:my-3 prose-li:my-1 prose-ul:my-4 prose-ol:my-4",
       "prose-img:rounded-lg prose-img:shadow-md prose-img:mx-auto",

@@ -91,13 +91,13 @@ export interface MarkdownCodeEditorProps {
 
 import { usePanelZoomStore } from "@/store/panelZoomStore"
 
-export const DEFAULT_NOTE_FONT_SIZE = 12.5
+export const DEFAULT_NOTE_FONT_SIZE = 14
 
 // Colors come from the shadcn CSS variables so dark mode flips for free.
 const editorTheme = EditorView.theme({
   "&": { height: "100%", fontSize: `var(--note-editor-font-size, ${DEFAULT_NOTE_FONT_SIZE}px)`, backgroundColor: "transparent" },
   ".cm-scroller": {
-    fontFamily: "var(--font-mono)",
+    fontFamily: "var(--font-sans)",
     lineHeight: "1.65",
     overflow: "auto",
   },
@@ -172,16 +172,16 @@ const editorTheme = EditorView.theme({
 })
 
 const mdHighlight = HighlightStyle.define([
-  { tag: t.heading1, fontSize: "1.3em", fontWeight: "700" },
-  { tag: t.heading2, fontSize: "1.15em", fontWeight: "700" },
-  { tag: t.heading3, fontSize: "1.05em", fontWeight: "600" },
+  { tag: t.heading1, fontSize: "1.45em", fontWeight: "700" },
+  { tag: t.heading2, fontSize: "1.25em", fontWeight: "600" },
+  { tag: t.heading3, fontSize: "1.12em", fontWeight: "600" },
   { tag: t.heading, fontWeight: "600" },
   { tag: t.strong, fontWeight: "700" },
   { tag: t.emphasis, fontStyle: "italic" },
   { tag: t.strikethrough, textDecoration: "line-through" },
   { tag: t.link, color: "hsl(var(--primary))" },
   { tag: t.url, color: "hsl(var(--primary))", textDecoration: "underline" },
-  { tag: t.monospace, color: "hsl(var(--primary))" },
+  { tag: t.monospace, color: "hsl(var(--primary))", fontFamily: "var(--font-mono)", fontSize: "0.92em" },
   { tag: t.quote, color: "hsl(var(--muted-foreground))", fontStyle: "italic" },
   { tag: t.meta, color: "hsl(var(--muted-foreground))" },
   { tag: t.processingInstruction, color: "hsl(var(--muted-foreground))" },

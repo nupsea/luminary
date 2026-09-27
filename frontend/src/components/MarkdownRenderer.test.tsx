@@ -34,5 +34,23 @@ describe("MarkdownRenderer image resolution", () => {
     expect(html).toContain("katex")
     expect(html).toContain("katex-display")
   })
+
+  it("applies [font-size:inherit] class so container zoom cascades to child prose", () => {
+    const md = "Hello world paragraph"
+    const html = renderToStaticMarkup(<MarkdownRenderer>{md}</MarkdownRenderer>)
+
+    expect(html).toContain("[font-size:inherit]")
+  })
+
+  it("renders code blocks with pre and code tags without inline style pollution", () => {
+    const md = "```python\nimport time\ns = time.start()\n```"
+    const html = renderToStaticMarkup(<MarkdownRenderer>{md}</MarkdownRenderer>)
+
+    expect(html).toContain("<pre")
+    expect(html).toContain("<code")
+    expect(html).toContain("hljs-keyword")
+    expect(html).toContain("import")
+    expect(html).toContain("time")
+  })
 })
 

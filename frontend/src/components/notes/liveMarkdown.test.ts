@@ -82,3 +82,10 @@ describe("MarkdownRenderer table whitespace", () => {
     expect(html).toContain("Test item")
   })
 })
+
+describe("DEFAULT_NOTE_FONT_SIZE constant", () => {
+  it("is calibrated to standard 14px", async () => {
+    const { DEFAULT_NOTE_FONT_SIZE } = await import("./MarkdownCodeEditor")
+    expect(DEFAULT_NOTE_FONT_SIZE).toBe(14)
+  })
+})
