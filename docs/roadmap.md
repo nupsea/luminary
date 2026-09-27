@@ -102,7 +102,7 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail | #48 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
 | | 0.18.0 | Your own server. **Checkpoint C** | | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key |
 | IV. Separation | 0.19.0 | Components separated for mobile | | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
-| V. Mobile | 0.20.0 | Mobile reading and note capture. **Checkpoint D** | | A phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated |
+| V. Mobile | 0.20.0 | Topic notes and the draft inbox; mobile reading and note capture. **Checkpoint D** | #173 | A merge that leaves a source note out of every section is refused, a summary claim no source note supports is flagged, and undoing a merge restores every original; a phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated |
 | VI. Extras | 0.21.0 | Anki import; the capture extension, watch folder and Obsidian export; card review on mobile | #137, #124, #121, #25, #103, #26 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an offline review on the phone merges without overwriting FSRS state |
 | VII. Languages | 0.22.0 | Multi-language — **conditional** | | Non-English degradation measured on the current stack first; a swap ships only through 0.17.0's rail; a no-go decision is an allowed outcome and moves the swap to 1.1 |
 | | 1.0.0-rc → 1.0.0 | The release. **Checkpoint E** | | Zero open `bug` issues; every rung's exit gate green together, on one build; the code-quality targets met |
@@ -626,7 +626,24 @@ a third mode, not a fork.
 
 Desktop-only code stays in `luminary-host` and `src-tauri`, as today.
 
-### 9. Mobile reading and note capture — 0.20.0
+### 9. Topic notes, then mobile reading and note capture — 0.20.0
+
+**Topic notes land first (#173), because dictation on a phone turns every thought into a small
+draft.** A topic note is written from several short notes: a summary, then one section per subtopic.
+It is not a collection. A collection groups notes; a topic note is new content with a recorded source
+for every section. It depends on nothing cloud or mobile, so it can ship before the client.
+
+- **Merge once, then place.** The first merge builds the note. Later drafts go into the section they
+  belong to, and existing text is not rewritten unless the user asks. Re-summarising on every
+  addition rewords the last rewording until the user's own sentences are gone.
+- **A draft inbox.** New notes arrive as drafts, each with a suggested topic and section by embedding
+  distance. `clustering_service.py` proposes a new topic when loose drafts match none.
+- **Preview, and keep the originals.** Nothing saves until the before/after preview is accepted.
+  Source notes are archived, never deleted, and a merge can be undone. Links to a merged note resolve
+  to its section.
+- **Nothing lost, nothing invented** (`product-integrity.md`). Coverage is structural: a source note
+  no section claims fails the merge, as `RefineDroppedContentError` does for a dropped image. The
+  summary is checked against its source notes. Dictation fixes show as fixes.
 
 **A Tauri 2 mobile client for reading and notes, the two things done away from a desk.** Ingest and
 the models stay on the user's server or desktop. The phone talks to that server or to a paired
