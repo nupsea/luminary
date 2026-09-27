@@ -91,13 +91,18 @@ export interface MarkdownCodeEditorProps {
 
 import { usePanelZoomStore } from "@/store/panelZoomStore"
 
+export const DEFAULT_NOTE_FONT_SIZE = 12.5
+
 // Colors come from the shadcn CSS variables so dark mode flips for free.
 const editorTheme = EditorView.theme({
-  "&": { height: "100%", fontSize: "var(--note-editor-font-size, 14px)", backgroundColor: "transparent" },
+  "&": { height: "100%", fontSize: `var(--note-editor-font-size, ${DEFAULT_NOTE_FONT_SIZE}px)`, backgroundColor: "transparent" },
   ".cm-scroller": {
     fontFamily: "var(--font-mono)",
-    lineHeight: "1.7",
+    lineHeight: "1.65",
     overflow: "auto",
+  },
+  ".cm-line": {
+    lineHeight: "1.65",
   },
   ".cm-content": { padding: "16px 20px", caretColor: "hsl(var(--primary))" },
   "&.cm-focused": { outline: "none" },
@@ -242,8 +247,8 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
       view.dispatch({
         effects: fontSizeRoom.reconfigure(
           EditorView.theme({
-            "&": { fontSize: `${14 * noteEditorZoom}px` },
-            ".cm-scroller": { fontSize: `${14 * noteEditorZoom}px` },
+            "&": { fontSize: `${DEFAULT_NOTE_FONT_SIZE * noteEditorZoom}px` },
+            ".cm-scroller": { fontSize: `${DEFAULT_NOTE_FONT_SIZE * noteEditorZoom}px` },
           })
         ),
       })
@@ -264,8 +269,8 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
             editorTheme,
             fontSizeRoom.of(
               EditorView.theme({
-                "&": { fontSize: `${14 * noteEditorZoom}px` },
-                ".cm-scroller": { fontSize: `${14 * noteEditorZoom}px` },
+                "&": { fontSize: `${DEFAULT_NOTE_FONT_SIZE * noteEditorZoom}px` },
+                ".cm-scroller": { fontSize: `${DEFAULT_NOTE_FONT_SIZE * noteEditorZoom}px` },
               })
             ),
             liveRoom.of(live ? liveExtension() : []),
@@ -525,7 +530,7 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
       <div
         ref={hostRef}
         data-zoom-panel="note-editor"
-        style={{ "--note-editor-font-size": `${14 * noteEditorZoom}px` } as React.CSSProperties}
+        style={{ "--note-editor-font-size": `${DEFAULT_NOTE_FONT_SIZE * noteEditorZoom}px` } as React.CSSProperties}
         className={className}
       />
     )

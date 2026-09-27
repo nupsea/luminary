@@ -488,15 +488,7 @@ const liveTheme = EditorView.theme({
     margin: "0.35rem 0 !important",
   },
   ".cm-line": {
-    lineHeight: "1.5",
-  },
-  ".cm-line:empty, .cm-line:has(> br:only-child)": {
-    height: "0.75rem",
-    lineHeight: "0.75rem",
-  },
-  ".cm-line:empty + .cm-line:empty, .cm-line:has(> br:only-child) + .cm-line:has(> br:only-child)": {
-    height: "0.25rem",
-    lineHeight: "0.25rem",
+    lineHeight: "1.65",
   },
   ".cm-md-code": {
     fontFamily: "var(--font-mono)",

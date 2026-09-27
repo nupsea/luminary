@@ -249,7 +249,7 @@ export function MarkdownSplitEditor({
   const previewPane = (
     <div
       data-zoom-panel="note-preview"
-      style={{ fontSize: `${notePreviewZoom}rem` }}
+      style={{ fontSize: `${notePreviewZoom * 0.95}rem` }}
       className="flex min-h-0 flex-1 flex-col gap-2"
     >
       {layout === "splitter" && (
