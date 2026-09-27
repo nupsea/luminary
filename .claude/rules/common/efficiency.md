@@ -12,4 +12,3 @@ reading less.** Targeted line ranges, not skipped reads.
 - **Check for a redundant helper before adding one.** Grep for the pattern; this codebase has
   accumulated near-duplicate utilities that way.
 - Don't ask about anything already settled in `docs/architecture.md` or `docs/invariants.md`.
-- Never open `frontend/src/types/api.ts` (18k generated lines). Grep it for a type name.

@@ -869,5 +869,5 @@ follow from one or both.
 
 The cost of that is complexity a single-store RAG demo does not carry, and the thing that
 keeps it navigable is mechanical enforcement rather than discipline: the layer linter, the
-38 invariants, the surface manifest and the eval floors are all gates a change has to pass
+invariants, the surface manifest and the eval floors are all gates a change has to pass
 rather than conventions it can drift from.
