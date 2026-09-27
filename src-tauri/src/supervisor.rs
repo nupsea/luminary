@@ -643,6 +643,8 @@ fn base_env(cmd: &mut Command) -> &mut Command {
         }
     }
     cmd.env("PATH", SYSTEM_PATH.join(PATH_SEPARATOR));
+    // Ollama is Go and reads only these, never the registry (#155).
+    cmd.envs(luminary_host::proxy_env());
     luminary_host::before_spawn(cmd)
 }
 

@@ -32,6 +32,15 @@ mod sys;
 
 pub use sys::{alive, executable_of, free_space, total_memory_bytes};
 
+mod proxy;
+pub use proxy::SystemProxy;
+
+/// Proxy variables for a child whose environment was cleared (#155): the
+/// shell's own `*_PROXY`, else the Windows system proxy, loopback exempt.
+pub fn proxy_env() -> Vec<(String, String)> {
+    proxy::proxy_env(|name| std::env::var(name).ok(), sys::system_proxy())
+}
+
 /// One child and everything it spawns, as something that can be ended at once.
 ///
 /// Dropping this on Windows closes the job handle, which kills the tree. That
