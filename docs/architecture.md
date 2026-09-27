@@ -4,6 +4,9 @@ description: Luminary architecture overview -- always loaded. Read before making
 
 # Luminary Architecture
 
+**The default path is local.** A fresh install works with no account, no key and no network; every
+cloud provider is an opt-in alternative to a local path that already exists (was I-16).
+
 ## Six-Layer Import Rule
 
 ```

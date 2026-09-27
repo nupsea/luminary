@@ -17,7 +17,7 @@ separately.
 
 - Delete dead code, unused helpers, parameters and flags the diff made obsolete.
 - Fold duplicates: grep for a helper before keeping a second one.
-- A function that grew past one screen during the feature gets split or simplified.
+- A function past 120 lines gets split or simplified (the ratchet in `docs/roadmap.md`, "Code quality to 1.0").
 - No behaviour change in the cleanup commit. `make ci` green before and after.
 
 The cleanup is scoped to what the feature touched. It is not licence to refactor unrelated code.

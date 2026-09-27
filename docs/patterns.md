@@ -16,6 +16,9 @@ Patterns discovered through completed stories. Read before implementing new feat
 
 ## Stores and imports
 
+- **AsyncSession** is not safe for concurrent use: never share one across `asyncio.gather` tasks. Give each task its own session, or serialise with `Semaphore(1)` (was I-1).
+- **FTS5 UNINDEXED columns** are unreliable for equality on a large table. Read through the content shadow table (`notes_fts_content WHERE c1 = :nid`; columns follow CREATE order) and delete by rowid (was I-4).
+- **List fields from a model** can arrive nested (`[["a", "b"]]`). Flatten one level and stringify where the value enters, never inventing one, because the schema that rejects it fails the whole batch (`_string_list`; was I-42).
 - **Kuzu results**: `get_next()` raises when no row exists; call `has_next()` first on every iteration.
 - **Circular imports**: break a cycle with a lazy import inside the function (`from app.runtime.X import fn  # noqa: PLC0415`); tests then patch `app.runtime.X.fn`, not the call site.
 - **Settings**: import `get_settings` at module level in services, never lazily and never under a bare `except`, so the patch target stays predictable.
