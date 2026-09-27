@@ -231,3 +231,8 @@ pub fn total_memory_bytes() -> Option<u64> {
     };
     (pages > 0 && page_size > 0).then(|| pages as u64 * page_size as u64)
 }
+
+/// Only Windows keeps a system proxy the children cannot read themselves.
+pub fn system_proxy() -> Option<crate::proxy::SystemProxy> {
+    None
+}

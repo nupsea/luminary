@@ -52,7 +52,10 @@ CORS nor `TrustedHostMiddleware` needs relaxing — a webview on
   collide with a user's own Ollama on 11434 or an older Luminary on 7820.
 - **Both children start from `env_clear()`**, so a user's `DYLD_*`, `PYTHON*` or
   `VIRTUAL_ENV` cannot reach them. `PATH` is rebuilt to include
-  `<stage>/python/bin`, which is where `yt-dlp` lives.
+  `<stage>/python/bin`, which is where `yt-dlp` lives. Proxy variables are added back
+  (`luminary_host::proxy_env`): the shell's own `*_PROXY`, else the Windows system proxy,
+  with loopback in `NO_PROXY`. Ollama is Go and reads nothing else, so without them a model
+  pull fails on a proxied network (#155).
 - **Both pipes are drained.** An undrained pipe fills its 64KB buffer and blocks
   the child on its next write; uvicorn logs to stderr, so piping stderr without
   a reader wedges the backend seconds into startup.
