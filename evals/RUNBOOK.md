@@ -99,8 +99,9 @@ make eval-matrix MODELS=... ARM=bare
 
 It also flags any task whose every metric came out identical on both models — two models do not
 score the same to full precision on work that depends on them, so an identical task measured
-something else (the summary task did exactly this until `--force-refresh` was added: `/summarize`
-replays the stored summary, which belongs to whichever model wrote it first).
+something else (the summary task did exactly this while `/summarize` replayed the stored summary,
+which belongs to whichever model wrote it first; `run_summary_eval.py` now regenerates and refuses
+any summary the stream does not report as `generated`).
 
 The matrix refuses to run when the backend's arm is not the one asked for — a matrix that mixes
 arms measures neither. Same for the necessity check, one accommodation at a time:

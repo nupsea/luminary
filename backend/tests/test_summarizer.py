@@ -398,6 +398,76 @@ async def test_force_refresh_bypasses_cache(test_db):
     assert done_payload.get("cached") is False
 
 
+class _ServedStream:
+    """A token stream that, like `TokenStream`, knows which model served it."""
+
+    def __init__(self, tokens: list[str], model: str) -> None:
+        self.model = model
+        self._tokens = tokens
+
+    async def _gen(self):
+        for t in self._tokens:
+            yield t
+
+    def __aiter__(self):
+        return self._gen()
+
+
+class _ServedLLMService(_MockLLMService):
+    async def generate(self, prompt: str, system: str = "", stream: bool = False, **kwargs):
+        self.call_count += 1
+        return _ServedStream(self._tokens, "ollama/served-model") if stream else self._response
+
+
+def _done(events: list[str]) -> dict:
+    return json.loads(events[-1][len("data: ") :])
+
+
+@pytest.mark.asyncio
+async def test_done_event_says_whether_a_model_wrote_the_summary(test_db):
+    """The summary eval credits a model only with a `generated` summary; a replay
+    must say `cached` and a regeneration must name the model that served it (#154)."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["text here"], [5])
+
+    with patch("app.services.summarizer.get_llm_service", return_value=_ServedLLMService()):
+        svc = SummarizationService()
+        first = [e async for e in svc.stream_summary(doc_id, "executive", None)]
+        replay = [e async for e in svc.stream_summary(doc_id, "executive", None)]
+        refresh = [
+            e async for e in svc.stream_summary(doc_id, "executive", None, force_refresh=True)
+        ]
+
+    assert _done(first)["source"] == "generated"
+    assert _done(replay)["source"] == "cached"
+    assert _done(refresh)["source"] == "generated"
+    assert _done(refresh)["model"] == "ollama/served-model"
+
+
+@pytest.mark.asyncio
+async def test_a_refreshed_detailed_summary_is_assembled_not_generated(test_db):
+    """`detailed` is stitched from ingest-time section summaries even on refresh, so
+    it must not report itself as written by the model the caller asked for."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["doc body"], [5])
+    await _insert_section_summaries(factory, doc_id, _CHAPTERED)
+    mock_llm = _ServedLLMService()
+
+    with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
+        events = [
+            e
+            async for e in SummarizationService().stream_summary(
+                doc_id, "detailed", "ollama/asked-for", force_refresh=True
+            )
+        ]
+
+    assert mock_llm.call_count == 0
+    assert _done(events)["source"] == "assembled"
+    assert "model" not in _done(events)
+
+
 async def _insert_section_summaries(factory, doc_id, sections):
     async with factory() as session:
         for idx, (heading, content) in enumerate(sections):

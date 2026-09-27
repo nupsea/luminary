@@ -19,7 +19,7 @@ whatever retrieval returned.
 | Generation | `make eval-gen` — faithfulness, answer relevance, citation support, citation coverage, answer rate | book, paper | yes |
 | Intent routing | `make eval-intent` — routing accuracy, per-route P/R | `golden/intents.jsonl` 50 rows (gated) + `intents_adversarial.jsonl` 29 rows (report-only) | yes / report-only |
 | Topics | `make eval-topics` | d2l | yes |
-| Summaries | `make eval-summary` — theme coverage, grounding (HHEM), conciseness, hallucination | `golden/summaries.jsonl` | yes |
+| Summaries | `make eval-summary` — theme coverage, grounding (HHEM), conciseness, hallucination. Regenerates each summary and fails any row the stream does not report as `generated`; `MODE=detailed` is assembled from section summaries, so it runs only with `SCORE_STORED=1` and is filed as `stored`, never under a model | `golden/summaries.jsonl` | yes |
 | Flashcards | `make eval-flashcards` — generation rate, repairs, factuality/atomicity/clarity | `golden/flashcards.jsonl`, 35 rows over 5 content types | yes |
 | Corpus routing | `make eval-routing` — route@1, route@5, unscoped HR@5 | book, paper, legal, play, study | baseline only, no floor |
 | Chat-graph routing | `make eval-chat-routing` — generation quality (citation support/coverage) through `/qa`, not `/search` | `golden/retrieval_and_memory_tutorial.jsonl`, 45 rows, one document | report-only, see below |

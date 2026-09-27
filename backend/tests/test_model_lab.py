@@ -53,11 +53,11 @@ def test_a_qa_stage_exists_per_dataset_rather_than_one_pooled_run():
 
 
 def test_summaries_are_regenerated_not_replayed():
-    """`POST /summarize/{id}` returns the stored summary unless asked to refresh,
-    so without this the stage scores whichever model wrote it first."""
+    """`run_summary_eval.py` regenerates unless told `--score-stored`, which scores
+    whichever model wrote the stored summary first."""
     catalogue = model_lab.task_catalogue("http://x", qa_datasets=[], max_questions=None)
 
-    assert "--force-refresh" in catalogue["summary"].argv
+    assert "--score-stored" not in catalogue["summary"].argv
 
 
 def test_stages_that_write_to_the_library_say_so():

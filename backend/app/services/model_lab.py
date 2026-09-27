@@ -140,7 +140,6 @@ def task_catalogue(
                 "--mode",
                 "executive",
                 "--skip-judge",
-                "--force-refresh",
                 "--backend-url",
                 backend_url,
             ),

@@ -700,12 +700,14 @@ class SummarizationService:
         Only falls back to LLM generation when no cached version exists, then
         stores the result so subsequent calls are instant.
 
-        force_refresh=True skips the cache lookup and re-generates via LLM,
-        overwriting the stored summary.
+        force_refresh=True skips the cache lookup and overwrites the stored
+        summary. `detailed` is still assembled from section summaries, so a
+        refresh is not an LLM call; the done event's `source` says which it was.
 
         Yields:
             ``data: {"token": "..."}\\n\\n``  — one word at a time
-            ``data: {"done": true, "summary_id": "..."}\\n\\n``  — final event
+            ``data: {"done": true, "summary_id": "...", "source": "..."}\\n\\n``  — final
+            event; source is cached|assembled|generated, and `generated` names the `model`
             ``data: {"error": "llm_unavailable", ...}\\n\\n``  — on LLM failure
         """
         try:
@@ -717,7 +719,12 @@ class SummarizationService:
                 )
                 # Send full content in a single event — no word-by-word drip
                 yield f"data: {json.dumps({'token': cached.content})}\n\n"
-                done_evt = {"done": True, "summary_id": cached.id, "cached": True}
+                done_evt = {
+                    "done": True,
+                    "summary_id": cached.id,
+                    "cached": True,
+                    "source": "cached",
+                }
                 yield f"data: {json.dumps(done_evt)}\n\n"
                 return
 
@@ -742,22 +749,26 @@ class SummarizationService:
                 # branch streams, so the summary is sent as one event exactly as
                 # the cache path above does.
                 assembled = await self.build_assembled_summary(document_id, mode)
-                text = (
-                    assembled
-                    if assembled is not None
-                    else (
-                        section_input
-                        if section_input is not None
-                        else await self._generate_detailed(
-                            _truncate_to_budget(input_text),
-                            model,
-                            await self._fetch_profile(document_id),
-                        )
+                source = "assembled"
+                if assembled is not None:
+                    text = assembled
+                elif section_input is not None:
+                    text = section_input
+                else:
+                    text = await self._generate_detailed(
+                        _truncate_to_budget(input_text),
+                        model,
+                        await self._fetch_profile(document_id),
                     )
-                )
+                    source = "generated"
                 summary_id = await self._store_summary(document_id, mode, text)
                 yield f"data: {json.dumps({'token': text})}\n\n"
-                done_evt = {"done": True, "summary_id": summary_id, "cached": False}
+                done_evt = {
+                    "done": True,
+                    "summary_id": summary_id,
+                    "cached": False,
+                    "source": source,
+                }
                 yield f"data: {json.dumps(done_evt)}\n\n"
                 return
 
@@ -768,7 +779,12 @@ class SummarizationService:
                 if assembled_exec is not None:
                     summary_id = await self._store_summary(document_id, mode, assembled_exec)
                     yield f"data: {json.dumps({'token': assembled_exec})}\n\n"
-                    done_evt = {"done": True, "summary_id": summary_id, "cached": False}
+                    done_evt = {
+                        "done": True,
+                        "summary_id": summary_id,
+                        "cached": False,
+                        "source": "assembled",
+                    }
                     yield f"data: {json.dumps(done_evt)}\n\n"
                     return
 
@@ -789,7 +805,14 @@ class SummarizationService:
 
             summary_text = "".join(collected)
             summary_id = await self._store_summary(document_id, mode, summary_text)
-            done_evt = {"done": True, "summary_id": summary_id, "cached": False}
+            done_evt = {
+                "done": True,
+                "summary_id": summary_id,
+                "cached": False,
+                "source": "generated",
+                # Read after the stream: an offline fallback changes who wrote it.
+                "model": getattr(token_stream, "model", None),
+            }
             yield f"data: {json.dumps(done_evt)}\n\n"
 
         except Exception as exc:

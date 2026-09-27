@@ -631,7 +631,8 @@ eval-summary:
 	@echo "Summary eval (mode=$(or $(MODE),executive))..."
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_summary_eval.py \
 		--mode $(or $(MODE),executive) --backend-url $(BACKEND_URL) \
-		--judge-model $(EVAL_TEXT_MODEL) $(if $(SKIP_JUDGE),--skip-judge,) --assert-thresholds
+		--judge-model $(EVAL_TEXT_MODEL) $(if $(SKIP_JUDGE),--skip-judge,) \
+		$(if $(SCORE_STORED),--score-stored,) --assert-thresholds
 
 # Everything, in the order the stages constrain each other: ingestion is the
 # ceiling on retrieval, retrieval is the ceiling on generation. Running them in
