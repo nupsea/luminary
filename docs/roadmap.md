@@ -700,7 +700,9 @@ gate green together on one build. 1.0.0 is that build with no new features.
 **Debt is paid down along the ladder, not in a phase of its own.** Each rung's first PR refactors
 what that rung is about to change, with no behaviour change, `make ci` green before and after, and
 existing tests as the net (characterization tests first where they are thin). Nothing is split for
-size alone. **Ratchets** stop new debt landing meanwhile: each check is baselined on today's numbers
+size alone. **Work lands in batches of a few PRs, and each batch stops for a manual test
+pass** on the app before the next one starts: the suite cannot see what a refactor did to a
+screen, and a regression found after five more PRs is five times harder to place. **Ratchets** stop new debt landing meanwhile: each check is baselined on today's numbers
 in `make ci` and may only shrink, as `KNOWN_VIOLATIONS` already does in `layer_linter.py`.
 
 Measured 2026-09-27 on `master` (`5e8cb41e`). The targets follow the usual external bars: McCabe's
