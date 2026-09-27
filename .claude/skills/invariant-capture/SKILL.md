@@ -42,12 +42,12 @@ or an existing test already catches. Those are commits, not invariants.
    cargo cult and gets worked around the first time it is inconvenient.
 
 4. **Write the entry** at the end of `docs/invariants.md` under the right heading, taking the
-   next `I-<n>`. Four parts, in this order:
+   next `I-<n>`. Three parts, in this order, in about 80 words:
 
    - **Bold one-line rule.** Imperative and absolute. `**I-32. <rule>.**`
-   - **The incident**, with measured numbers and what they were measured on. "Measured: a 2ms
-     `/tags/graph` took 8.5s sitting behind one all-library traversal."
-   - **The mechanism** — why the system makes this inevitable.
+   - **The mechanism** — why the system makes this inevitable, with at most one decisive
+     measured number, and the two cases that bracket any threshold. The full incident goes in
+     the commit message, not the entry.
    - **The named test**: "`tests/test_x.py` fails CI if …"
 
 5. **Name the test inside the invariant text.** This is the convention that makes this file work.
@@ -56,8 +56,8 @@ or an existing test already catches. Those are commits, not invariants.
    suggestion — and I-13/I-14 spent months naming a `passes=true` flag and a reviewer that never
    existed, which is worse than no gate at all, because it was unfalsifiable.
 
-6. **Update the count** in `.claude/rules/common/invariants.md` and add a `docs/` cross-reference
-   if a longer design doc covers the area.
+6. **Add a `docs/` cross-reference** if a longer design doc covers the area. Never state the
+   count of invariants anywhere; counts in prose drift.
 
 7. **`make ci`** — the new test has to pass with the fix in place.
 
@@ -65,7 +65,7 @@ or an existing test already catches. Those are commits, not invariants.
 
 Follow the `project-docs` skill. Specifically here: state what is true now, never narrate the
 investigation ("we found", "it turned out", "originally"). Bold the rule, not every clause.
-Keep the measured numbers — they are what make the entry persuasive two years from now.
+Keep the one number that makes the rule persuasive; the rest belongs in the commit.
 
 ## Superseding one
 
