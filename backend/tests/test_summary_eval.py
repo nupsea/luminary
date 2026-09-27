@@ -16,6 +16,11 @@ from evals.lib.summary_metrics import (  # noqa: E402
     compute_no_hallucination,
     compute_theme_coverage,
 )
+from evals.run_summary_eval import (  # noqa: E402
+    FetchedSummary,
+    parse_summary_stream,
+    summary_author,
+)
 
 
 def test_theme_coverage_counts_keyword_groups():
@@ -54,3 +59,39 @@ def test_summary_history_persists_metrics(tmp_path):
     assert row["theme_coverage"] == 0.8
     assert row["no_hallucination"] == 0.9
     assert row["conciseness_pct"] == 1.1
+
+
+def test_the_done_event_carries_source_and_serving_model():
+    body = (
+        'data: {"token": "A short "}\n\n'
+        'data: {"token": "summary."}\n\n'
+        'data: {"done": true, "cached": false, "source": "generated", "model": "ollama/m"}\n\n'
+    )
+    fetched = parse_summary_stream(body)
+    assert fetched == FetchedSummary("A short summary.", "generated", "ollama/m")
+
+
+def _gen(model: str | None = None) -> FetchedSummary:
+    return FetchedSummary("text", "generated", model)
+
+
+def test_a_replayed_or_assembled_summary_is_credited_to_no_model():
+    """#154: scoring a stored summary filed the row under the judge model."""
+    for source in ("cached", "assembled", None):
+        stale = FetchedSummary("text", source, None)
+        assert summary_author([_gen("ollama/a"), stale], "ollama/a", "ollama/a") is None
+
+
+def test_a_generated_summary_is_credited_to_the_model_that_served_it():
+    assert summary_author([_gen("ollama/served")], "ollama/asked", "ollama/chat") == (
+        "ollama/served"
+    )
+    # A backend that could not name the server: the requested model, else the route's.
+    assert summary_author([_gen()], "ollama/asked", "ollama/chat") == "ollama/asked"
+    assert summary_author([_gen()], None, "ollama/chat") == "ollama/chat"
+    assert summary_author([_gen()], None, None) is None
+
+
+def test_summaries_written_by_two_models_name_no_single_author():
+    """A fallback mid-run means the row describes neither model."""
+    assert summary_author([_gen("ollama/a"), _gen("ollama/b")], None, "ollama/a") is None

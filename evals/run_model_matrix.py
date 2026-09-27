@@ -158,7 +158,6 @@ def _tasks(backend_url: str, judge_model: str = "") -> dict[str, Task]:
                 "run_summary_eval.py",
                 "--mode", "executive",
                 "--skip-judge",
-                "--force-refresh",
                 "--backend-url", backend_url,
             ),
             note="deterministic half, regenerated: a stored summary scores the model that wrote it",
