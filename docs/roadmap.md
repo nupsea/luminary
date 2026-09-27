@@ -28,7 +28,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 
 | Capability | Where its contract lives |
 |---|---|
-| Frontend lint as a CI gate, `apiClient` used everywhere | `Makefile` `ci` target, `frontend/eslint.config.js` |
+| Frontend lint as a CI gate | `Makefile` `ci` target, `frontend/eslint.config.js` |
 | Six-layer architecture, stores, surface modes | `architecture.md` |
 | The 43 hard invariants | `invariants.md` |
 | Backend implementation patterns | `patterns.md` |
@@ -63,53 +63,49 @@ adequately described by `architecture.md` plus the code. Their specs were delete
 **1.0.0 is a major public release, reached through a ladder of minor versions.** Each rung carries
 one theme, one exit gate that can come out red, and leaves the app whole if the rung after it never
 ships. Patch numbers are release plumbing here — 0.8.0 to 0.8.28 took one day — so the minor is the
-planning unit.
+planning unit. Rung numbers are ordering, not commitments; several will split once scoped.
 
-Rung numbers are ordering, not commitments. Several will split once scoped.
+**1.0 is a production-grade local-first app on every host, that the user can also run on their own
+server and read from their phone.** The ladder runs stability, then cloud readiness, then component
+separation, then the mobile client, then Anki and the extras, then languages. Decided 2026-09-27:
 
-**1.0 is a production-grade local-first app on every host, reachable from the user's other
-devices.** Stability and architecture rungs come before feature rungs; a feature that only
-decorates the first run waits until after 1.0. Your own server, sync, mobile, Anki import and the
-encoder work are on the ladder, not after it.
+| Decision | Consequence |
+|---|---|
+| Cloud in 1.0 is **self-hosting**: each user runs their own server, with device-token auth and their own API key | A paid hosted multi-tenant version follows 1.0. 0.17.0 builds the seams it needs now, so that work starts with negligible debt |
+| Mobile data comes **from the server, with an offline cache**: the phone talks to the user's server or a paired desktop, and keeps a local cache and an outbox for offline writes | Sync through storage the user controls (iCloud, Dropbox) is after 1.0 (Deferred) |
+| The mobile client is **Tauri 2 mobile**, reusing the React + Vite frontend | `frontend/src` imports nothing from `@tauri-apps`, so separation (0.19.0) is a refactor rather than a rewrite |
+| **Pairing is built now, the capture extension later** | Device auth lands in 0.16.0; the extension moves to 0.21.0 |
+
+**One authentication mechanism, built in 0.16.0, serves your own server, mobile and the capture
+extension.** Building it per consumer produces three trust models that disagree.
 
 Feature rungs land on a suite with a live quarantine, so **a rung ships its smoke scripts with its
-endpoints (`CLAUDE.md`) and adds nothing to the quarantine**. The quarantine grew once — 22 to 23 markers
-on 2026-09-18 (`fcfb4e5d`, a `POST /notes` case in `test_S201.py`) — so the gates rung moved up
-the ladder, ahead of capture, as this rule said it would.
+endpoints (`CLAUDE.md`) and adds nothing to the quarantine**. The quarantine grew once — 22 to 23
+markers on 2026-09-18 (`fcfb4e5d`, a `POST /notes` case in `test_S201.py`) — which is why the gates
+rung sits ahead of every feature rung.
 
-Every rung that lands after 0.13.0 adds surface to a Windows and a Linux build that already work;
-every rung that lands before it adds surface to fix later, on platforms no CI runner exercises.
-
-**One authentication mechanism, built in 0.16.0, serves capture, your own server and mobile.**
-Building it per consumer produces three trust models that disagree.
-
-The ladder runs in five phases. The last rung of each phase is a **checkpoint release** (below):
-the whole product is measured on one build, not only the rung that just landed. The issues listed
-against a rung are the ones its exit gate cannot pass without.
+The last rung of each phase is a **checkpoint release** (below): the whole product is measured on
+one build, not only the rung that just landed. The issues listed against a rung are the ones its
+exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 
 | Phase | Rung | Theme | Issues | Exit gate |
 |---|---|---|---|---|
 | — | 0.10.0 | Smart Hybrid, and the privacy receipt — **shipped** | | Time to first token measured on both arms from a cold install and reported as a pair; a test proves that only the question and its packed passages leave the machine |
 | — | 0.11.0 | The docked reader — **shipped** | | A passage captured in the reader resolves back to its locus for page, video and web; no modal opens from the reader |
 | — | 0.12.0 | The Brief — **parked** | | None; no rung waits on it |
-| I. Every host | 0.13.0 | Every host is a first-class host — **0.13.8 released from `master`; exit gate open** (`make smoke` on Windows, Linux hardware). **Checkpoint A** | #139, #24, #99, #79 (merges with it) | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator |
-| II. Stability | 0.14.0 | Gates you can believe | #50, #101, #88, #110 | `make ci` and `make smoke` both green, nothing quarantined to keep them so |
-| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it |
-| III. Reach | 0.16.0 | Capture, and device pairing | | Three source types round-trip from the browser to a readable document; an unpaired origin or a revoked device is refused |
-| | 0.17.0 | The re-embed rail | | A full re-embed of a real library runs to completion, survives being killed, and resumes |
+| I. Every host | 0.13.x | Every host is a first-class host — **0.13.9 released; exit gate open.** **Checkpoint A** | #24, #99, #110, #154, #155, #156 | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator; `make smoke` green on Windows and against the bundled macOS app |
+| II. Stability | 0.14.0 | Gates you can believe | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so |
+| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #160, #161, #162 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
+| III. Cloud readiness | 0.16.0 | Device auth and pairing | | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
+| | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail | #48 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
 | | 0.18.0 | Your own server. **Checkpoint C** | | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key |
-| IV. Other devices | 0.19.0 | Sync through storage the user controls | | Two machines that reviewed the same deck offline converge with every review from both kept; a snapshot copied mid-write is refused on open |
-| | 0.20.0 | Mobile capture and review. **Checkpoint D** | | A phone reviews cards and takes notes with no connection, and both reach the library on reconnect with no review lost |
-| V. Breadth | 0.21.0 | Anki import | | No imported card shows a grounding verdict it did not earn; its schedule comes from FSRS state, not copied SM-2 intervals |
-| | 0.22.0 | Encoders and languages | | Non-English retrieval degradation measured on the current stack before any swap; a swap ships only through 0.17.0's rail |
-| | 1.0.0-rc | The release candidate. **Checkpoint E** | | The checkpoint gate, green on the candidate build |
-| | 1.0.0 | The public release | | Every rung's exit gate green together, on one build |
+| IV. Separation | 0.19.0 | Components separated for mobile | | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
+| V. Mobile | 0.20.0 | Mobile reading and note capture. **Checkpoint D** | | A phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated |
+| VI. Extras | 0.21.0 | Anki import; the capture extension, watch folder and Obsidian export; card review on mobile | #137, #124, #121, #25, #103, #26 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an offline review on the phone merges without overwriting FSRS state |
+| VII. Languages | 0.22.0 | Multi-language — **conditional** | | Non-English degradation measured on the current stack first; a swap ships only through 0.17.0's rail; a no-go decision is an allowed outcome and moves the swap to 1.1 |
+| | 1.0.0-rc → 1.0.0 | The release. **Checkpoint E** | | Zero open `bug` issues; every rung's exit gate green together, on one build |
 
-**1.0.0 itself carries no new features.** Work not on a rung above is 1.1, not 1.0. The open
-issues not on a rung are 1.1 unless a rung pulls them in: PDF math as LaTeX (#137), figure-caption
-quality (#124), nugget recall for answers (#121), Hub approximations (#103), parent-document
-retrieval (#25), model-change configurability (#48), and a copy-link button for notes (#26, a
-good first issue that can land at any time).
+**1.0.0 itself carries no new features.** Work not on a rung above is 1.1, not 1.0.
 
 ### Checkpoint releases
 
@@ -146,7 +142,7 @@ support is only quotable beside a near-copy rate. The suggested questions are #6
 `SuggestionService.get_grounding_passages` prefers `SectionSummaryModel.content`, so each question
 must be generated from chunk text and validated by retrieval before it ships.
 
-### 2. Every host is a first-class host — 0.13.0
+### 2. Every host is a first-class host — 0.13.x
 
 A public 1.0 that runs on one operating system is a beta with a version number. The macOS bundle is
 signed and notarized; Windows is #24 and Linux has no bundle at all. This rung is what makes the
@@ -343,23 +339,23 @@ learner record stay local in every mode and are reported as such by `llm_routing
 hosted embedder is a full re-embed behind I-9, not a setting, and routing extraction or reranking to a
 provider would put document text rather than a question on the wire.
 
-**Still open after 0.13.1** (0.13.1 carried reader and keychain fixes only; 0.13.0 shipped with the
-Linux T4 first run, `make ci`, `verify-dock` and `verify-citation` green; these were not run or not
-fixed):
+**Still open in Phase I.** 0.13.0 shipped with the Linux T4 first run, `make ci`, `verify-dock`
+and `verify-citation` green. Not yet run:
 
-- A first run of the 0.13.0 installer on a real Windows machine, and `make smoke` there. CI installs
-  it, ingests and searches (`desktop-installers.yml`); nothing has run the app past that.
-- `make smoke` against the bundled macOS app, and the 0.13.0 DMG on a cleared data directory.
-- Evals: `eval-ingest` reports a document this database lacks as "no chunks stored"
-  (`evals/run_ingest_eval.py:115`); `eval-summary` replays stored summaries unless asked to refresh
-  (`evals/run_summary_eval.py`, the `eval-summary` target); the flashcard judge's atomicity read
-  1.0000 unverified, and a factuality outside its enum raises (`evals/lib/flashcard_metrics.py:189`).
-- Flashcard factuality 0.78 and clarity 2.88, under their floors; predates 0.13.0, a product project.
-- Ask answers a question whose premise the text does not hold with a bare "not found" (the Odyssey:
-  "Mercury's plan" is Jove's), though the passage that corrects it was retrieved.
-- Web articles keep Wikipedia's `[edit]` links in the chunk text.
-- YouTube ingest unverified this release: YouTube refused the test machine as a bot, and the Linux
-  box has no ffmpeg.
+- A first run of the installer on a real Windows machine past what CI does (install, ingest,
+  search in `desktop-installers.yml`), and `make smoke` there.
+- `make smoke` against the bundled macOS app, and the DMG on a cleared data directory.
+- #110: a route chunk can fail to load in the packaged app, cause unknown. The bundled backend logs
+  no request status or latency, so the next occurrence could not be diagnosed either. That logging
+  comes first.
+
+Defects that were written here have moved to the tracker: `eval-summary` scoring a stored summary
+(#154), the Windows proxy for model pulls (#155) and split GPU/CPU offload (#156) belong to this
+phase. The false-premise answer (#158), Wikipedia `[edit]` links (#159), flashcard floors (#160)
+and YouTube verification (#162) belong to 0.15.0. Three instrument defects listed here were fixed
+on `master` before the move: `eval-ingest` re-resolves a document by filename (#143), atomicity is
+structural (`is_atomic`), and a judge verdict outside its enum is excluded rather than crashing
+the run.
 
 **0.13.2: one-command installs on Windows and Linux** (on `feat/windows-linux-release`). The aim
 for 1.0 is reach: any recent Windows or Linux machine either runs well or is told before the
@@ -445,9 +441,7 @@ download (I-59). Verified on AWS Windows Server 2022, m6i.xlarge with no GPU, be
 its CA in the machine store and set as the Windows proxy: 0.13.3 reproduced the laptop's screen;
 0.13.4 over it downloaded the embedder, installed both optional encoders, ingested a web article and
 an arXiv PDF by URL, reached OpenAI in Hybrid mode, opened the problem report in Notepad, and kept
-loopback off the proxy. Smoke there: 120 pass, 0 fail, 57 skip. Open: Ollama is Go and ignores the
-Windows system proxy, so a model pull needs a transparent proxy or `HTTPS_PROXY` (no effect on a
-refused host, which pulls nothing); PAC-file proxies are not read.
+loopback off the proxy. Smoke there: 120 pass, Open: Ollama ignores the Windows system proxy, and PAC files are not read (#155).ies are not read.
 
 **0.13.5–0.13.7: a driver is not a usable card (I-60).** Verified on AWS g4dn.xlarge, Windows Server
 2022, T4 with the AWS GRID driver (WDDM), no proxy, installed by the one-command installer. Card
@@ -459,8 +453,8 @@ disabled with the driver left on disk: warm-up measured 0 B on the card, refused
 unloaded the model and showed the banner in the same session; questions, cards and teach-back were
 refused with the key message, while reading, search, reviews and a new ingest worked, and Hybrid with
 a bad key said so. Installing the CUDA runner cleared the verdict and the next launch measured again.
-Open: a model split between card and processor is not refused; no consumer laptop GPU, Intel or AMD
-integrated graphics, or Linux host has been measured.
+Open: a split GPU/CPU offload is not refused, and no consumer laptop GPU, integrated graphics or
+Linux GPU host has been measured (#156).
 
 **0.13.8: private mode with no connection (I-61).** A desktop demo with Wi-Fi off showed an empty
 library with nothing in the backend log: TanStack Query paused every request after the webview's
@@ -468,6 +462,11 @@ library with nothing in the backend log: TanStack Query paused every request aft
 (14 documents), and on a backend whose outbound traffic went to a refusing proxy: ingest, search,
 Ask with a citation, cards, review, teach-back, notes and summary, with zero outbound attempts. The
 macOS app itself was not run with Wi-Fi off.
+
+**0.13.9: the AppImage on current distributions (I-62).** The AppImage opened a blank window on
+Fedora 44 and Bluefin. It bundled an old libwayland that the host's graphics drivers could not
+load against. Graphics libraries now always come from the system, and CI opens the AppImage under
+Wayland against the newest Fedora, Arch, Ubuntu and Debian drivers (PR #152).
 
 **Signing.** The installers are unsigned, so Windows SmartScreen shows "unknown publisher"
 (click More info -> Run anyway). The free route is SignPath Foundation, which signs OSS builds at
@@ -485,14 +484,14 @@ retrieval and the learner record never move with it. Desktop-only code stays in 
 
 **Exit gate.** First run completes with no terminal on a Windows and a Linux machine that has never
 seen Luminary; each host's verdict names the accelerator it actually has, proven by a platform-pinned
-test and a Windows CI job; a 16 GB host is not refused (#139); `make smoke` green on Windows. Then
-Checkpoint A.
+test and a Windows CI job; `make smoke` green on Windows and against the bundled macOS app; #24,
+#99, #110, #154, #155 and #156 closed. Then Checkpoint A.
 
 ### 3. Gates you can believe — 0.14.0
 
-`make ci` and `make smoke` green together with nothing quarantined to keep them so: 23 `pytest.mark.unstable`
-markers across 14 files today (#50). Local green is necessary and not sufficient — GLiNER memory pressure
-has produced GitHub-only failures no local run reproduces.
+`make ci` and `make smoke` green together, with nothing quarantined to keep them so. Today that takes
+23 `pytest.mark.unstable` markers across 14 files (#50). Local green is necessary and not
+sufficient: GLiNER memory pressure has produced GitHub-only failures that no local run reproduces.
 
 What the gate cannot pass without:
 
@@ -501,143 +500,209 @@ What the gate cannot pass without:
 - **#101**: the entity-extraction test doubles take the wrong signature and always raise, so no
   ingestion test exercises extraction or its Kuzu writes. The three `integration_http` tests are
   skipped on GitHub, so upload-to-complete ingestion never runs where a release is gated.
-- **#88**: the clustering holder was fixed in 0.11.0, but the reproduction that found it — smoke under
-  60 concurrent `/qa` calls — has not been re-run. It closes on 0 lock errors under that load.
-- **#110**: a route chunk can fail to load in the packaged app, cause unknown. The bundled backend
-  logs no request status or latency, so the next occurrence cannot be diagnosed either; that logging
-  is this rung's part.
+- **#88**: the clustering holder was fixed in 0.11.0, but the reproduction that found it (smoke under
+  60 concurrent `/qa` calls) has not been re-run. It closes on 0 lock errors under that load.
+- **#157**: the lock-holder report built on an unmerged branch. Without it, a non-zero result on #88
+  names the victim, not the holder.
 
-This rung exists to shrink as the ladder runs. It grows only if a rung above it breaks the no-new-quarantine
-rule, and that is the signal to move it back up.
+This rung exists to shrink as the ladder runs. It grows only if a later rung breaks the
+no-new-quarantine rule, and that is the signal to move it back up.
 
 ### 4. Stores that agree, output you can measure — 0.15.0
 
-A failed graph write is lost and SQLite and Kuzu diverge with nothing reconciling them (#65). Entity ingest
-samples 2.4% of a long book and reindex disagrees with ingest (#63). The md/epub/docx/txt paths are
-unmeasured, and audio ingested before 0.7.5 has no sections (#97); the parent-section duplication it
-also named is fixed.
+A failed graph write is lost, and SQLite and Kuzu diverge with nothing reconciling them (#65). Entity
+ingest samples 2.4% of a long book, and reindex disagrees with ingest (#63). The md/epub/docx/txt paths
+are unmeasured, and audio ingested before 0.7.5 has no sections (#97). The parent-section duplication
+#97 also named is fixed.
 
 **What a user receives is measured before it is a default.** Two shipped behaviours change the answer
 with no quality number behind them: the slow-host context budget halves the passages, and note
 search's semantic arm is never scored on a query with no lexical overlap (#100). Suggested questions
 are generated from section summaries rather than text, so they presuppose framings the document never
-makes, and the ungrounded answer that follows renders like a grounded one (#66).
+makes, and the ungrounded answer that follows renders like a grounded one (#66). The same bar covers
+Ask on a false premise (#158), web chunk hygiene (#159) and the flashcard floors (#160).
 
 **Query-time graph expansion buys no retrieval quality.** `run_eval.py --ablation`, 2026-09-21, dev
 library, GLiNER held resident and the arms confirmed to diverge before and after each dataset. On the
-shipped funnel (rrf+rerank) HR@5 is identical with and without expansion on all five sets (book 40,
-paper 40, legal/play/study 60 rows) and MRR moves by at most 0.003 in both directions, under one
-question. Unreranked, no set moves by more than one question, in both directions. Measured: the
-`_graph_expand` alias tokens on `/search`. Not measured: the chat `graph` node, which routes
+shipped funnel (rrf+rerank), HR@5 is identical with and without expansion on all five sets (book 40,
+paper 40, legal/play/study 60 rows), and MRR moves by at most 0.003 in both directions, which is less
+than one question. Unreranked, no set moves by more than one question in either direction. Measured:
+the `_graph_expand` alias tokens on `/search`. Not measured: the chat `graph` node, which routes
 relationship questions to Kuzu and not to `/search`.
 
 **Expansion is also dormant in the shipped app.** `_graph_expand` skips when GLiNER is not loaded
-(`retriever_strategies.py:370`), only startup warmup and ingestion load it, and the reaper releases it
-after `NER_IDLE_RELEASE_SECONDS=180`. A user's search therefore expands only in the three minutes after
-launch or an ingest. Given the ablation, the fix is to remove expansion from `/search`, not to keep
-GLiNER resident for it.
+(`retriever_strategies.py`). Only startup warmup and ingestion load it, and the reaper releases it
+after `NER_IDLE_RELEASE_SECONDS=180`. A user's search therefore expands only in the three minutes
+after launch or an ingest. Given the ablation, the fix is to remove expansion from `/search`, not to
+keep GLiNER resident for it.
 
-**The store's fate is not settled by that number.** 28 modules read the graph store: the chat `graph`
-node, graph flashcards, concepts, mastery, study paths and prerequisite extraction among them. Retiring
-expansion removes one reader. Port-or-delete for the rest is decided here on what those features
-deliver, alongside #65 (writes diverge from SQLite with nothing reconciling) and the Windows lock.
-`RELATED_TO` is empty library-wide and 11.1% of co-occurrence edges pair an entity with itself.
+**The Kuzu port-or-delete decision is made here.** 28 modules read the graph store: the chat `graph`
+node, graph flashcards, concepts, mastery, study paths and prerequisite extraction among them.
+Retiring expansion removes one reader. The decision for the rest weighs what those features deliver
+against #65, #161 (`RELATED_TO` empty library-wide, and self-pairs left by pre-0.11.0 ingests), and the
+Windows lock (0.13.x above). It also settles 0.17.0's scope, because whatever store survives needs a
+library scope.
 
-**The last of the document-model work belongs here.** `form`, `domain` and `register` are written at ingest
-by `_persist_classification` and `DocumentProfile` owns the policy, so what remains is retiring the legacy
-`content_type` projection and `is_technical` now that 0.9.0 has shipped without them being the source of
-truth. It is a migration, and migrations get more expensive with every user.
+**The last of the document-model work belongs here.** `form`, `domain` and `register` are written at
+ingest by `_persist_classification`, and `DocumentProfile` owns the policy. What remains is retiring
+the legacy `content_type` projection and `is_technical`. It is a migration, and migrations get more
+expensive with every user.
 
-Then Checkpoint B: the app is stable enough that the next three rungs open it to the network.
+YouTube ingest is re-verified on every platform (#162) before the checkpoint's manual gate relies on
+it. Then Checkpoint B: the app is stable enough that the next three rungs open it to the network.
 
-### 5. Capture, and device pairing — 0.16.0
+### 5. Device auth and pairing — 0.16.0
 
-**A library stays empty when filling it means opening the app and finding the file.** The backend is
-already HTTP on :7820, so an extension needs a POST rather than an architecture. One click for a page, a
-PDF, a YouTube video or a selection with its source; a watch-folder for the desktop app; Markdown export
-shaped for Obsidian and a Zotero read path.
+**The backend is unauthenticated on localhost, and CSRF is deliberately open.** Any page in any tab
+can already POST to :7820. This rung closes that, because authentication is what makes it possible.
+The gate is that an unpaired origin or a revoked device is refused, proven by a test that fails when
+pairing is removed.
 
-**Pairing ships with it, not after it.** The backend is unauthenticated on localhost and CSRF is
-deliberately open, so any page in any tab can already POST to :7820 — an extension turns a latent hole
-into a documented invitation. The gate is that an unpaired origin is refused, proven by a test that
-fails when pairing is removed.
+**Pairing is per device, not per origin.** A one-time code shown by the desktop app is exchanged for a
+named, revocable token that is stored hashed. 0.18.0's server, 0.20.0's phone and 0.21.0's extension
+all reuse it; an origin allowlist would serve the extension and nothing after it. The app's own origin
+stays tokenless on loopback, and any other origin needs a token. `TrustedHostMiddleware` in `main.py`
+pins loopback against DNS rebinding, and that pin may only widen when authentication is on.
 
-**Pairing is the device authentication 0.18.0 and 0.20.0 reuse, so it is per device, not per origin.**
-A one-time code shown by the desktop app is exchanged for a named, revocable token stored hashed. An
-origin allowlist would serve the extension and nothing after it. The app's own origin stays tokenless on
-loopback; any other origin needs a token. `TrustedHostMiddleware` in `main.py` pins loopback against DNS
-rebinding, and that pin may only widen when authentication is on.
+A token resolves to a principal. 0.17.0 hangs the request context off that principal, so the token
+shape is decided with the tenant seam in view, not retrofitted to it.
 
-### 6. The re-embed rail — 0.17.0
+### 6. An architecture that can take tenants — 0.17.0
 
-**Build the migration, not the model swap.** Moving to a multilingual embedder regenerates every vector in
-every library, and 0.x is the last point at which the compatibility promise is weak enough to absorb that —
-but the argument is about the machinery, not about the model. A resumable, restartable re-embed path plus
-the snapshot/restore format is the same work sync needs and the same work the OKF projection is (I-21).
+**Only the seams that are expensive to add once users have data.** There is no tenancy UI and no
+billing; hosted multi-tenant is after 1.0 (Deferred). On desktop every seam carries a single value.
+Today `models.py` has no owner, tenant or library column, data sits under one global `DATA_DIR`
+(`config.py`), and 54 files call `get_settings()`.
 
-Proven against the current 384-dim embedder, where a wrong answer costs nothing. The multilingual swap then
-becomes 0.22.0's decision, backed by the measurement nobody has taken: how far the current stack actually
-degrades on non-English text.
+| Seam | What it means |
+|---|---|
+| A library scope on every query | `library_id` on user-owned tables, the LanceDB tables and the graph store (or its 0.15.0 replacement). The migration is additive with a backfill: DDL and backfill in separate revisions (I-23) |
+| A request context | `principal` and `library` flow from the auth middleware through services to repos. No repo reads global state to find its data |
+| One path resolver | Direct `DATA_DIR` joins go through a resolver that takes the library, so each tenant gets its own root, or later an object store |
+| Per-library settings | `get_settings()` splits into process configuration and per-library or per-user preferences (`llm_mode`, keys, model picks). API keys move to storage scoped to the principal |
+| Shared-resource audit | Model residency, `MODEL_LOAD_LOCK`, the write-lock watchdog and the background queues, checked for anything that assumes one user. Fairness waits for the hosted work; correctness does not |
+| A layer-linter rule | `layer_linter.py` fails when a repo function lacks a library scope. Without it the seam decays |
+
+**The snapshot/restore format and the re-embed rail ship in the same rung.** Moving to a multilingual
+embedder regenerates every vector in every library, and 0.x is the last point at which the
+compatibility promise is weak enough to absorb that. The argument is about the machinery, not the
+model: a resumable, restartable re-embed plus the snapshot format is the same work that library
+export, a server restore and the OKF projection need (I-21). It is proven against the current 384-dim
+embedder, where a wrong answer costs nothing. #48 (model-change configurability) is the settings side
+of the same rail.
 
 ### 7. Your own server — 0.18.0
 
 **Luminary on the user's own cloud.** The container is most of it already: `Dockerfile` plus
 `LUMINARY_MODE=public` serves the SPA and the API on one port, and a compose volume holds the library.
 **What is missing is authentication, and 0.16.0 builds it.** `docker-compose.yml` binds `127.0.0.1`
-precisely because there is none, so until this rung ships, reaching the container from elsewhere is a
-tunnel the user owns and the docs say so.
+precisely because there is none. Until this rung ships, reaching the container from elsewhere is a
+tunnel the user owns, and the docs say so.
 
 **A server with no GPU is an unsupported host.** `host_support.local_inference_support` answers
-`container_without_accelerator` for a CPU-only container, so every local call is refused and
-enrichment does not happen. This rung depends on 0.13.0's BYOK enrichment choice; without it a
-reachable server serves an unenriched library.
+`container_without_accelerator` for a CPU-only container, so every local call is refused. Cloud mode
+with the user's key is the answer (engine modes, 0.13.x), and this rung's gate proves it builds an
+enriched library.
 
-### 8. Sync through storage the user controls — 0.19.0
+Then Checkpoint C.
 
-iCloud Drive, OneDrive, Dropbox, Google Drive — storage the user already controls, so no account and no
-server. **The live stores cannot be the thing that syncs**: SQLite with WAL, LanceDB and Kuzu are all
-mid-write-sensitive, and a daemon copying a `-wal` or a Kuzu directory mid-write produces a corrupt library
-on the other machine. What syncs is the snapshot format from 0.17.0, with the live stores rebuilt from it.
-Conflict resolution is the reason this is a feature rather than a script: two machines that both studied
-offline have divergent FSRS state, and last-writer-wins silently discards a review session.
+### 8. Components separated for mobile — 0.19.0
 
-### 9. Mobile capture and review — 0.20.0
+**Frontend.** 57 raw `fetch(` calls in 32 files still bypass `lib/apiClient.ts` (2026-09-27, excluding
+tests); they move onto it first, so the phone has one place to add its token and its cache. Then
+`packages/api` (client plus types), `packages/domain` (hooks and state) and `packages/ui` are
+extracted, and desktop and mobile become thin shells. `surface-manifest.json` gains a `mobile` mode:
+a third mode, not a fork.
 
-Note taking and flashcard review — the two things done away from a desk. Reading and ingest stay on the
-machine with the models. A phone that only works while the laptop is awake is not a client: against
-0.18.0's server it works online, and offline it needs on-device storage plus 0.19.0's sync.
-`surface-manifest.json` already declares each surface's mode, so a mobile build is a third mode rather
-than a fork. It authenticates with 0.16.0's device tokens.
+**Backend.**
 
-### 10. Anki import — 0.21.0
+- An incremental change feed for documents and notes.
+- Idempotent writes keyed by client ids, which the offline outbox needs.
+- A render-ready document endpoint for reading on the phone. Prose is never rebuilt from chunks (I-29).
+- Review logs made append-only, so an offline merge replays reviews rather than overwriting FSRS state.
 
-Export already ships — `export_service.py` writes a `.apkg` through genanki for a
-collection's deck. There is no import path. The hard part is not the file format: a Luminary card carries
-`source_chunk_ids` and a per-card grounding verdict (I-34, I-35), and an imported card has no passage in the
-library to point at. Decide what grounding means for a card whose source is elsewhere — shown as ungrounded,
-bindable to a document later, or held in a separate lane — before writing a parser, or the invariant quietly
-stops meaning anything. FSRS state is the second question: an Anki deck carries SM-2 scheduling, and `fsrs`
-v6 state is not the same shape, so importing intervals naively produces a schedule that looks continuous and
-is not.
+Desktop-only code stays in `luminary-host` and `src-tauri`, as today.
 
-### 11. Encoders and languages — 0.22.0
+### 9. Mobile reading and note capture — 0.20.0
 
-**fp32 ONNX Runtime for the encoders moved to 0.13.0** (`lighter-install-plan.md`), as a size change
-rather than a speed one: the same weights at fp32 measured cosine >= 0.99999982 against the shipped
-embedder with identical top-10 retrieval, so it is not a re-embed. **A quantized ONNX encoder still is**,
-and stays behind I-9 and 0.17.0's rail. Replacing only some of `optimum`, `sentence-transformers` and
-`gliner` *increases* the bundle, since each declares torch unconditionally — which is why the plan
-replaces all three. The encoders are not the latency bottleneck: a slow host's ~121s question is the
-4B model at ~6 tok/s, served by Ollama. For an accelerated encoder, `onnxruntime-directml` is the broadest Windows execution provider
-(NVIDIA, AMD, Intel Arc and Intel NPUs through one wheel) but publishes `win_amd64` only — Windows on
-ARM is not covered by it, so a Snapdragon NPU needs a different provider, not the same binary.
+**A Tauri 2 mobile client for reading and notes, the two things done away from a desk.** Ingest and
+the models stay on the user's server or desktop. The phone talks to that server or to a paired
+desktop, authenticates with 0.16.0's device token, and keeps a local cache of documents plus an outbox
+for notes written offline. The outbox drains through 0.19.0's idempotent writes, so a retried note is
+never stored twice.
 
-**The multilingual embedder swap.** Embeddings are `BAAI/bge-small-en-v1.5`, 384-dim and English-only, and
-every stored chunk, note, image and concept vector lives in that space. GLiNER is already multilingual
-(`gliner_multi_pii-v1`), so entity extraction survives the move and retrieval does not. Interface localisation
-is separate and seamed but unbuilt: every surface in `surface-manifest.json` carries `labels: {"en": ...}`.
+Then Checkpoint D.
+
+### 10. Anki import, capture and mobile review — 0.21.0
+
+**Anki import.** Export already ships: `export_service.py` writes a `.apkg` through genanki for a
+collection's deck. There is no import path. The hard part is not the file format. A Luminary card
+carries `source_chunk_ids` and a per-card grounding verdict (I-34, I-35), and an imported card has no
+passage in the library to point at. Decide what grounding means for a card whose source is elsewhere
+(shown as ungrounded, bindable to a document later, or held in a separate lane) before writing a
+parser, or the invariant quietly stops meaning anything. FSRS state is the second question: an Anki
+deck carries SM-2 scheduling, and `fsrs` v6 state is not the same shape. Importing intervals naively
+produces a schedule that looks continuous and is not.
+
+**The capture extension.** A library stays empty when filling it means opening the app and finding the
+file. The backend is already HTTP, so an extension needs a POST rather than an architecture: one click
+for a page, a PDF, a YouTube video, or a selection with its source. It pairs with 0.16.0's device auth.
+A watch folder for the desktop app, Markdown export shaped for Obsidian, and a Zotero read path ship
+with it.
+
+**Card review on mobile.** It rides 0.19.0's append-only review log, so a review made offline merges
+without discarding one made on the desktop.
+
+The enhancements that were on no rung land here: PDF math as LaTeX (#137), figure-caption quality
+(#124), nugget recall for answers (#121), parent-document retrieval (#25), the Hub approximations
+(#103) and a copy-link button for notes (#26, a good first issue that can land at any time).
+
+### 11. Multi-language — 0.22.0, conditional
+
+**Measure first.** Embeddings are `BAAI/bge-small-en-v1.5`, 384-dim and English-only, and every stored
+chunk, note, image and concept vector lives in that space. GLiNER is already multilingual
+(`gliner_multi_pii-v1`), so entity extraction survives a move and retrieval does not. Nobody has
+measured how far the current stack degrades on non-English text; that number decides the rung.
+
+**A swap ships only through 0.17.0's rail.** A no-go is an allowed outcome and moves the swap to 1.1.
+Interface localisation is separate, seamed and unbuilt: every surface in `surface-manifest.json`
+carries `labels: {"en": ...}`.
+
+**Encoders.** fp32 ONNX Runtime for the encoders is a size change rather than a speed one: the same
+weights at fp32 measured cosine >= 0.99999982 against the shipped embedder with identical top-10
+retrieval, so it is not a re-embed. **A quantized ONNX encoder is**, and stays behind I-9 and the rail.
+Replacing only some of `optimum`, `sentence-transformers` and `gliner` *increases* the bundle, since
+each declares torch unconditionally, so a port replaces all three. The encoders are not the latency
+bottleneck: a slow host's ~121s question is the 4B model at ~6 tok/s, served by Ollama. For an
+accelerated encoder, `onnxruntime-directml` is the broadest Windows execution provider (NVIDIA, AMD,
+Intel Arc and Intel NPUs through one wheel), but it publishes `win_amd64` only, so a Snapdragon NPU
+needs a different provider.
+
+### 12. The release — 1.0.0-rc, then 1.0.0
+
+The candidate is Checkpoint E: the checkpoint gate, plus zero open `bug` issues, plus every rung's exit
+gate green together on one build. 1.0.0 is that build with no new features.
+
+### Bugs to 1.0
+
+- **One GitHub milestone per rung** (`0.13.x` to `0.22.0`, then `1.0.0`). Every open issue carries
+  one; the table above is the mapping.
+- **A new bug is triaged when filed** to the current rung or the next one.
+- **A checkpoint is not tagged while a `bug` issue is milestoned to its phase or an earlier one.**
+- **A defect found while writing this file becomes an issue**, and the prose keeps only its link
+  (see "Adding to this file").
+- Each rung's row lists its issues, and an issue appears on exactly one row.
 
 ## Deferred — decided, not scheduled
+
+- **Sync through storage the user controls** (iCloud Drive, OneDrive, Dropbox, Google Drive) —
+  after 1.0; in 1.0 the phone syncs through the user's server. The live stores cannot be what syncs:
+  SQLite with WAL, LanceDB and Kuzu are all mid-write-sensitive, and a daemon copying a `-wal` or a
+  Kuzu directory mid-write produces a corrupt library on the other machine. What syncs is 0.17.0's
+  snapshot format, with the live stores rebuilt from it. Two machines that both studied offline have
+  divergent FSRS state, and last-writer-wins silently discards a review session.
+- **Hosted multi-tenant, the paid tier** — after 1.0. 0.17.0 builds the seams it needs; fairness
+  across tenants, billing and a tenancy UI are its own work.
 
 - **A serving width of 4, for a machine that asks for it.** Every install path sizes
   `OLLAMA_NUM_PARALLEL` from physical RAM and caps the automatic value at 2 (I-31): `performance`
