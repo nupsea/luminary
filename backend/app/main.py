@@ -22,6 +22,7 @@ from app.exceptions import LuminaryError
 from app.models import SettingsModel
 from app.parent_watch import watch_parent
 from app.paths import app_version, spa_dist
+from app.request_log import RequestLogMiddleware
 from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
 from app.routers.audio import router as audio_router
@@ -673,6 +674,14 @@ app.include_router(misc_router, prefix=_API_PREFIX)
 app.include_router(probe_router, prefix=_API_PREFIX)
 if _API_PREFIX:
     app.include_router(probe_router, include_in_schema=False)
+
+# Outermost, so a request refused by any other middleware is still recorded.
+app.add_middleware(
+    RequestLogMiddleware,
+    api_prefix=_API_PREFIX,
+    serves_spa=_mode == "public",
+    quiet_paths=frozenset(route.path for route in probe_router.routes),
+)
 
 
 def resolve_spa_asset(dist: Path, full_path: str) -> Path | None:
