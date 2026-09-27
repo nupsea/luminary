@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Dictation could transcribe gibberish, then fail every later try with "network error".** A second click while the browser asked for the microphone started a recorder that never stopped, and its audio leaked into later recordings. Each recording now keeps its own audio, and an unreadable one answers with a message instead of a crash the browser reports as a network failure.
+
 ## [0.13.9] - 2026-09-27
 
 ### Fixed

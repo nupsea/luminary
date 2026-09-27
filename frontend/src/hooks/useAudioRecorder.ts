@@ -10,7 +10,8 @@ export function useAudioRecorder({ onTranscribed }: UseAudioRecorderOptions) {
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const chunksRef = useRef<Blob[]>([])
+  // Held from the click that starts a recording until its transcription settles.
+  const busyRef = useRef(false)
   const streamRef = useRef<MediaStream | null>(null)
 
   const stopTracks = useCallback(() => {
@@ -21,47 +22,50 @@ export function useAudioRecorder({ onTranscribed }: UseAudioRecorderOptions) {
   }, [])
 
   const startRecording = useCallback(async () => {
+    // A second click while the permission prompt is open started a second
+    // recorder that was never stopped, and its header-less chunks leaked into
+    // every later recording.
+    if (busyRef.current) return
+    busyRef.current = true
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         toast.error("Audio recording is not supported in this environment.")
+        busyRef.current = false
         return
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
 
-      // Pick best supported MIME type
-      let mimeType = "audio/webm"
+      let mimeType: string | undefined
       if (typeof MediaRecorder.isTypeSupported === "function") {
-        if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
-          mimeType = "audio/webm;codecs=opus"
-        } else if (MediaRecorder.isTypeSupported("audio/webm")) {
-          mimeType = "audio/webm"
-        } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
-          mimeType = "audio/mp4"
-        }
+        mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((t) =>
+          MediaRecorder.isTypeSupported(t),
+        )
       }
 
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
-      chunksRef.current = []
+      const chunks: Blob[] = []
 
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
-          chunksRef.current.push(e.data)
+          chunks.push(e.data)
         }
       }
 
       recorder.onstop = async () => {
         stopTracks()
-        const blob = new Blob(chunksRef.current, { type: mimeType || "audio/webm" })
+        // The container the browser actually wrote, which may differ from the one asked for.
+        const type = recorder.mimeType || mimeType || "audio/webm"
+        const blob = new Blob(chunks, { type })
         if (blob.size < 500) {
-          // Extremely short or empty recording; ignore
+          busyRef.current = false
           return
         }
 
         setIsTranscribing(true)
         const formData = new FormData()
-        const ext = mimeType.includes("mp4") ? "mp4" : "webm"
+        const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm"
         formData.append("file", blob, `voice_recording.${ext}`)
 
         try {
@@ -76,7 +80,15 @@ export function useAudioRecorder({ onTranscribed }: UseAudioRecorderOptions) {
           toast.error(error.message)
         } finally {
           setIsTranscribing(false)
+          busyRef.current = false
         }
+      }
+
+      recorder.onerror = () => {
+        stopTracks()
+        setIsRecording(false)
+        busyRef.current = false
+        toast.error("Recording failed. Try again.")
       }
 
       recorder.start(250) // slice chunks every 250ms
@@ -84,6 +96,7 @@ export function useAudioRecorder({ onTranscribed }: UseAudioRecorderOptions) {
       setIsRecording(true)
     } catch (err: unknown) {
       stopTracks()
+      busyRef.current = false
       const msg = err instanceof Error ? err.message : "Microphone access denied or unavailable."
       toast.error(msg)
     }

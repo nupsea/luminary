@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from app.exceptions import InvalidInput
 from app.services.audio_transcriber import get_audio_transcriber
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,23 @@ async def transcribe_audio(file: UploadFile = File(...)) -> TranscriptionRespons
 
         try:
             transcriber = get_audio_transcriber()
-            segments, duration = transcriber.transcribe(tmp_path)
+            import av  # noqa: PLC0415 -- the media extra, absent from the bundle
+
+            try:
+                segments, duration = transcriber.transcribe(tmp_path)
+            except av.error.FFmpegError as exc:
+                # A raised decode error escapes CORS and reads as a network failure.
+                logger.warning(
+                    "transcribe: undecodable upload %s (%s, %d bytes, starts %s): %s",
+                    file.filename,
+                    file.content_type,
+                    len(data),
+                    data[:4].hex(),
+                    exc,
+                )
+                raise InvalidInput(
+                    "The recording could not be read as audio. Try recording again."
+                ) from exc
             full_text = " ".join(seg["text"] for seg in segments).strip()
             return full_text, duration
         finally:
