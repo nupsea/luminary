@@ -176,7 +176,15 @@ async def test_the_endpoint_reports_this_host():
 
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"supported", "reason", "host", "message", "measured", "settling"}
+    assert set(body) == {
+        "supported",
+        "reason",
+        "host",
+        "message",
+        "measured",
+        "settling",
+        "gpu_share",
+    }
     assert isinstance(body["supported"], bool)
     # Supported hosts carry no message; unsupported ones must carry one.
     assert (body["message"] is None) is body["supported"]

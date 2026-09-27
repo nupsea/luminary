@@ -157,6 +157,11 @@ class Offload:
     def on_processor(self) -> bool:
         return self.size > 0 and self.size_vram == 0
 
+    @property
+    def gpu_share(self) -> float | None:
+        """Share of the model's bytes on the card. `/api/ps` reports bytes, not layers."""
+        return self.size_vram / self.size if self.size > 0 else None
+
 
 _OFFLOAD_FILE = "gpu_offload.json"
 _UNREAD = object()
@@ -266,4 +271,9 @@ def local_inference_support() -> HostSupport:
         detail = f"{where}, the model ran on the processor, not the graphics card"
         return HostSupport(False, "gpu_unused", detail, UNSUPPORTED_MESSAGE)
 
+    # A split is supported (slower, not a different product) but quoted back, so
+    # a report from a card with too little memory says why it is slow (#156).
+    share = offload.gpu_share if offload is not None else None
+    if share is not None and share < 1:
+        where = f"{where}, {share:.0%} of the model on the graphics card"
     return HostSupport(True, None, where, None)

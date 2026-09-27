@@ -11,7 +11,7 @@
 #
 # Verifies:
 #   1. backend is healthy
-#   2. GET /setup/host-support answers with all six fields
+#   2. GET /setup/host-support answers with all seven fields
 #   3. a supported host carries no message and an unsupported one must
 #   4. the verdict names a reason from the known set, never a free-form string
 #   5. the message names both ways forward (I-16: no key still means a working app)
@@ -38,7 +38,7 @@ check "backend healthy" "200" "$HTTP"
 check "the host verdict is complete and self-consistent" "ok" "$(curl -s "$BASE/setup/host-support" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-missing = [f for f in ['supported', 'reason', 'host', 'message', 'measured', 'settling'] if f not in d]
+missing = [f for f in ['supported', 'reason', 'host', 'message', 'measured', 'settling', 'gpu_share'] if f not in d]
 if missing:
     print('missing fields: %s' % missing)
     raise SystemExit
