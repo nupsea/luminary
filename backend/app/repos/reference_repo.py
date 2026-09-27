@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from fastapi import Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
 from app.models import WebReferenceModel
 
 
@@ -52,7 +50,3 @@ class ReferenceRepo:
         for row in existing.scalars().all():
             await self.session.delete(row)
         await self.session.commit()
-
-
-def get_reference_repo(session: AsyncSession = Depends(get_db)) -> ReferenceRepo:
-    return ReferenceRepo(session)

@@ -101,7 +101,3 @@ class ActivityService:
             },
         )
         await self.session.commit()
-
-
-def get_activity_service(session: AsyncSession) -> ActivityService:
-    return ActivityService(session)
