@@ -24,6 +24,8 @@ import {
   insertInlineSpec,
   moveBlockOrLineSpec,
   replaceSelectionSpec,
+  smartBackspaceSpec,
+  smartDeleteSpec,
   syncDocSpec,
   tableNextCellSpec,
   tablePrevCellSpec,
@@ -317,7 +319,28 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
             }),
             keymap.of([
               { key: "Enter", run: insertNewlineContinueMarkup },
-              { key: "Backspace", run: deleteMarkupBackward },
+              {
+                key: "Backspace",
+                run: (v) => {
+                  const spec = smartBackspaceSpec(v.state)
+                  if (spec) {
+                    v.dispatch(spec)
+                    return true
+                  }
+                  return deleteMarkupBackward(v)
+                },
+              },
+              {
+                key: "Delete",
+                run: (v) => {
+                  const spec = smartDeleteSpec(v.state)
+                  if (spec) {
+                    v.dispatch(spec)
+                    return true
+                  }
+                  return false
+                },
+              },
               {
                 key: "Tab",
                 run: (v) => {

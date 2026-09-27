@@ -19,7 +19,9 @@ import { toast } from "sonner"
 
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
-import { moveBlockOrLineSpec } from "./markdownEditorCommands"
+import { moveBlockOrLineSpec, setImageSizeInMarkdown } from "./markdownEditorCommands"
+import { API_BASE } from "@/lib/config"
+import { cn } from "@/lib/utils"
 
 import {
   caretInTableRow,
@@ -67,11 +69,19 @@ function RenderedBlockContent({
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
 }) {
   const [copied, setCopied] = useState(false)
+  const from = view.posAtDOM(host)
+  const firstLine = view.state.doc.lineAt(from)
+  const lines = source.split("\n").length
+  const endLine = view.state.doc.line(Math.min(firstLine.number + lines - 1, view.state.doc.lines))
+  const isSelected =
+    !view.state.selection.main.empty &&
+    view.state.selection.main.from <= firstLine.from &&
+    view.state.selection.main.to >= endLine.to
 
   const handleMove = (dir: -1 | 1) => {
-    const from = view.posAtDOM(host)
+    const blockPos = view.posAtDOM(host)
     // Anchor at the target block to ensure correct block movement even if editor was focused elsewhere
-    const stateWithPos = view.state.update({ selection: { anchor: from } }).state
+    const stateWithPos = view.state.update({ selection: { anchor: blockPos } }).state
     const spec = moveBlockOrLineSpec(stateWithPos, dir)
     if (spec) {
       view.dispatch(spec)
@@ -80,11 +90,15 @@ function RenderedBlockContent({
   }
 
   const handleEdit = () => {
-    const from = view.posAtDOM(host)
-    const firstLine = view.state.doc.lineAt(from)
-    const offset = firstEditableLine(delimited)
-    const line = view.state.doc.line(Math.min(firstLine.number + offset, view.state.doc.lines))
-    view.dispatch({ selection: { anchor: line.to } })
+    const blockPos = view.posAtDOM(host)
+    const line = view.state.doc.lineAt(blockPos)
+    if (isImageOnlyParagraph(source)) {
+      view.dispatch({ selection: { anchor: Math.min(line.from + 2, line.to) } })
+    } else {
+      const offset = firstEditableLine(delimited)
+      const targetLine = view.state.doc.line(Math.min(line.number + offset, view.state.doc.lines))
+      view.dispatch({ selection: { anchor: targetLine.to } })
+    }
     view.focus()
   }
 
@@ -96,22 +110,33 @@ function RenderedBlockContent({
   }
 
   const handleDelete = () => {
-    const from = view.posAtDOM(host)
-    const firstLine = view.state.doc.lineAt(from)
-    const lines = source.split("\n").length
-    const endLine = view.state.doc.line(Math.min(firstLine.number + lines - 1, view.state.doc.lines))
-    let deleteTo = endLine.to
-    if (endLine.number < view.state.doc.lines && view.state.doc.line(endLine.number + 1).text.trim() === "") {
-      deleteTo = view.state.doc.line(endLine.number + 1).to
+    const blockPos = view.posAtDOM(host)
+    const startLine = view.state.doc.lineAt(blockPos)
+    const lineCount = source.split("\n").length
+    const lastLine = view.state.doc.line(Math.min(startLine.number + lineCount - 1, view.state.doc.lines))
+    let deleteFrom = startLine.from
+    let deleteTo = lastLine.to
+    if (lastLine.number < view.state.doc.lines) {
+      deleteTo = view.state.doc.line(lastLine.number + 1).from
+    } else if (startLine.number > 1) {
+      deleteFrom = view.state.doc.line(startLine.number - 1).to
     }
-    view.dispatch({ changes: { from: firstLine.from, to: deleteTo, insert: "" } })
+    view.dispatch({ changes: { from: deleteFrom, to: deleteTo, insert: "" } })
     view.focus()
   }
 
   return (
-    <div className="relative">
+    <div
+      className={cn(
+        "relative rounded-lg transition-all duration-150",
+        isSelected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+      )}
+    >
       <div
-        className="absolute -top-3 right-2 z-20 flex items-center gap-0.5 rounded-md border border-border/80 bg-background/95 px-1 py-0.5 shadow-sm backdrop-blur-sm opacity-0 transition-opacity duration-150 group-hover/md-block:opacity-100 not-prose"
+        className={cn(
+          "absolute -top-3 right-2 z-20 flex items-center gap-0.5 rounded-md border border-border/80 bg-background/95 px-1 py-0.5 shadow-sm backdrop-blur-sm transition-opacity duration-150 not-prose",
+          isSelected ? "opacity-100" : "opacity-0 group-hover/md-block:opacity-100",
+        )}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <button
@@ -167,6 +192,17 @@ function RenderedBlockContent({
             onEditDiagram({ ...diagram, start: diagram.start + base, end: diagram.end + base })
           })
         }
+        onSetImageSize={(src, size) => {
+          const blockPos = view.posAtDOM(host)
+          const startLine = view.state.doc.lineAt(blockPos)
+          const lineCount = source.split("\n").length
+          const lastLine = view.state.doc.line(Math.min(startLine.number + lineCount - 1, view.state.doc.lines))
+          const newBlockText = setImageSizeInMarkdown(source, src, size, API_BASE)
+          if (newBlockText !== source) {
+            view.dispatch({ changes: { from: startLine.from, to: lastLine.to, insert: newBlockText } })
+            view.focus()
+          }
+        }}
       >
         {source}
       </MarkdownRenderer>
@@ -218,7 +254,29 @@ class RenderedBlock extends WidgetType {
     // first keystroke goes in front of the block and destroys it.
     host.addEventListener("mousedown", (event) => {
       const target = event.target as HTMLElement | null
-      if (target?.closest("button, a")) return
+      if (target?.closest("button, a, input, select, textarea")) return
+
+      const from = view.posAtDOM(host)
+      const firstLine = view.state.doc.lineAt(from)
+      const lines = this.source.split("\n").length
+      const endLine = view.state.doc.line(Math.min(firstLine.number + lines - 1, view.state.doc.lines))
+
+      // If clicking an image block: select the entire block as a unit so user can delete or navigate smoothly!
+      if (isImageOnlyParagraph(this.source)) {
+        event.preventDefault()
+        view.focus()
+        if (event.shiftKey) {
+          view.dispatch({
+            selection: { anchor: view.state.selection.main.anchor, head: endLine.to },
+          })
+          return
+        }
+        view.dispatch({
+          selection: { anchor: firstLine.from, head: endLine.to },
+        })
+        return
+      }
+
       event.preventDefault()
       const anchor = this.caretFor(view, host, event, target)
       if (anchor === null) return
@@ -229,6 +287,18 @@ class RenderedBlock extends WidgetType {
       }
       view.dispatch({ selection: { anchor } })
       this.startDrag(view, anchor)
+    })
+
+    host.addEventListener("dblclick", (event) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest("button, a, input, select, textarea")) return
+      if (isImageOnlyParagraph(this.source)) {
+        event.preventDefault()
+        const from = view.posAtDOM(host)
+        const firstLine = view.state.doc.lineAt(from)
+        view.focus()
+        view.dispatch({ selection: { anchor: Math.min(firstLine.from + 2, firstLine.to) } })
+      }
     })
     return host
   }
@@ -293,9 +363,10 @@ class RenderedBlock extends WidgetType {
     }
   }
 
-  ignoreEvent() {
-    // The widget handles its own mousedown; the editor stays out of it.
-    return true
+  ignoreEvent(event: Event): boolean {
+    const target = event.target as HTMLElement | null
+    if (target?.closest("button, a, input, select, textarea")) return true
+    return false
   }
 
   /**
@@ -429,13 +500,17 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
       }
       if (node.name === "Paragraph" && isImageOnlyParagraph(state.doc.sliceString(node.from, node.to))) {
         // A diagram is the image plus the sidecar comment beneath it.
-        // Always keep images rendered so navigating past them does not collapse
-        // a 600px image into a 20px line of raw text and throw the viewport.
         const imageLine = state.doc.lineAt(node.to)
         const next = imageLine.number < state.doc.lines ? state.doc.line(imageLine.number + 1) : null
         const to = next && EXCALIDRAW_COMMENT.test(next.text.trim()) ? next.to : node.to
-        renderBlock(node.from, to, false, true)
-        return false
+        const range = blockRange(state, node.from, to)
+        const isEditingSource = selection.some(
+          (r) => r.empty && r.from > range.from && r.from < range.to,
+        )
+        if (!isEditingSource) {
+          renderBlock(node.from, to, false, true)
+          return false
+        }
       }
       if (node.name === "Image") {
         if (rendered.some((r) => node.from >= r.from && node.to <= r.to)) return false
@@ -445,8 +520,14 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
         if (lineText === nodeText) {
           const next = line.number < state.doc.lines ? state.doc.line(line.number + 1) : null
           const to = next && EXCALIDRAW_COMMENT.test(next.text.trim()) ? next.to : line.to
-          renderBlock(line.from, to, false, true)
-          return false
+          const range = blockRange(state, line.from, to)
+          const isEditingSource = selection.some(
+            (r) => r.empty && r.from > range.from && r.from < range.to,
+          )
+          if (!isEditingSource) {
+            renderBlock(line.from, to, false, true)
+            return false
+          }
         }
       }
       if (node.name === "Blockquote") {
@@ -458,6 +539,13 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
         return
       }
       if (!hidesMark(node.name, node.node.parent?.name)) return
+      if (node.name === "EmphasisMark") {
+        const parent = node.node.parent
+        if (parent) {
+          const parentText = state.doc.sliceString(parent.from, parent.to)
+          if (parentText.includes("LUMINARY_IMG")) return
+        }
+      }
       if (rendered.some((r) => node.from >= r.from && node.to <= r.to)) return
       const line = state.doc.lineAt(node.from)
       if (lineIsBeingEdited(selection, line.from, line.to)) return

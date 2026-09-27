@@ -138,6 +138,74 @@ $$
     }
     expect(widgets.some((w) => w.includes("Pasted Image"))).toBe(true)
   })
+
+  it("unrenders image into editable markdown source when cursor is placed inside the line to edit", () => {
+    const doc = "![Pasted Image|medium](__LUMINARY_IMG__/notes/4b5f7f44-0389-4da9-a1fe-adb4c92fc1b0.png)\n"
+    // Place cursor inside the image line (e.g. at position 10, inside the alt text)
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: 10 },
+      extensions: [markdown({ base: markdownLanguage }), liveMarkdown()],
+    })
+
+    // @ts-expect-error private field access for test assertion
+    const fields = state.values as unknown[]
+    interface DecoRange {
+      spec?: { widget?: { source: string } }
+    }
+    interface TestDecoSet {
+      size: number
+      between: (from: number, to: number, f: (from: number, to: number, deco: DecoRange) => void) => void
+    }
+    const decoSets = fields.filter((val): val is TestDecoSet =>
+      Boolean(val && typeof val === "object" && "size" in val && typeof (val as { size: unknown }).size === "number" && (val as { size: number }).size > 0),
+    )
+
+    const widgets: string[] = []
+    for (const ds of decoSets) {
+      ds.between(0, state.doc.length, (_from, _to, deco) => {
+        if (deco.spec?.widget) {
+          widgets.push(deco.spec.widget.source)
+        }
+      })
+    }
+    // Block widget should NOT be rendered because user is editing the source
+    expect(widgets.some((w) => w.includes("Pasted Image"))).toBe(false)
+  })
+
+  it("keeps image rendered as widget when the entire image line is selected as a block unit", () => {
+    const doc = "![Pasted Image|medium](__LUMINARY_IMG__/notes/4b5f7f44-0389-4da9-a1fe-adb4c92fc1b0.png)\n"
+    const lineEnd = doc.indexOf("\n")
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: 0, head: lineEnd },
+      extensions: [markdown({ base: markdownLanguage }), liveMarkdown()],
+    })
+
+    // @ts-expect-error private field access for test assertion
+    const fields = state.values as unknown[]
+    interface DecoRange {
+      spec?: { widget?: { source: string } }
+    }
+    interface TestDecoSet {
+      size: number
+      between: (from: number, to: number, f: (from: number, to: number, deco: DecoRange) => void) => void
+    }
+    const decoSets = fields.filter((val): val is TestDecoSet =>
+      Boolean(val && typeof val === "object" && "size" in val && typeof (val as { size: unknown }).size === "number" && (val as { size: number }).size > 0),
+    )
+
+    const widgets: string[] = []
+    for (const ds of decoSets) {
+      ds.between(0, state.doc.length, (_from, _to, deco) => {
+        if (deco.spec?.widget) {
+          widgets.push(deco.spec.widget.source)
+        }
+      })
+    }
+    // Block widget SHOULD be rendered with selection
+    expect(widgets.some((w) => w.includes("Pasted Image"))).toBe(true)
+  })
 })
 
 describe("MarkdownRenderer table whitespace", () => {
