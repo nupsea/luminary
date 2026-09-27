@@ -18,7 +18,7 @@ import re
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ConceptModel
@@ -49,12 +49,6 @@ class ConceptService:
                 return slug
             slug = f"{base}-{n}"
             n += 1
-
-    async def get_by_label(self, session: AsyncSession, label: str) -> ConceptModel | None:
-        result = await session.execute(
-            select(ConceptModel).where(func.lower(ConceptModel.label) == label.lower())
-        )
-        return result.scalars().first()
 
     async def create_concept(
         self,
@@ -154,26 +148,6 @@ class ConceptService:
             )
         except Exception:
             logger.debug("promote_status: Kuzu update failed for %s", concept_id, exc_info=True)
-
-    async def map_flashcard(
-        self, session: AsyncSession, flashcard_id: str, concept_id: str | None
-    ) -> None:
-        """Set a flashcard's concept_id + mapping_status (mapped when a concept, else unmapped).
-
-        Also records the concept's STABLE slug so the binding survives a concept rebuild.
-        """
-        from app.models import FlashcardModel  # noqa: PLC0415 -- avoid import cycle at module load
-
-        card = await session.get(FlashcardModel, flashcard_id)
-        if card is None:
-            return
-        card.concept_id = concept_id
-        card.mapping_status = "mapped" if concept_id else "unmapped"
-        if concept_id:
-            concept = await session.get(ConceptModel, concept_id)
-            card.concept_slug = concept.slug if concept else None
-        else:
-            card.concept_slug = None
 
     async def delete_concept(self, session: AsyncSession, concept_id: str) -> None:
         """Remove a concept from all three stores. The caller commits SQLite."""

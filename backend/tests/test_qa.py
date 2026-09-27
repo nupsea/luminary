@@ -4,7 +4,7 @@ V2: stream_answer() delegates to the LangGraph chat router.  Integration tests
 that exercise stream_answer() now mock app.runtime.chat_graph.get_chat_graph
 with a mock graph whose ainvoke() returns a pre-built result dict.
 
-Pure helper-function tests (_split_response, _build_context, etc.) are
+Pure helper-function tests (_split_response, etc.) are
 unchanged — they test stateless functions that are still in qa.py.
 """
 
@@ -25,13 +25,11 @@ from app.main import app
 from app.models import DocumentModel, QAHistoryModel
 from app.runtime.chat_nodes._shared import _COMPARATIVE_SYSTEM, _RELATIONAL_SYSTEM
 from app.services.qa import (
-    NOT_FOUND_SENTINEL,
     QA_CREATIVE_SYSTEM_PROMPT,
     QA_CREATIVE_TEMPERATURE,
     QA_FACTUAL_SYSTEM_PROMPT,
     QA_SYSTEM_PROMPT,
     QAService,
-    _build_context,
     _drop_ungrounded_citations,
     _enrich_citation_titles,
     _excerpt_from_chunk,
@@ -493,31 +491,6 @@ def test_split_response_prose_with_colon_not_stripped():
     )
     answer, _, _ = _split_response(full_text)
     assert "main themes" in answer
-
-
-# _build_context — unit tests (unchanged)
-
-
-def test_build_context_includes_document_title():
-    chunk = _make_chunk("doc1", text="ATP is produced in the mitochondria.", section="Energy")
-    context = _build_context([chunk], {"doc1": "Cell Biology"})
-    assert "Cell Biology" in context
-    assert "Energy" in context
-    assert "ATP is produced" in context
-
-
-def test_build_context_fallback_uses_document_id():
-    chunk = _make_chunk("doc-unknown")
-    context = _build_context([chunk], {})
-    assert "doc-unknown" in context
-
-
-def test_qa_system_prompt_contains_not_found_sentinel():
-    assert NOT_FOUND_SENTINEL in QA_SYSTEM_PROMPT
-
-
-def test_qa_system_prompt_mentions_citations():
-    assert "citations" in QA_SYSTEM_PROMPT
 
 
 # QAService.stream_answer — normal flow
