@@ -14,12 +14,15 @@ use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus};
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE};
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
     SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+};
+use windows_sys::Win32::System::Registry::{
+    RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
 };
 use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows_sys::Win32::System::Threading::{
@@ -235,6 +238,76 @@ pub fn total_memory_bytes() -> Option<u64> {
     // SAFETY: an owned struct whose `dwLength` is set, as the call requires.
     let ok = unsafe { GlobalMemoryStatusEx(&mut status) };
     (ok != 0 && status.ullTotalPhys > 0).then_some(status.ullTotalPhys)
+}
+
+const INTERNET_SETTINGS: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+
+/// The proxy set in Windows' settings, when "Use a proxy server" is on.
+pub fn system_proxy() -> Option<crate::proxy::SystemProxy> {
+    if registry_dword("ProxyEnable")? == 0 {
+        return None;
+    }
+    Some(crate::proxy::SystemProxy {
+        server: registry_string("ProxyServer")?,
+        bypass: registry_string("ProxyOverride").unwrap_or_default(),
+    })
+}
+
+fn registry_dword(value: &str) -> Option<u32> {
+    let (key, name) = (wide(INTERNET_SETTINGS.as_ref()), wide(value.as_ref()));
+    let mut data: u32 = 0;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    // SAFETY: NUL-terminated wide strings, and a buffer of the size passed.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&mut data as *mut u32).cast::<c_void>(),
+            &mut size,
+        )
+    };
+    (status == ERROR_SUCCESS).then_some(data)
+}
+
+fn registry_string(value: &str) -> Option<String> {
+    let (key, name) = (wide(INTERNET_SETTINGS.as_ref()), wide(value.as_ref()));
+    let mut size: u32 = 0;
+    // SAFETY: a null buffer asks only for the size, in bytes.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut size,
+        )
+    };
+    if status != ERROR_SUCCESS || size == 0 {
+        return None;
+    }
+    let mut buf = vec![0u16; (size as usize).div_ceil(2)];
+    // SAFETY: a buffer of exactly the size the first call reported.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            buf.as_mut_ptr().cast::<c_void>(),
+            &mut size,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return None;
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    Some(String::from_utf16_lossy(&buf[..len]))
 }
 
 fn wide(text: &std::ffi::OsStr) -> Vec<u16> {
