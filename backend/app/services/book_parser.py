@@ -259,15 +259,6 @@ def _clean_heading(heading: str) -> str:
     return h
 
 
-def _match_any_pattern(text: str) -> int | None:
-    for pid, pat, level in _PATTERNS:
-        if pid == "HR":
-            continue
-        if pat.match(text.strip()):
-            return level
-    return None
-
-
 _RE_BASE_HEADING = re.compile(
     r"((?:chapter|chap\.?|part|book|section|volume"
     r"|adventure)\s+(?:\w+))",

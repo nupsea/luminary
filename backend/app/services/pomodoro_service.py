@@ -244,7 +244,3 @@ class PomodoroService:
             "streak_days": streak,
             "total_completed": int(total_completed),
         }
-
-
-def get_pomodoro_service(session: AsyncSession) -> PomodoroService:
-    return PomodoroService(session)

@@ -280,16 +280,6 @@ def _marker_prefix_holdback(text: str, markers: tuple[str, ...]) -> int:
     return longest
 
 
-def _build_context(chunks: list[ScoredChunk], doc_titles: dict[str, str]) -> str:
-    """Format retrieved chunks as a numbered context block."""
-    parts: list[str] = []
-    for chunk in chunks:
-        title = doc_titles.get(chunk.document_id, chunk.document_id)
-        heading = chunk.section_heading or "—"
-        parts.append(f"[Document: {title} | Section: {heading} | Page: {chunk.page}]\n{chunk.text}")
-    return "\n\n---\n\n".join(parts)
-
-
 def _salvage_truncated_answer(json_text: str) -> str:
     """Recover the "answer" string from a truncated/malformed JSON block.
 

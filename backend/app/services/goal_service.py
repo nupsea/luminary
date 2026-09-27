@@ -442,7 +442,3 @@ class LearningGoalsService:
             "sessions_completed": sessions_completed,
             "completed_pct": self._pct(turns, goal.target_value),
         }
-
-
-def get_learning_goals_service(session: AsyncSession) -> LearningGoalsService:
-    return LearningGoalsService(session)

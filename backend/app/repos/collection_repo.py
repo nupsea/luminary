@@ -200,15 +200,6 @@ class CollectionRepo:
         await self.session.execute(stmt)
         await self.session.commit()
 
-    async def members_of(self, collection_id: str) -> list[tuple[str, str]]:
-        """Return list of (member_id, member_type) for a collection."""
-        result = await self.session.execute(
-            select(CollectionMemberModel.member_id, CollectionMemberModel.member_type).where(
-                CollectionMemberModel.collection_id == collection_id
-            )
-        )
-        return [(mid, mtype) for mid, mtype in result.all()]
-
     async def count_members(self, collection_id: str) -> int:
         result = await self.session.execute(
             select(func.count(CollectionMemberModel.member_id)).where(

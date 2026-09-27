@@ -441,14 +441,6 @@ class LearningPathNode:
     depth: int  # 0 = deepest prerequisite, increasing = closer to start (dependent)
 
 
-class LearningPathResponse(TypedDict):
-    start_entity: str
-    document_id: str
-    # topologically sorted; serialized to dicts on the wire
-    nodes: list[LearningPathNode]
-    edges: list[dict]  # list of {from_entity, to_entity, confidence}
-
-
 # Study path
 
 
@@ -537,22 +529,6 @@ class CoverageReport(TypedDict):
 
 
 # Teach-back rubric
-
-
-class TeachBackRubricDimension(TypedDict):
-    score: int  # 0-100
-    evidence: str  # quoted evidence from source or one-sentence comment
-
-
-class TeachBackCompletenessDimension(TypedDict):
-    score: int  # 0-100
-    missed_points: list[str]  # concise concept phrases the student omitted
-
-
-class TeachBackRubric(TypedDict):
-    accuracy: TeachBackRubricDimension
-    completeness: TeachBackCompletenessDimension
-    clarity: TeachBackRubricDimension
 
 
 # Deck health report
