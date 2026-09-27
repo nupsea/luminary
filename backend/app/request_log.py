@@ -95,7 +95,7 @@ class RequestLogMiddleware:
             extra={
                 "path": path,
                 "status": status,
-                "first_byte_ms": first_byte_ms,
+                "first_byte_ms": round(first_byte_ms, 1) if first_byte_ms is not None else None,
                 "total_ms": round(total_ms, 1),
                 "complete": state["complete"],
                 "error": type(error).__name__ if error is not None else None,
