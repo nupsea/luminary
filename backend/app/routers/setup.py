@@ -73,6 +73,7 @@ async def host_support() -> dict:
     from app.services.startup_status import get_startup_status  # noqa: PLC0415
 
     verdict = local_inference_support()
+    offload = measured_offload()
     chat = next(
         (p["state"] for p in get_startup_status().snapshot()["phases"] if p["key"] == "chat_model"),
         None,
@@ -82,7 +83,9 @@ async def host_support() -> dict:
         "reason": verdict.reason,
         "host": verdict.detail,
         "message": verdict.message,
-        "measured": measured_offload() is not None,
+        "measured": offload is not None,
+        # Below 1.0 the model is split between card and processor (#156).
+        "gpu_share": offload.gpu_share if offload is not None else None,
         # A chat-model load is under way, and its measurement can still turn a
         # supported verdict (I-60). A saved `measured` cannot say that: every
         # launch measures again.
