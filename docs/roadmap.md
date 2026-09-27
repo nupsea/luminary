@@ -84,6 +84,8 @@ endpoints (`CLAUDE.md`) and adds nothing to the quarantine**. The quarantine gre
 markers on 2026-09-18 (`fcfb4e5d`, a `POST /notes` case in `test_S201.py`) — which is why the gates
 rung sits ahead of every feature rung.
 
+Every rung also starts with a refactor of what it is about to change ("Code quality to 1.0", below).
+
 The last rung of each phase is a **checkpoint release** (below): the whole product is measured on
 one build, not only the rung that just landed. The issues listed against a rung are the ones its
 exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
@@ -94,7 +96,7 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | — | 0.11.0 | The docked reader — **shipped** | | A passage captured in the reader resolves back to its locus for page, video and web; no modal opens from the reader |
 | — | 0.12.0 | The Brief — **parked** | | None; no rung waits on it |
 | I. Every host | 0.13.x | Every host is a first-class host — **0.13.9 released; exit gate open.** **Checkpoint A** | #24, #99, #110, #154, #155, #156 | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator; `make smoke` green on Windows and against the bundled macOS app |
-| II. Stability | 0.14.0 | Gates you can believe | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so |
+| II. Stability | 0.14.0 | Gates you can believe | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
 | | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #160, #161, #162 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
 | III. Cloud readiness | 0.16.0 | Device auth and pairing | | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail | #48 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
@@ -103,7 +105,7 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | V. Mobile | 0.20.0 | Mobile reading and note capture. **Checkpoint D** | | A phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated |
 | VI. Extras | 0.21.0 | Anki import; the capture extension, watch folder and Obsidian export; card review on mobile | #137, #124, #121, #25, #103, #26 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an offline review on the phone merges without overwriting FSRS state |
 | VII. Languages | 0.22.0 | Multi-language — **conditional** | | Non-English degradation measured on the current stack first; a swap ships only through 0.17.0's rail; a no-go decision is an allowed outcome and moves the swap to 1.1 |
-| | 1.0.0-rc → 1.0.0 | The release. **Checkpoint E** | | Zero open `bug` issues; every rung's exit gate green together, on one build |
+| | 1.0.0-rc → 1.0.0 | The release. **Checkpoint E** | | Zero open `bug` issues; every rung's exit gate green together, on one build; the code-quality targets met |
 
 **1.0.0 itself carries no new features.** Work not on a rung above is 1.1, not 1.0.
 
@@ -693,6 +695,48 @@ gate green together on one build. 1.0.0 is that build with no new features.
 - **A defect found while writing this file becomes an issue**, and the prose keeps only its link
   (see "Adding to this file").
 - Each rung's row lists its issues, and an issue appears on exactly one row.
+
+### Code quality to 1.0
+
+**Debt is paid down along the ladder, not in a phase of its own.** Each rung's first PR refactors
+what that rung is about to change, with no behaviour change, `make ci` green before and after, and
+existing tests as the net (characterization tests first where they are thin). Nothing is split for
+size alone. **Work lands in batches of a few PRs, and each batch stops for a manual test
+pass** on the app before the next one starts: the suite cannot see what a refactor did to a
+screen, and a regression found after five more PRs is five times harder to place. **Ratchets** stop new debt landing meanwhile: each check is baselined on today's numbers
+in `make ci` and may only shrink, as `KNOWN_VIOLATIONS` already does in `layer_linter.py`.
+
+Measured 2026-09-27 on `master` (`5e8cb41e`). The targets follow the usual external bars: McCabe's
+10 per function (NIST SP 500-235), and the SonarQube default quality gate (maintainability A,
+duplication ≤ 3%, coverage ≥ 80% on new code).
+
+| Metric | Tool | Now | 1.0 target |
+|---|---|---|---|
+| Functions over 120 lines | `ast` | 57 of 2,250 | 0. Exempt: `db_init.create_all_tables` (787, frozen by I-23) |
+| Cyclomatic complexity over 20 | `radon cc` | 58 (worst: `qa.stream_answer` 93, `synthesize_node` 71, `flashcard_generators.generate` 61) | 0 |
+| Cyclomatic complexity over 10 | `radon cc` | 231 of 2,128 (10.9%) | under 5% |
+| Maintainability index below A | `radon mi` | 6 files: `routers/study.py`, `routers/documents.py`, `routers/evals.py`, `flashcard_generators.py`, `parser.py`, `qa.py` | 0 |
+| SQL outside `repos/` | `grep` for `select(` and `session.execute` | 310 in 16 routers, 644 in 75 services (131 in repos) | 0 in routers by 0.17; services by 1.0 |
+| Duplicated lines | `jscpd`, 8-line clones | 1.11% (96 clones) | ≤ 3%, held |
+| Dead Python | `vulture` ≥ 80% confidence, plus unreferenced symbols | 8 unused imports/variables, ~11 unused functions/classes | 0 |
+| Dead TypeScript | `knip` | 12 unused files, 29 unused exports, 77 unused exported types, 1 unused dependency | 0 files, 0 dependencies |
+| Test coverage | `pytest --cov`, `vitest --coverage` | **not measured** (the cloud container cannot install torch) | Floor set in 0.14 from the measured number; ≥ 80% on changed lines |
+| Quarantined / skipped tests | markers | 23 `unstable`, 16 `skip` | 0 `unstable`; every `skip` names what re-enables it |
+
+**Tests, evals and smoke are code, and carry debt too.** Test code (84,366 lines in 350 files) now
+outweighs the app (~80,000). There are 132 locally defined DB fixtures (#50 counted 111). Of 177
+smoke scripts, 16 make no HTTP call and 11 import `app.` in-process: those are pytest tests filed
+under the wire contract, and prove nothing about the wire. Eval runners are 12 scripts and 7,977
+lines with their own copies of manifest, search and history plumbing.
+
+| Rung | Refactor, as the rung's first PR |
+|---|---|
+| 0.14 | The ratchets above in `make ci`. Move `qa.stream_answer` to `runtime/`, which empties `KNOWN_VIOLATIONS`. One shared DB fixture (#50). The 11 in-process smoke scripts become pytest tests, or are deleted where pytest already covers them. Measure coverage and set its floor |
+| 0.15 | Split `summarizer.py` into `summary_prompts.py` and `summary_assembly.py` (both pure), `repos/summary_repo.py` (its 24 queries), and `library_summary.py` (the library-wide half, with its Kuzu read). The same prep for the other `content_type`/`is_technical` readers the retirement touches (37 files), starting with `flashcard_generators.generate` and `parser._parse_pdf`. Eval runners share one `evals/lib` path for manifest, search and history |
+| 0.16–0.17 | Repos extracted from `routers/study.py` (103 queries) and `routers/documents.py` (42), then from the services with the most direct SQL, before `library_id` lands, so the scope is added in one place. `get_collection_study_dashboard` and `list_documents` are split on the way. The 53 `DATA_DIR` joins go through the path resolver |
+| 0.18 | `main.lifespan` (300 lines) becomes named startup phases |
+| 0.19 | `fetch` onto `apiClient`, then `DocumentReader` (1,946 lines), `PDFViewer`, `Notes` and `ChatConversation` split into `packages/domain` hooks and `packages/ui` views |
+| 1.0-rc | Every target above met, or its exemption stated here with the reason |
 
 ## Deferred — decided, not scheduled
 
