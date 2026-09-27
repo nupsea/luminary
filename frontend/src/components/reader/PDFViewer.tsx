@@ -1004,9 +1004,14 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     }, [zoomMode, pdfDoc, fitTo])
     const fitToPage = useCallback(() => void fitTo("page"), [fitTo])
 
-    // Register custom zoom handler for PDF canvas when reader panel is active
+    // Register custom zoom handler for PDF canvas when reader panel is active and visible
     useEffect(() => {
       return registerCustomZoomHandler("reader", (action) => {
+        const el = scrollAreaRef.current
+        if (!el || el.closest(".hidden") || (el.offsetParent === null && el.offsetWidth === 0)) {
+          // PDF viewer is currently in a hidden tab (e.g. user is viewing ReadView or EPUBViewer), do not intercept
+          return false
+        }
         if (action === "in") {
           setZoomMode("manual")
           setZoom((currentZoom) => {

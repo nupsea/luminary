@@ -18,21 +18,56 @@ export function isMacPlatform(): boolean {
 }
 
 export function getZoomShortcutAction(e: KeyboardEvent, isMac: boolean): ZoomAction {
+  // On Mac, support both Command (standard) and Control (external keyboards or muscle memory).
+  // On Windows/Linux, support Control.
   const modifier = isMac
-    ? e.metaKey && !e.ctrlKey && !e.altKey
+    ? (e.metaKey || e.ctrlKey) && !e.altKey
     : e.ctrlKey && !e.metaKey && !e.altKey
 
   if (!modifier) return null
 
-  if (e.key === "+" || e.key === "=" || e.code === "Equal" || e.code === "NumpadAdd") {
-    return "in"
-  }
-  if (e.key === "-" || e.key === "_" || e.code === "Minus" || e.code === "NumpadSubtract") {
-    return "out"
-  }
-  if (e.key === "0" || e.code === "Digit0" || e.code === "Numpad0") {
-    return "reset"
-  }
+  // Zoom In (+ or = or NumpadAdd or corresponding keyCodes)
+  const isPlus =
+    e.key === "+" ||
+    e.key === "=" ||
+    e.code === "Equal" ||
+    e.code === "NumpadAdd" ||
+    (e as unknown as { keyCode?: number }).keyCode === 187 ||
+    (e as unknown as { which?: number }).which === 187 ||
+    (e as unknown as { keyCode?: number }).keyCode === 61 ||
+    (e as unknown as { which?: number }).which === 61 ||
+    (e as unknown as { keyCode?: number }).keyCode === 107 ||
+    (e as unknown as { which?: number }).which === 107
+
+  if (isPlus) return "in"
+
+  // Zoom Out (- or _ or NumpadSubtract or corresponding keyCodes)
+  const isMinus =
+    e.key === "-" ||
+    e.key === "_" ||
+    e.code === "Minus" ||
+    e.code === "NumpadSubtract" ||
+    (e as unknown as { keyCode?: number }).keyCode === 189 ||
+    (e as unknown as { which?: number }).which === 189 ||
+    (e as unknown as { keyCode?: number }).keyCode === 173 ||
+    (e as unknown as { which?: number }).which === 173 ||
+    (e as unknown as { keyCode?: number }).keyCode === 109 ||
+    (e as unknown as { which?: number }).which === 109
+
+  if (isMinus) return "out"
+
+  // Zoom Reset (0 or Numpad0 or corresponding keyCodes)
+  const isZero =
+    e.key === "0" ||
+    e.code === "Digit0" ||
+    e.code === "Numpad0" ||
+    (e as unknown as { keyCode?: number }).keyCode === 48 ||
+    (e as unknown as { which?: number }).which === 48 ||
+    (e as unknown as { keyCode?: number }).keyCode === 96 ||
+    (e as unknown as { which?: number }).which === 96
+
+  if (isZero) return "reset"
+
   return null
 }
 
@@ -41,6 +76,7 @@ export function resolveTargetPanel(
   activePanelId: string | null,
   defaultPanelId?: string
 ): string | null {
+  // 1. Check if the event target itself or an ancestor has data-zoom-panel
   if (target && typeof (target as { closest?: unknown }).closest === "function") {
     const el = target as unknown as { closest: (selector: string) => { getAttribute: (attr: string) => string | null } | null }
     const panelEl = el.closest("[data-zoom-panel]")
@@ -53,6 +89,31 @@ export function resolveTargetPanel(
       return null
     }
   }
+
+  // 2. Check if mouse pointer is currently hovering over a zoom panel
+  if (typeof document !== "undefined") {
+    try {
+      const hovered = document.querySelector("[data-zoom-panel]:hover")
+      if (hovered) {
+        const id = hovered.getAttribute("data-zoom-panel")
+        if (id) return id
+      }
+    } catch {
+      // Ignore pseudo-class query errors in headless/test environments
+    }
+  }
+
+  // 3. Smart path and active view context
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/notes")) {
+    if (typeof document !== "undefined") {
+      const previewVisible = document.querySelector("[data-zoom-panel='note-preview']:not(.hidden)")
+      const editorVisible = document.querySelector("[data-zoom-panel='note-editor']:not(.hidden)")
+      if (previewVisible && !editorVisible) {
+        return "note-preview"
+      }
+    }
+  }
+
   if (activePanelId) return activePanelId
   if (defaultPanelId) return defaultPanelId
   if (typeof window !== "undefined") {
@@ -85,7 +146,7 @@ export function usePanelZoomShortcut({
 
     const isMac = isMacPlatform()
 
-    // Track active panel on focus / click
+    // Track active panel on pointer over, click, or focus
     function onPointerOrFocus(e: Event) {
       const el = e.target as { closest?: (selector: string) => { getAttribute: (attr: string) => string | null } | null }
       if (!el || typeof el.closest !== "function") return
@@ -140,11 +201,13 @@ export function usePanelZoomShortcut({
     }
 
     window.addEventListener("pointerdown", onPointerOrFocus, { capture: true })
+    window.addEventListener("pointerover", onPointerOrFocus, { capture: true, passive: true })
     window.addEventListener("focusin", onPointerOrFocus, { capture: true })
     window.addEventListener("keydown", onKeyDown, { capture: true })
 
     return () => {
       window.removeEventListener("pointerdown", onPointerOrFocus, { capture: true })
+      window.removeEventListener("pointerover", onPointerOrFocus, { capture: true })
       window.removeEventListener("focusin", onPointerOrFocus, { capture: true })
       window.removeEventListener("keydown", onKeyDown, { capture: true })
     }

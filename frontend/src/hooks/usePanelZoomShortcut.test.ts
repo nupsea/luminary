@@ -49,6 +49,26 @@ describe("usePanelZoomShortcut", () => {
       expect(getZoomShortcutAction(altEvent, true)).toBeNull()
       expect(getZoomShortcutAction(otherKey, true)).toBeNull()
     })
+
+    it("recognizes Zoom In on Mac using keyCode 187 or 61", () => {
+      const e = { metaKey: true, ctrlKey: false, altKey: false, keyCode: 187 } as unknown as KeyboardEvent
+      expect(getZoomShortcutAction(e, true)).toBe("in")
+    })
+
+    it("recognizes Zoom Out on Mac using keyCode 189", () => {
+      const e = { metaKey: true, ctrlKey: false, altKey: false, keyCode: 189 } as unknown as KeyboardEvent
+      expect(getZoomShortcutAction(e, true)).toBe("out")
+    })
+
+    it("recognizes Zoom Reset on Mac using keyCode 48", () => {
+      const e = { metaKey: true, ctrlKey: false, altKey: false, keyCode: 48 } as unknown as KeyboardEvent
+      expect(getZoomShortcutAction(e, true)).toBe("reset")
+    })
+
+    it("accepts ctrlKey on Mac as well", () => {
+      const e = { metaKey: false, ctrlKey: true, altKey: false, key: "=", code: "Equal" } as KeyboardEvent
+      expect(getZoomShortcutAction(e, true)).toBe("in")
+    })
   })
 
   describe("resolveTargetPanel", () => {

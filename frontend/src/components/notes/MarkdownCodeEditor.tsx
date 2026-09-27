@@ -93,18 +93,25 @@ import { usePanelZoomStore } from "@/store/panelZoomStore"
 
 // Colors come from the shadcn CSS variables so dark mode flips for free.
 const editorTheme = EditorView.theme({
-  "&": { height: "100%", fontSize: "var(--note-editor-font-size, 13.5px)", backgroundColor: "transparent" },
+  "&": { height: "100%", fontSize: "var(--note-editor-font-size, 14px)", backgroundColor: "transparent" },
   ".cm-scroller": {
     fontFamily: "var(--font-mono)",
-    lineHeight: "1.65",
+    lineHeight: "1.7",
     overflow: "auto",
   },
-  ".cm-content": { padding: "8px 6px", caretColor: "hsl(var(--foreground))" },
+  ".cm-content": { padding: "16px 20px", caretColor: "hsl(var(--primary))" },
   "&.cm-focused": { outline: "none" },
-  ".cm-placeholder": { color: "hsl(var(--muted-foreground))" },
-  ".cm-cursor": { borderLeftColor: "hsl(var(--foreground))" },
+  ".cm-placeholder": { color: "hsl(var(--muted-foreground) / 0.7)" },
+  ".cm-cursor": { borderLeftColor: "hsl(var(--primary))", borderLeftWidth: "2px" },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
-    backgroundColor: "hsl(var(--primary) / 0.18)",
+    backgroundColor: "hsl(var(--primary) / 0.35) !important",
+  },
+  ".cm-content ::selection, .cm-line ::selection, .cm-scroller ::selection": {
+    backgroundColor: "hsl(var(--primary) / 0.35) !important",
+    color: "#ffffff !important",
+  },
+  ".cm-selectionMatch": {
+    backgroundColor: "hsl(var(--primary) / 0.2) !important",
   },
   // Completion popup restyled to the app's popover look (the CM default is a
   // stark blue box that clashes with the rest of the UI).
@@ -218,6 +225,7 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
     const hostRef = useRef<HTMLDivElement>(null)
     const viewRef = useRef<EditorView | null>(null)
     const noteEditorZoom = usePanelZoomStore((s) => s.getZoom("note-editor"))
+    const fontSizeRoom = useRef(new Compartment()).current
     // The preview pane is a toggle, so live rendering has to be switchable on a
     // view that is already built.
     const liveRoom = useRef(new Compartment()).current
@@ -227,6 +235,20 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
       () => liveMarkdown({ onEditDiagram: (d) => latest.current.onEditDiagram?.(d) }),
       [],
     )
+
+    useEffect(() => {
+      const view = viewRef.current
+      if (!view) return
+      view.dispatch({
+        effects: fontSizeRoom.reconfigure(
+          EditorView.theme({
+            "&": { fontSize: `${14 * noteEditorZoom}px` },
+            ".cm-scroller": { fontSize: `${14 * noteEditorZoom}px` },
+          })
+        ),
+      })
+      view.requestMeasure()
+    }, [noteEditorZoom, fontSizeRoom])
 
     useEffect(() => {
       const view = new EditorView({
@@ -240,6 +262,12 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
             markdown({ base: markdownLanguage, codeLanguages: languages }),
             syntaxHighlighting(mdHighlight),
             editorTheme,
+            fontSizeRoom.of(
+              EditorView.theme({
+                "&": { fontSize: `${14 * noteEditorZoom}px` },
+                ".cm-scroller": { fontSize: `${14 * noteEditorZoom}px` },
+              })
+            ),
             liveRoom.of(live ? liveExtension() : []),
             cmPlaceholder(placeholder ?? ""),
             autocompletion({
@@ -497,7 +525,7 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
       <div
         ref={hostRef}
         data-zoom-panel="note-editor"
-        style={{ "--note-editor-font-size": `${13.5 * noteEditorZoom}px` } as React.CSSProperties}
+        style={{ "--note-editor-font-size": `${14 * noteEditorZoom}px` } as React.CSSProperties}
         className={className}
       />
     )
