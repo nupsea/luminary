@@ -774,7 +774,7 @@ logs:
 
 # Measured on GitHub; raise it as coverage grows, never lower it to pass.
 # pytest-cov is pinned here rather than locked, like radon: a gate tool, not an app dependency.
-BACKEND_COVERAGE_FLOOR ?= 0
+BACKEND_COVERAGE_FLOOR ?= 1
 
 ci:
 	@echo "Running CI checks..."

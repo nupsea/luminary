@@ -11,7 +11,7 @@ export default defineConfig({
     environment: "node",
     coverage: {
       provider: "v8",
-      include: ["src/**"],
+      include: ["src/**/*.{ts,tsx}"],
       reporter: ["text-summary"],
       // Floors are the measured numbers rounded down (2026-09-28: 16.33 / 13.9 /
       // 11.63 / 15.97). Raise them as coverage grows; never lower one to pass.
