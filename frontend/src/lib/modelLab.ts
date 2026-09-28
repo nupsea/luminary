@@ -60,10 +60,6 @@ export function progressPct(run: Pick<LabRun, "total_units" | "completed_units">
   return Math.round((run.completed_units / run.total_units) * 100)
 }
 
-export function isTerminal(run: LabRun): boolean {
-  return run.status !== "running"
-}
-
 /** Rows grouped by tier, in the order they should be read. */
 export function rowsByTier(rows: LabMetricRow[]): {
   tier: LabMetricRow["tier"]

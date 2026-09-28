@@ -5,9 +5,9 @@
 
 import type { ContentTypeValue } from "@/lib/ingestionApi"
 
-export const TEXT_TYPES = [".pdf", ".docx", ".txt", ".md", ".epub"]
-export const AUDIO_TYPES = [".mp3", ".m4a", ".wav"]
-export const VIDEO_TYPES = [".mp4"]
+const TEXT_TYPES = [".pdf", ".docx", ".txt", ".md", ".epub"]
+const AUDIO_TYPES = [".mp3", ".m4a", ".wav"]
+const VIDEO_TYPES = [".mp4"]
 
 export interface FormatSupport {
   canAudio: boolean

@@ -100,12 +100,3 @@ export interface FileQuestion {
   context_hint: string | null
   source_file: string | null
 }
-
-export interface EvalRegressionItem {
-  dataset: string
-  metric: string
-  current_value: number
-  baseline_value: number
-  drop_pct: number
-  eval_kind: string | null
-}

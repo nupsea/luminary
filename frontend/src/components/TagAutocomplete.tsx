@@ -37,7 +37,7 @@ async function fetchAutocomplete(q: string, signal?: AbortSignal): Promise<Autoc
 
 // TagBreadcrumb — renders 'root/child' as breadcrumb style
 
-export function TagBreadcrumb({ tag }: { tag: string }) {
+function TagBreadcrumb({ tag }: { tag: string }) {
   const parts = tag.split("/")
   if (parts.length === 1) {
     return <span className="text-primary">{tag}</span>

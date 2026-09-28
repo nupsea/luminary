@@ -4,7 +4,7 @@ import { memo } from "react"
 import { cn } from "@/lib/utils"
 
 import { ChapterProgressRing } from "./ChapterGoalsPanel"
-import { SectionPreviewWithHighlights } from "./HighlightsPanel"
+import { SectionPreviewWithHighlights } from "./SectionPreviewWithHighlights"
 import { formatMmSs, parseAudioStartTime } from "./mediaUtils"
 import { PredictPanel } from "./PredictPanel"
 import { hasCodeFence } from "./predictUtils"

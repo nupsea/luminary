@@ -16,7 +16,7 @@
  */
 
 /** Below this a match lands on any sentence and points the reader at the wrong place. */
-export const MIN_MATCH_CHARS = 24
+const MIN_MATCH_CHARS = 24
 
 /**
  * Markdown syntax ingestion keeps verbatim in chunk text (I-33) but that the
@@ -84,7 +84,7 @@ export function longestPresentRun(words: string[], text: string): string[] {
   return best
 }
 
-export function escapeRegExp(text: string): string {
+function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 

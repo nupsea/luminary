@@ -2,14 +2,6 @@
 
 export type Surface = "read" | "recall" | "write" | "explore" | "none"
 
-export const VALID_SURFACES: ReadonlyArray<Surface> = [
-  "read",
-  "recall",
-  "write",
-  "explore",
-  "none",
-]
-
 // Map the active route pathname to a surface label that POST /pomodoro/start
 // expects. Routes outside the four learning surfaces map to "none".
 export function inferSurfaceFromPath(pathname: string): Surface {

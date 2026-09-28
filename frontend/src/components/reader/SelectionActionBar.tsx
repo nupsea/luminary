@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { ExplainMode } from "@/components/FloatingToolbar"
+export type ExplainMode = "plain" | "eli5" | "analogy"
 
 export type HighlightColor = "yellow" | "green" | "blue" | "pink"
 

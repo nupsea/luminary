@@ -1,7 +1,7 @@
 // HTTP wrappers backing the Learning page. Pure functions; the page and
 // its sub-components wire them up via tanstack-query useQuery / useMutation.
 
-import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/apiClient"
+import { apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import type { LibraryFacets } from "@/components/library/FilterBar"
 import type {
   DocumentListItem,
@@ -71,9 +71,6 @@ export async function fetchRecentlyAccessed(): Promise<DocumentListItem[]> {
     return []
   }
 }
-
-export const patchTags = (id: string, tags: string[]): Promise<void> =>
-  apiPatch(`/documents/${id}/tags`, { tags })
 
 export const bulkDelete = (ids: string[]): Promise<void> =>
   apiPost("/documents/bulk-delete", { ids })

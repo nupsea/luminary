@@ -18,7 +18,7 @@ const MUTED = "text-muted-foreground"
 const GOOD = "text-emerald-700 dark:text-emerald-400"
 const DOUBT = "text-amber-700 dark:text-amber-400"
 
-export const SOURCE_NOTES: Record<string, SourceNote> = {
+const SOURCE_NOTES: Record<string, SourceNote> = {
   checked: { text: "Found in this document, and the answer follows from it", className: GOOD },
   verified: { text: "Found in this document", className: GOOD },
   answer_unsupported: {

@@ -10,8 +10,6 @@ export type MonitoringOverview = components["schemas"]["MonitoringOverview"]
 export type MonitoringMetrics = components["schemas"]["MonitoringMetrics"]
 export type QADailyCount = components["schemas"]["QADailyCount"]
 export type PhoenixUrl = components["schemas"]["PhoenixUrlResponse"]
-export type ConceptMasteryItem = components["schemas"]["ConceptMasteryOut"]
-export type HeatmapCellItem = components["schemas"]["HeatmapCellOut"]
 export type MasteryConceptsResponse = components["schemas"]["MasteryConceptsOut"]
 export type MasteryHeatmapResponse = components["schemas"]["MasteryHeatmapOut"]
 
@@ -39,8 +37,4 @@ export interface SectionState<T> {
   loading: boolean
   data: T
   error: boolean
-}
-
-export function initSection<T>(data: T): SectionState<T> {
-  return { loading: true, data, error: false }
 }

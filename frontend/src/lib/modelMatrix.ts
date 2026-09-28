@@ -57,11 +57,6 @@ export function isStructural(key: string): boolean {
   return STRUCTURAL.has(key) || STRUCTURAL_PREFIXES.some((p) => key.startsWith(p))
 }
 
-export interface ModelCell {
-  model: string
-  value: number
-}
-
 export interface ModelMetricRow {
   /** `<eval kind>.<metric>` — the metric alone is ambiguous across kinds. */
   key: string

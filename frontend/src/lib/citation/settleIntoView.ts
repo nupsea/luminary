@@ -18,13 +18,13 @@
  * followed by another shift, and a 150ms interval spent eight seconds walking
  * down a 23K-word book before the passage came to rest.
  */
-export const SETTLE_INTERVAL_MS = 50
+const SETTLE_INTERVAL_MS = 50
 
 /** Within this many pixels of centre counts as arrived. */
-export const SETTLE_TOLERANCE_PX = 24
+const SETTLE_TOLERANCE_PX = 24
 
 /** Consecutive checks that must agree before the loop stops. */
-export const SETTLE_CONFIRM = 2
+const SETTLE_CONFIRM = 2
 
 /**
  * Upper bound on the whole loop, including waiting for the mark to render.
@@ -36,7 +36,7 @@ export const SETTLE_CONFIRM = 2
  */
 export const SETTLE_MAX_TICKS = 200
 
-export const SCROLL_KEYS = new Set([
+const SCROLL_KEYS = new Set([
   "ArrowUp",
   "ArrowDown",
   "PageUp",

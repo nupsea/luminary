@@ -15,7 +15,6 @@ export interface DocListItem {
   title: string
 }
 
-export type SuggestionItem = components["schemas"]["SuggestionItem"]
 export type SuggestionsResponse = components["schemas"]["SuggestionResponse"]
 export type WebSearchSettings = components["schemas"]["WebSearchSettingsResponse"]
 
@@ -100,7 +99,6 @@ export interface ChatMessage {
   failedQuestion?: string
 }
 
-export type SessionPlanItem = components["schemas"]["SessionPlanItem"]
 export type SessionPlanResponse = components["schemas"]["SessionPlanResponse"]
 
 export interface CloudProvider {

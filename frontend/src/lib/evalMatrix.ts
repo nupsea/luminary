@@ -79,7 +79,7 @@ export function fingerprintOf(run: EvalRunFull): string {
   ].join(" · ")
 }
 
-export function describeFingerprint(run: EvalRunFull): string {
+function describeFingerprint(run: EvalRunFull): string {
   const env = environmentOf(run)
   if (!env) return "no provenance recorded"
   const lib = env.library ?? {}

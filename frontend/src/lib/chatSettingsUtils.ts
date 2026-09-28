@@ -87,7 +87,6 @@ export function buildTransparencyIconLabel(confidenceLevel: string): string {
  * Scope moved to inline combobox in Chat header
  */
 export const DRAWER_SECTIONS = ["model", "web_search"] as const
-export type DrawerSection = (typeof DRAWER_SECTIONS)[number]
 
 /**
  * Returns the display label for the document scope combobox.

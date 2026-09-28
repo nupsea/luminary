@@ -4,7 +4,7 @@
  * triggering React or Zustand store imports.
  */
 
-export const LINK_MARKER_RE = /\[\[([a-f0-9-]+)\|([^\]]+)\]\]/g
+const LINK_MARKER_RE = /\[\[([a-f0-9-]+)\|([^\]]+)\]\]/g
 
 /** Parsed link marker extracted from note content. */
 export interface LinkMarker {

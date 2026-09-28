@@ -736,7 +736,7 @@ duplication ≤ 3%, coverage ≥ 80% on new code).
 | SQL outside `repos/` | `grep` for `select(` and `session.execute` | 310 in 16 routers, 644 in 75 services (131 in repos) | 0 in routers by 0.17; services by 1.0 |
 | Duplicated lines | `jscpd`, 8-line clones | 1.11% (96 clones) | ≤ 3%, held |
 | Dead Python | `vulture` ≥ 80% confidence, plus unreferenced symbols | 8 unused imports/variables, ~11 unused functions/classes | 0 |
-| Dead TypeScript | `knip` | 12 unused files, 29 unused exports, 77 unused exported types, 1 unused dependency | 0 files, 0 dependencies |
+| Dead TypeScript | `knip` (`frontend/knip.json`) | 0 unused files, exports or dependencies (was 12, 29 and 1); 115 unused exported types | 0 files, 0 dependencies |
 | Test coverage | `pytest --cov`, `vitest --coverage` | **not measured** (the cloud container cannot install torch) | Floor set in 0.14 from the measured number; ≥ 80% on changed lines |
 | Quarantined / skipped tests | markers | 23 `unstable`, 16 `skip` | 0 `unstable`; every `skip` names what re-enables it |
 

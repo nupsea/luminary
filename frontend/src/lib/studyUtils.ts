@@ -90,7 +90,6 @@ export const INSIGHTS_SECTIONS = [
   "struggling",
 ] as const
 
-export type InsightsSection = (typeof INSIGHTS_SECTIONS)[number]
 
 export interface SmartGenerateParams {
   document_id: string
