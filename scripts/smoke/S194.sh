@@ -33,7 +33,7 @@ print(pick['id'] if pick else '')
 " 2>/dev/null || true)
 if [ -z "$DOC_ID" ]; then
   echo "  SKIP: no documents in library"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 echo "  OK: doc_id=$DOC_ID"
 

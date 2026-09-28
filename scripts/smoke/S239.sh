@@ -33,7 +33,7 @@ print(items[0]['id'] if items else '')
 ")
 if [ -z "$DOC" ]; then
   echo "S239 SKIP (no documents in library)"
-  exit 0
+  exit "$SMOKE_SKIP"
 fi
 
 BEFORE=$(curl -s "${BASE}/documents/${DOC}" | python3 -c "

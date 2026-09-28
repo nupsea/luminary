@@ -21,8 +21,7 @@ print(' '.join(d['id'] for d in items if isinstance(d, dict) and d.get('stage') 
 " 2>/dev/null || echo ""); do
     COUNT=$(curl -s "${BASE}/documents/${CANDIDATE}/images" | python3 -c "
 import json, sys
-d = json.load(sys.stdin)
-print(len(d.get('images', d) if isinstance(d, dict) else d))
+print(json.load(sys.stdin)['total'])
 " 2>/dev/null || echo 0)
     if [ "${COUNT:-0}" -gt 0 ]; then DOC_ID="$CANDIDATE"; break; fi
   done
@@ -47,8 +46,8 @@ echo "PASS: images endpoint returned HTTP 200"
 # vision pipeline has images and no analysis jobs, and the script then reported a
 # broken feature. Look across the library instead, and say so plainly when
 # nothing has been through it rather than calling that a failure.
-python3 - <<'PYCHECK'
-import json, os, urllib.request
+SMOKE_SKIP="$SMOKE_SKIP" python3 - <<'PYCHECK'
+import json, os, sys, urllib.request
 
 BASE = os.environ["BASE"]
 
@@ -77,6 +76,7 @@ else:
         "SKIP: no document in this library has an image_analyze job "
         f"(job types seen: {sorted(t for t in seen_types if t)})"
     )
+    sys.exit(int(os.environ["SMOKE_SKIP"]))
 PYCHECK
 
 

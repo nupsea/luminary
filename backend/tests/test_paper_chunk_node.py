@@ -1,5 +1,6 @@
 """chunk_node's paper path: routing, reference exclusion, and fallback safety."""
 
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -145,6 +146,36 @@ async def test_unrecognised_structure_falls_back_to_generic(test_db):
             .all()
         )
     assert len(chunks) > 0
+
+
+@pytest.mark.asyncio
+async def test_the_splitter_import_runs_off_the_event_loop_before_any_write(test_db):
+    """Its first import loads torch; on the loop it froze the app mid-transaction."""
+    _, factory, tmp_path = test_db
+    doc_id = "paper-import"
+    await _insert_document(factory, doc_id, tmp_path)
+
+    from app.workflows.ingestion_nodes import chunk as chunk_module
+
+    events: list[str] = []
+    loop_thread = threading.get_ident()
+    real_splitter, real_stage = chunk_module._splitter_cls, chunk_module._update_stage
+
+    def splitter():
+        events.append("import on loop" if threading.get_ident() == loop_thread else "import")
+        return real_splitter()
+
+    async def stage(*args, **kwargs):
+        events.append("write")
+        return await real_stage(*args, **kwargs)
+
+    with (
+        patch.object(chunk_module, "_splitter_cls", splitter),
+        patch.object(chunk_module, "_update_stage", stage),
+    ):
+        await chunk_node(_state(doc_id, PAPER_SECTIONS, tmp_path))
+
+    assert events[:2] == ["import", "write"], events
 
 
 @pytest.mark.asyncio
