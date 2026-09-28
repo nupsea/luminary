@@ -181,13 +181,13 @@ async def test_streaming_is_progressive(test_db):
         }
     )
 
-    from app.services.qa import get_qa_service
+    from app.runtime.qa_stream import get_qa_service
 
     svc = get_qa_service()
     sse_token_count = 0
 
     with (
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm),
         patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
     ):
         async for sse_event in svc.stream_answer("What is this?", [], "all", None):

@@ -64,7 +64,7 @@ from this repo. The full set is in `docs/invariants.md`.
 - **Services and repos raise `LuminaryError` subclasses, never `HTTPException`.** One handler
   in `main.py` maps them.
 - **Never import backwards** across `Types → Config → Repo → Service → Runtime → API`.
-  `layer_linter.py` enforces it; its `KNOWN_VIOLATIONS` set may only shrink, never grow.
+  `layer_linter.py` enforces it; its `KNOWN_VIOLATIONS` set is empty and must stay so.
 - **Wrap synchronous LanceDB and Kuzu calls in `asyncio.to_thread`.** One worker serves every
   request, so a blocking call stalls the whole app. (I-2)
 - **New endpoints need a pytest test**, and the surface manifest must stay covered.

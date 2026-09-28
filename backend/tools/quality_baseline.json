@@ -39,7 +39,6 @@
     "app/services/ner.py::EntityExtractor.extract",
     "app/services/parser.py::DocumentParser._parse_pdf",
     "app/services/parser.py::_epub_html_to_markdown",
-    "app/services/qa.py::QAService.stream_answer",
     "app/services/retriever.py::HybridRetriever.retrieve",
     "app/services/summarizer.py::SummarizationService.pregenerate",
     "app/services/summarizer.py::SummarizationService.stream_library_summary",
@@ -105,7 +104,6 @@
     "app/services/oreilly_service.py::parse_cookies_input",
     "app/services/parser.py::DocumentParser._parse_pdf",
     "app/services/parser.py::_epub_html_to_markdown",
-    "app/services/qa.py::QAService.stream_answer",
     "app/services/retriever.py::HybridRetriever.retrieve",
     "app/services/retriever_strategies.py::_graph_expand",
     "app/services/study_assembler.py::assemble",
@@ -119,14 +117,13 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book",
     "app/workflows/ingestion_nodes/entity_extract.py::write_entity_graph"
   ],
-  "complexity_over_10": 239,
+  "complexity_over_10": 238,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
     "app/routers/study.py",
     "app/services/flashcard_generators.py",
-    "app/services/parser.py",
-    "app/services/qa.py"
+    "app/services/parser.py"
   ],
   "sql_outside_repos": {
     "app/main.py": 1,
@@ -195,7 +192,6 @@
     "app/services/pomodoro_service.py": 12,
     "app/services/prereq_extractor.py": 3,
     "app/services/progress_service.py": 18,
-    "app/services/qa.py": 6,
     "app/services/recommender_service.py": 7,
     "app/services/reference_enricher.py": 8,
     "app/services/reference_validator.py": 4,

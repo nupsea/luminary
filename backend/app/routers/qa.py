@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.runtime.qa_stream import get_qa_service
 from app.services.intent import (
     LLM_FALLBACK_BELOW,
     _llm_classify_fallback,
@@ -16,7 +17,6 @@ from app.services.intent import (
 )
 from app.services.llm import get_llm_service
 from app.services.okf_context import get_okf_context_service
-from app.services.qa import get_qa_service
 
 logger = logging.getLogger(__name__)
 

@@ -722,7 +722,7 @@ size alone. **Work lands in batches of a few PRs, and each batch stops for a man
 pass** on the app before the next one starts: the suite cannot see what a refactor did to a
 screen, and a regression found after five more PRs is five times harder to place. **Ratchets** stop new debt landing meanwhile: `backend/tools/quality_ratchet.py` lists today's
 offenders in `quality_baseline.json`, and `make ci` fails on a new one or on a fixed one left in
-the list (`--prune` drops those), so the baseline only shrinks, as `KNOWN_VIOLATIONS` does in
+the list (`--prune` drops those), so the baseline only shrinks, as `KNOWN_VIOLATIONS` did in
 `layer_linter.py`. `npm run knip` holds unused files, exports and dependencies at 0.
 
 Measured 2026-09-27 on `master` (`5e8cb41e`). The targets follow the usual external bars: McCabe's
@@ -750,7 +750,7 @@ lines with their own copies of manifest, search and history plumbing.
 
 | Rung | Refactor, as the rung's first PR |
 |---|---|
-| 0.14 | The ratchets above run in `make ci` for every row except coverage, which waits on its measurement. Move `qa.stream_answer` to `runtime/`, which empties `KNOWN_VIOLATIONS`. One shared DB fixture (#50). The 11 in-process smoke scripts become pytest tests, or are deleted where pytest already covers them. Measure coverage and set its floor |
+| 0.14 | The ratchets above run in `make ci` for every row except coverage, which waits on its measurement. **Done:** `qa.stream_answer` moved to `runtime/qa_stream.py` and split under the 120-line and complexity-20 bars; `KNOWN_VIOLATIONS` is empty. One shared DB fixture (#50). The 11 in-process smoke scripts become pytest tests, or are deleted where pytest already covers them. Measure coverage and set its floor |
 | 0.15 | Split `summarizer.py` into `summary_prompts.py` and `summary_assembly.py` (both pure), `repos/summary_repo.py` (its 24 queries), and `library_summary.py` (the library-wide half, with its Kuzu read). The same prep for the other `content_type`/`is_technical` readers the retirement touches (37 files), starting with `flashcard_generators.generate` and `parser._parse_pdf`. Eval runners share one `evals/lib` path for manifest, search and history |
 | 0.16–0.17 | Repos extracted from `routers/study.py` (103 queries) and `routers/documents.py` (42), then from the services with the most direct SQL, before `library_id` lands, so the scope is added in one place. `get_collection_study_dashboard` and `list_documents` are split on the way. The 53 `DATA_DIR` joins go through the path resolver |
 | 0.18 | `main.lifespan` (300 lines) becomes named startup phases |
