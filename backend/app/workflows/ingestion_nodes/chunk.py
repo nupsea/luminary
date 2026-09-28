@@ -659,6 +659,9 @@ async def _chunk_conversation(
 
 async def chunk_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "chunk", "doc_id": state["document_id"]})
+    # The splitter's first import loads torch. Run on the loop inside a chunk
+    # transaction, it froze the app and held the write lock for 12-43s (I-2, #88).
+    await asyncio.to_thread(_splitter_cls)
     await _update_stage(state["document_id"], "chunking")
     with trace_ingestion_node("chunk", state):
         try:
