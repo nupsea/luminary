@@ -31,7 +31,7 @@ Prose versions in this repo have drifted before.
 |---|---|
 | `make dev` | backend (:7820, reload) + frontend (:5173) |
 | `make luminary` | full app the way a user runs it |
-| `make ci` | **the gate.** ruff, layer_linter, boundary_checker, quality ratchet, pytest, manifest checks, frontend build, tsc, eslint, knip, vitest |
+| `make ci` | **the gate.** ruff, layer_linter, boundary_checker, quality ratchet, pytest (coverage floor), manifest checks, frontend build, tsc, eslint, knip, vitest (coverage floor) |
 | `make lint` | ruff + tsc + eslint + manifest checks |
 | `make test` | `pytest` (backend) |
 | `make smoke` | `scripts/smoke/all.sh` — ~160 numbered HTTP contract scripts; needs a running backend |
