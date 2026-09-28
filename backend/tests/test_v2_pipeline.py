@@ -199,8 +199,8 @@ async def test_intent_routing_factual(all_books_ingested):
         section_heading="Chapter I: Down the Rabbit-Hole",
     )
 
-    # LLM call now happens in stream_answer() (app.services.qa), not chat_graph
-    with patch("app.services.qa.get_llm_service", return_value=mock_llm):
+    # LLM call now happens in stream_answer() (app.runtime.qa_stream), not chat_graph
+    with patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/qa",
@@ -230,7 +230,7 @@ async def test_intent_routing_comparative(all_books_ingested):
     """POST /qa comparative question returns HTTP 200."""
     mock_llm = _make_mock_llm("Alice is a curious girl. The Time Traveller is an inventor.")
 
-    with patch("app.services.qa.get_llm_service", return_value=mock_llm):
+    with patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/qa",
@@ -261,7 +261,7 @@ async def test_intent_routing_relational(all_books_ingested):
         "Odysseus and Telemachus are father and son. Telemachus seeks his missing father."
     )
 
-    with patch("app.services.qa.get_llm_service", return_value=mock_llm):
+    with patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/qa",
@@ -348,7 +348,7 @@ async def test_streaming_not_buffered():
     Verifies true streaming: stream_answer() must yield tokens progressively,
     not buffer the full LLM response before sending the first SSE event.
     """
-    from app.services.qa import get_qa_service  # noqa: PLC0415
+    from app.runtime.qa_stream import get_qa_service  # noqa: PLC0415
 
     token_order: list[str] = []
     generation_complete = False
@@ -383,7 +383,7 @@ async def test_streaming_not_buffered():
 
     qa = get_qa_service()
     with (
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm),
         patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
     ):
         async for chunk in qa.stream_answer(
@@ -417,7 +417,7 @@ async def _run_qa_done(
     chunks: list[dict] | None = None,
     section_context: str = "",
 ) -> dict:
-    from app.services.qa import get_qa_service  # noqa: PLC0415
+    from app.runtime.qa_stream import get_qa_service  # noqa: PLC0415
 
     async def _stream(*_args, **_kwargs):
         for tok in ["Grounded", " answer.", '{"citations":[],"confidence":"high"}']:
@@ -448,7 +448,7 @@ async def _run_qa_done(
 
     qa = get_qa_service()
     with (
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm),
         patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
         patch.object(qa, "_store_qa", AsyncMock(return_value="qa-1")),
     ):

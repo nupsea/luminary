@@ -7,11 +7,8 @@ import pytest
 
 from app.runtime.chat_graph import build_chat_graph, classify_node, route_node
 from app.runtime.chat_nodes.direct import direct_node
-from app.services.qa import (
-    QA_CREATIVE_TEMPERATURE,
-    QA_DIRECT_SYSTEM_PROMPT,
-    get_qa_service,
-)
+from app.runtime.qa_stream import get_qa_service
+from app.services.qa import QA_CREATIVE_TEMPERATURE, QA_DIRECT_SYSTEM_PROMPT
 
 
 def _make_direct_state(question: str, history: list[dict] | None = None) -> dict:
@@ -108,7 +105,7 @@ async def test_stream_answer_direct_emits_no_citations_and_direct_flag(test_db):
     mock_llm.generate = AsyncMock(return_value=mock_token_gen())
 
     svc = get_qa_service()
-    with patch("app.services.qa.get_llm_service", return_value=mock_llm):
+    with patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm):
         events = [
             e async for e in svc.stream_answer("mutex vs semaphore", [], "all", None, direct=True)
         ]
@@ -140,7 +137,7 @@ async def test_stream_answer_direct_composes_with_creative(test_db):
     mock_llm.generate = AsyncMock(return_value=mock_token_gen())
 
     svc = get_qa_service()
-    with patch("app.services.qa.get_llm_service", return_value=mock_llm):
+    with patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm):
         _ = [
             e
             async for e in svc.stream_answer(

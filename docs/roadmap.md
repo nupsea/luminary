@@ -722,7 +722,7 @@ size alone. **Work lands in batches of a few PRs, and each batch stops for a man
 pass** on the app before the next one starts: the suite cannot see what a refactor did to a
 screen, and a regression found after five more PRs is five times harder to place. **Ratchets** stop new debt landing meanwhile: `backend/tools/quality_ratchet.py` lists today's
 offenders in `quality_baseline.json`, and `make ci` fails on a new one or on a fixed one left in
-the list (`--prune` drops those), so the baseline only shrinks, as `KNOWN_VIOLATIONS` does in
+the list (`--prune` drops those), so the baseline only shrinks, as `KNOWN_VIOLATIONS` did in
 `layer_linter.py`. `npm run knip` holds unused files, exports and dependencies at 0.
 
 Measured 2026-09-27 on `master` (`5e8cb41e`). The targets follow the usual external bars: McCabe's

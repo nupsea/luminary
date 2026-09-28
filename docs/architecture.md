@@ -26,7 +26,7 @@ Enforced by `backend/tools/layer_linter.py`, which `make ci` runs and which
 exits 1 on any violation. `LAYER_ORDER`/`SUBDIR_MAP` must name every directory:
 an unlisted one resolves to `None`, which the checker skips as unclassified, so
 a missing entry silently exempts a whole layer rather than failing loudly.
-`KNOWN_VIOLATIONS` carries pre-existing debt and may only shrink.
+`KNOWN_VIOLATIONS` is empty and must stay so.
 
 ## Tech Stack
 

@@ -12,7 +12,7 @@ still breaks the app.
 ## Layers, in order
 
 Follow `Types → Config → Repo → Service → Runtime → API`. Never import backwards;
-`layer_linter.py` fails CI on it, and its `KNOWN_VIOLATIONS` set may only shrink.
+`layer_linter.py` fails CI on it, and its `KNOWN_VIOLATIONS` set is empty and must stay so.
 
 1. **Schema** — `backend/app/schemas/<domain>.py`. Pydantic request/response models. Zero I/O,
    no imports from other layers.
