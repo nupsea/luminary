@@ -6,7 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A web article that needs a sign-in can be imported from the page saved in your browser.** Attach it on the Web URL tab; the import keeps the page's order and images.
+
 ### Fixed
+- **Imported web articles with link-preview cards came out jumbled**: card text glued into one link, card thumbnails repeated between the article's pictures. Cards now import as a linked title, their description and one thumbnail, in page order.
+- **A members-only article imported as its public preview without saying so.** The import now warns that only part of the article arrived.
 - **Dictation could transcribe gibberish, then fail every later try with "network error".** A second click while the browser asked for the microphone started a recorder that never stopped, and its audio leaked into later recordings. Each recording now keeps its own audio, and an unreadable one answers with a message instead of a crash the browser reports as a network failure.
 
 ## [0.13.9] - 2026-09-27
