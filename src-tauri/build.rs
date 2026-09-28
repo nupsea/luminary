@@ -23,6 +23,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "boot_state",
             "diagnostics",
+            "read_clipboard_image",
             "render_page",
             "report_issue",
             "retry_boot",

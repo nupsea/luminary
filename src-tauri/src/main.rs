@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod clipboard;
 mod logging;
 mod render;
 mod report;
@@ -275,7 +276,8 @@ fn grant_spa_render(app: &AppHandle, port: u16) {
         .local(false)
         .remote(render::spa_origin_pattern(port))
         .window("main")
-        .permission("allow-render-page");
+        .permission("allow-render-page")
+        .permission("allow-read-clipboard-image");
 
     match app.add_capability(capability) {
         Ok(()) => logging::write(
@@ -425,6 +427,7 @@ fn main() {
             report_issue,
             reveal_log,
             retry_boot,
+            clipboard::read_clipboard_image,
             render::render_page
         ])
         .setup(move |app| {

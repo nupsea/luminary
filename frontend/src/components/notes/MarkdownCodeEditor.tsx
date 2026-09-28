@@ -40,6 +40,7 @@ import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { slashCommandSource, type SlashCommandConfig } from "./slashCommands"
 import { toast } from "sonner"
 import { logger } from "@/lib/logger"
+import { isWithheldImage, readShellClipboardImage } from "@/lib/noteAssets"
 
 export interface MarkdownEditorHandle {
   insertBlock: (markdown: string) => void
@@ -254,7 +255,6 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
     { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live, onEditDiagram },
     ref,
   ) {
-    const lastPasteTimeRef = useRef(0)
     const hostRef = useRef<HTMLDivElement>(null)
     const viewRef = useRef<EditorView | null>(null)
     const noteEditorZoom = usePanelZoomStore((s) => s.getZoom("note-editor"))
@@ -412,35 +412,6 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
                   return true
                 },
               },
-              {
-                key: "Mod-v",
-                run: (v) => {
-                  const handler = latest.current.onPasteImage
-                  if (!handler) return false
-                  // Fallback for desktop WKWebView when Cmd+V does not emit a paste event
-                  if (typeof navigator !== "undefined" && navigator.clipboard?.read) {
-                    navigator.clipboard
-                      .read()
-                      .then(async (clipboardItems) => {
-                        for (const cItem of clipboardItems) {
-                          for (const type of cItem.types) {
-                            if (type.startsWith("image/")) {
-                              if (Date.now() - lastPasteTimeRef.current < 600) return
-                              lastPasteTimeRef.current = Date.now()
-                              const blob = await cItem.getType(type)
-                              const fallbackFile = new File([blob], "screenshot.png", { type })
-                              const md = await handler(fallbackFile)
-                              v.dispatch(insertBlockSpec(v.state, md))
-                              return
-                            }
-                          }
-                        }
-                      })
-                      .catch(() => {})
-                  }
-                  return false
-                },
-              },
               ...defaultKeymap,
               ...historyKeymap,
             ]),
@@ -456,48 +427,18 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
                 if (!handler) return false
 
                 const file = extractImageFile(event.clipboardData)
-                if (file) {
-                  event.preventDefault()
-                  if (Date.now() - lastPasteTimeRef.current < 600) return true
-                  lastPasteTimeRef.current = Date.now()
-                  handler(file)
-                    .then((md) => {
-                      v.dispatch(insertBlockSpec(v.state, md))
-                    })
-                    .catch((err) => {
-                      toast.error("Failed to upload pasted image")
-                      logger.warn("Failed to upload pasted image", err)
-                    })
-                  return true
-                }
-
-                // If no file was found in event.clipboardData, check if navigator.clipboard has an image
-                // (only when no text is being pasted, so we do not interfere with text paste)
-                const hasText = Boolean(event.clipboardData?.getData("text/plain")?.trim())
-                if (!hasText && typeof navigator !== "undefined" && navigator.clipboard?.read) {
-                  navigator.clipboard
-                    .read()
-                    .then(async (clipboardItems) => {
-                      for (const cItem of clipboardItems) {
-                        for (const type of cItem.types) {
-                          if (type.startsWith("image/")) {
-                            if (Date.now() - lastPasteTimeRef.current < 600) return
-                            lastPasteTimeRef.current = Date.now()
-                            const blob = await cItem.getType(type)
-                            const fallbackFile = new File([blob], "screenshot.png", { type })
-                            const md = await handler(fallbackFile)
-                            v.dispatch(insertBlockSpec(v.state, md))
-                            return
-                          }
-                        }
-                      }
-                    })
-                    .catch(() => {
-                      // Clipboard read permission denied or no image; ignore
-                    })
-                }
-
-                return false
+                if (!file && !isWithheldImage(event.clipboardData)) return false
+                event.preventDefault()
+                ;(file ? Promise.resolve(file) : readShellClipboardImage())
+                  .then((image) => (image ? handler(image) : Promise.reject(new Error("no image"))))
+                  .then((md) => {
+                    v.dispatch(insertBlockSpec(v.state, md))
+                  })
+                  .catch((err) => {
+                    toast.error("Failed to paste image")
+                    logger.warn("Failed to paste image", err)
+                  })
+                return true
               },
               drop: (event, v) => {
                 const handler = latest.current.onPasteImage
@@ -506,8 +447,6 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
                 const file = extractImageFile(event.dataTransfer)
                 if (file) {
                   event.preventDefault()
-                  if (Date.now() - lastPasteTimeRef.current < 600) return true
-                  lastPasteTimeRef.current = Date.now()
                   handler(file)
                     .then((md) => {
                       v.dispatch(insertBlockSpec(v.state, md))
