@@ -6,8 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-28
+
+Gates you can believe: `make ci` now runs every test it used to hide, and fails on new debt.
+
 ### Fixed
 - **Dictation could transcribe gibberish, then fail every later try with "network error".** A second click while the browser asked for the microphone started a recorder that never stopped, and its audio leaked into later recordings. Each recording now keeps its own audio, and an unreadable one answers with a message instead of a crash the browser reports as a network failure.
+
+### Changed
+- **Nothing is quarantined any more.** The 27 tests excluded as `unstable` and the 5 skipped only on GitHub run in CI again; 11 of them had been failing for reasons nobody saw, including ingestion tests whose entity-extraction double always raised, so extraction was never tested.
+- **`make ci` fails on new code-quality debt and measures coverage.** Functions over 120 lines or complexity 20, SQL outside `repos/`, unused frontend code and a quarantine marker cannot grow; backend and frontend coverage have floors.
+- **Chat's streaming answer moved to `runtime/qa_stream.py` and was split into steps**, which empties the layer linter's list of known violations. Answers stream exactly as before.
+- **Smoke scripts that never called the server are now pytest tests**, so they run on every push instead of only against a live backend.
 
 ## [0.13.9] - 2026-09-27
 
