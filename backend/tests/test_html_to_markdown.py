@@ -86,6 +86,24 @@ class TestBlocks:
         assert "![Arch](/d.png)" in out
         assert "Figure 1: pipeline" in out
 
+    def test_link_card_figure_keeps_its_prose_link_and_one_image(self):
+        """A Ghost bookmark card: prose inside a <figure>, wrapped in a block link.
+
+        Serialised image-only, its words went missing and the article fell back to
+        an extractor that glued title and description into one link and emitted
+        the thumbnail twice.
+        """
+        out = _md(
+            '<figure class="kg-bookmark-card"><a href="https://x.test/ralph">'
+            '<div><div class="t">Ralph as an engineer</div>'
+            '<div class="d">How a loop shipped six repos overnight.</div></div>'
+            '<div><img src="/thumb.jpg" alt=""></div></a></figure>'
+        )
+        assert "[Ralph as an engineer](https://x.test/ralph)" in out
+        assert "How a loop shipped six repos overnight." in out
+        assert out.count("/thumb.jpg") == 1
+        assert out.index("Ralph") < out.index("/thumb.jpg")
+
     def test_details_content_is_not_swallowed(self):
         """A collapsed section is still the author's content."""
         out = _md("<details><summary>Show proof</summary><p>The proof body.</p></details>")

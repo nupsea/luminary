@@ -724,7 +724,7 @@ size alone. **Work lands in batches of a few PRs, and each batch stops for a man
 pass** on the app before the next one starts: the suite cannot see what a refactor did to a
 screen, and a regression found after five more PRs is five times harder to place. **Ratchets** stop new debt landing meanwhile: `backend/tools/quality_ratchet.py` lists today's
 offenders in `quality_baseline.json`, and `make ci` fails on a new one or on a fixed one left in
-the list (`--prune` drops those), so the baseline only shrinks, as `KNOWN_VIOLATIONS` does in
+the list (`--prune` drops those), so the baseline only shrinks, as `KNOWN_VIOLATIONS` did in
 `layer_linter.py`. `npm run knip` holds unused files, exports and dependencies at 0.
 
 Measured 2026-09-27 on `master` (`5e8cb41e`). The targets follow the usual external bars: McCabe's
@@ -741,13 +741,15 @@ duplication ≤ 3%, coverage ≥ 80% on new code).
 | Duplicated lines | `jscpd`, 8-line clones | 1.11% (96 clones) | ≤ 3%, held |
 | Dead Python | `vulture` ≥ 80% confidence, plus unreferenced symbols | 8 unused imports/variables, ~11 unused functions/classes | 0 |
 | Dead TypeScript | `knip` (`frontend/knip.json`) | 0 unused files, exports or dependencies (was 12, 29 and 1); 115 unused exported types | 0 files, 0 dependencies |
-| Test coverage | `pytest --cov`, `vitest --coverage` | **not measured** (the cloud container cannot install torch) | Floor set in 0.14 from the measured number; ≥ 80% on changed lines |
-| Quarantined / skipped tests | markers | 23 `unstable`, 16 `skip` | 0 `unstable`; every `skip` names what re-enables it |
+| Test coverage | `pytest --cov`, `vitest --coverage` | backend 77.26% of statements; frontend 15.97% of lines (16.33 statements, 13.9 branches). Both floors are in `make ci` | Floors only rise; ≥ 80% on changed lines |
+| Quarantined / skipped tests | markers | 0 `unstable` and 0 GitHub-only skips (was 23 and 5); the ratchet fails on either. The remaining `skipif`s name a platform, tool or corpus | 0 `unstable`; every `skip` names what re-enables it |
 
 **Tests, evals and smoke are code, and carry debt too.** Test code (84,366 lines in 350 files) now
-outweighs the app (~80,000). There are 132 locally defined DB fixtures (#50 counted 111). Of 177
-smoke scripts, 16 make no HTTP call and 11 import `app.` in-process: those are pytest tests filed
-under the wire contract, and prove nothing about the wire. Eval runners are 12 scripts and 7,977
+outweighs the app (~80,000). There are 132 locally defined DB fixtures (#50 counted 111).
+Smoke is 158 scripts, and every one calls the server: the 19 that never did (in-process `app.`
+imports, eval-harness unit checks, source greps) are now `test_eval_harness_wiring.py` and
+`test_prompt_and_config_contracts.py`, or were deleted where pytest already covered them.
+Eval runners are 12 scripts and 7,977
 lines with their own copies of manifest, search and history plumbing.
 
 | Rung | Refactor, as the rung's first PR |

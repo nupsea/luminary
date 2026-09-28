@@ -17,6 +17,7 @@ NOT_IO = {
     "get_graph_service",
     "get_lancedb_service",
     "get_note_graph_service",
+    "get_chat_graph",
     "format",
     "extend",
     "append",
@@ -28,7 +29,7 @@ NOT_IO = {
     "get",
 }
 
-# Pre-existing debt. May only shrink. See docs/refactor-quality-plan.md (WP6).
+# Pre-existing debt. May only shrink.
 BASELINE = 44
 
 

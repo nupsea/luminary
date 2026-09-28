@@ -1,7 +1,6 @@
 """Tests for tag storage, retrieval, and filtering (S62 and S162)."""
 
 import asyncio
-import os
 import uuid
 
 import pytest
@@ -449,8 +448,6 @@ async def test_s162_concurrent_creates_usage_count_accurate(test_db):
 # ===========================================================================
 
 
-@pytest.mark.skipif(os.getenv("GITHUB_ACTIONS") == "true", reason="Flaky in GitHub Actions env")
-@pytest.mark.flaky(retries=3)
 async def test_s165_merge_replaces_source_tag_in_notes(test_db):
     """POST /tags/merge replaces source tag with target in all affected notes."""
     src_tag = f"old-tag-{id(object()):x}"
@@ -488,7 +485,6 @@ async def test_s165_merge_replaces_source_tag_in_notes(test_db):
         assert g2.json()["tags"].count(tgt_tag) == 1
 
 
-@pytest.mark.skipif(os.getenv("GITHUB_ACTIONS") == "true", reason="Flaky in GitHub Actions env")
 async def test_s165_merge_creates_alias_and_deletes_source(test_db):
     """POST /tags/merge creates TagAliasModel row and removes source CanonicalTagModel."""
     src_tag = f"source-alias-{id(object()):x}"

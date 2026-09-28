@@ -19,13 +19,13 @@ Run integration_http tests:
 
 import asyncio
 import os
-import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from stubs import MockEntityExtractor
 from task_drain import dispose_engine, drain_background_tasks
 
 import app.database as db_module
@@ -184,24 +184,6 @@ class _MockEmbeddingService:
         return [[0.1] * 384 for _ in texts]
 
 
-class _MockEntityExtractor:
-    def extract(self, chunks: list[dict], content_type: str | None = None) -> list[dict]:
-        if not chunks:
-            return []
-        doc_id = chunks[0]["document_id"]
-        chunk_id = chunks[0]["id"]
-        entity_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{doc_id}:e2e-test"))
-        return [
-            {
-                "id": entity_id,
-                "name": "e2e test entity",
-                "type": "CONCEPT",
-                "chunk_id": chunk_id,
-                "document_id": doc_id,
-            }
-        ]
-
-
 # integration_http fixture
 
 
@@ -253,7 +235,7 @@ async def upload_db(tmp_path, monkeypatch):
     graph_module._graph_service = None
     retriever_module._retriever = None
     embedder_module._embedding_service = _MockEmbeddingService()  # type: ignore[assignment]
-    ner_module._extractor = _MockEntityExtractor()  # type: ignore[assignment]
+    ner_module._extractor = MockEntityExtractor()  # type: ignore[assignment]
 
     # Reset singletons that hold references to closed engines/event loops from
     # prior tests — same pattern as integration_db in test_integration.py.
@@ -296,7 +278,6 @@ async def upload_db(tmp_path, monkeypatch):
 # integration_http tests — included in make ci
 
 
-@pytest.mark.skipif(os.getenv("GITHUB_ACTIONS") == "true", reason="Flaky in CI")
 @pytest.mark.integration_http
 async def test_http_upload_reaches_complete(upload_db):
     """POST a .txt file via ASGITransport; poll until done=True.
@@ -338,7 +319,6 @@ async def test_http_upload_reaches_complete(upload_db):
         assert final["error_message"] is None
 
 
-@pytest.mark.skipif(os.getenv("GITHUB_ACTIONS") == "true", reason="Flaky in CI")
 @pytest.mark.integration_http
 async def test_http_status_schema_on_every_poll(upload_db):
     """Validate the status response schema on every poll, not just the final one."""
@@ -381,7 +361,6 @@ async def test_http_status_schema_on_every_poll(upload_db):
         )
 
 
-@pytest.mark.skipif(os.getenv("GITHUB_ACTIONS") == "true", reason="Flaky in CI")
 @pytest.mark.integration_http
 async def test_http_corrupt_upload_terminates(upload_db):
     """POST a .pdf with random bytes; assert the pipeline terminates without hanging.

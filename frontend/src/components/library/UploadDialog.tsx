@@ -14,6 +14,7 @@ import {
   submitFile,
   detectFileType,
   submitKindleFile,
+  savedFromUrl,
   submitUrl,
 } from "@/lib/ingestionApi"
 import { useIngestionJob, useIngestionTracker } from "@/hooks/ingestionTrackerCore"
@@ -239,7 +240,9 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const [pasteType, setPasteType] = useState<ContentTypeValue>("notes")
   const [url, setUrl] = useState("")
   const [urlError, setUrlError] = useState("")
+  const [savedPage, setSavedPage] = useState<{ name: string; html: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const savedPageInputRef = useRef<HTMLInputElement>(null)
 
   const [mode, setMode] = useState<Mode>("idle")
   const [errorMessage, setErrorMessage] = useState("")
@@ -347,6 +350,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setPasteType("notes")
     setUrl("")
     setUrlError("")
+    setSavedPage(null)
     setTab(canUrl ? "url" : "upload")
     setMode("idle")
     setErrorMessage("")
@@ -525,6 +529,18 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     await doSubmit(file, pasteLabel.trim(), pasteType)
   }
 
+  async function handleSavedPageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+    const html = await file.text()
+    setSavedPage({ name: file.name, html })
+    if (!url.trim()) {
+      setUrl(savedFromUrl(html) ?? "")
+      setUrlError("")
+    }
+  }
+
   // `oreillyConnected` is passed by the connect modal: its success lands before the
   // status query refetches, so the cached status would reopen the modal.
   async function handleUrlSubmit({ oreillyConnected = false }: { oreillyConnected?: boolean } = {}) {
@@ -554,7 +570,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setDocTitle(finalUrl)
     logger.info("[Upload] url start", { url: finalUrl })
     try {
-      const { documentId, warnings } = await submitUrl(finalUrl)
+      const { documentId, warnings } = await submitUrl(finalUrl, savedPage?.html)
       track(documentId, finalUrl)
       setTrackedDocId(documentId)
       // The dialog closes immediately, so any extraction notices need a long
@@ -772,6 +788,42 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                       Articles are extracted to Markdown. YouTube videos and O'Reilly books are automatically detected. All processing is local.
                     </p>
                   )}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {savedPage ? (
+                    <div className="flex items-center justify-between rounded-md border border-border bg-muted/40 px-2.5 py-1.5">
+                      <span className="truncate text-foreground">Saved page: {savedPage.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setSavedPage(null)}
+                        aria-label="Remove saved page"
+                        className="ml-2 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => savedPageInputRef.current?.click()}
+                        className="font-medium text-foreground hover:underline"
+                      >
+                        Article needs a sign-in? Attach the page saved from your browser
+                      </button>
+                      <p className="mt-0.5">
+                        Save it while signed in with Save Page As, format "Webpage, HTML Only".
+                      </p>
+                    </>
+                  )}
+                  <input
+                    ref={savedPageInputRef}
+                    type="file"
+                    accept=".html,.htm"
+                    className="hidden"
+                    aria-label="Saved page"
+                    onChange={(e) => void handleSavedPageChange(e)}
+                  />
                 </div>
                 <button
                   onClick={() => void handleUrlSubmit()}

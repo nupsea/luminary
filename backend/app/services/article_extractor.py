@@ -60,6 +60,15 @@ _MIN_ARTICLE_WORDS_FOR_VISUAL_WARNING = 200
 _MARK_PREFIX = "LUMINARYPROTECTEDBLOCK"
 _MARK_SUFFIX = "ENDPROTECTED"
 
+# The schema.org paywall markup search engines ask gated publishers for, and the
+# class/id names publishers give the element that replaces the withheld text
+# (Ghost's `gh-post-upgrade-cta`, Substack's `paywall`).
+_GATED_JSON_LD = re.compile(r'"isAccessibleForFree"\s*:\s*"?false"?', re.I)
+_FALSE = re.compile(r"^\s*false\s*$", re.I)
+_GATE_HINT = re.compile(
+    r"paywall|regwall|content-gate|upgrade-cta|members-only|subscribers?-only", re.I
+)
+
 # An <svg> is content only when it is drawn large in BOTH axes. Markup length is
 # a bad proxy and position alone is not enough: measured across seven real
 # articles, every inline <svg> that passed a 400-character floor was chrome --
@@ -280,7 +289,7 @@ class ArticleExtractor:
         markdown_text = self._normalize_markdown(markdown_text)
 
         word_count = len(markdown_text.split())
-        warnings = self._detect_uncaptured_visuals(
+        warnings = self._detect_access_gate(html_content) + self._detect_uncaptured_visuals(
             html_content, markdown_text, word_count, fetch_mode
         )
         report = self._extraction_report(markdown_text, dropped, warnings)
@@ -307,6 +316,27 @@ class ArticleExtractor:
             warnings=warnings,
             extraction_report=report,
         )
+
+    @staticmethod
+    def _detect_access_gate(html: str) -> list[str]:
+        """Warns when the page withheld part of the article from this fetch.
+
+        The fetch carries no login, so a members-only post arrives as its public
+        preview and would otherwise be stored as if it were the whole article.
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        gated = bool(_GATED_JSON_LD.search(html)) or bool(
+            soup.find("meta", attrs={"itemprop": "isAccessibleForFree", "content": _FALSE})
+            or soup.find(class_=_GATE_HINT)
+            or soup.find(id=_GATE_HINT)
+        )
+        if not gated:
+            return []
+        return [
+            "This page shows only part of the article unless you are signed in, so only "
+            "that part was imported. To import all of it, save the page from your browser "
+            "while signed in and attach it as a saved page."
+        ]
 
     def _detect_uncaptured_visuals(
         self, html: str, markdown: str, word_count: int, fetch_mode: str = "static"

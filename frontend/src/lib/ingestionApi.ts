@@ -93,12 +93,25 @@ export interface UrlIngestResult {
   warnings: string[]
 }
 
-export async function submitUrl(url: string): Promise<UrlIngestResult> {
+/** The address Chromium browsers stamp into a page saved with "Save Page As". */
+export function savedFromUrl(html: string): string | null {
+  const match = /<!--\s*saved from url=\(\d+\)(https?:\/\/\S+?)\s*-->/i.exec(html)
+  return match ? match[1] : null
+}
+
+/**
+ * `savedHtml` is a page the user saved from their own signed-in browser. It
+ * replaces the webview render: the backend fetch carries no login, so a
+ * members-only article reaches it as its public preview.
+ */
+export async function submitUrl(url: string, savedHtml?: string): Promise<UrlIngestResult> {
   try {
     // Rendered here rather than in the backend: the desktop shell owns the
     // webview, and the backend has no browser on any platform. Null on every
     // other install, where the static fetch already handles the page.
-    const rendered = await renderPage(url)
+    const rendered = savedHtml
+      ? { html: savedHtml, state: "saved" as const, detail: undefined }
+      : await renderPage(url)
     const data = await apiPost<{ document_id: string; warnings?: string[] }>(
       "/documents/ingest-url",
       {

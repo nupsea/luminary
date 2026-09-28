@@ -39,10 +39,7 @@ SUBDIR_MAP: dict[str, str] = {
 }
 
 # Predates enforcement; may only shrink. See docs/roadmap.md, "Code quality to 1.0".
-KNOWN_VIOLATIONS: set[tuple[str, str]] = {
-    # stream_answer drives the chat graph, so it belongs in runtime/, not services/.
-    ("services/qa.py", "app.runtime.chat_graph"),
-}
+KNOWN_VIOLATIONS: set[tuple[str, str]] = set()
 
 APP_DIR = Path(__file__).parent.parent / "app"
 

@@ -16,38 +16,10 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.runtime.chat_graph import build_chat_graph, get_chat_graph
 
 # Shared fixture — in-memory DB (needed for synthesize_node DB calls)
-
-
-@pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
 
 
 def _make_initial_state(question: str) -> dict:
@@ -93,7 +65,6 @@ async def test_summary_question_routes_to_summary_node(test_db):
 # (b) test_factual_question_routes_to_search_node
 
 
-@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_factual_question_routes_to_search_node(test_db):
     """'who is Achilles?' → classify_node detects intent='factual' → search_node runs."""
@@ -181,13 +152,13 @@ async def test_streaming_is_progressive(test_db):
         }
     )
 
-    from app.services.qa import get_qa_service
+    from app.runtime.qa_stream import get_qa_service
 
     svc = get_qa_service()
     sse_token_count = 0
 
     with (
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm),
         patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
     ):
         async for sse_event in svc.stream_answer("What is this?", [], "all", None):

@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "regen:api-types": "bash scripts/regen-api-types.sh",
-    "knip": "knip --include files,exports,dependencies,unlisted"
+    "knip": "knip --include files,exports,dependencies,unlisted",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
@@ -73,6 +74,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "@vitest/coverage-v8": "^4.1.10",
     "autoprefixer": "^10.4.24",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
