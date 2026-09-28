@@ -96,8 +96,8 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | — | 0.11.0 | The docked reader — **shipped** | | A passage captured in the reader resolves back to its locus for page, video and web; no modal opens from the reader |
 | — | 0.12.0 | The Brief — **parked** | | None; no rung waits on it |
 | I. Every host | 0.13.x | Every host is a first-class host — **0.13.9 released; exit gate open.** **Checkpoint A** | #24, #99, #110, #154, #155, #156 | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator; `make smoke` green on Windows and against the bundled macOS app |
-| II. Stability | 0.14.0 | Gates you can believe — **released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
-| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #160, #161, #162, #185, #186, #187, #188, #189 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
+| II. Stability | 0.14.x | Gates you can believe — **0.14.1 released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
+| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #160, #161, #162, #185, #186, #187, #188, #189, #191, #195 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
 | III. Cloud readiness | 0.16.0 | Device auth and pairing | | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail | #48 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
 | | 0.18.0 | Your own server. **Checkpoint C** | | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key |
@@ -490,7 +490,7 @@ seen Luminary; each host's verdict names the accelerator it actually has, proven
 test and a Windows CI job; `make smoke` green on Windows and against the bundled macOS app; #24,
 #99, #110, #154, #155 and #156 closed. Then Checkpoint A.
 
-### 3. Gates you can believe — 0.14.0
+### 3. Gates you can believe — 0.14.x
 
 `make ci` and `make smoke` green together, with nothing quarantined to keep them so. **Done
 (#176-#183).** Local green is necessary and not sufficient: GLiNER memory pressure has produced
@@ -511,6 +511,11 @@ GitHub-only failures that no local run reproduces.
   Six more skipped on an empty library, then passed once one held a PDF with figures. S139's
   entry-point check never runs: no document here yields a prerequisite edge. Run against a
   source backend from the release commit, not the bundled app.
+- **0.14.1:** one flake mechanism found (whether it was #50's original is not established).
+  `:memory:` gets `StaticPool`, one connection shared by every session, so a background session's
+  rollback erased the test's write.
+  `memory_db` is now a per-test file copied from a schema template (#192); the bespoke
+  `:memory:` engines keep the defect (#195). Also a macOS screenshot pastes into a note (#193).
 
 This rung exists to shrink as the ladder runs. It grows only if a later rung breaks the
 no-new-quarantine rule, and that is the signal to move it back up.
@@ -527,7 +532,8 @@ with no quality number behind them: the slow-host context budget halves the pass
 search's semantic arm is never scored on a query with no lexical overlap (#100). Suggested questions
 are generated from section summaries rather than text, so they presuppose framings the document never
 makes, and the ungrounded answer that follows renders like a grounded one (#66). The same bar covers
-Ask on a false premise (#158), web chunk hygiene (#159) and the flashcard floors (#160).
+Ask on a false premise (#158), web chunk hygiene (#159), the flashcard floors (#160) and flashcard quality:
+0.53 of delivered cards are good, and no checker applied after generation lifts that above 0.62 (#191).
 
 **Query-time graph expansion buys no retrieval quality.** `run_eval.py --ablation`, 2026-09-21, dev
 library, GLiNER held resident and the arms confirmed to diverge before and after each dataset. On the

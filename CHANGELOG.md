@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-09-29
+
+### Fixed
+- **Pasting a screenshot into a note did nothing in the macOS app.** The app's web view withholds a pasted image from the page, so the desktop shell now reads it from the clipboard itself.
+- **Two tests failed about one run in three.** Every database session in a test shared one connection, so a note's background work could roll back what the test had just saved. Each test now gets its own database file, copied from one built at startup, which keeps the Windows CI job within its time limit.
+
 ## [0.14.0] - 2026-09-28
 
 Gates you can believe: `make ci` now runs every test it used to hide, and fails on new debt.
