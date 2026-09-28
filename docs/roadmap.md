@@ -96,8 +96,8 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | — | 0.11.0 | The docked reader — **shipped** | | A passage captured in the reader resolves back to its locus for page, video and web; no modal opens from the reader |
 | — | 0.12.0 | The Brief — **parked** | | None; no rung waits on it |
 | I. Every host | 0.13.x | Every host is a first-class host — **0.13.9 released; exit gate open.** **Checkpoint A** | #24, #99, #110, #154, #155, #156 | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator; `make smoke` green on Windows and against the bundled macOS app |
-| II. Stability | 0.14.0 | Gates you can believe — **code done; tag waits on `make smoke` and #88** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
-| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #160, #161, #162 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
+| II. Stability | 0.14.0 | Gates you can believe — **released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
+| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #160, #161, #162, #185, #186, #187, #188 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
 | III. Cloud readiness | 0.16.0 | Device auth and pairing | | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail | #48 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
 | | 0.18.0 | Your own server. **Checkpoint C** | | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key |
@@ -492,9 +492,8 @@ test and a Windows CI job; `make smoke` green on Windows and against the bundled
 
 ### 3. Gates you can believe — 0.14.0
 
-`make ci` and `make smoke` green together, with nothing quarantined to keep them so. **The code
-side is done (#176-#182); the release waits on two runs that need a live backend,** listed last
-below. Local green is necessary and not sufficient: GLiNER memory pressure has produced
+`make ci` and `make smoke` green together, with nothing quarantined to keep them so. **Done
+(#176-#183).** Local green is necessary and not sufficient: GLiNER memory pressure has produced
 GitHub-only failures that no local run reproduces.
 
 - **#50, done:** 0 `unstable` markers and 0 GitHub-only skips (was 27 tests and 5); 11 of the 27
@@ -505,10 +504,13 @@ GitHub-only failures that no local run reproduces.
   `to_thread` wrap made timeouts worse is not investigated and stays recorded on the issue.
 - **#157, done:** the report was already on master (`database.py`, timed from the first completed
   write); `test_write_lock_report.py` proves it names the holder and not a victim.
-- **#88, open:** closes on 0 lock errors from `make smoke` under 60 concurrent `/qa` calls, which
-  needs a live backend with models.
-- **`make smoke` green**, also open for the same reason: 158 scripts after #179, run against the
-  bundled app.
+- **#88, done:** 0 `database is locked` under 60 concurrent `/qa` calls during `make smoke` (was 48),
+  all 60 answered. One write held 2.5s, below `busy_timeout`; it began as the burst arrived, cause unconfirmed. The same
+  runs found chunking importing torch inside its write transaction, a 12-43s hold, now fixed.
+- **`make smoke` green:** 151 passed, 0 failed. S122 needs the internet and was skipped offline.
+  Six more skipped on an empty library, then passed once one held a PDF with figures. S139's
+  entry-point check never runs: no document here yields a prerequisite edge. Run against a
+  source backend from the release commit, not the bundled app.
 
 This rung exists to shrink as the ladder runs. It grows only if a later rung breaks the
 no-new-quarantine rule, and that is the signal to move it back up.
