@@ -14,7 +14,9 @@ baseline: even tests that don't define their own DB fixture will never touch
 
 import asyncio
 import asyncio.base_events
+import concurrent.futures
 import os
+import shutil
 import time
 import warnings
 from pathlib import Path
@@ -427,21 +429,44 @@ class MemoryDB(NamedTuple):
     tmp_path: Path
 
 
+@pytest.fixture(scope="session")
+def _schema_template(tmp_path_factory) -> Path:
+    """The schema built once; each test copies the file (~10 ms) instead of
+    running the DDL (~1 s on a file, several on Windows CI)."""
+    from app.database import make_engine
+    from app.db_init import create_all_tables
+
+    path = tmp_path_factory.mktemp("schema") / "template.db"
+
+    async def build() -> None:
+        engine = make_engine(f"sqlite+aiosqlite:///{path}")
+        await create_all_tables(engine)
+        await engine.dispose()
+
+    # Its own thread: a session fixture can be set up while a test's loop is running.
+    with concurrent.futures.ThreadPoolExecutor(1) as pool:
+        pool.submit(asyncio.run, build()).result()
+    return path
+
+
 @pytest.fixture
-async def memory_db(tmp_path, monkeypatch):
-    """An in-memory SQLite database wired into `app.database`'s singletons.
+async def memory_db(tmp_path, monkeypatch, _schema_template):
+    """A per-test SQLite database wired into `app.database`'s singletons.
 
     The one copy of what 96 test files each defined as their own `test_db` (#50).
+    A file, not `:memory:`: an in-memory engine is one StaticPool connection, so a
+    request and its background sessions share a transaction and one's rollback
+    drops the other's committed-looking write. Production pools per session.
     """
     import app.database as db_module
     from app.config import get_settings
     from app.database import make_engine
-    from app.db_init import create_all_tables
 
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     get_settings.cache_clear()
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+    db_file = tmp_path / "test.db"
+    shutil.copyfile(_schema_template, db_file)
+    engine = make_engine(f"sqlite+aiosqlite:///{db_file}")
     factory = async_sessionmaker(engine, expire_on_commit=False)
     # Saved by hand, not via monkeypatch: several tests call monkeypatch.undo()
     # mid-test, which would unwire the database under them.
