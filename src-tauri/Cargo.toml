@@ -27,6 +27,11 @@ luminary-host = { path = "host" }
 percent-encoding = "2"
 regex = "1"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSBitmapImageRep", "NSImage", "NSImageRep", "NSPasteboard"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSString"] }
+
 # Only to watch the page's web process (`watch_web_process`); tauri pins the version.
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "2.0"

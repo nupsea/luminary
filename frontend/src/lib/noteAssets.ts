@@ -1,4 +1,5 @@
 import { API_BASE } from "@/lib/config"
+import { tauriInvoke } from "@/lib/tauriBridge"
 
 export interface NoteAssetUpload {
   path: string
@@ -66,3 +67,20 @@ export function resolveLuminaryAssetUrl(path: string): string {
   return path.replace(/^__LUMINARY_IMG__\//, `${API_BASE}/images/local/`)
 }
 
+/**
+ * A paste that carries an image the page cannot see, which only the desktop
+ * shell can read: WKWebView lists a pasted image as "Files" but withholds the file.
+ */
+export function isWithheldImage(dataTransfer: DataTransfer | null): boolean {
+  if (!tauriInvoke() || !dataTransfer) return false
+  if (!Array.from(dataTransfer.types).includes("Files")) return false
+  return !dataTransfer.getData("text/plain").trim()
+}
+
+/** The clipboard image read by the desktop shell, or null outside it. */
+export async function readShellClipboardImage(): Promise<File | null> {
+  const invoke = tauriInvoke()
+  if (!invoke) return null
+  const bytes = (await invoke("read_clipboard_image")) as ArrayBuffer
+  return new File([bytes], "screenshot.png", { type: "image/png" })
+}

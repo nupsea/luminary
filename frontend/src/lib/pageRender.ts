@@ -12,22 +12,14 @@
  */
 
 import { logger } from "@/lib/logger"
+import { tauriInvoke } from "@/lib/tauriBridge"
 
 /** Rendering is slower than a fetch, so it must not hold an import open. */
 const RENDER_BUDGET_MS = 35_000
 
-interface TauriBridge {
-  core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> }
-}
-
-function bridge(): TauriBridge["core"] | null {
-  const injected = (window as unknown as { __TAURI__?: TauriBridge }).__TAURI__
-  return injected?.core?.invoke ? injected.core : null
-}
-
 /** Whether a hidden webview is available to render with. */
 export function canRender(): boolean {
-  return bridge() !== null
+  return tauriInvoke() !== null
 }
 
 /**
@@ -64,12 +56,12 @@ const TIMED_OUT = Symbol("render-timeout")
  * guards against a shell that never answers at all.
  */
 export async function renderPage(url: string): Promise<RenderOutcome> {
-  const core = bridge()
-  if (!core?.invoke) return { html: null, state: "unavailable" }
+  const invoke = tauriInvoke()
+  if (!invoke) return { html: null, state: "unavailable" }
 
   try {
     const html = await Promise.race([
-      core.invoke("render_page", { url }),
+      invoke("render_page", { url }),
       new Promise<typeof TIMED_OUT>((resolve) =>
         setTimeout(() => resolve(TIMED_OUT), RENDER_BUDGET_MS),
       ),
