@@ -450,7 +450,7 @@ class QAService:
                 question, document_ids, scope, model, direct, conversation_history, web_enabled
             )
             result = None
-            async for event in self._graph_events(req, state):
+            async for event in self._chat_events(req, state):
                 if isinstance(event, dict):
                     result = event
                 else:
@@ -468,7 +468,7 @@ class QAService:
             logger.exception("stream_answer: unhandled error", exc_info=exc)
             yield _sse({"error": "internal", "message": str(exc), "done": True})
 
-    async def _graph_events(self, req: "_Request", state: dict) -> AsyncGenerator[str | dict]:
+    async def _chat_events(self, req: "_Request", state: dict) -> AsyncGenerator[str | dict]:
         """Run the graph inside the qa.answer span.
 
         Yields the terminal events of a stream the graph ends (error, card, not found),
