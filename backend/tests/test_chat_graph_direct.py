@@ -4,11 +4,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.runtime.chat_graph import build_chat_graph, classify_node, route_node
 from app.runtime.chat_nodes.direct import direct_node
 from app.services.qa import (
@@ -16,30 +12,6 @@ from app.services.qa import (
     QA_DIRECT_SYSTEM_PROMPT,
     get_qa_service,
 )
-
-
-@pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
 
 
 def _make_direct_state(question: str, history: list[dict] | None = None) -> dict:
@@ -138,10 +110,7 @@ async def test_stream_answer_direct_emits_no_citations_and_direct_flag(test_db):
     svc = get_qa_service()
     with patch("app.services.qa.get_llm_service", return_value=mock_llm):
         events = [
-            e
-            async for e in svc.stream_answer(
-                "mutex vs semaphore", [], "all", None, direct=True
-            )
+            e async for e in svc.stream_answer("mutex vs semaphore", [], "all", None, direct=True)
         ]
 
     done_event_raw = next(e for e in events if '"done": true' in e.lower())

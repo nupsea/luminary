@@ -34,7 +34,7 @@ Prose versions in this repo have drifted before.
 | `make ci` | **the gate.** ruff, layer_linter, boundary_checker, quality ratchet, pytest (coverage floor), manifest checks, frontend build, tsc, eslint, knip, vitest (coverage floor) |
 | `make lint` | ruff + tsc + eslint + manifest checks |
 | `make test` | `pytest` (backend) |
-| `make smoke` | `scripts/smoke/all.sh` — ~180 numbered HTTP contract scripts; needs a running backend |
+| `make smoke` | `scripts/smoke/all.sh` — ~160 numbered HTTP contract scripts; needs a running backend |
 | `make eval` | retrieval quality vs. committed thresholds; needs a running backend |
 | `make db-revision m="…"` | generate an Alembic revision (never raw `alembic revision` — see I-23) |
 | `make db-migrate` | apply migrations to the dev database |
@@ -46,7 +46,7 @@ Ports: backend **7820**, frontend **5173**. Dev database: `<repo>/.luminary/lumi
 The bundled desktop app uses `~/Library/Application Support/sh.luminary.app/` instead.
 
 `make ci` is the gate. Local green is necessary, not sufficient — GLiNER memory pressure has
-produced GitHub-only failures. Markers `slow`, `e2e` and `unstable` are excluded by default.
+produced GitHub-only failures. Markers `slow` and `e2e` are excluded by default; nothing else is.
 
 ## Rules worth stating here
 

@@ -8,13 +8,9 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 from stubs import CapturingLLMService as _CapturingLLMService
 from stubs import MockLLMService as _MockLLMService
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.models import ChunkModel, DocumentModel, SectionSummaryModel, SummaryModel
 from app.services.qa import QA_SYSTEM_PROMPT
@@ -28,31 +24,6 @@ from app.services.summarizer import (
 )
 
 # Shared DB fixture
-
-
-@pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    """Wire an in-memory SQLite DB into the app's global singletons."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
 
 
 async def _insert_doc_and_chunks(
