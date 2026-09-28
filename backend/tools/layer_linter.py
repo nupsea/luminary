@@ -38,7 +38,7 @@ SUBDIR_MAP: dict[str, str] = {
     "runtime": "runtime",
 }
 
-# Predates enforcement; may only shrink. See docs/refactor-quality-plan.md.
+# Predates enforcement; may only shrink. See docs/roadmap.md, "Code quality to 1.0".
 KNOWN_VIOLATIONS: set[tuple[str, str]] = {
     # stream_answer drives the chat graph, so it belongs in runtime/, not services/.
     ("services/qa.py", "app.runtime.chat_graph"),

@@ -379,6 +379,7 @@ lint:
 	cd backend && uv run ruff check .
 	cd frontend && ./node_modules/.bin/tsc -b --noEmit
 	cd frontend && npm run lint
+	cd frontend && npm run knip
 	python3 scripts/check_manifest_schema.py
 	python3 scripts/check_manifest_coverage.py
 	python3 scripts/check_public_surface_calls.py
@@ -783,6 +784,7 @@ else
 	cd backend && uv run ruff check .
 	cd backend && uv run python tools/layer_linter.py
 	cd backend && uv run python tools/boundary_checker.py
+	cd backend && uv run python tools/quality_ratchet.py
 	./scripts/check_public_import.sh
 	cd backend && uv run pytest
 endif
@@ -798,6 +800,7 @@ endif
 		|| { echo 'FAIL: a chunk exceeds chunkSizeWarningLimit'; exit 1; }
 	python3 scripts/check_public_bundle_excludes_full.py
 	cd frontend && npm run lint
+	cd frontend && npm run knip
 	# The frontend suite was never wired into a gate: 59 files of pure-logic
 	# tests ran only when someone typed `npm test`, so a broken helper reached
 	# master green. It costs ~1s.
