@@ -235,3 +235,68 @@ describe("DEFAULT_NOTE_FONT_SIZE constant", () => {
     expect(DEFAULT_NOTE_FONT_SIZE).toBe(14)
   })
 })
+
+describe("liveMarkdown ArrowUp and ArrowDown vertical navigation", () => {
+  it("navigates line-by-line without jumping over code blocks or math blocks", async () => {
+    const { stepInto, liveField } = await import("./liveMarkdown")
+    const doc = `| C1 | C2 |
+| --- | --- |
+| x | y |
+
+\`\`\`python
+import time
+
+s = time.start()
+\`\`\`
+
+$$
+x = y + z
+$$
+
+The size of the problem is usually straightforward.`
+
+    const prosePos = doc.indexOf("The size of the problem")
+    const field = liveField({})
+    let state = EditorState.create({
+      doc,
+      selection: { anchor: prosePos },
+      extensions: [markdown({ base: markdownLanguage }), field],
+    })
+
+    const createMockView = () => ({
+      state,
+      dispatch: (tr: { selection?: { anchor: number } }) => {
+        state = state.update(tr).state
+      },
+    })
+
+    // 1st ArrowUp: should land on the blank line immediately above prose, NOT jumping to table!
+    const mockView1 = createMockView()
+    // @ts-expect-error test mock
+    const handled1 = stepInto(mockView1, field, -1)
+    expect(handled1).toBe(true)
+    const lineAfter1 = state.doc.lineAt(state.selection.main.head)
+    const blankLineAboveProse = doc.slice(0, prosePos).lastIndexOf("\n")
+    expect(lineAfter1.from).toBe(blankLineAboveProse)
+    expect(lineAfter1.text.trim()).toBe("")
+
+    // 2nd ArrowUp: should land inside the Math block (x = y + z)
+    const mockView2 = createMockView()
+    // @ts-expect-error test mock
+    const handled2 = stepInto(mockView2, field, -1)
+    expect(handled2).toBe(true)
+    const lineAfter2 = state.doc.lineAt(state.selection.main.head)
+    expect(lineAfter2.text).toContain("x = y + z")
+
+    // Move to blank line above Math block (between python block and math block)
+    const blankLineAboveMath = doc.indexOf("```\n\n") + 4
+    state = state.update({ selection: { anchor: blankLineAboveMath } }).state
+    const mockView3 = createMockView()
+    // 3rd ArrowUp: should land inside the Python code block (s = time.start())
+    // @ts-expect-error test mock
+    const handled3 = stepInto(mockView3, field, -1)
+    expect(handled3).toBe(true)
+    const lineAfter3 = state.doc.lineAt(state.selection.main.head)
+    expect(lineAfter3.text).toContain("s = time.start()")
+  })
+})

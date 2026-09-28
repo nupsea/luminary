@@ -679,50 +679,64 @@ const liveTheme = EditorView.theme({
  * the caret on the block's first or last line of content instead, which is what
  * reveals it.
  */
-function stepInto(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -1): boolean {
+export function stepInto(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -1): boolean {
   if (!view.state.selection.main.empty) return false
   const { doc } = view.state
   const head = view.state.selection.main.head
   const line = doc.lineAt(head)
   const column = head - line.from
-  const target = line.number + dir
-  if (target < 1 || target > doc.lines) return false
-  const edge = doc.line(target)
+
+  const targetNum = line.number + dir
+  if (targetNum < 1 || targetNum > doc.lines) return false
+
+  const targetLine = doc.line(targetNum)
   let anchor: number | null = null
-  // Coming down, the line below is the block's first; coming up, it is the
-  // block's last. Either way the decoration covers that point.
-  view.state.field(field).between(edge.from, edge.from, (from, to, deco) => {
+
+  // Check if target line is inside or covered by a RenderedBlock decoration
+  view.state.field(field).between(targetLine.from, targetLine.to, (from, to, deco) => {
+    if (anchor !== null) return
     const widget = deco.spec.widget
     if (!(widget instanceof RenderedBlock)) return
+
     if (isImageOnlyParagraph(widget.source)) {
       const blockLineFrom = doc.lineAt(from).number
       const blockLineTo = doc.lineAt(to).number
       const nextNum = dir === 1 ? blockLineTo + 1 : blockLineFrom - 1
       if (nextNum >= 1 && nextNum <= doc.lines) {
         anchor = dir === 1 ? doc.line(nextNum).from : doc.line(nextNum).to
+      } else {
+        anchor = dir === 1 ? doc.line(blockLineTo).to : doc.line(blockLineFrom).from
       }
       return
     }
+
     const lines = widget.source.split("\n").length
     const offset =
       dir === 1
         ? firstEditableLine(widget.delimited)
         : clickedSourceLine(null, lines, widget.delimited)
-    const targetLine = doc.line(Math.min(doc.lineAt(from).number + offset, doc.lines))
-    if (targetLine.text.includes("|")) {
-      const cellPos = caretInTableRow(targetLine.text, 0)
-      anchor = targetLine.from + cellPos
+    const blockStartLine = doc.lineAt(from).number
+    const destLine = doc.line(Math.min(blockStartLine + offset, doc.lines))
+    if (destLine.text.includes("|")) {
+      const cellPos = caretInTableRow(destLine.text, 0)
+      anchor = destLine.from + cellPos
     } else {
-      // Keep the caret's column rather than jumping to the line's end.
-      anchor = targetLine.from + columnOffset(targetLine.text, column)
+      anchor = destLine.from + columnOffset(destLine.text, column)
     }
   })
-  if (anchor === null) return false
-  view.dispatch({ selection: { anchor } })
+
+  if (anchor !== null) {
+    view.dispatch({ selection: { anchor }, scrollIntoView: true })
+    return true
+  }
+
+  // 3. Target line is a normal line or blank line: land on it cleanly without coordinate jumping!
+  const col = columnOffset(targetLine.text, column)
+  view.dispatch({ selection: { anchor: targetLine.from + col }, scrollIntoView: true })
   return true
 }
 
-function liveField(options: LiveMarkdownOptions) {
+export function liveField(options: LiveMarkdownOptions) {
   return StateField.define<DecorationSet>({
     create: (state) => decorate(state, options),
     update(value, tr) {
