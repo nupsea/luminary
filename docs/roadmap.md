@@ -96,7 +96,7 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | — | 0.11.0 | The docked reader — **shipped** | | A passage captured in the reader resolves back to its locus for page, video and web; no modal opens from the reader |
 | — | 0.12.0 | The Brief — **parked** | | None; no rung waits on it |
 | I. Every host | 0.13.x | Every host is a first-class host — **0.13.9 released; exit gate open.** **Checkpoint A** | #24, #99, #110, #154, #155, #156 | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator; `make smoke` green on Windows and against the bundled macOS app |
-| II. Stability | 0.14.x | Gates you can believe — **0.14.1 released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
+| II. Stability | 0.14.x | Gates you can believe — **0.14.2 released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
 | | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #160, #161, #162, #185, #186, #187, #188, #189, #191, #195 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
 | III. Cloud readiness | 0.16.0 | Device auth and pairing | | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail | #48 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
@@ -516,6 +516,7 @@ GitHub-only failures that no local run reproduces.
   rollback erased the test's write.
   `memory_db` is now a per-test file copied from a schema template (#192); the bespoke
   `:memory:` engines keep the defect (#195). Also a macOS screenshot pastes into a note (#193).
+- **0.14.2:** the reader no longer opens a document on the previous document's note (#194).
 
 This rung exists to shrink as the ladder runs. It grows only if a later rung breaks the
 no-new-quarantine rule, and that is the signal to move it back up.

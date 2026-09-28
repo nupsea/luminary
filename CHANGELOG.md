@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-09-29
+
+### Fixed
+- **After switching books, the reader could open on the previous book's note.** A note opened by link stayed pending when you returned to the library, and the next book picked it up. It is now tied to the document it was opened for.
+
 ## [0.14.1] - 2026-09-29
 
 ### Fixed
