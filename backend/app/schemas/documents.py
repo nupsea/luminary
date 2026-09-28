@@ -164,12 +164,13 @@ class ChunkItem(BaseModel):
 
 class UrlIngestRequest(BaseModel):
     url: str
-    # Post-JS DOM captured by the desktop shell's hidden webview, when it has
-    # one. Only pages that *compute* their content need it; everything else
-    # imports identically from the static fetch, which is the only path in dev,
-    # Docker and the script installs. Never required.
+    # Post-JS DOM captured by the desktop shell's hidden webview, or a page the
+    # user saved from their own signed-in browser. Only pages that compute or
+    # gate their content need it; everything else imports identically from the
+    # static fetch. Never required.
     rendered_html: str | None = None
-    # Why the caller did or did not render: "ok" | "unavailable" | "failed".
+    # Where rendered_html came from, or why there is none:
+    # "ok" | "unavailable" | "failed" | "saved".
     # Logged, never trusted for behaviour -- the presence of rendered_html is
     # what decides the path.
     render_state: str | None = None

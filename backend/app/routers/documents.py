@@ -1078,6 +1078,10 @@ async def ingest_url(
         # producing a fresh ParsedDocument with no report and overwriting this one.
         # Fidelity is only known at the point of extraction, so it is stored here.
         if parsed.extraction_report is not None:
+            # The extractor sees only that HTML was supplied; a page the user saved
+            # from their own browser is a different source from the shell's webview.
+            if body.render_state == "saved":
+                parsed.extraction_report["fetch"] = "saved"
             await _persist_extraction_report(doc_id, parsed.extraction_report)
 
         logger.info(

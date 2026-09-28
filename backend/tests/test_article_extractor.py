@@ -371,3 +371,27 @@ class TestPageSpecificTitle:
 
     def test_a_page_with_no_title_tag_keeps_its_metadata(self):
         assert self._refine("Some Article", "<html><body>x</body></html>") == "Some Article"
+
+
+class TestAccessGate:
+    """A members-only post fetched without a login is its public preview."""
+
+    def test_a_ghost_upgrade_cta_is_a_gate(self):
+        html = _wrap('<aside class="gh-post-upgrade-cta"><h2>For subscribers only</h2></aside>')
+        assert ArticleExtractor._detect_access_gate(html)
+
+    def test_schema_org_paywall_markup_is_a_gate(self):
+        html = (
+            '<html><head><script type="application/ld+json">'
+            '{"@type": "NewsArticle", "isAccessibleForFree": "False"}'
+            f"</script></head><body><p>{PAD}</p></body></html>"
+        )
+        assert ArticleExtractor._detect_access_gate(html)
+
+    def test_prose_about_paywalls_is_not_a_gate(self):
+        """Brackets the rule: the markup names the gate, the words do not."""
+        html = _wrap(
+            "<p>Why every paywall on a members-only site fails.</p>"
+            '<script type="application/ld+json">{"isAccessibleForFree": true}</script>'
+        )
+        assert ArticleExtractor._detect_access_gate(html) == []

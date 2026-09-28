@@ -370,3 +370,66 @@ async def test_document_ids_are_distinct_per_ingest(test_db, serve, monkeypatch)
 
     assert len(seen) == 2
     assert all(uuid.UUID(s) for s in seen)
+
+
+async def test_a_saved_page_is_recorded_as_saved_not_as_a_webview_render(
+    test_db, serve, monkeypatch
+):
+    """Two sources of supplied HTML must stay attributable in the report."""
+    _engine, factory, _tmp = test_db
+
+    async def _mock_run_ingestion(document_id, file_path, fmt, content_type=None, **_kwargs):
+        pass
+
+    monkeypatch.setattr("app.routers.documents.run_ingestion", _mock_run_ingestion)
+    serve(
+        {
+            "https://": httpx.Response(
+                200, content=b"<html></html>", headers={"content-type": "text/html"}
+            )
+        }
+    )
+
+    from app.types import ParsedDocument, Section
+
+    seen: dict = {}
+
+    class _Extractor:
+        async def extract(self, url, doc_id=None, rendered_html=None):
+            seen["rendered_html"] = rendered_html
+            return ParsedDocument(
+                title="A Members Post",
+                format="md",
+                pages=1,
+                word_count=3,
+                sections=[
+                    Section(
+                        heading="A Members Post", level=1, text="a b c", page_start=0, page_end=0
+                    )
+                ],
+                raw_text="a b c",
+                warnings=[],
+                extraction_report={"fetch": "webview", "complete": True},
+            )
+
+    monkeypatch.setattr("app.routers.documents.get_article_extractor", lambda: _Extractor())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/documents/ingest-url",
+            json={
+                "url": "https://example.com/members/post",
+                "rendered_html": "<html>signed in</html>",
+                "render_state": "saved",
+            },
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert seen["rendered_html"] == "<html>signed in</html>"
+    async with factory() as session:
+        doc = (
+            await session.execute(
+                select(DocumentModel).where(DocumentModel.id == resp.json()["document_id"])
+            )
+        ).scalar_one()
+    assert doc.extraction_report["fetch"] == "saved"
