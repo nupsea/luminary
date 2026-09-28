@@ -429,9 +429,12 @@ class MemoryDB(NamedTuple):
 
 @pytest.fixture
 async def memory_db(tmp_path, monkeypatch):
-    """An in-memory SQLite database wired into `app.database`'s singletons.
+    """A per-test SQLite database wired into `app.database`'s singletons.
 
     The one copy of what 96 test files each defined as their own `test_db` (#50).
+    A file, not `:memory:`: an in-memory engine is one StaticPool connection, so a
+    request and its background sessions share a transaction and one's rollback
+    drops the other's committed-looking write. Production pools per session.
     """
     import app.database as db_module
     from app.config import get_settings
@@ -440,7 +443,7 @@ async def memory_db(tmp_path, monkeypatch):
 
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     get_settings.cache_clear()
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
     await create_all_tables(engine)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     # Saved by hand, not via monkeypatch: several tests call monkeypatch.undo()
