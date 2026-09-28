@@ -12,13 +12,13 @@ make test-perf is equivalent.
 
 import asyncio
 import time
-import uuid
 from pathlib import Path
 
 import psutil
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from stubs import MockEntityExtractor
 
 import app.database as db_module
 import app.services.embedder as embedder_module
@@ -69,24 +69,6 @@ class _MockEmbeddingService:
         return [[0.1] * 1024 for _ in texts]
 
 
-class _MockEntityExtractor:
-    def extract(self, chunks: list[dict]) -> list[dict]:
-        if not chunks:
-            return []
-        doc_id = chunks[0]["document_id"]
-        chunk_id = chunks[0]["id"]
-        entity_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{doc_id}:perf-test"))
-        return [
-            {
-                "id": entity_id,
-                "name": "perf test entity",
-                "type": "CONCEPT",
-                "chunk_id": chunk_id,
-                "document_id": doc_id,
-            }
-        ]
-
-
 # Fixture
 
 
@@ -118,7 +100,7 @@ async def perf_db(tmp_path, monkeypatch):
     graph_module._graph_service = None
     retriever_module._retriever = None
     embedder_module._embedding_service = _MockEmbeddingService()  # type: ignore[assignment]
-    ner_module._extractor = _MockEntityExtractor()  # type: ignore[assignment]
+    ner_module._extractor = MockEntityExtractor()  # type: ignore[assignment]
 
     (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
 

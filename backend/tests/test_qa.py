@@ -16,20 +16,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel, QAHistoryModel
 from app.runtime.chat_nodes._shared import _COMPARATIVE_SYSTEM, _RELATIONAL_SYSTEM
+from app.runtime.qa_stream import QAService
 from app.services.qa import (
     QA_CREATIVE_SYSTEM_PROMPT,
     QA_CREATIVE_TEMPERATURE,
     QA_FACTUAL_SYSTEM_PROMPT,
     QA_SYSTEM_PROMPT,
-    QAService,
     _drop_ungrounded_citations,
     _enrich_citation_titles,
     _excerpt_from_chunk,
@@ -41,31 +37,6 @@ from app.services.qa import (
 from app.types import ScoredChunk
 
 # Shared DB fixture
-
-
-@pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    """Wire an in-memory SQLite DB into the app's global singletons."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
 
 
 async def _insert_doc(factory, tmp_path: Path, doc_id: str, title: str = "Test Doc") -> None:
@@ -1168,7 +1139,7 @@ async def test_creative_mode_uses_creative_prompt_and_higher_temperature(test_db
 
     with (
         patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm),
     ):
         svc = QAService()
         _ = [
@@ -1200,7 +1171,7 @@ async def test_default_mode_preserves_grounded_prompt_and_no_temperature(test_db
 
     with (
         patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm),
     ):
         svc = QAService()
         _ = [e async for e in svc.stream_answer("What is force?", [doc_id], "single", None)]
@@ -1572,7 +1543,7 @@ async def test_sources_are_emitted_before_the_first_token(test_db, monkeypatch):
 
     with (
         patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm),
     ):
         events = [e async for e in QAService().stream_answer("q?", [doc_id], "single", None)]
 
@@ -1639,7 +1610,7 @@ async def test_receipt_reports_engine_latency_and_what_was_sent(test_db):
 
     with (
         patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm),
     ):
         events = [e async for e in QAService().stream_answer("q?", [doc_id], "single", None)]
 
@@ -1736,7 +1707,7 @@ async def test_receipt_names_the_model_that_served_a_fallen_back_answer(test_db)
 
     with (
         patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm),
         patch(
             "app.services.settings_service.get_effective_routing",
             return_value=("openai/gpt-4o-mini", None),

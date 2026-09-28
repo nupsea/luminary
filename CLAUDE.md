@@ -31,10 +31,10 @@ Prose versions in this repo have drifted before.
 |---|---|
 | `make dev` | backend (:7820, reload) + frontend (:5173) |
 | `make luminary` | full app the way a user runs it |
-| `make ci` | **the gate.** ruff, layer_linter, boundary_checker, pytest, manifest checks, frontend build, tsc, eslint, vitest |
+| `make ci` | **the gate.** ruff, layer_linter, boundary_checker, quality ratchet, pytest, manifest checks, frontend build, tsc, eslint, knip, vitest |
 | `make lint` | ruff + tsc + eslint + manifest checks |
 | `make test` | `pytest` (backend) |
-| `make smoke` | `scripts/smoke/all.sh` — ~180 numbered HTTP contract scripts; needs a running backend |
+| `make smoke` | `scripts/smoke/all.sh` — ~160 numbered HTTP contract scripts; needs a running backend |
 | `make eval` | retrieval quality vs. committed thresholds; needs a running backend |
 | `make db-revision m="…"` | generate an Alembic revision (never raw `alembic revision` — see I-23) |
 | `make db-migrate` | apply migrations to the dev database |
@@ -46,7 +46,7 @@ Ports: backend **7820**, frontend **5173**. Dev database: `<repo>/.luminary/lumi
 The bundled desktop app uses `~/Library/Application Support/sh.luminary.app/` instead.
 
 `make ci` is the gate. Local green is necessary, not sufficient — GLiNER memory pressure has
-produced GitHub-only failures. Markers `slow`, `e2e` and `unstable` are excluded by default.
+produced GitHub-only failures. Markers `slow` and `e2e` are excluded by default; nothing else is.
 
 ## Rules worth stating here
 
@@ -64,7 +64,7 @@ from this repo. The full set is in `docs/invariants.md`.
 - **Services and repos raise `LuminaryError` subclasses, never `HTTPException`.** One handler
   in `main.py` maps them.
 - **Never import backwards** across `Types → Config → Repo → Service → Runtime → API`.
-  `layer_linter.py` enforces it; its `KNOWN_VIOLATIONS` set may only shrink, never grow.
+  `layer_linter.py` enforces it; its `KNOWN_VIOLATIONS` set is empty and must stay so.
 - **Wrap synchronous LanceDB and Kuzu calls in `asyncio.to_thread`.** One worker serves every
   request, so a blocking call stalls the whole app. (I-2)
 - **New endpoints need a pytest test**, and the surface manifest must stay covered.

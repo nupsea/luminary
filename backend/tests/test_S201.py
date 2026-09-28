@@ -15,39 +15,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.models import ClusterSuggestionModel, NoteModel
 
 # Fixture
-
-
-@pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
 
 
 # AC9: suggest_tags returns normalized tag slugs
@@ -96,7 +68,6 @@ async def test_suggest_tags_returns_normalized_slugs(test_db):
     assert "Science/Cell_Division" not in tags
 
 
-@pytest.mark.unstable  # POST /notes schedules a real embed/graph task, like the dedup test above
 @pytest.mark.asyncio
 async def test_create_note_returns_before_tagger_resolves(test_db):
     """POST /notes must not await the tagger inline (regression).
@@ -149,7 +120,6 @@ async def test_create_note_returns_before_tagger_resolves(test_db):
 # AC10: duplicate note creation within 5s window returns existing note
 
 
-@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_duplicate_note_dedup_within_5s(test_db):
     """POST /notes with identical (document_id, section_id, content) within 5s returns existing."""

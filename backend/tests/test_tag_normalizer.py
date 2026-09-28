@@ -8,11 +8,7 @@ import numpy as np
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.models import (
     CanonicalTagModel,
@@ -24,35 +20,8 @@ from app.services.tag_normalizer import SmartTagNormalizerService
 # Fixture
 
 
-@pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
-
-
 def _make_tag(tag_id: str, display_name: str, usage_count: int = 5) -> CanonicalTagModel:
     # `note_count` became `usage_count` when tags started counting documents too.
-    # Every test here builds tags through this helper, so the rename broke all of
-    # them at once -- and they are marked `unstable`, excluded from CI by default,
-    # so nothing said so.
     return CanonicalTagModel(
         id=tag_id,
         display_name=display_name,

@@ -109,7 +109,7 @@ class TestTimeMachineEndToEnd:
 
     async def test_qa_stream(self):
         """QAService.stream_answer yields >= 1 token event and done=true with citations."""
-        from app.services.qa import QAService
+        from app.runtime.qa_stream import QAService
 
         citations = [
             {
@@ -126,7 +126,7 @@ class TestTimeMachineEndToEnd:
         mock_llm = MagicMock()
         mock_llm.generate = AsyncMock(return_value=_async_iter([llm_response]))
 
-        with patch("app.services.qa.get_llm_service", return_value=mock_llm):
+        with patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm):
             svc = QAService()
             events = [
                 e

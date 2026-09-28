@@ -29,6 +29,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from stubs import MockEntityExtractor
 from task_drain import dispose_engine, drain_background_tasks
 
 import app.database as db_module
@@ -57,26 +58,6 @@ class _MockEmbeddingService:
 
     def encode(self, texts: list[str]) -> list[list[float]]:
         return [[0.1] * 1024 for _ in texts]
-
-
-class _MockEntityExtractor:
-    """Returns exactly one synthetic entity per non-empty document."""
-
-    def extract(self, chunks: list[dict], content_type: str = "unknown") -> list[dict]:
-        if not chunks:
-            return []
-        doc_id = chunks[0]["document_id"]
-        chunk_id = chunks[0]["id"]
-        entity_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{doc_id}:integration-test"))
-        return [
-            {
-                "id": entity_id,
-                "name": "integration test entity",
-                "type": "CONCEPT",
-                "chunk_id": chunk_id,
-                "document_id": doc_id,
-            }
-        ]
 
 
 # Test DB + service fixture
@@ -131,7 +112,7 @@ async def integration_db(tmp_path, monkeypatch):
 
     # Inject fast mock services (no model downloads)
     embedder_module._embedding_service = _MockEmbeddingService()  # type: ignore[assignment]
-    ner_module._extractor = _MockEntityExtractor()  # type: ignore[assignment]
+    ner_module._extractor = MockEntityExtractor()  # type: ignore[assignment]
 
     # Ensure raw/ dir exists (ingestion_endpoint creates it, direct calls need it)
     (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
@@ -219,7 +200,6 @@ async def _ingest_fixture(
 # Integration tests
 
 
-@pytest.mark.unstable
 async def test_ingest_fiction(integration_db, monkeypatch):
     """Ingest The Time Machine (fiction); assert pipeline reaches 'complete' stage,
     produces ≥5 chunks, and stores ≥1 entity in the knowledge graph."""
@@ -250,7 +230,6 @@ async def test_ingest_fiction(integration_db, monkeypatch):
     assert len(graph_data["nodes"]) >= 1, f"Expected ≥1 graph node, got {len(graph_data['nodes'])}"
 
 
-@pytest.mark.unstable
 async def test_ingest_technical(integration_db, monkeypatch):
     """Ingest Art of Unix Programming Ch.1 (technical); assert pipeline reaches
     'complete' stage, produces ≥5 chunks, and stores ≥1 entity."""
@@ -281,7 +260,6 @@ async def test_ingest_technical(integration_db, monkeypatch):
     assert len(graph_data["nodes"]) >= 1, f"Expected ≥1 graph node, got {len(graph_data['nodes'])}"
 
 
-@pytest.mark.unstable
 async def test_search_after_ingest(integration_db, monkeypatch):
     """After ingesting The Time Machine, GET /search?q=time+machine should return
     at least one result via hybrid retrieval (FTS5 keyword search)."""
