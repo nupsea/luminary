@@ -574,7 +574,7 @@ export default function NotePage() {
         {readingView ? (
           <div
             data-zoom-panel="note-preview"
-            style={{ fontSize: `${notePreviewZoom * 0.95}rem` }}
+            style={{ fontSize: `${notePreviewZoom * 0.875}rem` }}
             className="flex-1 overflow-auto"
           >
             <div ref={proseRef} className="mx-auto max-w-3xl px-8 py-6">

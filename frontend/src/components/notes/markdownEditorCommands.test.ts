@@ -13,6 +13,8 @@ import {
   insertInlineSpec,
   moveBlockOrLineSpec,
   replaceSelectionSpec,
+  smartBackspaceSpec,
+  smartDeleteSpec,
   tableNextCellSpec,
   tablePrevCellSpec,
   toggleInlineMarkSpec,
@@ -54,6 +56,12 @@ describe("insertBlockSpec", () => {
     const state = mdState("a\n\nb", 1)
     const next = apply(state, insertBlockSpec(state, "block"))
     expect(next.doc.toString()).toBe("a\n\nblock\n\nb")
+  })
+
+  it("ensures a blank line before block when cursor follows a single newline", () => {
+    const state = mdState("$$\nx = y + z\n$$\n", 15)
+    const next = apply(state, insertBlockSpec(state, "![img](a.png)"))
+    expect(next.doc.toString()).toBe("$$\nx = y + z\n$$\n\n![img](a.png)\n\n")
   })
 })
 
@@ -288,6 +296,85 @@ describe("Diagram & Heading block movement in moveBlockOrLineSpec", () => {
     expect(spec).not.toBeNull()
     const next = apply(state, spec!)
     expect(next.doc.toString()).toBe("$$\nfb = f + b\n$$\n\n| A | B |\n|---|---|\n| 1 | 2 |")
+  })
+})
+
+describe("smartBackspaceSpec", () => {
+  it("selects preceding image block when backspacing at start of text line instead of merging", () => {
+    const doc = "![Pasted Image|medium](__LUMINARY_IMG__/notes/img.png)\nThe size of the problem is straightforward."
+    const line2Start = doc.indexOf("The size")
+    const state = mdState(doc, line2Start)
+    const spec = smartBackspaceSpec(state)
+    expect(spec).not.toBeNull()
+    expect(spec!.selection).toEqual({
+      anchor: 0,
+      head: doc.indexOf("\nThe size"),
+    })
+  })
+
+  it("selects image block when cursor is at line.to of the image instead of deleting closing parenthesis", () => {
+    const doc = "![Pasted Image|medium](__LUMINARY_IMG__/notes/img.png)\n"
+    const line1End = doc.indexOf("png)") + 4
+    const state = mdState(doc, line1End)
+    const spec = smartBackspaceSpec(state)
+    expect(spec).not.toBeNull()
+    expect(spec!.selection).toEqual({
+      anchor: 0,
+      head: line1End,
+    })
+  })
+
+  it("deletes the entire image block and trailing newline when the image block is selected", () => {
+    const doc = "![Pasted Image|medium](__LUMINARY_IMG__/notes/img.png)\nThe size of the problem is straightforward."
+    const line1End = doc.indexOf("\nThe size")
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: 0, head: line1End },
+      extensions: [markdown({ base: markdownLanguage })],
+    })
+    const spec = smartBackspaceSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("The size of the problem is straightforward.")
+  })
+
+  it("removes a blank line cleanly when backspacing on empty line below an image", () => {
+    const doc = "![Pasted Image|medium](__LUMINARY_IMG__/notes/img.png)\n\nThe size of the problem"
+    const blankLinePos = doc.indexOf("\n\n") + 1
+    const state = mdState(doc, blankLinePos)
+    const spec = smartBackspaceSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("![Pasted Image|medium](__LUMINARY_IMG__/notes/img.png)\nThe size of the problem")
+  })
+})
+
+describe("smartDeleteSpec", () => {
+  it("selects following image block when pressing delete at end of prose line instead of merging", () => {
+    const doc = "Heading\n![Pasted Image|medium](__LUMINARY_IMG__/notes/img.png)"
+    const headingEnd = 7
+    const state = mdState(doc, headingEnd)
+    const spec = smartDeleteSpec(state)
+    expect(spec).not.toBeNull()
+    expect(spec!.selection).toEqual({
+      anchor: 8,
+      head: doc.length,
+    })
+  })
+
+  it("deletes image block atomically when image block is selected", () => {
+    const doc = "First\n![Pasted Image|medium](__LUMINARY_IMG__/notes/img.png)\nSecond"
+    const imgStart = doc.indexOf("![Pasted")
+    const imgEnd = doc.indexOf("\nSecond")
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: imgStart, head: imgEnd },
+      extensions: [markdown({ base: markdownLanguage })],
+    })
+    const spec = smartDeleteSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("First\nSecond")
   })
 })
 

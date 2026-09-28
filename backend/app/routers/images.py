@@ -111,7 +111,8 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
         subtype = content_type.split("/")[-1].split("+")[0].lower()
         if subtype == "jpeg":
             subtype = "jpg"
-        ext = f".{subtype}" if subtype in {"png", "jpg", "gif", "webp", "svg", "bmp"} else ".png"
+        allowed_subtypes = {"png", "jpg", "gif", "webp", "svg", "bmp", "tiff", "tif"}
+        ext = f".{subtype}" if subtype in allowed_subtypes else ".png"
     unique_filename = f"{uuid.uuid4()}{ext}"
     target_path = notes_img_dir / unique_filename
 
@@ -231,8 +232,11 @@ async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
         media_type = "image/svg+xml"
     elif ext == "json":
         media_type = "application/json"
+    elif ext in ["tiff", "tif"]:
+        media_type = "image/tiff"
     else:
-        media_type = f"image/{ext}" if ext in ["png", "jpg", "jpeg", "gif", "webp"] else "image/png"
+        common_types = {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
+        media_type = f"image/{ext}" if ext in common_types else "image/png"
     return FileResponse(str(abs_path), media_type=media_type)
 
 

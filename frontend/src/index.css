@@ -137,6 +137,9 @@
     @apply bg-background text-foreground;
     margin: 0;
     font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   /* Modern text selection styling with crystal clear contrast in dark mode */
@@ -227,13 +230,30 @@
 .prose pre {
   background: #f6f8fa !important;
   border: 1px solid #d0d7de !important;
-  border-radius: 0.375rem !important;
-  padding: 1rem !important;
+  border-radius: 0.5rem !important;
+  padding: 0.85em 1.15em !important;
+  font-family: var(--font-mono) !important;
+  font-size: 0.92em !important;
+  line-height: 1.6 !important;
 }
 .prose pre code {
   background: transparent !important;
   color: #24292e !important;
   padding: 0 !important;
+  font-family: var(--font-mono) !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+}
+
+/* Inline code inside prose */
+.prose :not(pre) > code {
+  font-family: var(--font-mono) !important;
+  font-size: 0.9em !important;
+  font-weight: 500 !important;
+  padding: 0.15em 0.35em !important;
+  border-radius: 0.25rem !important;
+  background-color: hsl(var(--muted) / 0.6) !important;
+  color: hsl(var(--primary)) !important;
 }
 
 /* Dark-mode prose headings default to pure white via prose-invert, which glares
@@ -249,6 +269,10 @@
 }
 .dark .prose pre code {
   color: #c9d1d9 !important;
+}
+.dark .prose :not(pre) > code {
+  background-color: hsl(var(--muted) / 0.5) !important;
+  color: hsl(var(--primary)) !important;
 }
 .dark .hljs-doctag,
 .dark .hljs-keyword,
@@ -564,38 +588,43 @@ html {
 
 .epub-reader-content [data-type="programlisting"] pre,
 .epub-reader-content pre {
-  padding: 1rem;
+  padding: 0.75em 1em;
   border-radius: var(--radius-md);
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
-  line-height: 1.5;
+  font-size: 0.9em;
+  line-height: 1.55;
   overflow-x: auto;
 }
 
+.epub-reader-content code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
 .epub-reader-content h1 {
-  font-size: 1.75rem;
+  font-size: 1.6em;
   font-weight: 700;
   line-height: 1.25;
-  margin-top: 1rem;
-  margin-bottom: 1.25rem;
-  padding-bottom: 0.5rem;
+  margin-top: 1em;
+  margin-bottom: 0.8em;
+  padding-bottom: 0.4em;
   border-bottom: 1px solid hsl(var(--border));
 }
 
 .epub-reader-content h2 {
-  font-size: 1.35rem;
+  font-size: 1.3em;
   font-weight: 600;
   line-height: 1.35;
-  margin-top: 2rem;
-  margin-bottom: 0.75rem;
+  margin-top: 1.5em;
+  margin-bottom: 0.6em;
 }
 
 .epub-reader-content h3 {
-  font-size: 1.125rem;
+  font-size: 1.1em;
   font-weight: 600;
   line-height: 1.4;
-  margin-top: 1.5rem;
-  margin-bottom: 0.5rem;
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
 }
 
 .epub-reader-content .label {
@@ -606,8 +635,12 @@ html {
 .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0.5rem 0;
-  margin: 1.25rem 0 !important;
+  padding: 0.4em 0;
+  margin: 0.85em 0 !important;
+}
+
+.katex-display > .katex {
+  font-size: 1.25em !important;
 }
 
 .katex {

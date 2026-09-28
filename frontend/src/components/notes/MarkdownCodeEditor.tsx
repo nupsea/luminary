@@ -24,6 +24,8 @@ import {
   insertInlineSpec,
   moveBlockOrLineSpec,
   replaceSelectionSpec,
+  smartBackspaceSpec,
+  smartDeleteSpec,
   syncDocSpec,
   tableNextCellSpec,
   tablePrevCellSpec,
@@ -91,13 +93,13 @@ export interface MarkdownCodeEditorProps {
 
 import { usePanelZoomStore } from "@/store/panelZoomStore"
 
-export const DEFAULT_NOTE_FONT_SIZE = 12.5
+export const DEFAULT_NOTE_FONT_SIZE = 14
 
 // Colors come from the shadcn CSS variables so dark mode flips for free.
 const editorTheme = EditorView.theme({
   "&": { height: "100%", fontSize: `var(--note-editor-font-size, ${DEFAULT_NOTE_FONT_SIZE}px)`, backgroundColor: "transparent" },
   ".cm-scroller": {
-    fontFamily: "var(--font-mono)",
+    fontFamily: "var(--font-sans)",
     lineHeight: "1.65",
     overflow: "auto",
   },
@@ -172,21 +174,39 @@ const editorTheme = EditorView.theme({
 })
 
 const mdHighlight = HighlightStyle.define([
-  { tag: t.heading1, fontSize: "1.3em", fontWeight: "700" },
-  { tag: t.heading2, fontSize: "1.15em", fontWeight: "700" },
-  { tag: t.heading3, fontSize: "1.05em", fontWeight: "600" },
+  { tag: t.heading1, fontSize: "1.45em", fontWeight: "700" },
+  { tag: t.heading2, fontSize: "1.25em", fontWeight: "600" },
+  { tag: t.heading3, fontSize: "1.12em", fontWeight: "600" },
   { tag: t.heading, fontWeight: "600" },
   { tag: t.strong, fontWeight: "700" },
   { tag: t.emphasis, fontStyle: "italic" },
   { tag: t.strikethrough, textDecoration: "line-through" },
   { tag: t.link, color: "hsl(var(--primary))" },
   { tag: t.url, color: "hsl(var(--primary))", textDecoration: "underline" },
-  { tag: t.monospace, color: "hsl(var(--primary))" },
+  { tag: t.monospace, color: "hsl(var(--primary))", fontFamily: "var(--font-mono)", fontSize: "0.92em" },
   { tag: t.quote, color: "hsl(var(--muted-foreground))", fontStyle: "italic" },
   { tag: t.meta, color: "hsl(var(--muted-foreground))" },
   { tag: t.processingInstruction, color: "hsl(var(--muted-foreground))" },
   { tag: t.labelName, color: "hsl(var(--primary))" },
 ])
+
+function extractImageFromHtml(html: string): File | null {
+  if (!html) return null
+  const match = html.match(/<img[^>]+src=["'](data:image\/([a-zA-Z0-9+.-]+);base64,([^"']+))["']/i)
+  if (!match) return null
+  const [, , subtype, base64] = match
+  try {
+    const byteCharacters = atob(base64)
+    const byteNumbers = new Uint8Array(byteCharacters.length)
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i)
+    }
+    const ext = subtype === "jpeg" ? "jpg" : subtype.split("+")[0]
+    return new File([byteNumbers], `screenshot.${ext}`, { type: `image/${subtype}` })
+  } catch {
+    return null
+  }
+}
 
 function extractImageFile(dataTransfer: DataTransfer | null): File | null {
   if (!dataTransfer) return null
@@ -196,7 +216,7 @@ function extractImageFile(dataTransfer: DataTransfer | null): File | null {
   if (files && files.length > 0) {
     for (let i = 0; i < files.length; i++) {
       const f = files[i]
-      if (f.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(f.name)) {
+      if (f.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg|tiff?)$/i.test(f.name)) {
         return f
       }
     }
@@ -211,12 +231,19 @@ function extractImageFile(dataTransfer: DataTransfer | null): File | null {
         const file = item.getAsFile()
         if (
           file &&
-          (file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file.name))
+          (file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg|tiff?)$/i.test(file.name))
         ) {
           return file
         }
       }
     }
+  }
+
+  // 3. Check HTML for inline base64 images
+  const html = dataTransfer.getData("text/html")
+  if (html) {
+    const file = extractImageFromHtml(html)
+    if (file) return file
   }
 
   return null
@@ -227,6 +254,7 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
     { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live, onEditDiagram },
     ref,
   ) {
+    const lastPasteTimeRef = useRef(0)
     const hostRef = useRef<HTMLDivElement>(null)
     const viewRef = useRef<EditorView | null>(null)
     const noteEditorZoom = usePanelZoomStore((s) => s.getZoom("note-editor"))
@@ -291,7 +319,28 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
             }),
             keymap.of([
               { key: "Enter", run: insertNewlineContinueMarkup },
-              { key: "Backspace", run: deleteMarkupBackward },
+              {
+                key: "Backspace",
+                run: (v) => {
+                  const spec = smartBackspaceSpec(v.state)
+                  if (spec) {
+                    v.dispatch(spec)
+                    return true
+                  }
+                  return deleteMarkupBackward(v)
+                },
+              },
+              {
+                key: "Delete",
+                run: (v) => {
+                  const spec = smartDeleteSpec(v.state)
+                  if (spec) {
+                    v.dispatch(spec)
+                    return true
+                  }
+                  return false
+                },
+              },
               {
                 key: "Tab",
                 run: (v) => {
@@ -363,6 +412,35 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
                   return true
                 },
               },
+              {
+                key: "Mod-v",
+                run: (v) => {
+                  const handler = latest.current.onPasteImage
+                  if (!handler) return false
+                  // Fallback for desktop WKWebView when Cmd+V does not emit a paste event
+                  if (typeof navigator !== "undefined" && navigator.clipboard?.read) {
+                    navigator.clipboard
+                      .read()
+                      .then(async (clipboardItems) => {
+                        for (const cItem of clipboardItems) {
+                          for (const type of cItem.types) {
+                            if (type.startsWith("image/")) {
+                              if (Date.now() - lastPasteTimeRef.current < 600) return
+                              lastPasteTimeRef.current = Date.now()
+                              const blob = await cItem.getType(type)
+                              const fallbackFile = new File([blob], "screenshot.png", { type })
+                              const md = await handler(fallbackFile)
+                              v.dispatch(insertBlockSpec(v.state, md))
+                              return
+                            }
+                          }
+                        }
+                      })
+                      .catch(() => {})
+                  }
+                  return false
+                },
+              },
               ...defaultKeymap,
               ...historyKeymap,
             ]),
@@ -380,9 +458,11 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
                 const file = extractImageFile(event.clipboardData)
                 if (file) {
                   event.preventDefault()
+                  if (Date.now() - lastPasteTimeRef.current < 600) return true
+                  lastPasteTimeRef.current = Date.now()
                   handler(file)
                     .then((md) => {
-                      v.dispatch(insertInlineSpec(v.state, md))
+                      v.dispatch(insertBlockSpec(v.state, md))
                     })
                     .catch((err) => {
                       toast.error("Failed to upload pasted image")
@@ -401,10 +481,12 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
                       for (const cItem of clipboardItems) {
                         for (const type of cItem.types) {
                           if (type.startsWith("image/")) {
+                            if (Date.now() - lastPasteTimeRef.current < 600) return
+                            lastPasteTimeRef.current = Date.now()
                             const blob = await cItem.getType(type)
                             const fallbackFile = new File([blob], "screenshot.png", { type })
                             const md = await handler(fallbackFile)
-                            v.dispatch(insertInlineSpec(v.state, md))
+                            v.dispatch(insertBlockSpec(v.state, md))
                             return
                           }
                         }
@@ -415,6 +497,27 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
                     })
                 }
 
+                return false
+              },
+              drop: (event, v) => {
+                const handler = latest.current.onPasteImage
+                if (!handler) return false
+
+                const file = extractImageFile(event.dataTransfer)
+                if (file) {
+                  event.preventDefault()
+                  if (Date.now() - lastPasteTimeRef.current < 600) return true
+                  lastPasteTimeRef.current = Date.now()
+                  handler(file)
+                    .then((md) => {
+                      v.dispatch(insertBlockSpec(v.state, md))
+                    })
+                    .catch((err) => {
+                      toast.error("Failed to upload dropped image")
+                      logger.warn("Failed to upload dropped image", err)
+                    })
+                  return true
+                }
                 return false
               },
             }),

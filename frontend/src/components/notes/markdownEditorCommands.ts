@@ -1,4 +1,5 @@
 import type { EditorState, TransactionSpec } from "@codemirror/state"
+import { isImageOnlyParagraph } from "./liveMarkdownRules"
 
 // Mirrors the old insertAtTextareaCursor semantics: the block lands in its own
 // paragraph with blank lines around it (mermaid/excalidraw insertions).
@@ -6,8 +7,16 @@ export function insertBlockSpec(state: EditorState, markdown: string): Transacti
   const { from, to } = state.selection.main
   const before = state.sliceDoc(0, from)
   const after = state.sliceDoc(to)
-  const prefix = from > 0 && !before.endsWith("\n") ? "\n\n" : ""
-  const suffix = after.startsWith("\n") ? "" : "\n\n"
+  let prefix = ""
+  if (from > 0) {
+    if (before.endsWith("\n\n")) prefix = ""
+    else if (before.endsWith("\n")) prefix = "\n"
+    else prefix = "\n\n"
+  }
+  let suffix = ""
+  if (after.startsWith("\n\n")) suffix = ""
+  else if (after.startsWith("\n")) suffix = "\n"
+  else suffix = "\n\n"
   const insertion = `${prefix}${markdown}${suffix}`
   return {
     changes: { from, to, insert: insertion },
@@ -592,4 +601,151 @@ export function insertBlockBreakSpec(state: EditorState): TransactionSpec | null
     selection: { anchor: line.to + 1 },
     scrollIntoView: true,
   }
+}
+
+/**
+ * Smart Backspace: prevents destructive concatenation of prose onto atomic blocks
+ * (images, diagrams, math, tables, code blocks) and handles atomic deletion.
+ */
+export function smartBackspaceSpec(state: EditorState): TransactionSpec | null {
+  const { from, to, empty } = state.selection.main
+
+  // 1. Non-empty selection covering an atomic block line (like an image/diagram)
+  if (!empty) {
+    const lineFrom = state.doc.lineAt(from)
+    const lineTo = state.doc.lineAt(to)
+    if (
+      lineFrom.number === lineTo.number &&
+      from <= lineFrom.from &&
+      to >= lineTo.to &&
+      isImageOnlyParagraph(lineFrom.text)
+    ) {
+      let deleteFrom = lineFrom.from
+      let deleteTo = lineTo.to
+      if (lineTo.number < state.doc.lines) {
+        deleteTo = state.doc.line(lineTo.number + 1).from
+      } else if (lineFrom.number > 1) {
+        deleteFrom = state.doc.line(lineFrom.number - 1).to
+      }
+      return {
+        changes: { from: deleteFrom, to: deleteTo, insert: "" },
+        selection: { anchor: deleteFrom },
+        scrollIntoView: true,
+      }
+    }
+    return null
+  }
+
+  const currentLine = state.doc.lineAt(from)
+
+  // 2. Cursor at line.to of an image-only paragraph:
+  // Instead of deleting the closing ')' and corrupting markdown, select the block.
+  if (from === currentLine.to && isImageOnlyParagraph(currentLine.text)) {
+    return {
+      selection: { anchor: currentLine.from, head: currentLine.to },
+      scrollIntoView: true,
+    }
+  }
+
+  // 3. Cursor at line.from (column 0)
+  if (from === currentLine.from && currentLine.number > 1) {
+    const prevLine = state.doc.line(currentLine.number - 1)
+    const prevText = prevLine.text.trim()
+
+    // If current line is blank, remove this blank line cleanly
+    if (currentLine.text.trim() === "") {
+      return {
+        changes: { from: prevLine.to, to: currentLine.to, insert: "" },
+        selection: { anchor: prevLine.to },
+        scrollIntoView: true,
+      }
+    }
+
+    const isBlockAbove =
+      /^!\[.*\]\(.*\)/.test(prevText) ||
+      /^<!--\s*luminary:excalidraw=.*-->$/.test(prevText) ||
+      prevText.startsWith("$$") ||
+      prevText.startsWith("```") ||
+      prevText.startsWith("~~~") ||
+      prevText.includes("|")
+
+    if (isBlockAbove) {
+      const block = findEnclosingBlock(state, prevLine.from)
+      const selFrom = block ? block.from : prevLine.from
+      const selTo = block ? block.to : prevLine.to
+      return {
+        selection: { anchor: selFrom, head: selTo },
+        scrollIntoView: true,
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Smart Delete: prevents destructive concatenation when cursor is at the end of a line above an atomic block,
+ * or cleanly deletes a selected atomic image block.
+ */
+export function smartDeleteSpec(state: EditorState): TransactionSpec | null {
+  const { from, to, empty } = state.selection.main
+
+  if (!empty) {
+    const lineFrom = state.doc.lineAt(from)
+    const lineTo = state.doc.lineAt(to)
+    if (
+      lineFrom.number === lineTo.number &&
+      from <= lineFrom.from &&
+      to >= lineTo.to &&
+      isImageOnlyParagraph(lineFrom.text)
+    ) {
+      let deleteFrom = lineFrom.from
+      let deleteTo = lineTo.to
+      if (lineTo.number < state.doc.lines) {
+        deleteTo = state.doc.line(lineTo.number + 1).from
+      } else if (lineFrom.number > 1) {
+        deleteFrom = state.doc.line(lineFrom.number - 1).to
+      }
+      return {
+        changes: { from: deleteFrom, to: deleteTo, insert: "" },
+        selection: { anchor: deleteFrom },
+        scrollIntoView: true,
+      }
+    }
+    return null
+  }
+
+  const currentLine = state.doc.lineAt(from)
+  if (from === currentLine.to && currentLine.number < state.doc.lines) {
+    const nextLine = state.doc.line(currentLine.number + 1)
+    const nextText = nextLine.text.trim()
+
+    if (currentLine.text.trim() === "") {
+      return {
+        changes: { from: currentLine.from, to: nextLine.from, insert: "" },
+        selection: { anchor: currentLine.from },
+        scrollIntoView: true,
+      }
+    }
+
+    const isBlockBelow =
+      /^!\[.*\]\(.*\)/.test(nextText) ||
+      /^<!--\s*luminary:excalidraw=.*-->$/.test(nextText) ||
+      nextText.startsWith("$$") ||
+      nextText.startsWith("```") ||
+      nextText.startsWith("~~~") ||
+      nextText.includes("|")
+
+    if (isBlockBelow) {
+      const block = findEnclosingBlock(state, nextLine.from)
+      const selFrom = block ? block.from : nextLine.from
+      const selTo = block ? block.to : nextLine.to
+      return {
+        selection: { anchor: selFrom, head: selTo },
+        scrollIntoView: true,
+      }
+    }
+  }
+
+  return null
 }

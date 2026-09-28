@@ -12,14 +12,16 @@
 import { useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { syntaxTree } from "@codemirror/language"
-import { StateField, type EditorState, type Extension, type Range } from "@codemirror/state"
+import { Prec, StateField, type EditorState, type Extension, type Range } from "@codemirror/state"
 import { Decoration, EditorView, WidgetType, keymap, type DecorationSet } from "@codemirror/view"
 import { Check, ChevronDown, ChevronUp, Copy, Pencil, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
-import { moveBlockOrLineSpec } from "./markdownEditorCommands"
+import { moveBlockOrLineSpec, setImageSizeInMarkdown } from "./markdownEditorCommands"
+import { API_BASE } from "@/lib/config"
+import { cn } from "@/lib/utils"
 
 import {
   caretInTableRow,
@@ -67,11 +69,19 @@ function RenderedBlockContent({
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
 }) {
   const [copied, setCopied] = useState(false)
+  const from = view.posAtDOM(host)
+  const firstLine = view.state.doc.lineAt(from)
+  const lines = source.split("\n").length
+  const endLine = view.state.doc.line(Math.min(firstLine.number + lines - 1, view.state.doc.lines))
+  const isSelected =
+    !view.state.selection.main.empty &&
+    view.state.selection.main.from <= firstLine.from &&
+    view.state.selection.main.to >= endLine.to
 
   const handleMove = (dir: -1 | 1) => {
-    const from = view.posAtDOM(host)
+    const blockPos = view.posAtDOM(host)
     // Anchor at the target block to ensure correct block movement even if editor was focused elsewhere
-    const stateWithPos = view.state.update({ selection: { anchor: from } }).state
+    const stateWithPos = view.state.update({ selection: { anchor: blockPos } }).state
     const spec = moveBlockOrLineSpec(stateWithPos, dir)
     if (spec) {
       view.dispatch(spec)
@@ -80,11 +90,15 @@ function RenderedBlockContent({
   }
 
   const handleEdit = () => {
-    const from = view.posAtDOM(host)
-    const firstLine = view.state.doc.lineAt(from)
-    const offset = firstEditableLine(delimited)
-    const line = view.state.doc.line(Math.min(firstLine.number + offset, view.state.doc.lines))
-    view.dispatch({ selection: { anchor: line.to } })
+    const blockPos = view.posAtDOM(host)
+    const line = view.state.doc.lineAt(blockPos)
+    if (isImageOnlyParagraph(source)) {
+      view.dispatch({ selection: { anchor: Math.min(line.from + 2, line.to) } })
+    } else {
+      const offset = firstEditableLine(delimited)
+      const targetLine = view.state.doc.line(Math.min(line.number + offset, view.state.doc.lines))
+      view.dispatch({ selection: { anchor: targetLine.to } })
+    }
     view.focus()
   }
 
@@ -96,22 +110,33 @@ function RenderedBlockContent({
   }
 
   const handleDelete = () => {
-    const from = view.posAtDOM(host)
-    const firstLine = view.state.doc.lineAt(from)
-    const lines = source.split("\n").length
-    const endLine = view.state.doc.line(Math.min(firstLine.number + lines - 1, view.state.doc.lines))
-    let deleteTo = endLine.to
-    if (endLine.number < view.state.doc.lines && view.state.doc.line(endLine.number + 1).text.trim() === "") {
-      deleteTo = view.state.doc.line(endLine.number + 1).to
+    const blockPos = view.posAtDOM(host)
+    const startLine = view.state.doc.lineAt(blockPos)
+    const lineCount = source.split("\n").length
+    const lastLine = view.state.doc.line(Math.min(startLine.number + lineCount - 1, view.state.doc.lines))
+    let deleteFrom = startLine.from
+    let deleteTo = lastLine.to
+    if (lastLine.number < view.state.doc.lines) {
+      deleteTo = view.state.doc.line(lastLine.number + 1).from
+    } else if (startLine.number > 1) {
+      deleteFrom = view.state.doc.line(startLine.number - 1).to
     }
-    view.dispatch({ changes: { from: firstLine.from, to: deleteTo, insert: "" } })
+    view.dispatch({ changes: { from: deleteFrom, to: deleteTo, insert: "" } })
     view.focus()
   }
 
   return (
-    <div className="relative">
+    <div
+      className={cn(
+        "relative rounded-lg transition-all duration-150",
+        isSelected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+      )}
+    >
       <div
-        className="absolute -top-3 right-2 z-20 flex items-center gap-0.5 rounded-md border border-border/80 bg-background/95 px-1 py-0.5 shadow-sm backdrop-blur-sm opacity-0 transition-opacity duration-150 group-hover/md-block:opacity-100 not-prose"
+        className={cn(
+          "absolute -top-3 right-2 z-20 flex items-center gap-0.5 rounded-md border border-border/80 bg-background/95 px-1 py-0.5 shadow-sm backdrop-blur-sm transition-opacity duration-150 not-prose",
+          isSelected ? "opacity-100" : "opacity-0 group-hover/md-block:opacity-100",
+        )}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <button
@@ -167,6 +192,17 @@ function RenderedBlockContent({
             onEditDiagram({ ...diagram, start: diagram.start + base, end: diagram.end + base })
           })
         }
+        onSetImageSize={(src, size) => {
+          const blockPos = view.posAtDOM(host)
+          const startLine = view.state.doc.lineAt(blockPos)
+          const lineCount = source.split("\n").length
+          const lastLine = view.state.doc.line(Math.min(startLine.number + lineCount - 1, view.state.doc.lines))
+          const newBlockText = setImageSizeInMarkdown(source, src, size, API_BASE)
+          if (newBlockText !== source) {
+            view.dispatch({ changes: { from: startLine.from, to: lastLine.to, insert: newBlockText } })
+            view.focus()
+          }
+        }}
       >
         {source}
       </MarkdownRenderer>
@@ -218,7 +254,29 @@ class RenderedBlock extends WidgetType {
     // first keystroke goes in front of the block and destroys it.
     host.addEventListener("mousedown", (event) => {
       const target = event.target as HTMLElement | null
-      if (target?.closest("button, a")) return
+      if (target?.closest("button, a, input, select, textarea")) return
+
+      const from = view.posAtDOM(host)
+      const firstLine = view.state.doc.lineAt(from)
+      const lines = this.source.split("\n").length
+      const endLine = view.state.doc.line(Math.min(firstLine.number + lines - 1, view.state.doc.lines))
+
+      // If clicking an image block: select the entire block as a unit so user can delete or navigate smoothly!
+      if (isImageOnlyParagraph(this.source)) {
+        event.preventDefault()
+        view.focus()
+        if (event.shiftKey) {
+          view.dispatch({
+            selection: { anchor: view.state.selection.main.anchor, head: endLine.to },
+          })
+          return
+        }
+        view.dispatch({
+          selection: { anchor: firstLine.from, head: endLine.to },
+        })
+        return
+      }
+
       event.preventDefault()
       const anchor = this.caretFor(view, host, event, target)
       if (anchor === null) return
@@ -229,6 +287,18 @@ class RenderedBlock extends WidgetType {
       }
       view.dispatch({ selection: { anchor } })
       this.startDrag(view, anchor)
+    })
+
+    host.addEventListener("dblclick", (event) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest("button, a, input, select, textarea")) return
+      if (isImageOnlyParagraph(this.source)) {
+        event.preventDefault()
+        const from = view.posAtDOM(host)
+        const firstLine = view.state.doc.lineAt(from)
+        view.focus()
+        view.dispatch({ selection: { anchor: Math.min(firstLine.from + 2, firstLine.to) } })
+      }
     })
     return host
   }
@@ -293,9 +363,10 @@ class RenderedBlock extends WidgetType {
     }
   }
 
-  ignoreEvent() {
-    // The widget handles its own mousedown; the editor stays out of it.
-    return true
+  ignoreEvent(event: Event): boolean {
+    const target = event.target as HTMLElement | null
+    if (target?.closest("button, a, input, select, textarea")) return true
+    return false
   }
 
   /**
@@ -429,13 +500,35 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
       }
       if (node.name === "Paragraph" && isImageOnlyParagraph(state.doc.sliceString(node.from, node.to))) {
         // A diagram is the image plus the sidecar comment beneath it.
-        // Always keep images rendered so navigating past them does not collapse
-        // a 600px image into a 20px line of raw text and throw the viewport.
         const imageLine = state.doc.lineAt(node.to)
         const next = imageLine.number < state.doc.lines ? state.doc.line(imageLine.number + 1) : null
         const to = next && EXCALIDRAW_COMMENT.test(next.text.trim()) ? next.to : node.to
-        renderBlock(node.from, to, false, true)
-        return false
+        const range = blockRange(state, node.from, to)
+        const isEditingSource = selection.some(
+          (r) => r.empty && r.from > range.from && r.from < range.to,
+        )
+        if (!isEditingSource) {
+          renderBlock(node.from, to, false, true)
+          return false
+        }
+      }
+      if (node.name === "Image") {
+        if (rendered.some((r) => node.from >= r.from && node.to <= r.to)) return false
+        const line = state.doc.lineAt(node.from)
+        const lineText = line.text.trim()
+        const nodeText = state.doc.sliceString(node.from, node.to).trim()
+        if (lineText === nodeText) {
+          const next = line.number < state.doc.lines ? state.doc.line(line.number + 1) : null
+          const to = next && EXCALIDRAW_COMMENT.test(next.text.trim()) ? next.to : line.to
+          const range = blockRange(state, line.from, to)
+          const isEditingSource = selection.some(
+            (r) => r.empty && r.from > range.from && r.from < range.to,
+          )
+          if (!isEditingSource) {
+            renderBlock(line.from, to, false, true)
+            return false
+          }
+        }
       }
       if (node.name === "Blockquote") {
         for (let pos = node.from; pos <= node.to; ) {
@@ -446,6 +539,13 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
         return
       }
       if (!hidesMark(node.name, node.node.parent?.name)) return
+      if (node.name === "EmphasisMark") {
+        const parent = node.node.parent
+        if (parent) {
+          const parentText = state.doc.sliceString(parent.from, parent.to)
+          if (parentText.includes("LUMINARY_IMG")) return
+        }
+      }
       if (rendered.some((r) => node.from >= r.from && node.to <= r.to)) return
       const line = state.doc.lineAt(node.from)
       if (lineIsBeingEdited(selection, line.from, line.to)) return
@@ -472,20 +572,23 @@ const liveTheme = EditorView.theme({
     color: "hsl(var(--muted-foreground))",
   },
   ".cm-md-block": {
-    margin: "4px 0",
+    margin: "6px 0",
     position: "relative",
     whiteSpace: "normal",
+    fontSize: "inherit",
   },
   ".cm-md-block .prose": {
     margin: "0 !important",
     maxWidth: "none !important",
+    fontSize: "inherit !important",
+    lineHeight: "1.65 !important",
   },
   ".cm-md-block .prose > *": {
-    marginTop: "0.25rem !important",
-    marginBottom: "0.25rem !important",
+    marginTop: "0.35rem !important",
+    marginBottom: "0.35rem !important",
   },
   ".cm-md-block figure": {
-    margin: "0.35rem 0 !important",
+    margin: "0.5rem 0 !important",
   },
   ".cm-line": {
     lineHeight: "1.65",
@@ -498,7 +601,7 @@ const liveTheme = EditorView.theme({
   ".cm-md-fence": { color: "hsl(var(--muted-foreground))", opacity: "0.55" },
   ".cm-md-table-line": {
     fontFamily: "var(--font-mono)",
-    fontSize: "0.90em",
+    fontSize: "0.92em",
     letterSpacing: "-0.01em",
     lineHeight: "1.5",
     backgroundColor: "hsl(var(--muted) / 0.25)",
@@ -506,7 +609,7 @@ const liveTheme = EditorView.theme({
   },
   ".cm-md-math-line": {
     fontFamily: "var(--font-mono)",
-    fontSize: "0.92em",
+    fontSize: "0.95em",
     backgroundColor: "hsl(var(--primary) / 0.05)",
     borderLeft: "2px solid hsl(var(--primary) / 0.5)",
     paddingLeft: "8px",
@@ -514,19 +617,19 @@ const liveTheme = EditorView.theme({
   ".cm-md-block img": { maxWidth: "100%", height: "auto" },
   ".cm-md-block table": {
     width: "auto",
-    minWidth: "min(100%, 320px)",
+    minWidth: "min(100%, 360px)",
     maxWidth: "100%",
     borderCollapse: "collapse",
-    margin: "4px 0",
-    fontSize: "0.875rem",
-    lineHeight: "1.35",
+    margin: "6px 0",
+    fontSize: "0.95em",
+    lineHeight: "1.45",
   },
   ".cm-md-block th": {
-    padding: "5px 10px",
+    padding: "6px 12px",
     backgroundColor: "hsl(var(--muted) / 0.6)",
     color: "hsl(var(--foreground))",
     fontWeight: "600",
-    fontSize: "0.75rem",
+    fontSize: "0.85em",
     textTransform: "uppercase",
     letterSpacing: "0.04em",
     border: "1px solid hsl(var(--border))",
@@ -534,16 +637,37 @@ const liveTheme = EditorView.theme({
     whiteSpace: "nowrap",
   },
   ".cm-md-block td": {
-    padding: "5px 10px",
+    padding: "6px 12px",
     border: "1px solid hsl(var(--border))",
     color: "hsl(var(--foreground) / 0.9)",
     verticalAlign: "top",
+    fontSize: "inherit",
   },
   ".cm-md-block tr:nth-child(even) td": {
     backgroundColor: "hsl(var(--muted) / 0.15)",
   },
   ".cm-md-block tr:hover td": {
     backgroundColor: "hsl(var(--accent) / 0.3)",
+  },
+  ".cm-md-block pre": {
+    fontFamily: "var(--font-mono) !important",
+    fontSize: "0.92em !important",
+    lineHeight: "1.6 !important",
+    padding: "0.85em 1.15em !important",
+    margin: "0.5rem 0 !important",
+    borderRadius: "0.5rem !important",
+  },
+  ".cm-md-block pre code": {
+    fontFamily: "var(--font-mono) !important",
+    fontSize: "inherit !important",
+    lineHeight: "inherit !important",
+  },
+  ".cm-md-block .katex-display": {
+    margin: "0.75rem 0 !important",
+    padding: "0.4rem 0",
+  },
+  ".cm-md-block .katex-display > .katex": {
+    fontSize: "1.25em !important",
   },
 })
 
@@ -555,50 +679,119 @@ const liveTheme = EditorView.theme({
  * the caret on the block's first or last line of content instead, which is what
  * reveals it.
  */
-function stepInto(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -1): boolean {
-  if (!view.state.selection.main.empty) return false
+function isAtVisualEdge(view: EditorView, head: number, dir: 1 | -1): { atEdge: boolean; visualPos?: number } {
+  try {
+    if (typeof view.coordsAtPos !== "function" || typeof view.posAtCoords !== "function") {
+      return { atEdge: true }
+    }
+    const coords = view.coordsAtPos(head)
+    if (!coords) return { atEdge: true }
+    const line = view.state.doc.lineAt(head)
+    if (dir === -1) {
+      const posAbove = view.posAtCoords({ x: coords.left, y: coords.top - 5 })
+      if (posAbove !== null && view.state.doc.lineAt(posAbove).number === line.number && posAbove !== head) {
+        return { atEdge: false, visualPos: posAbove }
+      }
+      return { atEdge: true }
+    } else {
+      const posBelow = view.posAtCoords({ x: coords.left, y: coords.bottom + 5 })
+      if (posBelow !== null && view.state.doc.lineAt(posBelow).number === line.number && posBelow !== head) {
+        return { atEdge: false, visualPos: posBelow }
+      }
+      return { atEdge: true }
+    }
+  } catch {
+    return { atEdge: true }
+  }
+}
+
+export function stepInto(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -1): boolean {
+  const sel = view.state.selection.main
   const { doc } = view.state
-  const head = view.state.selection.main.head
+
+  // If there is an active selection (e.g. selected image or text range):
+  // collapse to the leading edge in the direction of motion
+  let head = sel.head
+  if (!sel.empty) {
+    head = dir === -1 ? sel.from : sel.to
+  }
+
   const line = doc.lineAt(head)
   const column = head - line.from
-  const target = line.number + dir
-  if (target < 1 || target > doc.lines) return false
-  const edge = doc.line(target)
+
+  // 1. If moving within wrapped visual lines of the same paragraph, move visually
+  const visual = isAtVisualEdge(view, head, dir)
+  if (!visual.atEdge && visual.visualPos !== undefined) {
+    view.dispatch({ selection: { anchor: visual.visualPos }, scrollIntoView: true })
+    return true
+  }
+
+  // 2. We are crossing to an adjacent line
+  const targetNum = line.number + dir
+  if (targetNum < 1) {
+    view.dispatch({ selection: { anchor: 0 }, scrollIntoView: true })
+    return true
+  }
+  if (targetNum > doc.lines) {
+    view.dispatch({ selection: { anchor: doc.length }, scrollIntoView: true })
+    return true
+  }
+
+  const targetLine = doc.line(targetNum)
   let anchor: number | null = null
-  // Coming down, the line below is the block's first; coming up, it is the
-  // block's last. Either way the decoration covers that point.
-  view.state.field(field).between(edge.from, edge.from, (from, to, deco) => {
-    const widget = deco.spec.widget
-    if (!(widget instanceof RenderedBlock)) return
-    if (isImageOnlyParagraph(widget.source)) {
-      const blockLineFrom = doc.lineAt(from).number
-      const blockLineTo = doc.lineAt(to).number
-      const nextNum = dir === 1 ? blockLineTo + 1 : blockLineFrom - 1
-      if (nextNum >= 1 && nextNum <= doc.lines) {
-        anchor = dir === 1 ? doc.line(nextNum).from : doc.line(nextNum).to
+
+  // Check if target line is inside or covered by a RenderedBlock decoration
+  try {
+    view.state.field(field).between(targetLine.from, targetLine.to, (from, to, deco) => {
+      if (anchor !== null) return
+      const widget = deco.spec?.widget
+      if (!widget || typeof widget !== "object" || !("source" in widget)) return
+
+      const widgetSource = (widget as { source: string }).source
+      const widgetDelimited = Boolean((widget as { delimited?: boolean }).delimited)
+
+      if (isImageOnlyParagraph(widgetSource)) {
+        const blockLineFrom = doc.lineAt(from).number
+        const blockLineTo = doc.lineAt(to).number
+        const nextNum = dir === 1 ? blockLineTo + 1 : blockLineFrom - 1
+        if (nextNum >= 1 && nextNum <= doc.lines) {
+          anchor = dir === 1 ? doc.line(nextNum).from : doc.line(nextNum).to
+        } else {
+          anchor = dir === 1 ? doc.line(blockLineTo).to : doc.line(blockLineFrom).from
+        }
+        return
       }
-      return
-    }
-    const lines = widget.source.split("\n").length
-    const offset =
-      dir === 1
-        ? firstEditableLine(widget.delimited)
-        : clickedSourceLine(null, lines, widget.delimited)
-    const targetLine = doc.line(Math.min(doc.lineAt(from).number + offset, doc.lines))
-    if (targetLine.text.includes("|")) {
-      const cellPos = caretInTableRow(targetLine.text, 0)
-      anchor = targetLine.from + cellPos
-    } else {
-      // Keep the caret's column rather than jumping to the line's end.
-      anchor = targetLine.from + columnOffset(targetLine.text, column)
-    }
-  })
-  if (anchor === null) return false
-  view.dispatch({ selection: { anchor } })
+
+      const lines = widgetSource.split("\n").length
+      const offset =
+        dir === 1
+          ? firstEditableLine(widgetDelimited)
+          : clickedSourceLine(null, lines, widgetDelimited)
+      const blockStartLine = doc.lineAt(from).number
+      const destLine = doc.line(Math.min(blockStartLine + offset, doc.lines))
+      if (destLine.text.includes("|")) {
+        const cellPos = caretInTableRow(destLine.text, 0)
+        anchor = destLine.from + cellPos
+      } else {
+        anchor = destLine.from + columnOffset(destLine.text, column)
+      }
+    })
+  } catch {
+    // If field lookup fails, fallback to line-based navigation
+  }
+
+  if (anchor !== null) {
+    view.dispatch({ selection: { anchor }, scrollIntoView: true })
+    return true
+  }
+
+  // 3. Target line is a normal line or blank line: land on it cleanly without coordinate jumping!
+  const col = columnOffset(targetLine.text, column)
+  view.dispatch({ selection: { anchor: targetLine.from + col }, scrollIntoView: true })
   return true
 }
 
-function liveField(options: LiveMarkdownOptions) {
+export function liveField(options: LiveMarkdownOptions) {
   return StateField.define<DecorationSet>({
     create: (state) => decorate(state, options),
     update(value, tr) {
@@ -613,10 +806,12 @@ export function liveMarkdown(options: LiveMarkdownOptions = {}): Extension {
   const field = liveField(options)
   return [
     field,
-    keymap.of([
-      { key: "ArrowDown", run: (view) => stepInto(view, field, 1) },
-      { key: "ArrowUp", run: (view) => stepInto(view, field, -1) },
-    ]),
+    Prec.high(
+      keymap.of([
+        { key: "ArrowDown", run: (view) => stepInto(view, field, 1) },
+        { key: "ArrowUp", run: (view) => stepInto(view, field, -1) },
+      ]),
+    ),
     // Inline, so it beats the base theme's monospace rule whatever order the
     // two style modules are mounted in. Prose is what is being written here.
     EditorView.contentAttributes.of({ style: "font-family: var(--font-sans)" }),
