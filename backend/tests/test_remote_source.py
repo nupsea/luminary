@@ -10,11 +10,7 @@ import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app  # noqa: F401 (used via ASGITransport)
 from app.models import DocumentModel
 from app.services import remote_source
@@ -31,26 +27,6 @@ MINIMAL_PDF = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
 GITHUB_BLOB_HTML = b"""<!doctype html><html><body>
 <nav>Skip to content Navigation Menu Sign in Appearance settings Platform
 GitHub Copilot Write better code with AI</nav></body></html>"""
-
-
-@pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-    yield engine, factory, tmp_path
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
 
 
 @pytest.fixture

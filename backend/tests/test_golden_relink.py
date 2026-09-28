@@ -12,11 +12,7 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel, GoldenDatasetModel, GoldenQuestionModel
 
@@ -24,20 +20,8 @@ DEAD_DOC = "dead-document-id"
 
 
 @pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    orig_engine, orig_factory = db_module._engine, db_module._session_factory
-    db_module._engine, db_module._session_factory = engine, factory
-    yield factory
-    db_module._engine, db_module._session_factory = orig_engine, orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
+def test_db(memory_db):
+    return memory_db.factory
 
 
 async def _seed(factory, *, doc_ids: list[str] | None = None) -> tuple[str, str]:

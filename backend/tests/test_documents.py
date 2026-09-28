@@ -6,11 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.models import (
     ChunkModel,
@@ -21,30 +17,6 @@ from app.models import (
 )
 
 # Test DB fixture
-
-
-@pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
 
 
 def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
@@ -237,14 +209,18 @@ async def test_list_documents_filter_by_content_type(test_db):
     assert types == {"book", "paper"}
 
 
-@pytest.mark.unstable
 async def test_list_documents_filter_by_tag(test_db):
     """tag query param filters to documents with that tag."""
+    from app.services.notes_service import sync_document_tag_index
+
     _, factory, _ = test_db
     async with factory() as session:
-        session.add(_make_doc(tags=["ai", "ml"]))
-        session.add(_make_doc(tags=["history"]))
-        session.add(_make_doc(tags=[]))
+        docs = [_make_doc(tags=["ai", "ml"]), _make_doc(tags=["history"]), _make_doc(tags=[])]
+        session.add_all(docs)
+        await session.flush()
+        # The filter reads the shadow index, which the tagging paths maintain.
+        for doc in docs:
+            await sync_document_tag_index(doc.id, doc.tags, session)
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

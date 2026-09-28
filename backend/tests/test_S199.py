@@ -9,11 +9,7 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.services.naming import normalize_collection_name, normalize_tag_slug
 
@@ -99,30 +95,6 @@ class TestNormalizeTagSlug:
 # Integration test fixture
 
 
-@pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
-
-
 # Integration tests: POST endpoints normalize before insert
 
 
@@ -178,7 +150,6 @@ async def test_autocomplete_normalizes_query(test_db):
 # Integration tests: migration endpoints
 
 
-@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_migrate_tags_merges_duplicates(test_db):
     """Two tags 'Python' and 'python' should merge into 'python' with combined note count."""
@@ -188,14 +159,14 @@ async def test_migrate_tags_merges_duplicates(test_db):
         now = "2026-01-01T00:00:00"
         await session.execute(
             text(
-                "INSERT INTO canonical_tags (id, display_name, parent_tag, note_count, created_at)"
+                "INSERT INTO canonical_tags (id, display_name, parent_tag, usage_count, created_at)"
                 " VALUES (:id, :dn, NULL, :nc, :ca)"
             ),
             {"id": "Python", "dn": "Python", "nc": 3, "ca": now},
         )
         await session.execute(
             text(
-                "INSERT INTO canonical_tags (id, display_name, parent_tag, note_count, created_at)"
+                "INSERT INTO canonical_tags (id, display_name, parent_tag, usage_count, created_at)"
                 " VALUES (:id, :dn, NULL, :nc, :ca)"
             ),
             {"id": "python", "dn": "python", "nc": 2, "ca": now},
@@ -258,7 +229,7 @@ async def test_migrate_tags_merges_duplicates(test_db):
 
     # Verify: only 'python' canonical tag remains
     async with factory() as session:
-        result = await session.execute(text("SELECT id, note_count FROM canonical_tags"))
+        result = await session.execute(text("SELECT id, usage_count FROM canonical_tags"))
         rows = result.all()
         tag_map = {r[0]: r[1] for r in rows}
         assert "python" in tag_map

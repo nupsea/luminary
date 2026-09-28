@@ -4,6 +4,8 @@ Use these instead of MagicMock for domain services.
 Reserve MagicMock for true external boundaries (LiteLLM, httpx, SQLAlchemy).
 """
 
+import uuid
+
 
 class MockEmbeddingService:
     """Returns a deterministic 1024-dim vector for any input text."""
@@ -93,3 +95,36 @@ class CapturingLLMService(MockLLMService):
     async def stream_messages(self, messages, **kwargs):
         self.captured_messages.append(messages)
         return await super().stream_messages(messages, **kwargs)
+
+
+class MockEntityExtractor:
+    """One synthetic entity per non-empty batch, for ingestion tests.
+
+    The signature mirrors EntityExtractor.extract (test_stubs.py checks it). A double
+    that drifts raises TypeError inside entity_extract_node, which logs it as
+    non-fatal, so the tests passed without extraction ever running (#101).
+    """
+
+    def __init__(self, label: str = "test entity"):
+        self.label = label
+        self.calls = 0
+
+    def extract(
+        self,
+        chunks: list[dict],
+        content_type: str = "unknown",
+        is_technical: bool | None = None,
+    ) -> list[dict]:
+        self.calls += 1
+        if not chunks:
+            return []
+        doc_id = chunks[0]["document_id"]
+        return [
+            {
+                "id": str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{doc_id}:{self.label}")),
+                "name": self.label,
+                "type": "CONCEPT",
+                "chunk_id": chunks[0]["id"],
+                "document_id": doc_id,
+            }
+        ]

@@ -6,11 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.models import (
     CanonicalTagModel,
@@ -22,34 +18,9 @@ from app.models import (
 # Fixture
 
 
-@pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
-
-
 # Tag migration tests
 
 
-@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_tag_migration_merges_duplicates(test_db):
     """POST /tags/migrate-naming merges 'Python' and 'python' into 'python' with combined notes."""
@@ -85,7 +56,7 @@ async def test_tag_migration_merges_duplicates(test_db):
                 id="Python",
                 display_name="Python",
                 parent_tag=None,
-                note_count=1,
+                usage_count=1,
                 created_at=datetime.now(UTC),
             )
         )
@@ -94,7 +65,7 @@ async def test_tag_migration_merges_duplicates(test_db):
                 id="python",
                 display_name="python",
                 parent_tag=None,
-                note_count=1,
+                usage_count=1,
                 created_at=datetime.now(UTC),
             )
         )
@@ -313,7 +284,6 @@ async def test_sync_tag_index_normalizes(test_db):
         assert "Machine Learning" not in rows
 
 
-@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_autocomplete_normalizes_query(test_db):
     """GET /tags/autocomplete normalizes the query parameter."""
@@ -325,7 +295,7 @@ async def test_autocomplete_normalizes_query(test_db):
                 id="machine-learning",
                 display_name="machine-learning",
                 parent_tag=None,
-                note_count=5,
+                usage_count=5,
                 created_at=datetime.now(UTC),
             )
         )

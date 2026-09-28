@@ -71,7 +71,7 @@ def _exit_seconds_with_executor_work_in_flight() -> float:
 
 def test_teardown_does_not_wait_out_background_thread_work(monkeypatch):
     monkeypatch.setitem(_installed_join().__globals__, "_EXECUTOR_JOIN_GRACE_S", _GRACE_S)
-    before = threading.active_count()
+    before = {t.ident for t in threading.enumerate()}
 
     elapsed = _exit_seconds_with_executor_work_in_flight()
 
@@ -82,7 +82,9 @@ def test_teardown_does_not_wait_out_background_thread_work(monkeypatch):
     )
     # The work was abandoned, not killed. Asserting it is still running is what
     # keeps this from passing because the call finished early on a fast machine.
-    assert threading.active_count() > before
+    # Compared by identity, not count: a thread leaked by an earlier test can end in
+    # this window and cancel out the new one (seen on CI as `assert 8 > 8`).
+    assert {t.ident for t in threading.enumerate()} - before
 
 
 def test_the_bound_is_what_makes_it_early(monkeypatch):

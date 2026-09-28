@@ -224,20 +224,5 @@
     "app/workflows/ingestion_nodes/finalize.py": 3,
     "app/workflows/ingestion_nodes/transcribe.py": 1
   },
-  "unstable_tests": {
-    "tests/test_S199.py": 1,
-    "tests/test_S201.py": 2,
-    "tests/test_S207.py": 5,
-    "tests/test_chat_graph.py": 1,
-    "tests/test_collection_overview.py": 1,
-    "tests/test_documents.py": 1,
-    "tests/test_export.py": 1,
-    "tests/test_integration.py": 3,
-    "tests/test_membership_chips_contract.py": 1,
-    "tests/test_naming_migration.py": 2,
-    "tests/test_note_links.py": 2,
-    "tests/test_note_title.py": 1,
-    "tests/test_tag_cross_content_counts.py": 1,
-    "tests/test_tags_scoped_count.py": 1
-  }
+  "unstable_tests": {}
 }
