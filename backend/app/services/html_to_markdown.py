@@ -24,6 +24,8 @@ _ANCHOR_ONLY = re.compile(r"^\s*(#|¶|§|link|permalink|anchor)\s*$", re.I)
 
 _INLINE_WRAP = {"strong": "**", "b": "**", "em": "*", "i": "*", "del": "~~", "s": "~~"}
 
+_BLOCK_TAGS = ["div", "p", "section", "figure", "blockquote", "ul", "ol", "h1", "h2", "h3", "h4"]
+
 # Callout containers keep their text but lose their box; the words are what matter.
 _CALLOUT_HINT = re.compile(r"callout|admonition|note|warning|tip|caution|info-box", re.I)
 
@@ -207,8 +209,22 @@ class MarkdownSerializer:
             return self._details(node, depth)
         if name == "dl":
             return self._definition_list(node)
+        if name == "a" and node.find(_BLOCK_TAGS):
+            return self._block_link(node, depth)
 
         return self._descend(node, depth)
+
+    def _block_link(self, node: Tag, depth: int) -> list[str]:
+        """A link wrapping blocks (a card) keeps its target on its first text line."""
+        lines = self._descend(node, depth)
+        href = node.get("href") or ""
+        if not href or href.startswith("javascript:"):
+            return lines
+        for i, line in enumerate(lines):
+            if not line.startswith(("![", "#", ">", "[")):
+                lines[i] = f"[{line}]({href})"
+                break
+        return lines
 
     def _figure(self, node: Tag, depth: int) -> list[str]:
         """Image then caption, both kept.
@@ -216,6 +232,12 @@ class MarkdownSerializer:
         The caption is where a technical article explains its figure, and a plain
         extraction drops it while keeping the image.
         """
+        # A link-preview card is a <figure> whose content is prose, not a caption.
+        # Serialised as image-only it lost that prose, and the shortfall sent the
+        # whole article to the fallback extractor.
+        caption_words = sum(len(c.get_text(" ").split()) for c in node.find_all("figcaption"))
+        if len(node.get_text(" ").split()) > caption_words:
+            return self._descend(node, depth)
         out: list[str] = []
         for img in node.find_all("img"):
             line = self._inline(img)
