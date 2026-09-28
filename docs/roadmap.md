@@ -739,7 +739,7 @@ duplication ≤ 3%, coverage ≥ 80% on new code).
 | Duplicated lines | `jscpd`, 8-line clones | 1.11% (96 clones) | ≤ 3%, held |
 | Dead Python | `vulture` ≥ 80% confidence, plus unreferenced symbols | 8 unused imports/variables, ~11 unused functions/classes | 0 |
 | Dead TypeScript | `knip` (`frontend/knip.json`) | 0 unused files, exports or dependencies (was 12, 29 and 1); 115 unused exported types | 0 files, 0 dependencies |
-| Test coverage | `pytest --cov`, `vitest --coverage` | **not measured** (the cloud container cannot install torch) | Floor set in 0.14 from the measured number; ≥ 80% on changed lines |
+| Test coverage | `pytest --cov`, `vitest --coverage` | backend 77.26% of statements; frontend 15.97% of lines (16.33 statements, 13.9 branches). Both floors are in `make ci` | Floors only rise; ≥ 80% on changed lines |
 | Quarantined / skipped tests | markers | 23 `unstable`, 16 `skip` | 0 `unstable`; every `skip` names what re-enables it |
 
 **Tests, evals and smoke are code, and carry debt too.** Test code (84,366 lines in 350 files) now
@@ -750,7 +750,7 @@ lines with their own copies of manifest, search and history plumbing.
 
 | Rung | Refactor, as the rung's first PR |
 |---|---|
-| 0.14 | The ratchets above run in `make ci` for every row except coverage, which waits on its measurement. Move `qa.stream_answer` to `runtime/`, which empties `KNOWN_VIOLATIONS`. One shared DB fixture (#50). The 11 in-process smoke scripts become pytest tests, or are deleted where pytest already covers them. Measure coverage and set its floor |
+| 0.14 | The ratchets above run in `make ci`, coverage included. Move `qa.stream_answer` to `runtime/`, which empties `KNOWN_VIOLATIONS`. One shared DB fixture (#50). The 11 in-process smoke scripts become pytest tests, or are deleted where pytest already covers them. Measure coverage and set its floor |
 | 0.15 | Split `summarizer.py` into `summary_prompts.py` and `summary_assembly.py` (both pure), `repos/summary_repo.py` (its 24 queries), and `library_summary.py` (the library-wide half, with its Kuzu read). The same prep for the other `content_type`/`is_technical` readers the retirement touches (37 files), starting with `flashcard_generators.generate` and `parser._parse_pdf`. Eval runners share one `evals/lib` path for manifest, search and history |
 | 0.16–0.17 | Repos extracted from `routers/study.py` (103 queries) and `routers/documents.py` (42), then from the services with the most direct SQL, before `library_id` lands, so the scope is added in one place. `get_collection_study_dashboard` and `list_documents` are split on the way. The 53 `DATA_DIR` joins go through the path resolver |
 | 0.18 | `main.lifespan` (300 lines) becomes named startup phases |

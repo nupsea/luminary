@@ -772,9 +772,9 @@ db-revision:
 logs:
 	bash scripts/dev-logs.sh
 
-# Measured on GitHub; raise it as coverage grows, never lower it to pass.
+# Measured on GitHub at 77.26% (2026-09-28). Raise it as coverage grows, never lower it to pass.
 # pytest-cov is pinned here rather than locked, like radon: a gate tool, not an app dependency.
-BACKEND_COVERAGE_FLOOR ?= 1
+BACKEND_COVERAGE_FLOOR ?= 77
 
 ci:
 	@echo "Running CI checks..."
