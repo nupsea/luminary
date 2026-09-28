@@ -178,7 +178,6 @@ async def test_autocomplete_normalizes_query(test_db):
 # Integration tests: migration endpoints
 
 
-@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_migrate_tags_merges_duplicates(test_db):
     """Two tags 'Python' and 'python' should merge into 'python' with combined note count."""
@@ -188,14 +187,14 @@ async def test_migrate_tags_merges_duplicates(test_db):
         now = "2026-01-01T00:00:00"
         await session.execute(
             text(
-                "INSERT INTO canonical_tags (id, display_name, parent_tag, note_count, created_at)"
+                "INSERT INTO canonical_tags (id, display_name, parent_tag, usage_count, created_at)"
                 " VALUES (:id, :dn, NULL, :nc, :ca)"
             ),
             {"id": "Python", "dn": "Python", "nc": 3, "ca": now},
         )
         await session.execute(
             text(
-                "INSERT INTO canonical_tags (id, display_name, parent_tag, note_count, created_at)"
+                "INSERT INTO canonical_tags (id, display_name, parent_tag, usage_count, created_at)"
                 " VALUES (:id, :dn, NULL, :nc, :ca)"
             ),
             {"id": "python", "dn": "python", "nc": 2, "ca": now},
@@ -258,7 +257,7 @@ async def test_migrate_tags_merges_duplicates(test_db):
 
     # Verify: only 'python' canonical tag remains
     async with factory() as session:
-        result = await session.execute(text("SELECT id, note_count FROM canonical_tags"))
+        result = await session.execute(text("SELECT id, usage_count FROM canonical_tags"))
         rows = result.all()
         tag_map = {r[0]: r[1] for r in rows}
         assert "python" in tag_map

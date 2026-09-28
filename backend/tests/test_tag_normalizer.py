@@ -50,9 +50,6 @@ async def test_db(tmp_path, monkeypatch):
 
 def _make_tag(tag_id: str, display_name: str, usage_count: int = 5) -> CanonicalTagModel:
     # `note_count` became `usage_count` when tags started counting documents too.
-    # Every test here builds tags through this helper, so the rename broke all of
-    # them at once -- and they are marked `unstable`, excluded from CI by default,
-    # so nothing said so.
     return CanonicalTagModel(
         id=tag_id,
         display_name=display_name,

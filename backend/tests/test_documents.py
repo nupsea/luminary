@@ -237,14 +237,18 @@ async def test_list_documents_filter_by_content_type(test_db):
     assert types == {"book", "paper"}
 
 
-@pytest.mark.unstable
 async def test_list_documents_filter_by_tag(test_db):
     """tag query param filters to documents with that tag."""
+    from app.services.notes_service import sync_document_tag_index
+
     _, factory, _ = test_db
     async with factory() as session:
-        session.add(_make_doc(tags=["ai", "ml"]))
-        session.add(_make_doc(tags=["history"]))
-        session.add(_make_doc(tags=[]))
+        docs = [_make_doc(tags=["ai", "ml"]), _make_doc(tags=["history"]), _make_doc(tags=[])]
+        session.add_all(docs)
+        await session.flush()
+        # The filter reads the shadow index, which the tagging paths maintain.
+        for doc in docs:
+            await sync_document_tag_index(doc.id, doc.tags, session)
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

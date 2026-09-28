@@ -96,7 +96,6 @@ async def test_suggest_tags_returns_normalized_slugs(test_db):
     assert "Science/Cell_Division" not in tags
 
 
-@pytest.mark.unstable  # POST /notes schedules a real embed/graph task, like the dedup test above
 @pytest.mark.asyncio
 async def test_create_note_returns_before_tagger_resolves(test_db):
     """POST /notes must not await the tagger inline (regression).
@@ -149,7 +148,6 @@ async def test_create_note_returns_before_tagger_resolves(test_db):
 # AC10: duplicate note creation within 5s window returns existing note
 
 
-@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_duplicate_note_dedup_within_5s(test_db):
     """POST /notes with identical (document_id, section_id, content) within 5s returns existing."""

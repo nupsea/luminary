@@ -43,7 +43,6 @@ async def test_db(tmp_path, monkeypatch):
 # AC12: detect_naming_violations returns suggestions for violating tag + collection
 
 
-@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_detect_naming_violations_tag_and_collection(test_db):
     """detect_naming_violations returns rename suggestions for
@@ -58,7 +57,7 @@ async def test_detect_naming_violations_tag_and_collection(test_db):
                 id="machine_learning",
                 display_name="machine_learning",
                 parent_tag=None,
-                note_count=3,
+                usage_count=3,
                 created_at=datetime.now(UTC),
             )
         )
@@ -94,7 +93,6 @@ async def test_detect_naming_violations_tag_and_collection(test_db):
 # AC3: Duplicate tags that normalize to the same slug detected for merge
 
 
-@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_detect_naming_violations_duplicate_tags_merge(test_db):
     """Two tags that normalize to the same slug should produce merge suggestions."""
@@ -107,7 +105,7 @@ async def test_detect_naming_violations_duplicate_tags_merge(test_db):
                 id="Machine-Learning",
                 display_name="Machine-Learning",
                 parent_tag=None,
-                note_count=2,
+                usage_count=2,
                 created_at=datetime.now(UTC),
             )
         )
@@ -116,7 +114,7 @@ async def test_detect_naming_violations_duplicate_tags_merge(test_db):
                 id="machine_learning",
                 display_name="machine_learning",
                 parent_tag=None,
-                note_count=5,
+                usage_count=5,
                 created_at=datetime.now(UTC),
             )
         )
@@ -135,7 +133,6 @@ async def test_detect_naming_violations_duplicate_tags_merge(test_db):
 # AC13: normalize-apply renames a tag and updates NoteTagIndexModel rows
 
 
-@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_apply_naming_fixes_renames_tag_and_index(test_db):
     """apply_naming_fixes renames a tag and updates NoteTagIndexModel rows."""
@@ -149,7 +146,7 @@ async def test_apply_naming_fixes_renames_tag_and_index(test_db):
                 id="machine_learning",
                 display_name="machine_learning",
                 parent_tag=None,
-                note_count=1,
+                usage_count=1,
                 created_at=datetime.now(UTC),
             )
         )
@@ -263,7 +260,6 @@ async def test_apply_naming_fixes_renames_collection(test_db):
 # Startup migration: tags normalized on create_all_tables
 
 
-@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_startup_migration_normalizes_tags(tmp_path, monkeypatch):
     """create_all_tables normalizes pre-existing tags with underscores."""
@@ -282,7 +278,8 @@ async def test_startup_migration_normalizes_tags(tmp_path, monkeypatch):
     async with factory() as session:
         await session.execute(
             text(
-                "INSERT INTO canonical_tags (id, display_name, parent_tag, note_count, created_at) "
+                "INSERT INTO canonical_tags"
+                " (id, display_name, parent_tag, usage_count, created_at) "
                 "VALUES ('data_science', 'data_science', NULL, 2, datetime('now'))"
             )
         )
@@ -326,7 +323,6 @@ async def test_startup_migration_normalizes_tags(tmp_path, monkeypatch):
 # Already-normalized tags should be skipped (idempotent)
 
 
-@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_detect_no_violations_when_normalized(test_db):
     """No violations reported for already-normalized names."""
@@ -339,7 +335,7 @@ async def test_detect_no_violations_when_normalized(test_db):
                 id="machine-learning",
                 display_name="machine-learning",
                 parent_tag=None,
-                note_count=1,
+                usage_count=1,
                 created_at=datetime.now(UTC),
             )
         )

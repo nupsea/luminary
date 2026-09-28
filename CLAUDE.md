@@ -46,7 +46,7 @@ Ports: backend **7820**, frontend **5173**. Dev database: `<repo>/.luminary/lumi
 The bundled desktop app uses `~/Library/Application Support/sh.luminary.app/` instead.
 
 `make ci` is the gate. Local green is necessary, not sufficient — GLiNER memory pressure has
-produced GitHub-only failures. Markers `slow`, `e2e` and `unstable` are excluded by default.
+produced GitHub-only failures. Markers `slow` and `e2e` are excluded by default; nothing else is.
 
 ## Rules worth stating here
 

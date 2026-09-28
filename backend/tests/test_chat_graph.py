@@ -93,7 +93,6 @@ async def test_summary_question_routes_to_summary_node(test_db):
 # (b) test_factual_question_routes_to_search_node
 
 
-@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_factual_question_routes_to_search_node(test_db):
     """'who is Achilles?' → classify_node detects intent='factual' → search_node runs."""
