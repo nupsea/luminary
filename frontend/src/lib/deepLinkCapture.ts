@@ -42,3 +42,43 @@ export function shouldCaptureDeepLink(
   if (docParam !== activeDocumentId) return true
   return hasDeepLinkParams(params)
 }
+
+/**
+ * Where one arrival lands: a place inside the document it was captured for.
+ *
+ * Stamped with that document because the library holds it after the reader
+ * closes. Unstamped, a note opened through `?note=` came back when the next
+ * document was picked from the library, and that document opened on the other
+ * document's note.
+ */
+export interface Arrival {
+  documentId: string
+  sectionId?: string
+  chunkId?: string
+  noteId?: string
+  page?: number
+  search?: string
+  citationWords: string[]
+}
+
+export function readArrival(
+  documentId: string,
+  params: { get(name: string): string | null },
+  citationWords: string[] = [],
+): Arrival {
+  const page = parseInt(params.get("page") ?? "", 10)
+  return {
+    documentId,
+    sectionId: params.get("section_id") ?? undefined,
+    chunkId: params.get("chunk_id") ?? undefined,
+    noteId: params.get("note") ?? undefined,
+    page: isNaN(page) ? undefined : page,
+    search: params.get("search") ?? undefined,
+    citationWords,
+  }
+}
+
+/** The arrival that belongs to this document, or null when it belongs to another. */
+export function arrivalFor(arrival: Arrival | null, documentId: string): Arrival | null {
+  return arrival?.documentId === documentId ? arrival : null
+}

@@ -45,7 +45,12 @@ import { SearchPanel } from "./Learning/SearchPanel"
 import { TodayHero } from "./Learning/TodayHero"
 import { WhereToStartPanel } from "./Learning/WhereToStartPanel"
 import { libraryRefetchInterval } from "@/lib/libraryPolling"
-import { shouldCaptureDeepLink } from "@/lib/deepLinkCapture"
+import {
+  arrivalFor,
+  readArrival,
+  shouldCaptureDeepLink,
+  type Arrival,
+} from "@/lib/deepLinkCapture"
 import { stateValueToWords } from "@/lib/citation"
 
 const PAGE_SIZE = 20
@@ -103,28 +108,10 @@ export default function Learning() {
   // Capture into state so they survive URL param cleanup (params are cleared after first use
   // but DocumentReader needs them after its async doc fetch completes).
   const docParam = searchParams.get("doc")
-  const [savedSectionId, setSavedSectionId] = useState<string | undefined>(
-    searchParams.get("section_id") ?? undefined,
-  )
-  const [savedChunkId, setSavedChunkId] = useState<string | undefined>(
-    searchParams.get("chunk_id") ?? undefined,
-  )
-  // A note to open in the reader's own panel -- how the full note page hands a
-  // note back to the editor it was expanded from.
-  const [savedNoteId, setSavedNoteId] = useState<string | undefined>(
-    searchParams.get("note") ?? undefined,
-  )
-  // Not a URL param: a display hint for one arrival, not something a shared link
-  // should reproduce.
-  const [savedCitationWords, setSavedCitationWords] = useState<string[]>([])
-  const [savedPage, setSavedPage] = useState<number | undefined>(() => {
-    const raw = searchParams.get("page")
-    if (!raw) return undefined
-    const n = parseInt(raw, 10)
-    return isNaN(n) ? undefined : n
-  })
-  const [savedSearch, setSavedSearch] = useState<string | undefined>(
-    searchParams.get("search") ?? undefined,
+  // A note in it opens in the reader's own panel -- how the full note page hands
+  // a note back to the editor it was expanded from.
+  const [arrival, setArrival] = useState<Arrival | null>(() =>
+    docParam ? readArrival(docParam, searchParams) : null,
   )
 
   const [search, setSearch] = useState(() => (!docParam ? searchParams.get("search") ?? "" : ""))
@@ -343,18 +330,15 @@ export default function Learning() {
     // lib/deepLinkCapture. The old guard was false at exactly the moment it
     // mattered, because navigateToCitation sets the active document before it
     // navigates.
-    if (!shouldCaptureDeepLink(docParam, activeDocumentId, searchParams)) return
-    const rawPage = searchParams.get("page")
-    const pageNum = rawPage ? parseInt(rawPage, 10) : undefined
-    setSavedSectionId(searchParams.get("section_id") ?? undefined)
-    setSavedChunkId(searchParams.get("chunk_id") ?? undefined)
-    setSavedNoteId(searchParams.get("note") ?? undefined)
-    setSavedPage(pageNum && !isNaN(pageNum) ? pageNum : undefined)
-    setSavedSearch(searchParams.get("search") ?? undefined)
-    // Carried in route state rather than the URL: it is a display hint for one
-    // arrival, not something a shared link should reproduce.
-    setSavedCitationWords(
-      stateValueToWords((routeLocation.state as { citationWords?: string } | null)?.citationWords),
+    if (!docParam || !shouldCaptureDeepLink(docParam, activeDocumentId, searchParams)) return
+    // Citation words ride in route state rather than the URL: a display hint for
+    // one arrival, not something a shared link should reproduce.
+    setArrival(
+      readArrival(
+        docParam,
+        searchParams,
+        stateValueToWords((routeLocation.state as { citationWords?: string } | null)?.citationWords),
+      ),
     )
 
     setActiveDocument(docParam)
@@ -404,13 +388,11 @@ export default function Learning() {
     ]
     const activeDoc = allKnownDocs.find((d) => d.id === activeDocumentId)
     const activeContentType = activeDoc?.content_type ?? ""
+    const here = arrivalFor(arrival, activeDocumentId)
 
     function returnToLibrary() {
       setActiveDocument(null)
-      setSavedSectionId(undefined)
-      setSavedChunkId(undefined)
-      setSavedPage(undefined)
-      setSavedSearch(undefined)
+      setArrival(null)
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev)
         next.delete("doc")
@@ -445,12 +427,12 @@ export default function Learning() {
           <DocumentReader
             documentId={activeDocumentId}
             onBack={returnToLibrary}
-            initialSectionId={savedSectionId}
-            initialChunkId={savedChunkId}
-            initialNoteId={savedNoteId}
-            initialCitationWords={savedCitationWords}
-            initialPage={savedPage}
-            initialSearch={savedSearch}
+            initialSectionId={here?.sectionId}
+            initialChunkId={here?.chunkId}
+            initialNoteId={here?.noteId}
+            initialCitationWords={here?.citationWords}
+            initialPage={here?.page}
+            initialSearch={here?.search}
           />
         </div>
       </div>

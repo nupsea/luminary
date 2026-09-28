@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-refusal eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-refusal eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-reader-switch luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -445,6 +445,13 @@ verify-dock:
 	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
 		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
 	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} node scripts/verify-dock.mjs
+
+# Moving between documents starts the next one's panel clean: no draft and no
+# note carried over from the last. Needs two ingested documents, no model.
+verify-reader-switch:
+	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
+		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
+	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} node scripts/verify-reader-switch.mjs
 
 measure-ttft:
 	@echo "Measuring time to first token (requires backend on :7820)..."
