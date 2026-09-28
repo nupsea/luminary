@@ -2,7 +2,27 @@
 
 import { describe, expect, it } from "vitest"
 
-import { hasDeepLinkParams, shouldCaptureDeepLink } from "./deepLinkCapture"
+import { arrivalFor, hasDeepLinkParams, readArrival, shouldCaptureDeepLink } from "./deepLinkCapture"
+
+describe("arrivalFor", () => {
+  const noteArrival = readArrival("doc-a", new URLSearchParams({ note: "note-1", page: "12" }))
+
+  it("hands a document its own arrival", () => {
+    expect(arrivalFor(noteArrival, "doc-a")?.noteId).toBe("note-1")
+    expect(arrivalFor(noteArrival, "doc-a")?.page).toBe(12)
+  })
+
+  it("never hands one document another document's note", () => {
+    // The reported bug: a note opened through ?note= on one document was still
+    // held when the next document was picked from the library, and that
+    // document's panel opened on it.
+    expect(arrivalFor(noteArrival, "doc-b")).toBeNull()
+  })
+
+  it("reads an unparseable page as no page", () => {
+    expect(readArrival("doc-a", new URLSearchParams({ page: "x" })).page).toBeUndefined()
+  })
+})
 
 const params = (...names: string[]) => new URLSearchParams(names.map((n) => [n, "x"]))
 
