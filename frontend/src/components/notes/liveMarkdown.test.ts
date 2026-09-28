@@ -299,4 +299,98 @@ The size of the problem is usually straightforward.`
     const lineAfter3 = state.doc.lineAt(state.selection.main.head)
     expect(lineAfter3.text).toContain("s = time.start()")
   })
+
+  it("traces stepInto with the user's exact note content", async () => {
+    const { stepInto, liveField } = await import("./liveMarkdown")
+    const doc = `## Data Structure
+
+A data structure is what it says on the tin: a way to store information in an organized, structured manner. We’ll be creating data structures using C# arrays, classes, structs, records, and interfaces, as we’d expect.
+
+
+| C1 | C2 |
+| --- | --- |
+| x | y |
+| n | tdkfjd | 
+
+\`\`\`python
+
+import time
+
+s = time.start()
+
+\`\`\`
+
+$$
+x = y + z
+$$
+
+
+
+The size of the problem is usually straightforward.
+
+![Pasted Image|medium](__LUMINARY_IMG__/notes/e95a1b0e-9a58-404d-8942-783d851ce879.png)
+
+
+
+`
+    const field = liveField({})
+    let state = EditorState.create({
+      doc,
+      selection: { anchor: doc.indexOf("The size of the problem") },
+      extensions: [markdown({ base: markdownLanguage }), field],
+    })
+
+    const view = {
+      state,
+      dispatch: (tr: { selection?: { anchor: number } }) => {
+        state = state.update(tr).state
+        view.state = state
+      },
+    }
+
+    for (let i = 1; i <= 25; i++) {
+      // @ts-expect-error test mock
+      const handled = stepInto(view, field, -1)
+      if (!handled) break
+    }
+    const finalLine = state.doc.lineAt(state.selection.main.head)
+    expect(finalLine.number).toBe(1)
+    expect(finalLine.text).toBe("## Data Structure")
+  })
+
+  it("collapses active selection cleanly on ArrowUp instead of skipping over blocks", async () => {
+    const { stepInto, liveField } = await import("./liveMarkdown")
+    const doc = `First line
+
+Second line
+
+![Pasted Image|medium](url)
+
+Third line`
+
+    const field = liveField({})
+    const imagePos = doc.indexOf("![Pasted Image")
+    // Select the whole image line (as happens when an image widget is clicked)
+    let state = EditorState.create({
+      doc,
+      selection: { anchor: imagePos, head: imagePos + 27 },
+      extensions: [markdown({ base: markdownLanguage }), field],
+    })
+
+    const view = {
+      state,
+      dispatch: (tr: { selection?: { anchor: number } }) => {
+        state = state.update(tr).state
+        view.state = state
+      },
+    }
+
+    // Press ArrowUp while image is selected: should collapse and land on line above image (blank line)
+    // @ts-expect-error test mock
+    const handled = stepInto(view, field, -1)
+    expect(handled).toBe(true)
+    const lineAfter = state.doc.lineAt(state.selection.main.head)
+    expect(lineAfter.text).toBe("")
+    expect(lineAfter.number).toBe(4)
+  })
 })
