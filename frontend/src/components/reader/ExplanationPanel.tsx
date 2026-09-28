@@ -7,7 +7,7 @@
 
 import { Loader2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import type { ExplainMode } from "@/components/FloatingToolbar"
+import type { ExplainMode } from "@/components/reader/SelectionActionBar"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 
 import { API_BASE } from "@/lib/config"

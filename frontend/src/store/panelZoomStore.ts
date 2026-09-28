@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from "zustand/middleware"
 
 export const MIN_PANEL_ZOOM = 0.7
 export const MAX_PANEL_ZOOM = 2.0
-export const PANEL_ZOOM_STEP = 0.1
+const PANEL_ZOOM_STEP = 0.1
 export const DEFAULT_PANEL_ZOOM = 1.0
 
 export function clampZoom(val: number): number {

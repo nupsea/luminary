@@ -11,7 +11,7 @@ export const SEARCH_MARK_TOKEN = "luminary-search-mark"
 export const SEARCH_MARK_CLASS =
   `bg-sky-200 text-sky-950 dark:bg-sky-700 dark:text-sky-50 rounded-sm px-0.5 ${SEARCH_MARK_TOKEN}`
 
-export const SEARCH_ACTIVE_MARK_TOKEN = "luminary-search-active-mark"
+const SEARCH_ACTIVE_MARK_TOKEN = "luminary-search-active-mark"
 
 /**
  * Update DOM classes to reflect the currently active search mark and return its details.

@@ -26,7 +26,7 @@ export const READER_PREF_LIMITS = {
   measureCh: { min: 45, max: 80, step: 1 },
 } as const
 
-export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
+const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   family: "auto",
   fontScale: 1,
   lineHeight: 1.7,

@@ -18,7 +18,7 @@ export interface NoteLinkCompletionConfig {
 }
 
 // Matches an unclosed [[query on the current line, anchored at the cursor.
-export const NOTE_LINK_TRIGGER = /\[\[([^\]\n]*)$/
+const NOTE_LINK_TRIGGER = /\[\[([^\]\n]*)$/
 
 // Marker labels live inside [[id|label]], so strip the delimiter characters.
 export function linkLabel(preview: string): string {

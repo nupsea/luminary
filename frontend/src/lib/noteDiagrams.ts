@@ -11,10 +11,6 @@ export function buildExcalidrawDiagramMarkdown(svgPath: string, scenePath: strin
   return `![Diagram|large](${svgPath})\n<!-- luminary:excalidraw=${scenePath} -->`
 }
 
-export function findLastExcalidrawDiagram(content: string): ExcalidrawNoteDiagramRef | null {
-  return findExcalidrawDiagrams(content).at(-1) ?? null
-}
-
 export function findExcalidrawDiagrams(content: string): ExcalidrawNoteDiagramRef[] {
   return [...content.matchAll(EXCALIDRAW_MARKER_RE)].flatMap((match) => {
     if (match.index === undefined) return []

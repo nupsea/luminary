@@ -8,11 +8,8 @@ import type {
   Citation,
   Confidence,
   DocListItem,
-  LLMSettings,
-  SessionPlanResponse,
   SuggestionsResponse,
   TransparencyInfo,
-  WebSearchSettings,
   WebSource,
 } from "./types"
 import type { SourceCitation } from "@/components/SourceCitationChips"
@@ -29,15 +26,6 @@ export async function fetchDocList(): Promise<DocListItem[]> {
     return []
   }
 }
-
-export const fetchLLMSettings = (): Promise<LLMSettings> =>
-  apiGet<LLMSettings>("/settings/llm")
-
-export const fetchWebSearchSettings = (): Promise<WebSearchSettings> =>
-  apiGet<WebSearchSettings>("/settings/web-search")
-
-export const fetchSessionPlan = (): Promise<SessionPlanResponse> =>
-  apiGet<SessionPlanResponse>("/study/session-plan", { minutes: 20 })
 
 export const fetchCachedSuggestions = (
   documentId: string | null,

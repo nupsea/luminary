@@ -5,7 +5,7 @@ export interface NoteAssetUpload {
   filename: string
 }
 
-export async function normalizeImageFile(file: File): Promise<File> {
+async function normalizeImageFile(file: File): Promise<File> {
   const isStandardWebImage =
     file.type === "image/png" ||
     file.type === "image/jpeg" ||

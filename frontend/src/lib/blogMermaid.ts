@@ -4,7 +4,7 @@
 
 const MERMAID_RE = /^[ \t]*```mermaid[ \t]*\r?\n([\s\S]*?)^[ \t]*```[ \t]*$/gm
 
-export function extractMermaidBlocks(content: string): string[] {
+function extractMermaidBlocks(content: string): string[] {
   const out: string[] = []
   let m: RegExpExecArray | null
   MERMAID_RE.lastIndex = 0

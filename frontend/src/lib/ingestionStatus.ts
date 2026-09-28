@@ -1,6 +1,6 @@
 import type { IngestionStatus } from "@/lib/ingestionApi"
 
-export const STAGE_LABELS: Record<string, string> = {
+const STAGE_LABELS: Record<string, string> = {
   parsing: "Parsing document",
   transcribing: "Transcribing",
   classifying: "Classifying content",

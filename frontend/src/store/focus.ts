@@ -38,7 +38,7 @@ export interface FocusState {
   hydrate: (snapshot: Partial<FocusState>) => void
 }
 
-export const FOCUS_STORAGE_KEY = "luminary:focusTimer"
+const FOCUS_STORAGE_KEY = "luminary:focusTimer"
 
 export const DEFAULT_FOCUS_MINUTES = 25
 export const DEFAULT_BREAK_MINUTES = 5

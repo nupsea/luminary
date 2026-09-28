@@ -10,7 +10,7 @@ import {
 
 export type ZoomAction = "in" | "out" | "reset" | null
 
-export function isMacPlatform(): boolean {
+function isMacPlatform(): boolean {
   if (typeof navigator === "undefined") return false
   const nav = navigator as unknown as { userAgentData?: { platform?: string } }
   const platform = nav.userAgentData?.platform || navigator.platform || navigator.userAgent || ""

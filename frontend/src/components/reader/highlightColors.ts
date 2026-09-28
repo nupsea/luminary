@@ -1,5 +1,5 @@
 /**
- * Highlight swatch classes shared by HighlightsPanel and DocumentReader. Kept
+ * Highlight swatch classes shared by SectionPreviewWithHighlights and DocumentReader. Kept
  * in its own module so the panel file exports only components (fast refresh).
  */
 

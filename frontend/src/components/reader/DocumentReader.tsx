@@ -4,7 +4,7 @@ import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useStat
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
 
-import type { ExplainMode } from "@/components/FloatingToolbar"
+import type { ExplainMode } from "@/components/reader/SelectionActionBar"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import type { ContentType } from "@/components/library/types"
 import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
