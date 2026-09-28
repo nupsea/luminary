@@ -740,7 +740,7 @@ duplication ≤ 3%, coverage ≥ 80% on new code).
 | Dead Python | `vulture` ≥ 80% confidence, plus unreferenced symbols | 8 unused imports/variables, ~11 unused functions/classes | 0 |
 | Dead TypeScript | `knip` (`frontend/knip.json`) | 0 unused files, exports or dependencies (was 12, 29 and 1); 115 unused exported types | 0 files, 0 dependencies |
 | Test coverage | `pytest --cov`, `vitest --coverage` | **not measured** (the cloud container cannot install torch) | Floor set in 0.14 from the measured number; ≥ 80% on changed lines |
-| Quarantined / skipped tests | markers | 23 `unstable`, 16 `skip` | 0 `unstable`; every `skip` names what re-enables it |
+| Quarantined / skipped tests | markers | 0 `unstable` and 0 GitHub-only skips (was 23 and 5); the ratchet fails on either. The remaining `skipif`s name a platform, tool or corpus | 0 `unstable`; every `skip` names what re-enables it |
 
 **Tests, evals and smoke are code, and carry debt too.** Test code (84,366 lines in 350 files) now
 outweighs the app (~80,000). There are 132 locally defined DB fixtures (#50 counted 111). Of 177

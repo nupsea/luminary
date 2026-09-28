@@ -31,7 +31,8 @@ MAX_COMPLEXITY = 20
 LENGTH_EXEMPT = {"app/db_init.py::create_all_tables"}
 
 SQL_RE = re.compile(r"\bselect\(|session\.execute\(")
-UNSTABLE_RE = re.compile(r"pytest\.mark\.unstable\b")
+# A quarantine marker, or a test that behaves differently on the CI runner.
+UNSTABLE_RE = re.compile(r"pytest\.mark\.unstable\b|GITHUB_ACTIONS")
 
 
 def _rel(path: Path) -> str:
