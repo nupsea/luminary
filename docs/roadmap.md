@@ -741,9 +741,11 @@ duplication ≤ 3%, coverage ≥ 80% on new code).
 | Quarantined / skipped tests | markers | 23 `unstable`, 16 `skip` | 0 `unstable`; every `skip` names what re-enables it |
 
 **Tests, evals and smoke are code, and carry debt too.** Test code (84,366 lines in 350 files) now
-outweighs the app (~80,000). There are 132 locally defined DB fixtures (#50 counted 111). Of 177
-smoke scripts, 16 make no HTTP call and 11 import `app.` in-process: those are pytest tests filed
-under the wire contract, and prove nothing about the wire. Eval runners are 12 scripts and 7,977
+outweighs the app (~80,000). There are 132 locally defined DB fixtures (#50 counted 111).
+Smoke is 158 scripts, and every one calls the server: the 19 that never did (in-process `app.`
+imports, eval-harness unit checks, source greps) are now `test_eval_harness_wiring.py` and
+`test_prompt_and_config_contracts.py`, or were deleted where pytest already covered them.
+Eval runners are 12 scripts and 7,977
 lines with their own copies of manifest, search and history plumbing.
 
 | Rung | Refactor, as the rung's first PR |

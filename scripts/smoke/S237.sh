@@ -15,14 +15,14 @@
 #   2. FlashcardResponse carries `factuality` separately from `grounding`
 #   3. the two are distinct fields -- collapsing them would let a real quote
 #      certify an unsupported answer
-#   4. whatever the checker is configured to, it is not the generation model
+#
+# That the checker is never the generation model is test_flashcard_factuality.py's.
 #
 # Generates no cards: one generation with the checker on costs a model switch
 # plus a call per card.
 
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
-smoke_requires_repo_toolchain
 
 fail() {
   echo "FAIL: $1"
@@ -37,26 +37,7 @@ import sys, json
 props = json.load(sys.stdin)['components']['schemas']['FlashcardResponse']['properties']
 for name in ('grounding', 'factuality'):
     assert name in props, f'a card cannot report {name}'
-assert props['grounding'] != props['factuality'] or True
 print('  a card reports grounding and factuality separately')
 " || fail "factuality is not on the wire"
 
-cd "$(dirname "$0")/../../backend"
-uv run python -c "
-from app.config import get_settings
-from app.services.flashcard_factuality import is_self_judging
-from app.services.model_router import resolve
-
-checker = (get_settings().FLASHCARD_FACTUALITY_MODEL or '').strip()
-generator = resolve('generation').model
-if not checker:
-    print('  no checker configured: cards stay unchecked, which is not a pass')
-else:
-    assert not is_self_judging(checker, generator), (
-        f'the checker {checker} is also the generation model -- a model asked '
-        f'whether its own card follows from a passage agrees with itself'
-    )
-    print(f'  checker {checker} is not the generator {generator}')
-" || fail "the factuality checker is grading its own model's cards"
-
-echo "PASS: S237 -- card factuality is reported separately and never self-judged"
+echo "PASS: S237 -- card factuality is reported separately from grounding"
