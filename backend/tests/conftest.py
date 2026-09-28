@@ -18,6 +18,7 @@ import os
 import time
 import warnings
 from pathlib import Path
+from typing import NamedTuple
 from unittest.mock import patch
 
 import keyring
@@ -25,6 +26,8 @@ import keyring.backend
 import keyring.errors
 import pytest
 import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from task_drain import dispose_engine
 
 # Filter aiosqlite DeprecationWarning for Python 3.12+ datetime adapter
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="aiosqlite")
@@ -416,3 +419,43 @@ def _no_real_library_summary_refresh(request):
 
 # Deterministic service stubs live in tests/stubs.py (Belief #25)
 # Test files import directly: from stubs import MockLLMService
+
+
+class MemoryDB(NamedTuple):
+    engine: AsyncEngine
+    factory: async_sessionmaker
+    tmp_path: Path
+
+
+@pytest.fixture
+async def memory_db(tmp_path, monkeypatch):
+    """An in-memory SQLite database wired into `app.database`'s singletons.
+
+    The one copy of what 96 test files each defined as their own `test_db` (#50).
+    """
+    import app.database as db_module
+    from app.config import get_settings
+    from app.database import make_engine
+    from app.db_init import create_all_tables
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    get_settings.cache_clear()
+    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    await create_all_tables(engine)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    # Saved by hand, not via monkeypatch: several tests call monkeypatch.undo()
+    # mid-test, which would unwire the database under them.
+    saved = db_module._engine, db_module._session_factory
+    db_module._engine, db_module._session_factory = engine, factory
+
+    yield MemoryDB(engine, factory, tmp_path)
+
+    db_module._engine, db_module._session_factory = saved
+    get_settings.cache_clear()
+    await dispose_engine(engine)
+
+
+@pytest.fixture
+def test_db(memory_db):
+    """(engine, factory, tmp_path). A file needing a different shape overrides this."""
+    return memory_db

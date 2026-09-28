@@ -3,45 +3,15 @@
 import uuid
 from unittest.mock import MagicMock, patch
 
-import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker
 from stubs import MockEmbeddingService as _MockEmbeddingService
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import ChunkModel, DocumentModel
 from app.services.retriever import HybridRetriever
 from app.types import ScoredChunk
 from app.workflows.ingestion import IngestionState, keyword_index_node
 
 # Shared fixture — in-memory SQLite with FTS5
-
-
-@pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    """Wire an in-memory SQLite DB into the app's global singletons."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
 
 
 async def _insert_doc_and_chunk(factory, tmp_path, doc_id: str, chunk_id: str, text_content: str):

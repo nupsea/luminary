@@ -24,11 +24,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import ChunkModel, DocumentModel, FlashcardModel
 from app.services.flashcard import (
     FlashcardService,
@@ -80,30 +76,6 @@ def test_the_deck_is_still_compared_on_the_question_alone():
 
 
 # The first generation on a document is the one with an empty pool
-
-
-@pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
 
 
 _PASSAGE = (
