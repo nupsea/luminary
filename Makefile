@@ -772,6 +772,10 @@ db-revision:
 logs:
 	bash scripts/dev-logs.sh
 
+# Measured on GitHub; raise it as coverage grows, never lower it to pass.
+# pytest-cov is pinned here rather than locked, like radon: a gate tool, not an app dependency.
+BACKEND_COVERAGE_FLOOR ?= 0
+
 ci:
 	@echo "Running CI checks..."
 ifeq ($(shell uname -s)-$(shell uname -m),Darwin-x86_64)
@@ -786,7 +790,7 @@ else
 	cd backend && uv run python tools/boundary_checker.py
 	cd backend && uv run python tools/quality_ratchet.py
 	./scripts/check_public_import.sh
-	cd backend && uv run pytest
+	cd backend && uv run --with pytest-cov==7.1.0 pytest --cov=app --cov-report= --cov-fail-under=$(BACKEND_COVERAGE_FLOOR)
 endif
 	python3 scripts/check_manifest_schema.py
 	python3 scripts/check_manifest_coverage.py
@@ -804,7 +808,7 @@ endif
 	# The frontend suite was never wired into a gate: 59 files of pure-logic
 	# tests ran only when someone typed `npm test`, so a broken helper reached
 	# master green. It costs ~1s.
-	cd frontend && npm test
+	cd frontend && npm run test:coverage
 	@echo "CI passed."
 
 regen-api-types:
