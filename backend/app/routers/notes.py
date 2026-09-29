@@ -326,13 +326,7 @@ async def get_groups(session: AsyncSession = Depends(get_db)) -> GroupsResponse:
     )
     total_notes = total_result.scalar_one()
 
-    # Favorites count (unarchived)
-    fav_result = await session.execute(
-        select(func.count())
-        .select_from(NoteModel)
-        .where(NoteModel.archived.is_(False), NoteModel.is_favorite.is_(True))
-    )
-    favorites_count = fav_result.scalar_one()
+    favorites_count = await NoteRepo(session).favorite_count()
 
     return GroupsResponse(
         groups=groups, tags=tags, total_notes=total_notes, favorites_count=favorites_count

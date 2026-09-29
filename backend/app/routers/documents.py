@@ -1210,9 +1210,9 @@ async def document_facets() -> DocumentFacetsResponse:
     Declared above `/{document_id}` so the router does not read `facets` as an id.
     """
     async with get_session_factory()() as session:
-        by_type, by_format = await DocumentRepo(session).facet_counts()
-        fav_stmt = select(func.count(DocumentModel.id)).where(DocumentModel.is_favorite.is_(True))
-        favorite_count = (await session.execute(fav_stmt)).scalar() or 0
+        repo = DocumentRepo(session)
+        by_type, by_format = await repo.facet_counts()
+        favorite_count = await repo.favorite_count()
     return DocumentFacetsResponse(
         content_types=by_type,
         formats=by_format,

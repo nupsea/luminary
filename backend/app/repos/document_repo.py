@@ -120,6 +120,12 @@ class DocumentRepo:
             {row[0]: row[1] for row in by_format.all() if row[0]},
         )
 
+    async def favorite_count(self) -> int:
+        result = await self.session.execute(
+            select(func.count(DocumentModel.id)).where(DocumentModel.is_favorite.is_(True))
+        )
+        return result.scalar_one()
+
     async def read_section_count(self, document_id: str) -> int:
         result = await self.session.execute(
             select(func.count()).where(ReadingProgressModel.document_id == document_id)
