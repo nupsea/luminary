@@ -240,6 +240,17 @@ _SOURCE_REFERENCE = (
 )
 
 
+# A referent only the source can resolve: "the narrator", "in this system".
+# Bare "this"/"those" stay allowed: "how does this workhorse improve" points back inside the
+# question, and "differ from those who didn't" is a comparison.
+_UNNAMED_REFERENT = re.compile(
+    r"\bthe\s+(?:narrator|protagonist|main\s+character|characters?)\b"
+    r"|\b(?:in|within|of|for|from|to|by|under|across|throughout)\s+(?:this|these)\s+"
+    r"(?:specific\s+|particular\s+)?(?!day\b|reason\b)[a-z]",
+    re.I,
+)
+
+
 def _word_count(text: str) -> int:
     return len(re.findall(r"\b\w+\b", text))
 
@@ -435,6 +446,9 @@ def card_rejection(
         if match:
             pointed = " ".join(match.group(0).split())
             return REJECT_DEICTIC, f"question points at its source ({pointed!r})"
+    unnamed = _UNNAMED_REFERENT.search(q)
+    if unnamed:
+        return REJECT_DEICTIC, f"question leaves its subject unnamed ({unnamed.group(0)!r})"
 
     enumerated = sum(1 for line in a.splitlines() if _ENUM_LINE.match(line))
     if enumerated > _MAX_ENUMERATED_ITEMS:

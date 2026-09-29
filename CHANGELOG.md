@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Generated flashcards often asked why something happened when the text never said why, or named no subject ("the narrator", "in this system").** The prompt now asks for a reason only where the text states one, and a question that leaves its subject unnamed is rejected. Hand-graded on the local model over two runs, good cards among those delivered rose from 0.49 to 0.71.
+
 ## [0.14.2] - 2026-09-29
 
 ### Fixed

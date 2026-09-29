@@ -64,12 +64,13 @@ FLASHCARD_SYSTEM = (
     "complete answer -- both grounded only in the provided text.\n"
     "QUESTION: match it to the knowledge type -- causal knowledge asks why or what causes; a "
     "comparison asks how two things differ; a role/process asks what X enables in Y; a "
-    "definition asks what X is. Name the concept directly, and prefer why, how and "
-    "what-would-happen questions over recall. "
+    "definition asks what X is. Name the concept directly. Ask why, or what causes, only "
+    "when the text itself states the reason: a question about a cause, motive or "
+    "consequence the text does not state has no true answer. "
     "AVOID trivia about wording, yes/no questions, answers that are a bare list, and asking "
     "which specific example or analogy the text used. The question must stand alone -- never "
-    "say 'in this passage', 'according to the text', or 'the author'; it must make sense "
-    "without the source.\n"
+    "say 'in this passage', 'according to the text', 'the author', 'the narrator' or 'this "
+    "system' -- name the person or thing; it must make sense without the source.\n"
     "ANSWER: one sentence, the shortest that is still complete. If the text lists several "
     "items, write one card per item rather than one card listing them -- an answer carrying a "
     "list is several cards wearing a single question, and it is the hardest kind to recall. "
@@ -86,8 +87,9 @@ FLASHCARD_SYSTEM = (
     "  use     -- work the idea through a concrete situation\n"
     "  relate  -- connect two ideas, or say why the text chose one over another\n"
     "  limit   -- say where an approach breaks down, or what it costs\n"
-    "  build   -- put together something the text does not state outright\n"
-    "Prefer `use`, `relate` and `limit` where the material allows."
+    "  build   -- combine two statements the text makes into a step it supports\n"
+    "Choose the depth the text supports; a card whose answer the text does not state is "
+    "discarded."
 )
 
 # The taxonomy never reaches the model (I-28). A level label is not a
@@ -308,7 +310,8 @@ _DIFFICULTY_GUIDELINES = {
         "Questions should be straightforward."
     ),
     "medium": (
-        "Focus on comprehension, connecting ideas, identifying themes, and explaining 'why'. "
+        "Focus on comprehension and on connections the text itself makes; ask 'why' only "
+        "where the text gives the reason. "
         "Questions should require some thought and understanding."
     ),
     "hard": (
@@ -445,7 +448,8 @@ _TECH_TITLE_KEYWORDS = re.compile(
 # "who wrote it", and transcript cards into facts that go stale unread.
 _GENRE_STRATEGY = {
     "narrative": (
-        "Ask about cause and consequence, what a character wanted, or what a choice cost. "
+        "Ask what happened, who did what, and why where the story says why. Name the "
+        "character in every question. "
         "Never ask which words the text used or which example illustrated a point."
     ),
     "non-fiction": ("Ask what a claim asserts, why it holds, and what it rules out."),
