@@ -101,11 +101,24 @@ def test_an_answer_no_sentence_carries_falls_below_the_floor():
         "What happens to things over time according to the first paragraph?",
         "Why does §4.2 dominate the fused ranking?",
         "How does BM25 contribute uniquely to understanding the given concept?",
+        "How did Linux start according to [Debugging]?",
     ],
 )
 def test_a_question_may_not_point_at_a_position_in_the_prompt(question):
     verdict = card_rejection(question, "A real answer of sufficient length.")
     assert verdict is not None and verdict[0] == REJECT_DEICTIC
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What does a cross-encoder feed through the transformer as `[Query, Document]`?",
+        "What does the list [1] hold after append?",
+        "What type does List[Int] describe?",
+    ],
+)
+def test_brackets_that_are_not_a_section_label_are_allowed(question):
+    assert card_rejection(question, "A real answer of sufficient length.") is None
 
 
 @pytest.mark.parametrize(

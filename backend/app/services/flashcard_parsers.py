@@ -246,6 +246,9 @@ _SOURCE_REFERENCE = (
         r"|§\s*\d|\b(?:the|this)\s+given\s+\w+",
         re.I,
     ),
+    # "according to [Debugging]": the section label the passage builder puts on each chunk.
+    # Fired on 2 of 158 graded tech cards, both bad, and on none of 1,217 library cards.
+    re.compile(r"(?<![\w`])\[[A-Z][^\],]{1,60}\]"),
 )
 
 # An answer that concedes the source has none, or a bracketed placeholder for one. Fired on 477
