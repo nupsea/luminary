@@ -482,6 +482,17 @@ async def memory_db(tmp_path, monkeypatch, _schema_template):
 
 
 @pytest.fixture
+def single_prompt(monkeypatch):
+    """Flashcard generation on the single-prompt path, which unit-first replaced by default."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("FLASHCARD_UNIT_SELECTION", "false")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture
 def test_db(memory_db):
     """(engine, factory, tmp_path). A file needing a different shape overrides this."""
     return memory_db

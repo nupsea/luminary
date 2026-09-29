@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Unit-first flashcards, behind `FLASHCARD_UNIT_SELECTION` (off by default).** Code picks the sentences worth a card and the model only phrases the question, so every card quotes the sentence that answers it. On 19 library documents, graded blind over two runs, good cards rose from 0.69 and 0.73 to 0.84 and 0.88, beating today's prompt in every document type. It stays off until the unit path honours the difficulty choice.
+- **Unit-first flashcards, on by default (`FLASHCARD_UNIT_SELECTION`).** Code picks the sentences worth a card and the model only phrases the question, so every card quotes the sentence that answers it. On 19 library documents, graded blind over two runs, good cards rose from 0.69 and 0.73 to 0.84 and 0.88, beating the previous prompt in every document type. Document cards now ignore the Easy/Medium/Hard choice and carry no Bloom level.
 
 ### Fixed
 - **Flashcards were written from a paper's reference list.** A whole-document deck now skips bibliography chunks.

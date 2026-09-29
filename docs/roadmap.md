@@ -541,8 +541,10 @@ A prompt that asks for a reason only where the text states one, plus a check tha
 subjects, raised hand-graded good-among-delivered from 0.49 to 0.71 over two local runs (2026-09-29).
 Choosing the sentences in code before the model writes a card (#191, `FLASHCARD_UNIT_SELECTION`)
 beat that prompt in every document type on two blind runs over 19 library documents, 0.69 and 0.73
-to 0.84 and 0.88. It is off by default: the unit path ignores the difficulty choice and gives no
-Bloom level (`backend/app/services/flashcard_generators.py`, `_unit_cards`). The remaining misses
+to 0.84 and 0.88, and is on by default since 0.14.4. Open: the unit path ignores the difficulty
+choice and gives no Bloom level (`backend/app/services/flashcard_generators.py`, `_unit_cards`);
+"hard" as worded today asks for analysis the sentence does not state, so it needs its own design and
+a graded run before it is honoured. The remaining misses
 are speakers the source mislabels (the Gita's chapter headings name the wrong speaker) and misread
 text.
 

@@ -168,6 +168,7 @@ def test_resolve_section_heading_no_section():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("single_prompt")
 async def test_generate_book_produces_bloom_l3_cards(test_db):
     """generate() for a book document produces cards with >= 50% bloom_level >= 3."""
     _engine, factory, _tmp = test_db
