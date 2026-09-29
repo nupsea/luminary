@@ -45,6 +45,77 @@ const codeLine = Decoration.line({ class: "cm-md-code" })
 const fenceLine = Decoration.line({ class: "cm-md-fence" })
 const tableLine = Decoration.line({ class: "cm-md-table-line" })
 const mathLine = Decoration.line({ class: "cm-md-math-line" })
+const orderedMark = Decoration.mark({ class: "cm-md-ordered-mark" })
+
+class BulletWidget extends WidgetType {
+  readonly level: number
+
+  constructor(level: number) {
+    super()
+    this.level = level
+  }
+
+  eq(other: BulletWidget): boolean {
+    return this.level === other.level
+  }
+
+  toDOM(): HTMLElement {
+    const span = document.createElement("span")
+    const lvl = Math.min(this.level, 2)
+    span.className = `cm-md-bullet cm-md-bullet-l${lvl}`
+    span.textContent = lvl === 0 ? "•" : lvl === 1 ? "◦" : "▪"
+    span.setAttribute("aria-hidden", "true")
+    return span
+  }
+
+  ignoreEvent(): boolean {
+    return false
+  }
+}
+
+class TaskWidget extends WidgetType {
+  readonly checked: boolean
+  readonly taskPos: number
+
+  constructor(checked: boolean, taskPos: number) {
+    super()
+    this.checked = checked
+    this.taskPos = taskPos
+  }
+
+  eq(other: TaskWidget): boolean {
+    return this.checked === other.checked && this.taskPos === other.taskPos
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement("span")
+    wrap.className = `cm-md-task-widget ${this.checked ? "cm-md-task-checked" : ""}`
+    const input = document.createElement("input")
+    input.type = "checkbox"
+    input.checked = this.checked
+    input.className = "cm-md-task-checkbox"
+    input.setAttribute("aria-label", this.checked ? "Completed task" : "Incomplete task")
+    input.addEventListener("mousedown", (e) => e.stopPropagation())
+    input.addEventListener("change", (e) => {
+      e.stopPropagation()
+      const line = view.state.doc.lineAt(this.taskPos)
+      const m = line.text.match(/^(\s*[-*+]\s+\[)([ xX])(\])/)
+      if (m) {
+        const charPos = line.from + m[1].length
+        const nextChar = this.checked ? " " : "x"
+        view.dispatch({
+          changes: { from: charPos, to: charPos + 1, insert: nextChar },
+        })
+      }
+    })
+    wrap.appendChild(input)
+    return wrap
+  }
+
+  ignoreEvent(event: Event): boolean {
+    return event.type === "mousedown" || event.type === "click" || event.type === "change"
+  }
+}
 
 /** The sidecar an excalidraw diagram is paired with; the renderer needs both. */
 const EXCALIDRAW_COMMENT = /^<!-- luminary:excalidraw=.+ -->$/
@@ -560,6 +631,58 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
         }
         return
       }
+      if (node.name === "ListItem") {
+        if (rendered.some((r) => node.from >= r.from && node.to <= r.to)) return
+        const line = state.doc.lineAt(node.from)
+        const indentMatch = line.text.match(/^(\s*)/)
+        const leadingSpaces = indentMatch ? indentMatch[1].length : 0
+        const level = Math.min(Math.floor(leadingSpaces / 2), 4)
+
+        const isTaskDone = /^\s*[-*+]\s+\[[xX]\]/.test(line.text)
+        const lineClass = `cm-md-list-line cm-md-list-l${level}${isTaskDone ? " cm-md-task-done" : ""}`
+        marks.push(Decoration.line({ class: lineClass }).range(line.from))
+      }
+      if (node.name === "ListMark") {
+        if (rendered.some((r) => node.from >= r.from && node.to <= r.to)) return
+        const line = state.doc.lineAt(node.from)
+        if (!lineIsBeingEdited(selection, line.from, line.to)) {
+          // 1. Task list item: `- [ ] ` or `- [x] `
+          const taskMatch = line.text.match(/^(\s*)([-*+])\s+\[([ xX])\](\s*)/)
+          if (taskMatch) {
+            const start = line.from + taskMatch[1].length
+            const end = start + taskMatch[2].length + 1 + 3 + taskMatch[4].length
+            const isChecked = taskMatch[3].toLowerCase() === "x"
+            marks.push(
+              Decoration.replace({
+                widget: new TaskWidget(isChecked, start),
+              }).range(start, end),
+            )
+            return
+          }
+
+          // 2. Bullet list item: `- `, `* `, `+ `
+          const markText = state.doc.sliceString(node.from, node.to)
+          if (markText === "-" || markText === "*" || markText === "+") {
+            let end = node.to
+            if (state.doc.sliceString(end, end + 1) === " ") end += 1
+            const indentMatch = line.text.match(/^(\s*)/)
+            const level = indentMatch ? Math.min(Math.floor(indentMatch[1].length / 2), 4) : 0
+            marks.push(
+              Decoration.replace({
+                widget: new BulletWidget(level),
+              }).range(node.from, end),
+            )
+            return
+          }
+
+          // 3. Ordered list item: `1.`, `2.`, etc.
+          if (/^\d+[.)]$/.test(markText)) {
+            marks.push(orderedMark.range(node.from, node.to))
+            return
+          }
+        }
+        return
+      }
       if (!hidesMark(node.name, node.node.parent?.name)) return
       if (node.name === "EmphasisMark") {
         const parent = node.node.parent
@@ -584,6 +707,7 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
     },
   })
 
+  marks.sort((a, b) => a.from - b.from || a.value.startSide - b.value.startSide)
   return Decoration.set(marks, true)
 }
 
@@ -690,6 +814,48 @@ const liveTheme = EditorView.theme({
   },
   ".cm-md-block .katex-display > .katex": {
     fontSize: "1.25em !important",
+  },
+  ".cm-md-bullet": {
+    display: "inline-block",
+    width: "1.2rem",
+    textAlign: "left",
+    color: "hsl(var(--primary))",
+    userSelect: "none",
+    fontWeight: "bold",
+    lineHeight: "1",
+    fontSize: "1.05em",
+  },
+  ".cm-md-bullet-l0": {
+    color: "hsl(var(--primary))",
+  },
+  ".cm-md-bullet-l1": {
+    color: "hsl(var(--primary) / 0.85)",
+  },
+  ".cm-md-bullet-l2": {
+    color: "hsl(var(--muted-foreground))",
+  },
+  ".cm-md-task-widget": {
+    display: "inline-flex",
+    alignItems: "center",
+    marginRight: "0.45rem",
+    verticalAlign: "middle",
+  },
+  ".cm-md-task-checkbox": {
+    cursor: "pointer",
+    accentColor: "hsl(var(--primary))",
+    width: "0.95rem",
+    height: "0.95rem",
+    margin: "0",
+  },
+  ".cm-md-task-done": {
+    textDecoration: "line-through",
+    color: "hsl(var(--muted-foreground))",
+    opacity: "0.7",
+  },
+  ".cm-md-ordered-mark": {
+    fontVariantNumeric: "tabular-nums",
+    fontWeight: "600",
+    color: "hsl(var(--primary) / 0.9)",
   },
 })
 

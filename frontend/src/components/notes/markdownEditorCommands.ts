@@ -786,7 +786,7 @@ export function indentMarkdownSpec(state: EditorState): TransactionSpec | null {
   }
 
   const line = startLine
-  const listMatch = line.text.match(/^(\s*)([-*+]|\d+[.)]|- \[[ xX]\])(\s+)/)
+  const listMatch = line.text.match(/^(\s*)([-*+]\s+\[[ xX]\]|[-*+]|\d+[.)])(\s+)/)
   if (listMatch) {
     return {
       changes: { from: line.from, to: line.from, insert: INDENT_SPACES },

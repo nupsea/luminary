@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react"
 import { acceptCompletion, autocompletion, closeCompletion, completionStatus } from "@codemirror/autocomplete"
-import { Compartment, EditorState } from "@codemirror/state"
+import { Compartment, EditorState, Prec } from "@codemirror/state"
 import {
   EditorView,
   drawSelection,
@@ -321,65 +321,66 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
               // cursor motion, killing the popup.
               interactionDelay: 30,
             }),
-            keymap.of([
-              {
-                key: "Enter",
-                run: (v) => {
-                  const spec = smartEnterSpec(v.state)
-                  if (spec) {
-                    v.dispatch(spec)
-                    return true
-                  }
-                  return insertNewlineContinueMarkup(v)
+            Prec.highest(
+              keymap.of([
+                {
+                  key: "Enter",
+                  run: (v) => {
+                    const spec = smartEnterSpec(v.state)
+                    if (spec) {
+                      v.dispatch(spec)
+                      return true
+                    }
+                    return insertNewlineContinueMarkup(v)
+                  },
                 },
-              },
-              {
-                key: "Backspace",
-                run: (v) => {
-                  const spec = smartBackspaceSpec(v.state)
-                  if (spec) {
-                    v.dispatch(spec)
-                    return true
-                  }
-                  return deleteMarkupBackward(v)
+                {
+                  key: "Backspace",
+                  run: (v) => {
+                    const spec = smartBackspaceSpec(v.state)
+                    if (spec) {
+                      v.dispatch(spec)
+                      return true
+                    }
+                    return deleteMarkupBackward(v)
+                  },
                 },
-              },
-              {
-                key: "Delete",
-                run: (v) => {
-                  const spec = smartDeleteSpec(v.state)
-                  if (spec) {
-                    v.dispatch(spec)
-                    return true
-                  }
-                  return false
+                {
+                  key: "Delete",
+                  run: (v) => {
+                    const spec = smartDeleteSpec(v.state)
+                    if (spec) {
+                      v.dispatch(spec)
+                      return true
+                    }
+                    return false
+                  },
                 },
-              },
-              {
-                key: "Tab",
-                run: (v) => {
-                  if (completionStatus(v.state) === "active") {
-                    return acceptCompletion(v)
-                  }
-                  const spec = indentMarkdownSpec(v.state)
-                  if (spec) {
-                    v.dispatch(spec)
+                {
+                  key: "Tab",
+                  run: (v) => {
+                    if (completionStatus(v.state) === "active") {
+                      return acceptCompletion(v)
+                    }
+                    const spec = indentMarkdownSpec(v.state)
+                    if (spec) {
+                      v.dispatch(spec)
+                    }
                     return true
-                  }
-                  return false
+                  },
+                  preventDefault: true,
                 },
-              },
-              {
-                key: "Shift-Tab",
-                run: (v) => {
-                  const spec = dedentMarkdownSpec(v.state)
-                  if (spec) {
-                    v.dispatch(spec)
+                {
+                  key: "Shift-Tab",
+                  run: (v) => {
+                    const spec = dedentMarkdownSpec(v.state)
+                    if (spec) {
+                      v.dispatch(spec)
+                    }
                     return true
-                  }
-                  return false
+                  },
+                  preventDefault: true,
                 },
-              },
               // Line boundary navigation: End / Home (Windows, Linux, and external keyboards on Mac)
               {
                 key: "End",
@@ -546,7 +547,7 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
               },
               ...defaultKeymap,
               ...historyKeymap,
-            ]),
+            ])),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) latest.current.onChange(update.state.doc.toString())
             }),

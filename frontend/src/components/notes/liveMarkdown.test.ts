@@ -393,4 +393,113 @@ Third line`
     expect(lineAfter.text).toBe("")
     expect(lineAfter.number).toBe(4)
   })
+
+  it("dynamically decorates bullet lists, task lists, and ordered lists", async () => {
+    const { liveField } = await import("./liveMarkdown")
+    const doc = `Prompts
+
+1. In your own words
+2. Maintain docs
+
+List
+- one
+  - nested
+- [ ] task 1
+- [x] done 2`
+
+    const field = liveField({})
+    // Cursor at position 0 (not on lists)
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: 0 },
+      extensions: [markdown({ base: markdownLanguage }), field],
+    })
+
+    // Inspect decorations
+    // @ts-expect-error private field access
+    const fields = state.values as unknown[]
+    interface DecoRange {
+      spec?: {
+        widget?: { level?: number; checked?: boolean }
+        class?: string
+      }
+    }
+    interface TestDecoSet {
+      size: number
+      between: (from: number, to: number, f: (from: number, to: number, deco: DecoRange) => void) => void
+    }
+    const decoSets = fields.filter((val): val is TestDecoSet =>
+      Boolean(val && typeof val === "object" && "size" in val && typeof (val as { size: unknown }).size === "number" && (val as { size: number }).size > 0),
+    )
+    expect(decoSets.length).toBeGreaterThan(0)
+
+    const listLineDecos: string[] = []
+    const bulletWidgets: number[] = []
+    const taskWidgets: boolean[] = []
+
+    decoSets[0].between(0, state.doc.length, (_from, _to, deco) => {
+      if (deco.spec?.class?.includes("cm-md-list-line")) {
+        listLineDecos.push(deco.spec.class)
+      }
+      if (deco.spec?.widget && typeof deco.spec.widget.level === "number") {
+        bulletWidgets.push(deco.spec.widget.level)
+      }
+      if (deco.spec?.widget && typeof deco.spec.widget.checked === "boolean") {
+        taskWidgets.push(deco.spec.widget.checked)
+      }
+    })
+
+    // 6 list lines: 2 ordered + 2 bullet + 2 task
+    expect(listLineDecos.length).toBe(6)
+    expect(listLineDecos.some((c) => c.includes("cm-md-task-done"))).toBe(true)
+
+    // Bullet widgets: level 0 for "- one", level 1 for "  - nested"
+    expect(bulletWidgets).toEqual([0, 1])
+
+    // Task widgets: false for "- [ ] task 1", true for "- [x] done 2"
+    expect(taskWidgets).toEqual([false, true])
+  })
+
+  it("reveals raw list marker when cursor is placed on that list line", async () => {
+    const { liveField } = await import("./liveMarkdown")
+    const doc = `List\n- one\n- two`
+    const field = liveField({})
+    // Cursor on line 2 ("- one")
+    const onePos = doc.indexOf("- one") + 2
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: onePos },
+      extensions: [markdown({ base: markdownLanguage }), field],
+    })
+
+    // @ts-expect-error private field access
+    const fields = state.values as unknown[]
+    interface DecoRange {
+      from?: number
+      to?: number
+      spec?: {
+        widget?: { level?: number }
+      }
+    }
+    interface TestDecoSet {
+      size: number
+      between: (from: number, to: number, f: (from: number, to: number, deco: DecoRange) => void) => void
+    }
+    const decoSets = fields.filter((val): val is TestDecoSet =>
+      Boolean(val && typeof val === "object" && "size" in val && typeof (val as { size: unknown }).size === "number" && (val as { size: number }).size > 0),
+    )
+
+    const bulletWidgets: { from: number; to: number }[] = []
+    decoSets[0].between(0, state.doc.length, (from, to, deco) => {
+      if (deco.spec?.widget && typeof deco.spec.widget.level === "number") {
+        bulletWidgets.push({ from, to })
+      }
+    })
+
+    // Only line 3 ("- two") should have a bullet widget; line 2 ("- one") is revealed for editing!
+    expect(bulletWidgets.length).toBe(1)
+    const line3 = state.doc.line(3)
+    expect(bulletWidgets[0].from).toBeGreaterThanOrEqual(line3.from)
+  })
 })
+
