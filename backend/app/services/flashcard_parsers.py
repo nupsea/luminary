@@ -201,7 +201,7 @@ _LEADING_PHRASES = (
 # view cannot be answered at all.
 _SOURCE_NOUN = (
     r"(?:context|passage|text|excerpt|document|material|snippet|transcript"
-    r"|notes|article|essay|paragraph|chapter|section|book)"
+    r"|notes|article|essay|paragraph|chapter|section|book|sentence)"
 )
 # A source noun taking "of"/"for" names a subject rather than the page in front of
 # the reader, and both cases are real: "What are CoW and MoR in the context of
@@ -228,13 +228,14 @@ _SOURCE_REFERENCE = (
         rf"the\s+(?:{_HANDED_OVER}\s+)?{_SOURCE_NOUN}{_TOPICAL}\b",
         re.I,
     ),
-    # "the text suggests", "the passage says" -- the source as the one speaking.
+    # "the text suggests", "the passage says" -- the source as the one speaking. The bare verb
+    # after "does" counts too: "Why does the text argue ..." passed 5 library cards without it.
     re.compile(
         rf"\bthe\s+(?:{_HANDED_OVER}\s+)?{_SOURCE_NOUN}(?:'s)?\s+"
         rf"(?:also\s+|then\s+|further\s+)?"
         rf"(?:suggest|impl|argu|describ|defin|stat|say|mention|not|claim|frame|draw"
         rf"|highlight|cit|recommend|contrast|impos|explain|indicat|show|tell|refer"
-        rf"|discuss|present|emphasi|list|call|treat|warn|assert)(?:e?s|ed|ing|y|ies)?\b",
+        rf"|discuss|present|emphasi|list|call|treat|warn|assert)(?:e?s|e|ed|ing|y|ies)?\b",
         re.I,
     ),
     # "according to sentence four", "the first paragraph", "§4.2", "the given concept" -- a
@@ -266,10 +267,17 @@ _NO_ANSWER = re.compile(
 # Bare "this"/"those" stay allowed: "how does this workhorse improve" points back inside the
 # question, and "differ from those who didn't" is a comparison.
 _UNNAMED_REFERENT = re.compile(
-    r"\bthe\s+(?:narrator|protagonist|main\s+character|characters?)\b"
+    r"\bthe\s+(?:narrator|protagonist|main\s+character|characters?|speaker)\b"
     r"|\b(?:in|within|of|for|from|to|by|under|across|throughout)\s+(?:this|these)\s+"
     r"(?:specific\s+|particular\s+)?(?!day\b|reason\b)[a-z]",
     re.I,
+)
+# A first-person narrator carried into the question: "What did I exclaim", "the words ... on me".
+# Case-sensitive, and "I" only as a narrating subject: "Type I error" and the quoted "'I' flag"
+# (the one library hit of a bare "I") are not narrators. Fired on 4 graded cards, all bad.
+_FIRST_PERSON = re.compile(
+    r"\b(?:did|was|had|could|would)\s+I\b|\bI\s+(?:felt|was|had|did|said|saw|thought|met|knew)\b"
+    r"|(?<![\w'\"‘“`])(?:me|my)\b(?![\w'\"’”`])"
 )
 
 
@@ -434,7 +442,7 @@ def _pointing_message(q: str) -> str | None:
         if match:
             pointed = " ".join(match.group(0).split())
             return f"question points at its source ({pointed!r})"
-    unnamed = _UNNAMED_REFERENT.search(q)
+    unnamed = _UNNAMED_REFERENT.search(q) or _FIRST_PERSON.search(q)
     if unnamed:
         return f"question leaves its subject unnamed ({unnamed.group(0)!r})"
     return None

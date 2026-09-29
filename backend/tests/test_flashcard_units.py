@@ -161,6 +161,11 @@ def test_an_answer_no_sentence_carries_falls_below_the_floor():
         "Why does §4.2 dominate the fused ranking?",
         "How does BM25 contribute uniquely to understanding the given concept?",
         "How did Linux start according to [Debugging]?",
+        "Why does the text argue against a hard line between premises and conclusions?",
+        "What does the sentence say about one who acts with detachment?",
+        "What does the speaker wish to do during the lesson?",
+        "What did I exclaim after listening to the professor?",
+        "What effect did the professor's words have on me?",
     ],
 )
 def test_a_question_may_not_point_at_a_position_in_the_prompt(question):
@@ -174,6 +179,9 @@ def test_a_question_may_not_point_at_a_position_in_the_prompt(question):
         "What does a cross-encoder feed through the transformer as `[Query, Document]`?",
         "What does the list [1] hold after append?",
         "What type does List[Int] describe?",
+        "What is a Type I error in hypothesis testing?",
+        "Why must the instruction encode its operand size using the 'I' flag?",
+        "What does the sentence 'The penny dropped' mean?",
     ],
 )
 def test_brackets_that_are_not_a_section_label_are_allowed(question):
