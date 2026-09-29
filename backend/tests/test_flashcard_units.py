@@ -67,6 +67,7 @@ def test_the_longest_prose_units_are_chosen_in_passage_order():
         "---------------------------------------------------------------------",
         "## **Part 4: Do Not Open The Door**",
         "Layer normalization. arXiv preprint arXiv:1607.06450, 2016.",
+        "In Proceedings of the IEEE Conference on Computer Vision, pages 770–778, 2016.",
     ],
 )
 def test_furniture_never_outranks_a_sentence(furniture):
@@ -98,6 +99,8 @@ def test_an_answer_no_sentence_carries_falls_below_the_floor():
         "How do you use this system based on sentence five?",
         "What actions does one not need to perform according to sentence 4?",
         "What happens to things over time according to the first paragraph?",
+        "Why does §4.2 dominate the fused ranking?",
+        "How does BM25 contribute uniquely to understanding the given concept?",
     ],
 )
 def test_a_question_may_not_point_at_a_position_in_the_prompt(question):

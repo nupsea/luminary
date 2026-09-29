@@ -27,7 +27,12 @@ _FURNITURE_SPAN = re.compile(
     r"\[[^\]]*>[^\]]*\]|^\s*\[[^\]]*\]|^\s*\[[^\]]*$|[-=]{5,}"
     r"|#{1,6}\s+\*\*[^*]*\*\*|#{1,6}\s[^#\n]*?\?|#{1,6}\s[^#\n.!?]*$"
 )
-_CITATION = re.compile(r"\barXiv\b|\bpreprint\b|©|All rights reserved")
+# A bibliography entry that survived the chunk-level filter in _fetch_chunks. Matches none of
+# the 497 hand-labelled #191 units, so no sentence worth learning is lost to it.
+_CITATION = re.compile(
+    r"\barXiv\b|\bpreprint\b|©|All rights reserved|\bIn\s+(?:Proceedings|Advances\s+in)\b"
+    r"|\bpages?\s+\d+\s*[–-]\s*\d+|\bpp\.\s*\d+|\d+\s*\(\d+\)\s*:\s*\d+"
+)
 
 _WORD = re.compile(r"[a-z0-9]+")
 # The list the coverage floor below was measured with; a different list moves the floor.

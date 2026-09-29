@@ -237,10 +237,13 @@ _SOURCE_REFERENCE = (
         rf"|discuss|present|emphasi|list|call|treat|warn|assert)(?:e?s|ed|ing|y|ies)?\b",
         re.I,
     ),
-    # "according to sentence four", "the first paragraph" -- a position only the prompt had.
+    # "according to sentence four", "the first paragraph", "§4.2", "the given concept" -- a
+    # position or a referent only the prompt had. On 1,217 library and 96 graded real-document
+    # cards the last two fired 4 times, all on cards that cannot be answered alone.
     re.compile(
         r"\bsentence\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b"
-        r"|\b(?:first|second|third|last|next|previous)\s+(?:sentence|paragraph)\b",
+        r"|\b(?:first|second|third|last|next|previous)\s+(?:sentence|paragraph)\b"
+        r"|§\s*\d|\b(?:the|this)\s+given\s+\w+",
         re.I,
     ),
 )
