@@ -6,7 +6,9 @@
 import type { components } from "@/types/api"
 
 export type SectionItem = components["schemas"]["SectionItem"]
-export type DocumentDetail = components["schemas"]["DocumentDetail"]
+export type DocumentDetail = components["schemas"]["DocumentDetail"] & {
+  is_favorite?: boolean
+}
 export type ChunkItem = components["schemas"]["ChunkItem"]
 export type SectionContentItem = components["schemas"]["SectionContentItem"]
 

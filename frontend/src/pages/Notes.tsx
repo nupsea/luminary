@@ -5,7 +5,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, BookOpen, Download, Feather, FileText, Loader2, Network, Newspaper, Pencil, Plus, Star, Tag, Trash2, Wand2, X } from "lucide-react"
+import { ArrowLeft, BookOpen, Download, Feather, FileText, Loader2, Network, Newspaper, Pencil, Plus, Star, StickyNote, Tag, Trash2, Wand2, X } from "lucide-react"
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -1267,6 +1267,7 @@ export default function NotesPage() {
               : "text-muted-foreground hover:bg-accent/60"
           }`}
         >
+          <StickyNote size={13} />
           All Notes
           <span className="ml-auto text-xs">{groups?.total_notes ?? noteList.length}</span>
         </button>

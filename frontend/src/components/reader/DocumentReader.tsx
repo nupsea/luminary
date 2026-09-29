@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, Brain, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, Lightbulb, MessageSquare, PanelRightClose, PanelRightOpen, RefreshCw, ScrollText, Search, StickyNote, Trash2, X, type LucideIcon } from "lucide-react"
+import { ArrowLeft, Brain, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, Lightbulb, MessageSquare, PanelRightClose, PanelRightOpen, RefreshCw, ScrollText, Search, Star, StickyNote, Trash2, X, type LucideIcon } from "lucide-react"
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
@@ -10,6 +10,7 @@ import type { ContentType } from "@/components/library/types"
 import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
 import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
+import { toggleDocumentFavorite } from "@/pages/Learning/api"
 import { useTimeOnTask } from "@/lib/useTimeOnTask"
 import { cn, stripMarkdown } from "@/lib/utils"
 import { useAppStore } from "@/store"
@@ -323,6 +324,33 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       onBack()
     },
     onError: () => toast.error("Failed to delete document. Please try again."),
+  })
+
+  const toggleFavoriteMutation = useMutation({
+    mutationFn: (fav: boolean) => toggleDocumentFavorite(documentId, fav),
+    onMutate: async (fav: boolean) => {
+      await qc.cancelQueries({ queryKey: ["document", documentId] })
+      const previousDoc = qc.getQueryData<DocumentDetail>(["document", documentId])
+      qc.setQueryData(["document", documentId], (old: DocumentDetail | undefined) =>
+        old ? { ...old, is_favorite: fav } : old,
+      )
+      return { previousDoc }
+    },
+    onError: (_err, _fav, context) => {
+      if (context?.previousDoc) {
+        qc.setQueryData(["document", documentId], context.previousDoc)
+      }
+      toast.error("Failed to update favorite")
+    },
+    onSuccess: (data, fav) => {
+      qc.setQueryData(["document", documentId], (old: DocumentDetail | undefined) =>
+        old ? { ...old, is_favorite: data.is_favorite ?? fav } : old,
+      )
+      void qc.invalidateQueries({ queryKey: ["documents"] })
+      void qc.invalidateQueries({ queryKey: ["library-facets"] })
+      void qc.invalidateQueries({ queryKey: ["documents-recent"] })
+      toast.success(fav ? "Added to favorites" : "Removed from favorites")
+    },
   })
 
   // Audio mini-player state — only active for audio documents
@@ -1286,6 +1314,25 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
               tabs do not: both showed a face already in the tab bar, and
               Practice's extra trick -- arming the whole document -- is the
               panel's own "Use the whole document" control. */}
+          <button
+            type="button"
+            onClick={() => toggleFavoriteMutation.mutate(!doc.is_favorite)}
+            aria-label={doc.is_favorite ? "Remove from favorites" : "Add to favorites"}
+            aria-pressed={Boolean(doc.is_favorite)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors",
+              doc.is_favorite
+                ? "text-amber-500 hover:text-amber-600 border-amber-300/40 dark:border-amber-500/30"
+                : "text-muted-foreground hover:text-amber-500 hover:bg-accent",
+            )}
+            title={doc.is_favorite ? "Remove from favorites" : "Add to favorites"}
+          >
+            <Star
+              size={14}
+              className={doc.is_favorite ? "fill-amber-400 text-amber-500" : ""}
+            />
+            <span>{doc.is_favorite ? "Favorited" : "Favorite"}</span>
+          </button>
           <div className="relative">
             <button
               onClick={() => setConfirmDelete((open) => !open)}

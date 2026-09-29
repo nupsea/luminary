@@ -7431,6 +7431,8 @@ export interface components {
             /** Content Type */
             content_type: string;
             facets?: components["schemas"]["DocumentFacets"] | null;
+            /** Is Favorite */
+            is_favorite?: boolean;
             /** Structure Type */
             structure_type?: string | null;
             /** Extraction Report */
