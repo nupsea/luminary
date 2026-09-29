@@ -749,3 +749,302 @@ export function smartDeleteSpec(state: EditorState): TransactionSpec | null {
 
   return null
 }
+
+const INDENT_SPACES = "  "
+
+/**
+ * Smart Tab handler for Markdown:
+ * - Inside a table: delegates to tableNextCellSpec
+ * - On a list item: indents the list item by 2 spaces
+ * - Multiline selection: indents all selected lines by 2 spaces
+ * - Mid-text or line start: indents or inserts 2 spaces
+ */
+export function indentMarkdownSpec(state: EditorState): TransactionSpec | null {
+  const tableSpec = tableNextCellSpec(state)
+  if (tableSpec) return tableSpec
+
+  const { from, to, empty } = state.selection.main
+  const startLine = state.doc.lineAt(from)
+  const endLine = state.doc.lineAt(to)
+
+  if (startLine.number !== endLine.number) {
+    const changes: { from: number; to: number; insert: string }[] = []
+    let addedChars = 0
+    for (let ln = startLine.number; ln <= endLine.number; ln++) {
+      const line = state.doc.line(ln)
+      changes.push({ from: line.from, to: line.from, insert: INDENT_SPACES })
+      addedChars += INDENT_SPACES.length
+    }
+    return {
+      changes,
+      selection: {
+        anchor: from + INDENT_SPACES.length,
+        head: to + addedChars,
+      },
+      scrollIntoView: true,
+    }
+  }
+
+  const line = startLine
+  const listMatch = line.text.match(/^(\s*)([-*+]|\d+[.)]|- \[[ xX]\])(\s+)/)
+  if (listMatch) {
+    return {
+      changes: { from: line.from, to: line.from, insert: INDENT_SPACES },
+      selection: { anchor: from + INDENT_SPACES.length },
+      scrollIntoView: true,
+    }
+  }
+
+  if (!empty) {
+    return {
+      changes: { from: line.from, to: line.from, insert: INDENT_SPACES },
+      selection: { anchor: from + INDENT_SPACES.length, head: to + INDENT_SPACES.length },
+      scrollIntoView: true,
+    }
+  }
+
+  const nonSpace = line.text.search(/\S/)
+  if (nonSpace === -1 || from <= line.from + nonSpace) {
+    return {
+      changes: { from: line.from, to: line.from, insert: INDENT_SPACES },
+      selection: { anchor: from + INDENT_SPACES.length },
+      scrollIntoView: true,
+    }
+  }
+
+  return {
+    changes: { from, to: from, insert: INDENT_SPACES },
+    selection: { anchor: from + INDENT_SPACES.length },
+    scrollIntoView: true,
+  }
+}
+
+/**
+ * Smart Shift-Tab handler for Markdown:
+ * - Inside a table: delegates to tablePrevCellSpec
+ * - On a list item or line: dedents by removing up to 2 leading spaces or 1 tab
+ * - Multiline selection: dedents all selected lines
+ */
+export function dedentMarkdownSpec(state: EditorState): TransactionSpec | null {
+  const tableSpec = tablePrevCellSpec(state)
+  if (tableSpec) return tableSpec
+
+  const { from, to } = state.selection.main
+  const startLine = state.doc.lineAt(from)
+  const endLine = state.doc.lineAt(to)
+
+  if (startLine.number !== endLine.number) {
+    const changes: { from: number; to: number; insert: string }[] = []
+    let totalRemoved = 0
+    let firstLineRemoved = 0
+    for (let ln = startLine.number; ln <= endLine.number; ln++) {
+      const line = state.doc.line(ln)
+      const leadingMatch = line.text.match(/^ {1,2}|\t/)
+      if (leadingMatch) {
+        const removeCount = leadingMatch[0].length
+        changes.push({ from: line.from, to: line.from + removeCount, insert: "" })
+        totalRemoved += removeCount
+        if (ln === startLine.number) firstLineRemoved = removeCount
+      }
+    }
+    if (changes.length === 0) return null
+    return {
+      changes,
+      selection: {
+        anchor: Math.max(startLine.from, from - firstLineRemoved),
+        head: Math.max(startLine.from, to - totalRemoved),
+      },
+      scrollIntoView: true,
+    }
+  }
+
+  const line = startLine
+  const leadingMatch = line.text.match(/^ {1,2}|\t/)
+  if (!leadingMatch) return null
+
+  const removeCount = leadingMatch[0].length
+  const newAnchor = Math.max(line.from, from - removeCount)
+  const newHead = Math.max(line.from, to - removeCount)
+  return {
+    changes: { from: line.from, to: line.from + removeCount, insert: "" },
+    selection: { anchor: newAnchor, head: newHead },
+    scrollIntoView: true,
+  }
+}
+
+/**
+ * Smart Enter for Markdown lists and blockquotes:
+ * - Continues bullet lists (- ), numbered lists (1. -> 2. ), and task lists (- [ ] )
+ * - Pressing Enter on an empty list item dedents or clears the marker, cleanly exiting the list
+ * - Continues or exits blockquotes (> )
+ */
+export function smartEnterSpec(state: EditorState): TransactionSpec | null {
+  const { from, empty } = state.selection.main
+  if (!empty) return null
+
+  const line = state.doc.lineAt(from)
+  const lineText = line.text
+
+  // 1. Task list item (e.g. `- [ ] `, `* [x] `)
+  const taskMatch = lineText.match(/^(\s*)([-*+])\s+\[[ xX]\](\s*)(.*)$/)
+  if (taskMatch) {
+    const indent = taskMatch[1]
+    const bullet = taskMatch[2]
+    const content = taskMatch[4]
+
+    if (!content.trim()) {
+      if (indent.length >= 2) {
+        const newIndent = indent.slice(2)
+        const newText = `${newIndent}${bullet} [ ] `
+        return {
+          changes: { from: line.from, to: line.to, insert: newText },
+          selection: { anchor: line.from + newText.length },
+          scrollIntoView: true,
+        }
+      }
+      return {
+        changes: { from: line.from, to: line.to, insert: "" },
+        selection: { anchor: line.from },
+        scrollIntoView: true,
+      }
+    }
+
+    const insertText = `\n${indent}${bullet} [ ] `
+    return {
+      changes: { from, to: from, insert: insertText },
+      selection: { anchor: from + insertText.length },
+      scrollIntoView: true,
+    }
+  }
+
+  // 2. Ordered list item (e.g. `1. `, `1) `)
+  const orderedMatch = lineText.match(/^(\s*)(\d+)([.)])(\s*)(.*)$/)
+  if (orderedMatch) {
+    const indent = orderedMatch[1]
+    const num = parseInt(orderedMatch[2], 10)
+    const delimiter = orderedMatch[3]
+    const content = orderedMatch[5]
+
+    if (!content.trim()) {
+      if (indent.length >= 2) {
+        const newIndent = indent.slice(2)
+        const newText = `${newIndent}${num}${delimiter} `
+        return {
+          changes: { from: line.from, to: line.to, insert: newText },
+          selection: { anchor: line.from + newText.length },
+          scrollIntoView: true,
+        }
+      }
+      return {
+        changes: { from: line.from, to: line.to, insert: "" },
+        selection: { anchor: line.from },
+        scrollIntoView: true,
+      }
+    }
+
+    const insertText = `\n${indent}${num + 1}${delimiter} `
+    return {
+      changes: { from, to: from, insert: insertText },
+      selection: { anchor: from + insertText.length },
+      scrollIntoView: true,
+    }
+  }
+
+  // 3. Bullet list item (e.g. `- `, `* `, `+ `)
+  const bulletMatch = lineText.match(/^(\s*)([-*+])(\s+)(.*)$/)
+  if (bulletMatch) {
+    const indent = bulletMatch[1]
+    const bullet = bulletMatch[2]
+    const content = bulletMatch[4]
+
+    if (!content.trim()) {
+      if (indent.length >= 2) {
+        const newIndent = indent.slice(2)
+        const newText = `${newIndent}${bullet} `
+        return {
+          changes: { from: line.from, to: line.to, insert: newText },
+          selection: { anchor: line.from + newText.length },
+          scrollIntoView: true,
+        }
+      }
+      return {
+        changes: { from: line.from, to: line.to, insert: "" },
+        selection: { anchor: line.from },
+        scrollIntoView: true,
+      }
+    }
+
+    const insertText = `\n${indent}${bullet} `
+    return {
+      changes: { from, to: from, insert: insertText },
+      selection: { anchor: from + insertText.length },
+      scrollIntoView: true,
+    }
+  }
+
+  // 4. Blockquote item (e.g. `> `)
+  const quoteMatch = lineText.match(/^(\s*>\s*)(.*)$/)
+  if (quoteMatch) {
+    const prefix = quoteMatch[1]
+    const content = quoteMatch[2]
+    if (!content.trim()) {
+      return {
+        changes: { from: line.from, to: line.to, insert: "" },
+        selection: { anchor: line.from },
+        scrollIntoView: true,
+      }
+    }
+    const insertText = `\n${prefix}`
+    return {
+      changes: { from, to: from, insert: insertText },
+      selection: { anchor: from + insertText.length },
+      scrollIntoView: true,
+    }
+  }
+
+  return null
+}
+
+/**
+ * Toggle link markdown around selection: [text](url).
+ */
+export function toggleLinkSpec(state: EditorState): TransactionSpec {
+  const { from, to, empty } = state.selection.main
+  const selected = state.sliceDoc(from, to)
+
+  const linkMatch = selected.match(/^\[(.*)\]\((.*)\)$/)
+  if (linkMatch) {
+    const innerText = linkMatch[1] || linkMatch[2]
+    return {
+      changes: { from, to, insert: innerText },
+      selection: { anchor: from, head: from + innerText.length },
+      scrollIntoView: true,
+    }
+  }
+
+  if (empty) {
+    const insert = "[](url)"
+    return {
+      changes: { from, to: from, insert },
+      selection: { anchor: from + 1 },
+      scrollIntoView: true,
+    }
+  }
+
+  if (/^https?:\/\//.test(selected.trim())) {
+    const insert = `[Link](${selected.trim()})`
+    return {
+      changes: { from, to, insert },
+      selection: { anchor: from + 1, head: from + 5 },
+      scrollIntoView: true,
+    }
+  }
+
+  const insert = `[${selected}](url)`
+  const urlStart = from + selected.length + 3
+  return {
+    changes: { from, to, insert },
+    selection: { anchor: urlStart, head: urlStart + 3 },
+    scrollIntoView: true,
+  }
+}

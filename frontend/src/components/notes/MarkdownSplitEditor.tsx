@@ -35,6 +35,7 @@ export interface MarkdownSplitEditorProps {
   previewLabel?: string
   editorClassName?: string
   previewClassName?: string
+  onOpenShortcuts?: () => void
 }
 
 const DEFAULT_EDITOR_CLASS =
@@ -63,6 +64,7 @@ export function MarkdownSplitEditor({
   previewLabel = "Preview",
   editorClassName,
   previewClassName,
+  onOpenShortcuts,
 }: MarkdownSplitEditorProps) {
   const internalEditorRef = useRef<MarkdownEditorHandle | null>(null)
   const editorRef = externalEditorRef ?? internalEditorRef
@@ -241,6 +243,7 @@ export function MarkdownSplitEditor({
         // so the editor is the rendering.
         live={layout === "editor"}
         onEditDiagram={onEditDiagram}
+        onOpenShortcuts={onOpenShortcuts}
         className={editorClassName ?? DEFAULT_EDITOR_CLASS}
       />
     </div>

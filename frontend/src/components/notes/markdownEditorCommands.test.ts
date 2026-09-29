@@ -7,7 +7,9 @@ import {
   markdownLanguage,
 } from "@codemirror/lang-markdown"
 import {
+  dedentMarkdownSpec,
   findEnclosingBlock,
+  indentMarkdownSpec,
   insertBlockBreakSpec,
   insertBlockSpec,
   insertInlineSpec,
@@ -15,9 +17,11 @@ import {
   replaceSelectionSpec,
   smartBackspaceSpec,
   smartDeleteSpec,
+  smartEnterSpec,
   tableNextCellSpec,
   tablePrevCellSpec,
   toggleInlineMarkSpec,
+  toggleLinkSpec,
 } from "./markdownEditorCommands"
 
 function mdState(doc: string, cursor = doc.length): EditorState {
@@ -375,6 +379,208 @@ describe("smartDeleteSpec", () => {
     expect(spec).not.toBeNull()
     const next = apply(state, spec!)
     expect(next.doc.toString()).toBe("First\nSecond")
+  })
+})
+
+describe("indentMarkdownSpec (Tab in Markdown)", () => {
+  it("indents a bullet list item by 2 spaces", () => {
+    const state = mdState("- Item 1", 4)
+    const spec = indentMarkdownSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("  - Item 1")
+    expect(next.selection.main.anchor).toBe(6)
+  })
+
+  it("indents an ordered list item by 2 spaces", () => {
+    const state = mdState("1. Item 1", 5)
+    const spec = indentMarkdownSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("  1. Item 1")
+  })
+
+  it("indents a task list item by 2 spaces", () => {
+    const state = mdState("- [ ] To do task", 6)
+    const spec = indentMarkdownSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("  - [ ] To do task")
+  })
+
+  it("indents multiple selected lines", () => {
+    const doc = "- A\n- B\n- C"
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: 0, head: doc.length },
+      extensions: [markdown({ base: markdownLanguage })],
+    })
+    const spec = indentMarkdownSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("  - A\n  - B\n  - C")
+  })
+
+  it("delegates to tableNextCellSpec inside a table", () => {
+    const doc = "| Col A | Col B |"
+    const state = mdState(doc, 3)
+    const spec = indentMarkdownSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.selection.main.anchor).toBe(10)
+  })
+
+  it("inserts 2 spaces mid-prose", () => {
+    const state = mdState("helloworld", 5)
+    const spec = indentMarkdownSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("hello  world")
+    expect(next.selection.main.anchor).toBe(7)
+  })
+})
+
+describe("dedentMarkdownSpec (Shift-Tab in Markdown)", () => {
+  it("dedents an indented list item by 2 spaces", () => {
+    const state = mdState("  - Item 1", 6)
+    const spec = dedentMarkdownSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("- Item 1")
+    expect(next.selection.main.anchor).toBe(4)
+  })
+
+  it("dedents an ordered list item", () => {
+    const state = mdState("    1. Nested item", 8)
+    const spec = dedentMarkdownSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("  1. Nested item")
+  })
+
+  it("dedents multiple selected lines", () => {
+    const doc = "  - A\n  - B\n  - C"
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: 0, head: doc.length },
+      extensions: [markdown({ base: markdownLanguage })],
+    })
+    const spec = dedentMarkdownSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("- A\n- B\n- C")
+  })
+
+  it("delegates to tablePrevCellSpec inside a table", () => {
+    const doc = "| Col A | Col B |"
+    const state = mdState(doc, 10)
+    const spec = dedentMarkdownSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.selection.main.anchor).toBe(2)
+  })
+})
+
+describe("smartEnterSpec (Enter in lists and quotes)", () => {
+  it("continues bullet list with new bullet", () => {
+    const state = mdState("- Item 1", 8)
+    const spec = smartEnterSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("- Item 1\n- ")
+  })
+
+  it("clears empty bullet list item on Enter to exit list", () => {
+    const state = mdState("- Item 1\n- ", 11)
+    const spec = smartEnterSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("- Item 1\n")
+  })
+
+  it("dedents empty indented bullet list item", () => {
+    const state = mdState("- Item 1\n  - ", 13)
+    const spec = smartEnterSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("- Item 1\n- ")
+  })
+
+  it("increments ordered list number on Enter", () => {
+    const state = mdState("1. First item", 13)
+    const spec = smartEnterSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("1. First item\n2. ")
+  })
+
+  it("clears empty ordered list item on Enter", () => {
+    const state = mdState("1. First item\n2. ", 17)
+    const spec = smartEnterSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("1. First item\n")
+  })
+
+  it("continues task list on Enter", () => {
+    const state = mdState("- [ ] First task", 16)
+    const spec = smartEnterSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("- [ ] First task\n- [ ] ")
+  })
+
+  it("clears empty task list item on Enter", () => {
+    const state = mdState("- [ ] First task\n- [ ] ", 23)
+    const spec = smartEnterSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("- [ ] First task\n")
+  })
+
+  it("continues blockquote on Enter", () => {
+    const state = mdState("> A wise quote", 14)
+    const spec = smartEnterSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("> A wise quote\n> ")
+  })
+
+  it("exits blockquote on empty quote line", () => {
+    const state = mdState("> A wise quote\n> ", 17)
+    const spec = smartEnterSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("> A wise quote\n")
+  })
+})
+
+describe("toggleLinkSpec (Mod-k)", () => {
+  it("wraps selected text in [text](url) with url highlighted", () => {
+    const doc = "visit Luminary now"
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: 6, head: 14 },
+    })
+    const spec = toggleLinkSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec)
+    expect(next.doc.toString()).toBe("visit [Luminary](url) now")
+    expect(next.sliceDoc(next.selection.main.anchor, next.selection.main.head)).toBe("url")
+  })
+
+  it("unwraps existing [text](url) link", () => {
+    const doc = "visit [Luminary](https://luminary.app) now"
+    const start = doc.indexOf("[Luminary")
+    const end = doc.indexOf("now") - 1
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: start, head: end },
+    })
+    const spec = toggleLinkSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec)
+    expect(next.doc.toString()).toBe("visit Luminary now")
   })
 })
 

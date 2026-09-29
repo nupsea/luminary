@@ -28,6 +28,7 @@ export interface NoteEditorProps {
   linkCompletion?: NoteLinkCompletionConfig
   /** External handle (outline navigation); defaults to an internal ref. */
   editorRef?: RefObject<MarkdownEditorHandle | null>
+  onOpenShortcuts?: () => void
 }
 
 export function NoteEditor({
@@ -39,6 +40,7 @@ export function NoteEditor({
   editorClassName,
   linkCompletion,
   editorRef: externalEditorRef,
+  onOpenShortcuts,
 }: NoteEditorProps) {
   const internalEditorRef = useRef<MarkdownEditorHandle | null>(null)
   const editorRef = externalEditorRef ?? internalEditorRef
@@ -88,6 +90,7 @@ export function NoteEditor({
           linkCompletion={linkCompletion}
           slashCommands={slashCommands}
           onEditDiagram={openDiagramEditor}
+          onOpenShortcuts={onOpenShortcuts}
           preview={
             content.trim() ? (
               <MarkdownRenderer

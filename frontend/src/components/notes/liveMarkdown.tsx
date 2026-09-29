@@ -383,6 +383,9 @@ class RenderedBlock extends WidgetType {
   ): number | null {
     const from = view.posAtDOM(host)
     const firstLine = view.state.doc.lineAt(from)
+    const sourceLines = this.source.split("\n")
+    const totalLines = sourceLines.length
+
     const code = target?.closest("pre")?.querySelector("code")
     if (code) {
       const offset = offsetInCode(code, event)
@@ -393,21 +396,40 @@ class RenderedBlock extends WidgetType {
     const rows = [...host.querySelectorAll("tr")]
     const row = target?.closest("tr")
     const rowIndex = row ? rows.indexOf(row as HTMLTableRowElement) : null
-    const line = view.state.doc.line(
-      Math.min(
-        firstLine.number +
-          clickedSourceLine(rowIndex, this.source.split("\n").length, this.delimited),
-        view.state.doc.lines,
-      ),
-    )
-    // Inside a table, the column matters as much as the row: the end of the
-    // line is past the last pipe, which is not any cell.
     const cell = target?.closest("td, th")
-    if (row && cell) {
+    if (row && cell && rowIndex !== null) {
+      const line = view.state.doc.line(
+        Math.min(
+          firstLine.number +
+            clickedSourceLine(rowIndex, totalLines, this.delimited),
+          view.state.doc.lines,
+        ),
+      )
       const index = [...row.children].indexOf(cell)
       if (index >= 0) return line.from + caretInTableRow(line.text, index)
+      return line.to
     }
-    return line.to
+
+    // Spatial coordinate mapping for non-table blocks:
+    // Maps click position to line and column within block instead of jumping to the bottom
+    const rect = host.getBoundingClientRect()
+    const relY = Math.max(0, event.clientY - rect.top)
+    const fraction = relY / Math.max(rect.height, 1)
+
+    let lineOffset = Math.floor(fraction * totalLines)
+    lineOffset = Math.max(0, Math.min(lineOffset, totalLines - 1))
+    if (this.delimited && totalLines > 2) {
+      lineOffset = Math.max(1, Math.min(lineOffset, totalLines - 2))
+    }
+
+    const targetLineNum = Math.min(firstLine.number + lineOffset, view.state.doc.lines)
+    const targetLine = view.state.doc.line(targetLineNum)
+
+    const relX = Math.max(0, event.clientX - rect.left - 16)
+    const approxCol = Math.max(0, Math.round(relX / 8.5))
+    const col = Math.min(approxCol, targetLine.text.length)
+
+    return targetLine.from + col
   }
 }
 
@@ -791,6 +813,61 @@ export function stepInto(view: EditorView, field: StateField<DecorationSet>, dir
   return true
 }
 
+export function stepHorizontal(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -1): boolean {
+  const sel = view.state.selection.main
+  if (!sel.empty) return false
+  const { doc } = view.state
+  const head = sel.head
+
+  try {
+    let handled = false
+    const decorations = view.state.field(field)
+
+    if (dir === 1) {
+      // Forward arrow (ArrowRight)
+      decorations.between(head, Math.min(head + 2, doc.length), (from, _to, deco) => {
+        if (handled) return
+        const widget = deco.spec?.widget
+        if (!widget || typeof widget !== "object" || !("source" in widget)) return
+
+        const widgetDelimited = Boolean((widget as { delimited?: boolean }).delimited)
+        const blockStartLine = doc.lineAt(from)
+        if (head === blockStartLine.from || head === from || head === Math.max(0, from - 1)) {
+          const offset = firstEditableLine(widgetDelimited)
+          const targetLine = doc.line(Math.min(blockStartLine.number + offset, doc.lines))
+          view.dispatch({ selection: { anchor: targetLine.from }, scrollIntoView: true })
+          handled = true
+        }
+      })
+    } else {
+      // Backward arrow (ArrowLeft)
+      decorations.between(Math.max(0, head - 2), head, (from, to, deco) => {
+        if (handled) return
+        const widget = deco.spec?.widget
+        if (!widget || typeof widget !== "object" || !("source" in widget)) return
+
+        const widgetSource = (widget as { source: string }).source
+        const widgetDelimited = Boolean((widget as { delimited?: boolean }).delimited)
+        const lines = widgetSource.split("\n").length
+        const blockStartLine = doc.lineAt(from)
+
+        if (head === to || head === Math.min(doc.length, to + 1)) {
+          const offset = clickedSourceLine(null, lines, widgetDelimited)
+          const targetLine = doc.line(Math.min(blockStartLine.number + offset, doc.lines))
+          view.dispatch({ selection: { anchor: targetLine.to }, scrollIntoView: true })
+          handled = true
+        }
+      })
+    }
+
+    if (handled) return true
+  } catch {
+    // fallback
+  }
+
+  return false
+}
+
 export function liveField(options: LiveMarkdownOptions) {
   return StateField.define<DecorationSet>({
     create: (state) => decorate(state, options),
@@ -810,6 +887,8 @@ export function liveMarkdown(options: LiveMarkdownOptions = {}): Extension {
       keymap.of([
         { key: "ArrowDown", run: (view) => stepInto(view, field, 1) },
         { key: "ArrowUp", run: (view) => stepInto(view, field, -1) },
+        { key: "ArrowRight", run: (view) => stepHorizontal(view, field, 1) },
+        { key: "ArrowLeft", run: (view) => stepHorizontal(view, field, -1) },
       ]),
     ),
     // Inline, so it beats the base theme's monospace rule whatever order the

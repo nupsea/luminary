@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react"
-import { autocompletion, closeCompletion, completionStatus } from "@codemirror/autocomplete"
+import { acceptCompletion, autocompletion, closeCompletion, completionStatus } from "@codemirror/autocomplete"
 import { Compartment, EditorState } from "@codemirror/state"
 import {
   EditorView,
@@ -19,6 +19,8 @@ import {
 import { languages } from "@codemirror/language-data"
 import { tags as t } from "@lezer/highlight"
 import {
+  dedentMarkdownSpec,
+  indentMarkdownSpec,
   insertBlockBreakSpec,
   insertBlockSpec,
   insertInlineSpec,
@@ -26,10 +28,10 @@ import {
   replaceSelectionSpec,
   smartBackspaceSpec,
   smartDeleteSpec,
+  smartEnterSpec,
   syncDocSpec,
-  tableNextCellSpec,
-  tablePrevCellSpec,
   toggleInlineMarkSpec,
+  toggleLinkSpec,
 } from "./markdownEditorCommands"
 import {
   noteLinkCompletionSource,
@@ -90,6 +92,8 @@ export interface MarkdownCodeEditorProps {
   live?: boolean
   /** Live rendering only: the edit button on a drawn diagram. */
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
+  /** Opens the keyboard shortcuts info modal. */
+  onOpenShortcuts?: () => void
 }
 
 import { usePanelZoomStore } from "@/store/panelZoomStore"
@@ -107,7 +111,7 @@ const editorTheme = EditorView.theme({
   ".cm-line": {
     lineHeight: "1.65",
   },
-  ".cm-content": { padding: "16px 20px", caretColor: "hsl(var(--primary))" },
+  ".cm-content": { minHeight: "100%", padding: "16px 20px", caretColor: "hsl(var(--primary))", cursor: "text" },
   "&.cm-focused": { outline: "none" },
   ".cm-placeholder": { color: "hsl(var(--muted-foreground) / 0.7)" },
   ".cm-cursor": { borderLeftColor: "hsl(var(--primary))", borderLeftWidth: "2px" },
@@ -252,7 +256,7 @@ function extractImageFile(dataTransfer: DataTransfer | null): File | null {
 
 export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeEditorProps>(
   function MarkdownCodeEditor(
-    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live, onEditDiagram },
+    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live, onEditDiagram, onOpenShortcuts },
     ref,
   ) {
     const hostRef = useRef<HTMLDivElement>(null)
@@ -262,8 +266,8 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
     // The preview pane is a toggle, so live rendering has to be switchable on a
     // view that is already built.
     const liveRoom = useRef(new Compartment()).current
-    const latest = useRef({ onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram })
-    latest.current = { onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram }
+    const latest = useRef({ onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onOpenShortcuts })
+    latest.current = { onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onOpenShortcuts }
     const liveExtension = useCallback(
       () => liveMarkdown({ onEditDiagram: (d) => latest.current.onEditDiagram?.(d) }),
       [],
@@ -318,7 +322,17 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
               interactionDelay: 30,
             }),
             keymap.of([
-              { key: "Enter", run: insertNewlineContinueMarkup },
+              {
+                key: "Enter",
+                run: (v) => {
+                  const spec = smartEnterSpec(v.state)
+                  if (spec) {
+                    v.dispatch(spec)
+                    return true
+                  }
+                  return insertNewlineContinueMarkup(v)
+                },
+              },
               {
                 key: "Backspace",
                 run: (v) => {
@@ -344,7 +358,10 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
               {
                 key: "Tab",
                 run: (v) => {
-                  const spec = tableNextCellSpec(v.state)
+                  if (completionStatus(v.state) === "active") {
+                    return acceptCompletion(v)
+                  }
+                  const spec = indentMarkdownSpec(v.state)
                   if (spec) {
                     v.dispatch(spec)
                     return true
@@ -355,13 +372,52 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
               {
                 key: "Shift-Tab",
                 run: (v) => {
-                  const spec = tablePrevCellSpec(v.state)
+                  const spec = dedentMarkdownSpec(v.state)
                   if (spec) {
                     v.dispatch(spec)
                     return true
                   }
                   return false
                 },
+              },
+              {
+                key: "End",
+                mac: "Cmd-ArrowRight",
+                run: (v) => {
+                  const line = v.state.doc.lineAt(v.state.selection.main.head)
+                  v.dispatch({ selection: { anchor: line.to }, scrollIntoView: true })
+                  return true
+                },
+                shift: (v) => {
+                  const { anchor } = v.state.selection.main
+                  const line = v.state.doc.lineAt(v.state.selection.main.head)
+                  v.dispatch({ selection: { anchor, head: line.to }, scrollIntoView: true })
+                  return true
+                },
+                preventDefault: true,
+              },
+              {
+                key: "Home",
+                mac: "Cmd-ArrowLeft",
+                run: (v) => {
+                  const head = v.state.selection.main.head
+                  const line = v.state.doc.lineAt(head)
+                  const firstNonWs = line.text.search(/\S/)
+                  const indentPos = firstNonWs === -1 ? line.from : line.from + firstNonWs
+                  const target = head === indentPos ? line.from : indentPos
+                  v.dispatch({ selection: { anchor: target }, scrollIntoView: true })
+                  return true
+                },
+                shift: (v) => {
+                  const { anchor, head } = v.state.selection.main
+                  const line = v.state.doc.lineAt(head)
+                  const firstNonWs = line.text.search(/\S/)
+                  const indentPos = firstNonWs === -1 ? line.from : line.from + firstNonWs
+                  const target = head === indentPos ? line.from : indentPos
+                  v.dispatch({ selection: { anchor, head: target }, scrollIntoView: true })
+                  return true
+                },
+                preventDefault: true,
               },
               {
                 key: "Alt-ArrowUp",
@@ -410,6 +466,44 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
                 run: (v) => {
                   v.dispatch(toggleInlineMarkSpec(v.state, "*"))
                   return true
+                },
+              },
+              {
+                key: "Mod-k",
+                run: (v) => {
+                  v.dispatch(toggleLinkSpec(v.state))
+                  return true
+                },
+              },
+              {
+                key: "Mod-Shift-s",
+                run: (v) => {
+                  v.dispatch(toggleInlineMarkSpec(v.state, "~~"))
+                  return true
+                },
+              },
+              {
+                key: "Mod-Shift-x",
+                run: (v) => {
+                  v.dispatch(toggleInlineMarkSpec(v.state, "~~"))
+                  return true
+                },
+              },
+              {
+                key: "Mod-`",
+                run: (v) => {
+                  v.dispatch(toggleInlineMarkSpec(v.state, "`"))
+                  return true
+                },
+              },
+              {
+                key: "Mod-/",
+                run: () => {
+                  if (latest.current.onOpenShortcuts) {
+                    latest.current.onOpenShortcuts()
+                    return true
+                  }
+                  return false
                 },
               },
               ...defaultKeymap,

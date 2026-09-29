@@ -13,6 +13,7 @@ import {
   Columns2,
   Download,
   FileText,
+  Keyboard,
   LayoutGrid,
   List,
   Loader2,
@@ -34,6 +35,7 @@ import { type MarkdownEditorHandle } from "@/components/notes/MarkdownCodeEditor
 import { NoteBacklinks } from "@/components/notes/NoteBacklinks"
 import { NoteCollectionsField } from "@/components/notes/NoteCollectionsField"
 import { NoteEditor } from "@/components/notes/NoteEditor"
+import { NoteShortcutsDialog } from "@/components/notes/NoteShortcutsDialog"
 import { NotePdfExport } from "@/components/notes/NotePdfExport"
 import { NoteSourceDocsField } from "@/components/notes/NoteSourceDocsField"
 import { VoiceRecordButton } from "@/components/VoiceRecordButton"
@@ -187,11 +189,16 @@ export default function NotePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note?.id])
 
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "e") {
         e.preventDefault()
         setReadingView((v) => !v)
+      } else if ((e.metaKey || e.ctrlKey) && e.key === "/") {
+        e.preventDefault()
+        setShortcutsOpen((v) => !v)
       }
     }
     window.addEventListener("keydown", onKey)
@@ -458,6 +465,14 @@ export default function NotePage() {
               title="Dictate into note (Whisper)"
             />
             <PanelZoomResetButton panelId={readingView ? "note-preview" : "note-editor"} />
+            <button
+              type="button"
+              onClick={() => setShortcutsOpen(true)}
+              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              title="Keyboard shortcuts (Cmd+/)"
+            >
+              <Keyboard size={14} />
+            </button>
           </div>
           <div
             role="status"
@@ -679,6 +694,7 @@ export default function NotePage() {
                 onContentChange={setEditContent}
                 linkCompletion={linkCompletion}
                 editorRef={editorHandleRef}
+                onOpenShortcuts={() => setShortcutsOpen(true)}
               />
               {note && (
                 <NoteBacklinks
@@ -786,6 +802,10 @@ export default function NotePage() {
           onDone={() => setPdfExporting(false)}
         />
       )}
+      <NoteShortcutsDialog
+        open={shortcutsOpen}
+        onOpenChange={setShortcutsOpen}
+      />
     </div>
   )
 }
