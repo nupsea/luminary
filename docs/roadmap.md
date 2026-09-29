@@ -539,8 +539,14 @@ Ask on a false premise (#158), web chunk hygiene (#159), the flashcard floors (#
 0.53 of delivered cards are good, and no checker applied after generation lifts that above 0.62 (#191).
 A prompt that asks for a reason only where the text states one, plus a check that rejects unnamed
 subjects, raised hand-graded good-among-delivered from 0.49 to 0.71 over two local runs (2026-09-29).
-The remaining failures are invented links and misread text; choosing the sentences in code before
-the model writes a card is being tested in #191.
+Choosing the sentences in code before the model writes a card (#191, `FLASHCARD_UNIT_SELECTION`)
+beat that prompt in every document type on two blind runs over 19 library documents, 0.69 and 0.73
+to 0.84 and 0.88, and is on by default since 0.14.4. Open: the unit path ignores the difficulty
+choice and gives no Bloom level (`backend/app/services/flashcard_generators.py`, `_unit_cards`);
+"hard" as worded today asks for analysis the sentence does not state, so it needs its own design and
+a graded run before it is honoured. The remaining misses
+are speakers the source mislabels (the Gita's chapter headings name the wrong speaker) and misread
+text.
 
 **Query-time graph expansion buys no retrieval quality.** `run_eval.py --ablation`, 2026-09-21, dev
 library, GLiNER held resident and the arms confirmed to diverge before and after each dataset. On the

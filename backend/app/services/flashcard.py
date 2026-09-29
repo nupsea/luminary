@@ -235,6 +235,44 @@ def _resolve_section_heading(
     return heading
 
 
+# Marks of a bibliography entry. Three in one chunk decide it, bracketed on the dev library's
+# 47k chunks: at 3 or more, all 449 unheaded chunks were reference lists or endnotes (two open
+# with a few lines of prose); at 2, prose such as DDIA's "Asynchronous message passing ..." appears.
+_REFERENCE_MARK = re.compile(
+    r"^\s*\[\d{1,3}\]\s+\S|\bIn\s+(?:Proceedings|Advances\s+in)\b"
+    r"|\bpages?\s+\d+\s*[–-]\s*\d+|\bpp\.\s*\d+|\d+\s*\(\d+\)\s*:\s*\d+|\barXiv\b"
+    r"|,\s+(?:19|20)\d\d[a-z]?\.",
+    re.M,
+)
+_REFERENCE_MARKS_PER_CHUNK = 3
+_REFERENCE_HEADING = re.compile(
+    r"^\W*(?:\d+(?:\.\d+)*\.?\s*)?(?:references|bibliography|works cited|literature cited)\b",
+    re.I,
+)
+
+
+def _is_reference_chunk(text: str, heading: str | None) -> bool:
+    """A bibliography chunk: under a references heading, or dense with entry marks.
+
+    Both are needed: a paper's reference list is often parsed under its last heading
+    ("Conclusion"), and a references section split mid-entry can carry no marks at all.
+    """
+    if heading and _REFERENCE_HEADING.search(heading):
+        return True
+    return len(_REFERENCE_MARK.findall(text)) >= _REFERENCE_MARKS_PER_CHUNK
+
+
+async def _drop_reference_lists(
+    chunks: list[ChunkModel], session: AsyncSession
+) -> list[ChunkModel]:
+    """Chunks that are not bibliography, or all of them when nothing else is left."""
+    from app.repos.study_repo import StudyRepo  # noqa: PLC0415
+
+    headings = await StudyRepo(session).chunk_section_headings([c.id for c in chunks])
+    kept = [c for c in chunks if not _is_reference_chunk(c.text, headings.get(c.id))]
+    return kept or chunks
+
+
 async def _fetch_chunks(
     document_id: str,
     scope: Literal["full", "section"],
@@ -244,7 +282,23 @@ async def _fetch_chunks(
 ) -> list[ChunkModel]:
     """Return ordered chunks for the document, filtered by section when scope='section'.
 
-    If scope='full' and content_type='book', it tries to skip preface/introduction sections
+    A whole-document read leaves out reference lists: a card asking where a cited paper
+    appeared tests nothing the document teaches. A section the reader chose is read as is.
+    """
+    chunks = await _fetch_document_chunks(
+        document_id, scope, section_heading, session, content_type
+    )
+    return await _drop_reference_lists(chunks, session) if scope == "full" else chunks
+
+
+async def _fetch_document_chunks(
+    document_id: str,
+    scope: Literal["full", "section"],
+    section_heading: str | None,
+    session: AsyncSession,
+    content_type: str = "unknown",
+) -> list[ChunkModel]:
+    """If scope='full' and content_type='book', skips preface/introduction sections
     to avoid metadata-heavy flashcards.
     """
     if scope == "section" and section_heading:

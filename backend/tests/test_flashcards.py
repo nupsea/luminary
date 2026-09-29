@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 from stubs import CapturingLLMService as _CapturingLLMService
 from stubs import MockLLMService as _MockLLMService
@@ -74,6 +75,7 @@ def _make_flashcard(card_id: str | None = None, doc_id: str = "doc-1", **kwargs)
 # Service unit tests
 
 
+@pytest.mark.usefixtures("single_prompt")
 async def test_service_parses_json_and_creates_cards(test_db):
     """FlashcardService.generate() parses LLM JSON output and stores cards."""
     _, factory, _ = test_db
@@ -121,6 +123,7 @@ async def test_service_parses_json_and_creates_cards(test_db):
     assert cards[1].answer == "A state of being both 0 and 1."
 
 
+@pytest.mark.usefixtures("single_prompt")
 async def test_service_strips_markdown_fences(test_db):
     """FlashcardService.generate() handles LLM responses wrapped in markdown fences."""
     _, factory, _ = test_db
@@ -180,6 +183,7 @@ async def test_service_returns_empty_when_no_chunks(test_db):
     assert mock_llm.call_count == 0
 
 
+@pytest.mark.usefixtures("single_prompt")
 async def test_service_prompt_includes_count(test_db):
     """LLM prompt includes the requested count."""
     _, factory, _ = test_db
@@ -208,6 +212,7 @@ async def test_service_prompt_includes_count(test_db):
     assert "7" in mock_llm.captured_prompts[0]
 
 
+@pytest.mark.usefixtures("single_prompt")
 async def test_service_prompt_includes_difficulty(test_db):
     """LLM prompt includes the requested difficulty and it's stored in the database."""
     _, factory, _ = test_db
@@ -246,6 +251,7 @@ async def test_service_prompt_includes_difficulty(test_db):
     assert cards[0].difficulty == "hard"
 
 
+@pytest.mark.usefixtures("single_prompt")
 async def test_service_prompt_includes_book_guidelines(test_db):
     """LLM prompt includes book-specific guidelines when content_type is 'book'."""
     _, factory, _ = test_db
@@ -400,6 +406,7 @@ async def test_bulk_delete_empty_ids_rejected(test_db):
 # Endpoint integration tests
 
 
+@pytest.mark.usefixtures("single_prompt")
 async def test_generate_endpoint_returns_201(test_db):
     """POST /flashcards/generate returns 201 with card list."""
     _, factory, _ = test_db
@@ -472,6 +479,7 @@ async def test_generate_without_cloud_key_is_503_naming_settings(test_db, monkey
     assert "Go to Settings to add your API key" in resp.json()["detail"]
 
 
+@pytest.mark.usefixtures("single_prompt")
 async def test_generate_retries_to_backfill_gated_cards(test_db):
     """When some cards fail the quality gate, extra LLM passes backfill the
     shortfall so the requested count is met."""
@@ -540,6 +548,7 @@ async def test_generate_retries_to_backfill_gated_cards(test_db):
     assert all(len(c["answer"].split()) >= 2 for c in data)
 
 
+@pytest.mark.usefixtures("single_prompt")
 async def test_generate_retries_to_backfill_deduped_cards(test_db):
     """When a candidate card is dropped by near-duplicate detection, extra LLM
     passes backfill the shortfall so the requested count is met."""

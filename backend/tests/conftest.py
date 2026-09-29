@@ -143,6 +143,7 @@ def isolated_data_dir(tmp_path_factory):
         "LITELLM_GENERATION_MODEL",
         "VISION_MODEL",
         "FLASHCARD_FACTUALITY_MODEL",
+        "FLASHCARD_UNIT_SELECTION",
         "LUMINARY_MEMORY_PROFILE",
     ):
         os.environ[_knob] = str(Settings.model_fields[_knob].default)
@@ -478,6 +479,17 @@ async def memory_db(tmp_path, monkeypatch, _schema_template):
     db_module._engine, db_module._session_factory = saved
     get_settings.cache_clear()
     await dispose_engine(engine)
+
+
+@pytest.fixture
+def single_prompt(monkeypatch):
+    """Flashcard generation on the single-prompt path, which unit-first replaced by default."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("FLASHCARD_UNIT_SELECTION", "false")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture

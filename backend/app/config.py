@@ -317,6 +317,10 @@ class Settings(BaseSettings):
     # separates supported from unsupported on this corpus, not a smaller model
     # appearing. Must not equal the generation model (self-judging).
     FLASHCARD_FACTUALITY_MODEL: str = ""
+    # Unit-first flashcards: code picks the sentences, the model phrases one card each (#191).
+    # On: it beat the shipped prompt in every document type over two blind runs. It ignores the
+    # Easy/Medium/Hard choice and sets no Bloom level; "hard" as worded asks for unstated content.
+    FLASHCARD_UNIT_SELECTION: bool = True
     # Prompt arm for the model matrix (P6). `shipped` renders the contract plus
     # the accommodations a model still needs; `bare` renders the contract alone.
     # A model that scores HIGHER on `bare` is telling you the accommodation set

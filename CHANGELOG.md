@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Unit-first flashcards, on by default (`FLASHCARD_UNIT_SELECTION`).** Code picks the sentences worth a card and the model only phrases the question, so every card quotes the sentence that answers it. On 19 library documents, graded blind over two runs, good cards rose from 0.69 and 0.73 to 0.84 and 0.88, beating the previous prompt in every document type. Document cards now ignore the Easy/Medium/Hard choice and carry no Bloom level.
+
+### Fixed
+- **Flashcards were written from a paper's reference list.** A whole-document deck now skips bibliography chunks.
+- **Some flashcards pointed at text the reader cannot see.** Questions naming "the text", "the sentence", "the speaker", a section label or a first-person narrator ("What did I exclaim") are now rejected.
+
 ## [0.14.3] - 2026-09-29
 
 ### Added
