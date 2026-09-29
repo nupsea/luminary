@@ -5,7 +5,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, BookOpen, Download, Feather, FileText, Loader2, Network, Newspaper, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
+import { ArrowLeft, BookOpen, Download, Feather, FileText, Loader2, Network, Newspaper, Pencil, Plus, Star, Tag, Trash2, Wand2, X } from "lucide-react"
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -59,6 +59,7 @@ import {
   backfillNoteDescriptions,
   deleteNote,
   fetchCollectionTree,
+  toggleNoteFavorite,
   type Note,
 } from "@/lib/notesApi"
 
@@ -68,7 +69,12 @@ import {
 
 interface GroupInfo { name: string; count: number }
 interface TagInfo { name: string; count: number }
-interface GroupsData { groups: GroupInfo[]; tags: TagInfo[]; total_notes: number }
+interface GroupsData {
+  groups: GroupInfo[]
+  tags: TagInfo[]
+  total_notes: number
+  favorites_count?: number
+}
 
 interface DocumentItem {
   id: string
@@ -95,11 +101,13 @@ async function fetchNotes(
   documentId?: string,
   tag?: string,
   collectionId?: string,
+  favorite?: boolean,
 ): Promise<Note[]> {
   return apiGet<Note[]>("/notes", {
     document_id: documentId,
     tag,
     collection_id: collectionId,
+    favorite,
   })
 }
 
@@ -505,6 +513,18 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
     },
   })
 
+  const favoriteMut = useMutation({
+    mutationFn: (fav: boolean) => toggleNoteFavorite(note.id, fav),
+    onSuccess: (updated) => {
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+      void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+      toast.success(updated.is_favorite ? "Added to favorites" : "Removed from favorites")
+    },
+    onError: () => {
+      toast.error("Failed to update favorite")
+    },
+  })
+
   return (
     <div className="mb-6 flex break-inside-avoid flex-col gap-4 rounded-xl border border-border bg-card p-6">
       {/* Header row */}
@@ -514,6 +534,25 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         {note.group_name && (
           <span className="rounded-full bg-muted px-2 py-0.5">{note.group_name}</span>
         )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            favoriteMut.mutate(!note.is_favorite)
+          }}
+          aria-label={note.is_favorite ? "Remove from favorites" : "Add to favorites"}
+          aria-pressed={Boolean(note.is_favorite)}
+          className={`p-0.5 rounded hover:bg-accent transition-colors ${
+            note.is_favorite
+              ? "text-amber-500 hover:text-amber-600"
+              : "text-muted-foreground/40 hover:text-amber-500"
+          }`}
+          title={note.is_favorite ? "Remove from favorites" : "Add to favorites"}
+        >
+          <Star
+            size={13}
+            className={note.is_favorite ? "fill-amber-400 text-amber-500" : ""}
+          />
+        </button>
         {canPublishBlog && (
           <button
             onClick={(e) => { e.stopPropagation(); setPublishKind("blog") }}
@@ -705,6 +744,7 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
 
 type FilterState =
   | { type: "all" }
+  | { type: "favorites" }
   | { type: "journal" }
   | { type: "blogs" }
   | { type: "tag"; name: string }
@@ -787,6 +827,7 @@ export default function NotesPage() {
   const tagParam = activeTag ?? (filter.type === "tag" ? filter.name : undefined)
   // When a collection is active, clear tag params and use collection filter instead.
   const collectionParam = activeCollectionId ?? undefined
+  const isFavorites = filter.type === "favorites" && !activeCollectionId && !activeTag
 
   const {
     data: notes,
@@ -794,8 +835,14 @@ export default function NotesPage() {
     isError: notesError,
     refetch,
   } = useQuery({
-    queryKey: ["notes", tagParam, collectionParam, notesDocumentId],
-    queryFn: () => fetchNotes(notesDocumentId ?? undefined, tagParam, collectionParam),
+    queryKey: ["notes", tagParam, collectionParam, notesDocumentId, isFavorites],
+    queryFn: () =>
+      fetchNotes(
+        notesDocumentId ?? undefined,
+        tagParam,
+        collectionParam,
+        isFavorites ? true : undefined,
+      ),
     gcTime: 60_000,
   })
 
@@ -917,7 +964,9 @@ export default function NotesPage() {
     }
   }
 
-  const noteList = notes ?? []
+  const noteList = isFavorites
+    ? (notes ?? []).filter((n) => n.is_favorite)
+    : (notes ?? [])
 
   const openNote = (id: string) =>
     navigate(`/notes/${id}`, { state: { from: "/notes" } })
@@ -1001,6 +1050,7 @@ export default function NotesPage() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8 px-2" aria-label="Favorite" />
               <TableHead>Title</TableHead>
               <TableHead>Tags</TableHead>
               <TableHead>Group</TableHead>
@@ -1012,6 +1062,7 @@ export default function NotesPage() {
           <TableBody>
             {Array.from({ length: 3 }).map((_, i) => (
               <TableRow key={i}>
+                <TableCell className="w-8 px-2"><Skeleton className="h-4 w-4" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-40" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-16" /></TableCell>
@@ -1041,7 +1092,15 @@ export default function NotesPage() {
       </div>
     )
   } else if (noteList.length === 0) {
-    panelContent = activeTag ? (
+    panelContent = isFavorites ? (
+      <div className="flex flex-col items-center gap-3 py-20 text-center">
+        <Star size={32} className="fill-amber-400 text-amber-400 opacity-60" />
+        <p className="text-base font-medium text-foreground">No favorite notes yet</p>
+        <p className="text-sm text-muted-foreground">
+          Click the star icon on any note to access it quickly in your favorites list.
+        </p>
+      </div>
+    ) : activeTag ? (
       <div className="flex flex-col items-center gap-3 py-20 text-center">
         <Tag size={32} className="text-muted-foreground/50" />
         <p className="text-base font-medium text-foreground">
@@ -1073,6 +1132,7 @@ export default function NotesPage() {
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-8 px-2" aria-label="Favorite" />
             <TableHead>Title</TableHead>
             <TableHead>Tags</TableHead>
             <TableHead>Group</TableHead>
@@ -1090,6 +1150,33 @@ export default function NotesPage() {
               draggable
               onDragStart={(e) => e.dataTransfer.setData("text/plain", note.id)}
             >
+              <TableCell className="w-8 px-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    toggleNoteFavorite(note.id, !note.is_favorite)
+                      .then((updated) => {
+                        void qc.invalidateQueries({ queryKey: ["notes"] })
+                        void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+                        toast.success(updated.is_favorite ? "Added to favorites" : "Removed from favorites")
+                      })
+                      .catch(() => toast.error("Failed to update favorite"))
+                  }}
+                  aria-label={note.is_favorite ? "Remove from favorites" : "Add to favorites"}
+                  aria-pressed={Boolean(note.is_favorite)}
+                  className="rounded p-1 text-muted-foreground hover:text-amber-500 hover:bg-accent transition-colors"
+                  title={note.is_favorite ? "Remove from favorites" : "Add to favorites"}
+                >
+                  <Star
+                    size={13}
+                    className={
+                      note.is_favorite
+                        ? "fill-amber-400 text-amber-500"
+                        : "text-muted-foreground/30 hover:text-amber-500"
+                    }
+                  />
+                </button>
+              </TableCell>
               <TableCell className="max-w-[200px] truncate font-medium text-foreground">
                 {note.title?.trim() || deriveTitle(note.content)}
               </TableCell>
@@ -1182,6 +1269,25 @@ export default function NotesPage() {
         >
           All Notes
           <span className="ml-auto text-xs">{groups?.total_notes ?? noteList.length}</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setFilter({ type: "favorites" })
+            setActiveCollectionId(null)
+            setActiveTag(null)
+          }}
+          className={`flex items-center gap-2 rounded px-3 py-2 text-sm text-left transition-colors ${
+            filter.type === "favorites" && !activeCollectionId && !activeTag
+              ? "bg-accent font-medium text-foreground"
+              : "text-muted-foreground hover:bg-accent/60"
+          }`}
+        >
+          <Star size={13} className="fill-amber-400 text-amber-400" />
+          Favorites
+          <span className="ml-auto text-xs">
+            {groups?.favorites_count ?? (notes ?? []).filter((n) => n.is_favorite).length}
+          </span>
         </button>
 
         <button
@@ -1345,11 +1451,13 @@ export default function NotesPage() {
                   ? `Tag: #${activeTag}`
                   : filter.type === "all"
                     ? "All Notes"
+                    : filter.type === "favorites"
+                      ? "Favorite Notes"
                     : filter.type === "journal"
                       ? "Reading Journal"
-                      : filter.type === "blogs"
-                        ? "Blog & Thoughts"
-                        : `#${filter.name}`}
+                    : filter.type === "blogs"
+                      ? "Blog & Thoughts"
+                      : `#${filter.name}`}
           </h2>
           {notesDocumentId && (
             <button

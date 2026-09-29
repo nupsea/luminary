@@ -1,8 +1,10 @@
 // Sortable library table view (alternative to the card grid). Sort state
 // is local; the parent owns row-click navigation.
 
-import { ChevronDown, ChevronUp, ChevronsUpDown } from "lucide-react"
+import { ChevronDown, ChevronUp, ChevronsUpDown, Star } from "lucide-react"
 import { useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
+import { toggleDocumentFavorite } from "./api"
 
 import { humanizeTitle } from "@/lib/humanizeTitle"
 import { Badge } from "@/components/ui/badge"
@@ -26,6 +28,7 @@ interface LibraryTableProps {
   isError: boolean
   onRowClick: (id: string) => void
   onRetry: () => void
+  onToggleFavorite?: (id: string, isFavorite: boolean) => void
 }
 
 function SortIcon({
@@ -43,9 +46,26 @@ function SortIcon({
     : <ChevronDown size={12} className="ml-1 inline text-foreground" />
 }
 
-export function LibraryTable({ items, isLoading, isError, onRowClick, onRetry }: LibraryTableProps) {
+export function LibraryTable({ items, isLoading, isError, onRowClick, onRetry, onToggleFavorite }: LibraryTableProps) {
+  const queryClient = useQueryClient()
   const [sortCol, setSortCol] = useState<TableSortCol | null>(null)
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+
+  async function handleStarClick(e: React.MouseEvent, docId: string, currentFav: boolean) {
+    e.stopPropagation()
+    try {
+      if (onToggleFavorite) {
+        onToggleFavorite(docId, !currentFav)
+      } else {
+        await toggleDocumentFavorite(docId, !currentFav)
+        void queryClient.invalidateQueries({ queryKey: ["documents"] })
+        void queryClient.invalidateQueries({ queryKey: ["library-facets"] })
+        void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   function handleColClick(col: TableSortCol) {
     if (sortCol === col) {
@@ -81,6 +101,7 @@ export function LibraryTable({ items, isLoading, isError, onRowClick, onRetry }:
     <Table>
       <TableHeader>
         <TableRow>
+          <TableHead className="w-8 px-2" aria-label="Favorite" />
           <TableHead>
             <button
               onClick={() => handleColClick("title")}
@@ -109,6 +130,7 @@ export function LibraryTable({ items, isLoading, isError, onRowClick, onRetry }:
         {isLoading
           ? Array.from({ length: 5 }).map((_, i) => (
               <TableRow key={i}>
+                <TableCell className="w-8 px-2"><Skeleton className="h-4 w-4" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-48" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-12" /></TableCell>
@@ -120,7 +142,7 @@ export function LibraryTable({ items, isLoading, isError, onRowClick, onRetry }:
           : sorted.length === 0
           ? (
               <TableRow>
-                <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
                   No documents yet. Upload your first document to get started.
                 </TableCell>
               </TableRow>
@@ -131,6 +153,24 @@ export function LibraryTable({ items, isLoading, isError, onRowClick, onRetry }:
                 className="cursor-pointer"
                 onClick={() => onRowClick(doc.id)}
               >
+                <TableCell className="w-8 px-2">
+                  <button
+                    type="button"
+                    onClick={(e) => void handleStarClick(e, doc.id, Boolean(doc.is_favorite))}
+                    aria-label={doc.is_favorite ? "Remove from favorites" : "Add to favorites"}
+                    aria-pressed={Boolean(doc.is_favorite)}
+                    className="rounded p-1 hover:bg-accent focus:outline-none transition-colors"
+                  >
+                    <Star
+                      size={14}
+                      className={
+                        doc.is_favorite
+                          ? "fill-amber-400 text-amber-500"
+                          : "text-muted-foreground/30 hover:text-amber-500"
+                      }
+                    />
+                  </button>
+                </TableCell>
                 <TableCell className="font-medium text-foreground">
                   {humanizeTitle(doc.title)}
                 </TableCell>

@@ -235,6 +235,7 @@ async def list_documents(
     collection_id: str | None = Query(
         default=None, description="Restrict to documents in this collection"
     ),
+    favorite: bool | None = Query(default=None, description="Filter by favorite status"),
     sort: Literal[
         "newest", "oldest", "alphabetical", "most-studied", "last_accessed", "weakest-first"
     ] = Query(default="newest"),
@@ -401,6 +402,8 @@ async def list_documents(
                 )
                 .exists()
             )
+        if favorite is not None:
+            where_clauses.append(DocumentModel.is_favorite == favorite)
 
         # Total count under the same filters.
         count_stmt = select(func.count()).select_from(DocumentModel)
@@ -521,6 +524,7 @@ async def list_documents(
                 enrichment_status=enrichment_status,
                 objective_progress_pct=objective_progress_pct,
                 mastery_pct=mastery_pct,
+                is_favorite=bool(doc.is_favorite),
                 collections=[
                     CollectionRef(id=cid, name=name, color=color)
                     for cid, name, color in collection_refs_by_doc.get(doc.id, [])
@@ -1207,10 +1211,13 @@ async def document_facets() -> DocumentFacetsResponse:
     """
     async with get_session_factory()() as session:
         by_type, by_format = await DocumentRepo(session).facet_counts()
+        fav_stmt = select(func.count(DocumentModel.id)).where(DocumentModel.is_favorite.is_(True))
+        favorite_count = (await session.execute(fav_stmt)).scalar() or 0
     return DocumentFacetsResponse(
         content_types=by_type,
         formats=by_format,
         total=sum(by_type.values()),
+        favorite_count=favorite_count,
     )
 
 
@@ -1264,6 +1271,7 @@ async def get_document(document_id: str):
         format=doc.format,
         content_type=doc.content_type,
         facets=_facets(doc),
+        is_favorite=bool(doc.is_favorite),
         structure_type=doc.structure_type,
         extraction_report=doc.extraction_report,
         word_count=doc.word_count,
@@ -1827,9 +1835,15 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
             )
         if body.content_type is not None:
             doc.content_type = body.content_type
+        if body.is_favorite is not None:
+            doc.is_favorite = body.is_favorite
         await repo.commit()
     logger.info("Patched document", extra={"document_id": document_id})
-    response: dict = {"document_id": document_id, "updated": True}
+    response: dict = {
+        "document_id": document_id,
+        "updated": True,
+        "is_favorite": doc.is_favorite,
+    }
     if body.content_type is not None:
         response["note"] = "Re-ingest document to apply new chunking strategy."
     return response

@@ -57,6 +57,7 @@ class DocumentListItem(BaseModel):
     enrichment_status: str | None = None
     objective_progress_pct: float | None = None
     mastery_pct: float | None = None
+    is_favorite: bool = False
     # Membership chips for the card surface (plan 2E.5). Ordered by
     # CollectionModel.sort_order ASC, created_at ASC -- stable across pages.
     collections: list[CollectionRef] = []
@@ -73,6 +74,7 @@ class DocumentFacetsResponse(BaseModel):
     content_types: dict[str, int]
     formats: dict[str, int]
     total: int
+    favorite_count: int = 0
 
 
 class DocumentListResponse(BaseModel):
@@ -94,6 +96,7 @@ class PatchDocumentRequest(BaseModel):
     title: str | None = None
     tags: list[str] | None = None
     content_type: ContentType | None = None
+    is_favorite: bool | None = None
 
 
 class SectionItem(BaseModel):
@@ -127,6 +130,7 @@ class DocumentDetail(BaseModel):
     format: str
     content_type: str
     facets: DocumentFacets | None = None
+    is_favorite: bool = False
     # Layout discovered while parsing: book|paper|script|chat.
     structure_type: str | None = None
     # What the importer captured and what it could not. Null means fidelity was

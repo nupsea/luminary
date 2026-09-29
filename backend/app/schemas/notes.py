@@ -24,6 +24,7 @@ class NoteCreateRequest(BaseModel):
     title: str | None = None
     # multi-document source linkage; legacy document_id still accepted
     source_document_ids: list[str] = []
+    is_favorite: bool = False
 
 
 class NoteUpdateRequest(BaseModel):
@@ -38,6 +39,7 @@ class NoteUpdateRequest(BaseModel):
     # title_auto_generated=False so subsequent auto-gen passes never
     # overwrite the user's choice. Empty string is a legal "clear to null".
     title: str | None = None
+    is_favorite: bool | None = None
 
 
 class NoteResponse(BaseModel):
@@ -57,6 +59,7 @@ class NoteResponse(BaseModel):
     title: str | None = None
     title_auto_generated: bool = True
     description: str | None = None
+    is_favorite: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -77,6 +80,7 @@ class GroupsResponse(BaseModel):
     groups: list[GroupInfo]
     tags: list[TagInfo]
     total_notes: int
+    favorites_count: int = 0
 
 
 class SuggestedTagsResponse(BaseModel):

@@ -92,4 +92,4 @@ async def test_facets_is_not_read_as_a_document_id(test_db):
 async def test_an_empty_library_reports_nothing_rather_than_failing(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         body = (await c.get("/documents/facets")).json()
-    assert body == {"content_types": {}, "formats": {}, "total": 0}
+    assert body == {"content_types": {}, "formats": {}, "total": 0, "favorite_count": 0}

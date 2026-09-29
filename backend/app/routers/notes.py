@@ -222,6 +222,7 @@ async def create_note(
         group_name=req.group_name,
         title=(req.title or "").strip() or None,
         title_auto_generated=req.title is None,
+        is_favorite=bool(req.is_favorite),
         created_at=now,
         updated_at=now,
     )
@@ -325,7 +326,17 @@ async def get_groups(session: AsyncSession = Depends(get_db)) -> GroupsResponse:
     )
     total_notes = total_result.scalar_one()
 
-    return GroupsResponse(groups=groups, tags=tags, total_notes=total_notes)
+    # Favorites count (unarchived)
+    fav_result = await session.execute(
+        select(func.count())
+        .select_from(NoteModel)
+        .where(NoteModel.archived.is_(False), NoteModel.is_favorite.is_(True))
+    )
+    favorites_count = fav_result.scalar_one()
+
+    return GroupsResponse(
+        groups=groups, tags=tags, total_notes=total_notes, favorites_count=favorites_count
+    )
 
 
 @router.get("", response_model=list[NoteResponse])
@@ -334,6 +345,7 @@ async def list_notes(
     group: str | None = Query(default=None),
     tag: str | None = Query(default=None),
     collection_id: str | None = Query(default=None),
+    favorite: bool | None = Query(default=None, description="Filter by favorite status"),
     page: int = Query(default=1, ge=1),
     page_size: int | None = Query(
         default=None,
@@ -388,6 +400,8 @@ async def list_notes(
                 )
             )
         )
+    if favorite is not None:
+        stmt = stmt.where(NoteModel.is_favorite == favorite)
 
     if page_size is not None:
         stmt = stmt.limit(page_size).offset((page - 1) * page_size)
@@ -445,6 +459,8 @@ async def _apply_note_update(
         cleaned = req.title.strip()
         note.title = cleaned or None
         note.title_auto_generated = False
+    if req.is_favorite is not None:
+        note.is_favorite = req.is_favorite
     note.updated_at = datetime.now(UTC)
 
     await session.flush()  # Ensure content update is visible to other queries if needed

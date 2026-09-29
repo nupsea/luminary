@@ -15,6 +15,7 @@ const FACETS = {
   content_types: { book: 17, tech_book: 8, tech_article: 16, audio: 4 },
   formats: { pdf: 18, epub: 1 },
   total: 45,
+  favorite_count: 5,
 }
 
 describe("visibleChips", () => {

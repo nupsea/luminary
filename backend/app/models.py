@@ -81,6 +81,9 @@ class DocumentModel(Base):
     # partial import is visible to the reader rather than a silence they have
     # no way to interpret. Null = the parser does not measure its own fidelity.
     extraction_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    is_favorite: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
@@ -419,6 +422,9 @@ class NoteModel(Base):
     content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     # archived flag -- excluded from default GET /notes list; set by archive-stale
     archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    is_favorite: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))

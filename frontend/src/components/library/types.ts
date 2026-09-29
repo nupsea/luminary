@@ -64,6 +64,7 @@ export interface DocumentListItem {
   // Membership chips (plan 2E.5). Stable sort: CollectionModel.sort_order
   // then name. Card UI lands in step 8.
   collections: CollectionRef[]
+  is_favorite?: boolean
 }
 
 export interface DocumentListResponse {

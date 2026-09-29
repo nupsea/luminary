@@ -6,6 +6,7 @@ import {
   FileText,
   MessageSquare,
   Mic,
+  Star,
   StickyNote,
   Video,
   type LucideIcon,
@@ -84,6 +85,8 @@ interface FilterBarProps {
   onChange: (selected: Set<ContentType>) => void
   selectedFormats: Set<string>
   onFormatsChange: (selected: Set<string>) => void
+  favoriteOnly?: boolean
+  onFavoriteToggle?: () => void
   /** Counts over the whole library. Undefined while loading: chips stay hidden
    *  rather than flashing in and out as the numbers arrive. */
   facets?: LibraryFacets
@@ -127,6 +130,8 @@ export function FilterBar({
   onChange,
   selectedFormats,
   onFormatsChange,
+  favoriteOnly,
+  onFavoriteToggle,
   facets,
 }: FilterBarProps) {
   function toggleChip(chip: TypeChip) {
@@ -149,11 +154,53 @@ export function FilterBar({
     .filter(([id, count]) => count > 0 && id in FORMAT_LABELS)
     .sort((a, b) => b[1] - a[1])
 
-  if (groups.length === 0 && formats.length === 0) return null
+  if (groups.length === 0 && formats.length === 0 && !onFavoriteToggle) return null
 
   return (
     <div className="flex w-full flex-col gap-6 py-2">
       <div className="no-scrollbar flex items-start gap-12 overflow-x-auto pb-2">
+        {onFavoriteToggle && (
+          <div className="group/nav flex flex-col gap-3">
+            <span className="lum-eyebrow transition-colors group-hover/nav:text-primary/70">
+              Quick Filter
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onFavoriteToggle}
+                aria-pressed={favoriteOnly}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium whitespace-nowrap transition-all duration-200",
+                  favoriteOnly
+                    ? "border-amber-400/40 bg-amber-400/10 text-amber-500 dark:text-amber-400 shadow-sm font-semibold"
+                    : "border-transparent bg-muted/30 text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                <Star
+                  size={14}
+                  className={cn(
+                    favoriteOnly
+                      ? "fill-amber-400 text-amber-400"
+                      : "text-muted-foreground",
+                  )}
+                />
+                Favorites
+                {facets?.favorite_count !== undefined && (
+                  <span
+                    className={cn(
+                      "tabular-nums",
+                      favoriteOnly
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-muted-foreground/60",
+                    )}
+                  >
+                    {facets.favorite_count}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
         {groups.map((group) => (
           <div key={group.label} className="group/nav flex flex-col gap-3">
             <span className="lum-eyebrow transition-colors group-hover/nav:text-primary/70">

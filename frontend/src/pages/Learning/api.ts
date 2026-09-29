@@ -1,7 +1,7 @@
 // HTTP wrappers backing the Learning page. Pure functions; the page and
 // its sub-components wire them up via tanstack-query useQuery / useMutation.
 
-import { apiDelete, apiGet, apiPost } from "@/lib/apiClient"
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 import type { LibraryFacets } from "@/components/library/FilterBar"
 import type {
   DocumentListItem,
@@ -37,6 +37,7 @@ export const fetchDocuments = (params: {
   format?: string
   tag?: string
   collection_id?: string
+  favorite?: boolean
   sort: SortOption
   page: number
   page_size: number
@@ -49,7 +50,14 @@ export const fetchDocuments = (params: {
     format: params.format,
     tag: params.tag,
     collection_id: params.collection_id,
+    favorite: params.favorite,
   })
+
+export const toggleDocumentFavorite = (
+  documentId: string,
+  isFavorite: boolean,
+): Promise<{ document_id: string; updated: boolean; is_favorite?: boolean }> =>
+  apiPatch(`/documents/${documentId}`, { is_favorite: isFavorite })
 
 /** How many documents each filter would match, over the whole library.
  *

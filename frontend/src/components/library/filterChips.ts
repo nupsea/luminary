@@ -15,6 +15,7 @@ export interface LibraryFacets {
   content_types: Record<string, number>
   formats: Record<string, number>
   total: number
+  favorite_count?: number
 }
 
 /** How many documents a chip stands for, over the whole library. */

@@ -18,6 +18,7 @@ import {
   Loader2,
   PanelRight,
   PencilLine,
+  Star,
   Tag,
   Trash2,
   Wand2,
@@ -62,6 +63,7 @@ import {
   fetchSuggestedTags,
   getNote,
   removeNoteFromCollection,
+  toggleNoteFavorite,
 } from "@/lib/notesApi"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { useNoteEditorUi } from "@/store/noteEditorUi"
@@ -248,6 +250,19 @@ export default function NotePage() {
   })
 
   useNoteSaveShortcut(() => void flush().catch(() => {}), Boolean(note))
+
+  const favoriteMut = useMutation({
+    mutationFn: (fav: boolean) => toggleNoteFavorite(noteId!, fav),
+    onSuccess: (updated) => {
+      qc.setQueryData(["note", noteId], updated)
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+      void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+      toast.success(updated.is_favorite ? "Added to favorites" : "Removed from favorites")
+    },
+    onError: () => {
+      toast.error("Failed to update favorite")
+    },
+  })
 
   async function handleFetchSuggestions() {
     if (!note) return
@@ -472,6 +487,25 @@ export default function NotePage() {
               <>Autosaves as you type</>
             )}
           </div>
+          {note && (
+            <button
+              type="button"
+              onClick={() => favoriteMut.mutate(!note.is_favorite)}
+              aria-label={note.is_favorite ? "Remove from favorites" : "Add to favorites"}
+              aria-pressed={Boolean(note.is_favorite)}
+              className={`rounded-md border border-border bg-background p-1.5 transition-colors ${
+                note.is_favorite
+                  ? "text-amber-500 hover:text-amber-600"
+                  : "text-muted-foreground hover:text-amber-500"
+              }`}
+              title={note.is_favorite ? "Remove from favorites" : "Add to favorites"}
+            >
+              <Star
+                size={13}
+                className={note.is_favorite ? "fill-amber-400 text-amber-500" : ""}
+              />
+            </button>
+          )}
           {note && (
           <div className="relative">
             <button

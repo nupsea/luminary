@@ -61,6 +61,7 @@ def to_response(
         title=note.title,
         title_auto_generated=note.title_auto_generated,
         description=note.description,
+        is_favorite=bool(note.is_favorite),
         created_at=note.created_at,
         updated_at=note.updated_at,
     )

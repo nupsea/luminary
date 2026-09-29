@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BookPlus, Plus, SlidersHorizontal, Trash2 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useSearchParams, useLocation } from "react-router-dom"
 import { toast } from "sonner"
 
@@ -115,6 +115,7 @@ export default function Learning() {
   )
 
   const [search, setSearch] = useState(() => (!docParam ? searchParams.get("search") ?? "" : ""))
+  const [favoriteOnly, setFavoriteOnly] = useState(() => searchParams.get("favorite") === "true")
   const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
   const [selectedFormats, setSelectedFormats] = useState<Set<string>>(new Set())
   const [sort, setSort] = useState<SortOption>("newest")
@@ -129,6 +130,24 @@ export default function Learning() {
       setSearch(searchParams.get("search") ?? "")
     }
   }, [docParam, searchParams])
+
+  useEffect(() => {
+    setFavoriteOnly(searchParams.get("favorite") === "true")
+  }, [searchParams])
+
+  const handleFavoriteToggle = useCallback(() => {
+    setFavoriteOnly((prev) => {
+      const next = !prev
+      setSearchParams((p) => {
+        const nextParams = new URLSearchParams(p)
+        if (next) nextParams.set("favorite", "true")
+        else nextParams.delete("favorite")
+        return nextParams
+      })
+      setPage(1)
+      return next
+    })
+  }, [setSearchParams])
 
   // Consume the store value once on mount so a subsequent visit to /library
   // (e.g. via the sidebar tab) lands unfiltered. The local selectedCollectionId
@@ -146,7 +165,7 @@ export default function Learning() {
 
   const content_type = selectedTypes.size > 0 ? [...selectedTypes].join(",") : undefined
   const format = selectedFormats.size > 0 ? [...selectedFormats].join(",") : undefined
-  const filtered = selectedTypes.size > 0 || selectedFormats.size > 0
+  const filtered = selectedTypes.size > 0 || selectedFormats.size > 0 || favoriteOnly
 
   // Counts for the filter bar. Whole-library, so a chip is offered only when it
   // has something behind it.
@@ -175,6 +194,7 @@ export default function Learning() {
       format,
       tagFilter,
       selectedCollectionId,
+      favoriteOnly,
       sort,
       page,
       PAGE_SIZE,
@@ -185,6 +205,7 @@ export default function Learning() {
         format,
         tag: tagFilter ?? undefined,
         collection_id: selectedCollectionId ?? undefined,
+        favorite: favoriteOnly ? true : undefined,
         sort,
         page,
         page_size: PAGE_SIZE,
@@ -588,6 +609,8 @@ export default function Learning() {
             onChange={handleTypesChange}
             selectedFormats={selectedFormats}
             onFormatsChange={handleFormatsChange}
+            favoriteOnly={favoriteOnly}
+            onFavoriteToggle={handleFavoriteToggle}
             facets={facets}
           />
 
@@ -637,7 +660,9 @@ export default function Learning() {
 
               <section>
                 <h2 className="lum-eyebrow mb-2">
-                  {tagFilter
+                  {favoriteOnly
+                    ? "Favorite documents"
+                    : tagFilter
                     ? `Tagged: ${tagFilter}`
                     : selectedCollectionId
                     ? "In collection"
@@ -670,7 +695,9 @@ export default function Learning() {
                   </div>
                 ) : items.length === 0 ? (
                   <div className="py-8 text-center text-sm text-muted-foreground">
-                    {tagFilter ? (
+                    {favoriteOnly ? (
+                      <p>No favorite documents yet. Star any document in your library to access it quickly here.</p>
+                    ) : tagFilter ? (
                       <p>No documents tagged &ldquo;{tagFilter}&rdquo;.</p>
                     ) : selectedCollectionId ? (
                       <>

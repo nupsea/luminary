@@ -21,6 +21,7 @@ import {
   Network,
   Newspaper,
   Plus,
+  Star,
   StickyNote,
   Trash2, 
   X, 
@@ -135,6 +136,7 @@ interface DocumentCardProps {
   selected?: boolean
   onSelect?: (id: string, selected: boolean) => void
   selectMode?: boolean
+  onToggleFavorite?: (docId: string, isFavorite: boolean) => void
 }
 
 export function DocumentCard({
@@ -146,6 +148,7 @@ export function DocumentCard({
   selected = false,
   onSelect,
   selectMode = false,
+  onToggleFavorite,
 }: DocumentCardProps) {
   const isYouTube = isYouTubeDoc(doc)
   const isKindleSource = doc.tags.includes("kindle")
@@ -176,6 +179,28 @@ export function DocumentCard({
   const queryClient = useQueryClient()
   const [retagState, setRetagState] = useState<"idle" | "running" | "done">("idle")
   const [retagAdded, setRetagAdded] = useState<number | null>(null)
+  const [isFavoriteOptimistic, setIsFavoriteOptimistic] = useState<boolean | null>(null)
+  const isFav = isFavoriteOptimistic !== null ? isFavoriteOptimistic : Boolean(doc.is_favorite)
+
+  async function handleToggleFavorite(e: React.MouseEvent) {
+    e.stopPropagation()
+    const nextFav = !isFav
+    setIsFavoriteOptimistic(nextFav)
+    try {
+      if (onToggleFavorite) {
+        onToggleFavorite(doc.id, nextFav)
+      } else {
+        await apiPatch(`/documents/${doc.id}`, { is_favorite: nextFav })
+        void queryClient.invalidateQueries({ queryKey: ["documents"] })
+        void queryClient.invalidateQueries({ queryKey: ["library-facets"] })
+        void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
+      }
+      toast.success(nextFav ? "Added to favorites" : "Removed from favorites")
+    } catch {
+      setIsFavoriteOptimistic(!nextFav)
+      toast.error("Failed to update favorite")
+    }
+  }
 
   // Close popover on outside click
   useEffect(() => {
@@ -375,6 +400,29 @@ export function DocumentCard({
             <Badge variant={STATUS_VARIANTS[doc.learning_status]}>
               {STATUS_LABELS[doc.learning_status]}
             </Badge>
+          )}
+          {/* Favorite Star Button */}
+          {!selectMode && (
+            <button
+              type="button"
+              onClick={handleToggleFavorite}
+              aria-label={isFav ? "Remove from favorites" : "Add to favorites"}
+              aria-pressed={isFav}
+              className={cn(
+                "rounded p-0.5 transition-all duration-150 hover:bg-accent focus:outline-none",
+                isFav
+                  ? "text-amber-500 fill-amber-400 opacity-100 hover:text-amber-600"
+                  : "text-muted-foreground/40 hover:text-amber-500 hover:fill-amber-400/20 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100",
+              )}
+              title={isFav ? "Remove from favorites" : "Add to favorites"}
+            >
+              <Star
+                size={14}
+                className={cn(
+                  isFav ? "fill-amber-400 text-amber-500" : "text-muted-foreground hover:text-amber-500",
+                )}
+              />
+            </button>
           )}
           {/* Document action menu */}
           {onAction && !selectMode && (

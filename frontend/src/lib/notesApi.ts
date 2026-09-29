@@ -2,7 +2,9 @@ import { apiDelete, apiGet, apiPatch, apiPost, request } from "@/lib/apiClient"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import type { components } from "@/types/api"
 
-export type Note = components["schemas"]["NoteResponse"]
+export type Note = components["schemas"]["NoteResponse"] & {
+  is_favorite?: boolean
+}
 export type NoteLinkItem = components["schemas"]["NoteLinkItem"]
 export type NoteLinksResponse = components["schemas"]["NoteLinksResponse"]
 
@@ -16,6 +18,7 @@ export interface CreateNotePayload {
   source_document_ids?: string[]
   /** Optional manual title; when set the note is flagged manual-title. */
   title?: string
+  is_favorite?: boolean
 }
 
 export interface PatchNotePayload {
@@ -25,6 +28,7 @@ export interface PatchNotePayload {
   source_document_ids?: string[]
   /** Empty string clears to NULL; either way flips title_auto_generated=False. */
   title?: string
+  is_favorite?: boolean
 }
 
 export type NoteAutocompleteItem = components["schemas"]["NoteAutocompleteItem"]
@@ -44,6 +48,9 @@ export async function fetchNoteAutocomplete(q: string): Promise<NoteAutocomplete
 
 export const patchNote = (id: string, data: PatchNotePayload): Promise<Note> =>
   apiPatch<Note>(`/notes/${id}`, data)
+
+export const toggleNoteFavorite = (id: string, isFavorite: boolean): Promise<Note> =>
+  patchNote(id, { is_favorite: isFavorite })
 
 export const deleteNote = (id: string): Promise<void> =>
   apiDelete(`/notes/${id}`)
