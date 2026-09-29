@@ -535,6 +535,9 @@ are generated from section summaries rather than text, so they presuppose framin
 makes, and the ungrounded answer that follows renders like a grounded one (#66). The same bar covers
 Ask on a false premise (#158), web chunk hygiene (#159), the flashcard floors (#160) and flashcard quality:
 0.53 of delivered cards are good, and no checker applied after generation lifts that above 0.62 (#191).
+A prompt that asks for a reason only where the text states one, plus a check that rejects unnamed
+subjects, raised hand-graded good-among-delivered from 0.49 to 0.71 over two local runs (2026-09-29).
+The remaining failures are invented links and misread text, which point at extracting facts at ingest.
 
 **Query-time graph expansion buys no retrieval quality.** `run_eval.py --ablation`, 2026-09-21, dev
 library, GLiNER held resident and the arms confirmed to diverge before and after each dataset. On the

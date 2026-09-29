@@ -411,3 +411,36 @@ def test_a_question_may_not_point_at_the_page_it_came_from(question):
 )
 def test_a_source_noun_used_as_vocabulary_is_not_a_reference(question):
     assert card_rejection_reason(question, "A real answer of sufficient length.") is None
+
+
+# Library cards the source alone can resolve: which system, which narrator?
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Why is an FSM used to compile agent tasks in this system?",
+        "What operation transforms the x-coordinate into a y-value within this specific network?",
+        "Why did the narrator shrink away from the pallid bodies?",
+        "What does the conversation about butter reveal about the characters' attitudes?",
+        "How does the presence of \\therefore connect to the broader function of these symbols?",
+    ],
+)
+def test_a_question_must_name_its_subject(question):
+    from app.services.flashcard_parsers import REJECT_DEICTIC, card_rejection
+
+    verdict = card_rejection(question, "A real answer of sufficient length.")
+    assert verdict is not None, question
+    assert verdict[0] == REJECT_DEICTIC
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What characterizes lexical search, and how does this workhorse improve on TF-IDF?",
+        "How do customers who paid in euros differ from those who didn't?",
+        "What does the `this` keyword refer to in JavaScript?",
+        "Why is the Julian calendar still used to this day by some churches?",
+        "Why did Snow White trust the old woman selling apples?",
+    ],
+)
+def test_a_named_or_self_referring_question_stands(question):
+    assert card_rejection_reason(question, "A real answer of sufficient length.") is None
