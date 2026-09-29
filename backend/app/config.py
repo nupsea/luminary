@@ -317,6 +317,10 @@ class Settings(BaseSettings):
     # separates supported from unsupported on this corpus, not a smaller model
     # appearing. Must not equal the generation model (self-judging).
     FLASHCARD_FACTUALITY_MODEL: str = ""
+    # `staged` writes document cards by select -> ask -> verify -> rank
+    # (`flashcard_staged.py`, #191 Phase 2); the verify step is the checker above.
+    # Off until it beats `single` on the #191 labelled set in two full runs.
+    FLASHCARD_PIPELINE: Literal["single", "staged"] = "single"
     # Prompt arm for the model matrix (P6). `shipped` renders the contract plus
     # the accommodations a model still needs; `bare` renders the contract alone.
     # A model that scores HIGHER on `bare` is telling you the accommodation set

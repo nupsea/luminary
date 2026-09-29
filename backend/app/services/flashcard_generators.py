@@ -20,6 +20,7 @@ from typing import Any, Literal
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models import (
     ChunkModel,
     CollectionMemberModel,
@@ -71,6 +72,7 @@ from app.services.flashcard_prompts import (
     notes_concept_extract_system,
 )
 from app.services.flashcard_search import _sync_flashcard_fts
+from app.services.flashcard_staged import staged_cards
 from app.services.llm import LLMAPIConnectionError, LLMServiceUnavailableError
 from app.telemetry import trace_chain
 from app.types import DocumentProfile
@@ -742,6 +744,7 @@ def _extend_pool(pool_q: Any, pool_a: Any, q_row: Any, a_row: Any) -> tuple[Any,
 async def _collect_with_backfill(
     count: int,
     generate_batch: Callable[[int, list[str]], Awaitable[list[dict]]],
+    max_retries: int = _MAX_GENERATION_RETRIES,
 ) -> list[dict]:
     """Run `generate_batch(want, avoid)` until `count` gate-passing cards are
     collected or a pass stops making progress. Each retry is told which
@@ -750,7 +753,7 @@ async def _collect_with_backfill(
     candidates: list[dict] = []
     seen: set[str] = set()
     attempts = 0
-    while len(candidates) < count and attempts <= _MAX_GENERATION_RETRIES:
+    while len(candidates) < count and attempts <= max_retries:
         batch = await generate_batch(count - len(candidates), [c["question"] for c in candidates])
         attempts += 1
         added = 0
@@ -1018,30 +1021,44 @@ async def generate(
     call_q: Any = None
     call_a: Any = None
     deduped = 0
+    staged = get_settings().FLASHCARD_PIPELINE == "staged"
+    staged_spans: list[str] = []
+    # Staged is a fixed call count: one refill at most (#191, Strategy C).
+    max_retries = 1 if staged else _MAX_GENERATION_RETRIES
 
     async def _batch(want: int, avoid: list[str]) -> list[dict]:
         nonlocal call_q, call_a, deduped
-        batch_prompt = flashcard_user_tmpl().format(
-            count=want,
-            difficulty=difficulty,
-            difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
-            extra_instructions=extra_instructions,
-            text=combined_text,
-        ) + _avoid_suffix(avoid)
-        raw = await llm.generate(
-            batch_prompt,
-            system=system_prompt,
-            model=model or _generation_model(),
-            stream=False,
-            response_format={"type": "json_object"},
-        )
-        screened = await _screen_factuality(
-            _gate_cards(
-                _parse_llm_response(raw, document_id, expect="object"),
-                source_text=combined_text,
-            ),
-            combined_text,
-        )
+        if staged:
+            screened = await staged_cards(
+                llm,
+                combined_text,
+                want,
+                model=model or _generation_model(),
+                used_spans=staged_spans,
+            )
+            staged_spans.extend(c["source_excerpt"] for c in screened)
+        else:
+            batch_prompt = flashcard_user_tmpl().format(
+                count=want,
+                difficulty=difficulty,
+                difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
+                extra_instructions=extra_instructions,
+                text=combined_text,
+            ) + _avoid_suffix(avoid)
+            raw = await llm.generate(
+                batch_prompt,
+                system=system_prompt,
+                model=model or _generation_model(),
+                stream=False,
+                response_format={"type": "json_object"},
+            )
+            screened = await _screen_factuality(
+                _gate_cards(
+                    _parse_llm_response(raw, document_id, expect="object"),
+                    source_text=combined_text,
+                ),
+                combined_text,
+            )
         if not screened:
             return []
 
@@ -1091,7 +1108,7 @@ async def generate(
         if section_heading:
             span.set_attribute("flashcard.section_heading", section_heading)
 
-        candidates = await _collect_with_backfill(count, _batch)
+        candidates = await _collect_with_backfill(count, _batch, max_retries)
 
         # Resilient fallback: if the initial passage yields 0 cards and there are
         # unused chunks available in the document, advance to the next unused passage
@@ -1131,7 +1148,7 @@ async def generate(
                     len(fallback_chunks),
                     len(combined_text),
                 )
-                candidates = await _collect_with_backfill(count, _batch)
+                candidates = await _collect_with_backfill(count, _batch, max_retries)
 
         span.set_attribute("flashcard.generated_count", len(candidates))
 
