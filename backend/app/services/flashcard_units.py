@@ -157,9 +157,7 @@ def _speaker_lines(text: str) -> set[str]:
     found = {
         line
         for prev, line in zip(["", *lines], lines, strict=False)
-        if _SPEAKER_LINE.match(line)
-        and not _HEADING_WORD.search(line)
-        and not prev[-1:].islower()
+        if _SPEAKER_LINE.match(line) and not _HEADING_WORD.search(line) and not prev[-1:].islower()
     }
     return found if len(found) >= 2 else set()
 
@@ -171,11 +169,11 @@ def _paragraphs(text: str) -> list[tuple[bool, list[str], str | None]]:
     runs: list[tuple[bool, list[str], str | None]] = []
     for line in text.splitlines():
         stripped = line.strip()
-        # A blank line ends a paragraph, and so does the "[...]" that joins separate excerpts;
-        # the next excerpt starts mid-play, so its speaker is unknown.
+        # A blank line ends a paragraph, and so does the "[...]" that joins separate excerpts.
+        # Chunks are joined by a blank line too, so it also ends the speech: a speaker carried
+        # into the next chunk credited Hamlet's "What a piece of work is man" to the Queen.
         if stripped in ("", "[...]"):
-            if stripped:
-                speaker = None
+            speaker = None
             runs.append((True, [], speaker))
             continue
         if stripped in speaker_lines:

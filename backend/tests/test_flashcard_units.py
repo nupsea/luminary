@@ -69,9 +69,11 @@ def test_a_speaker_line_starts_a_speech_rather_than_ending_the_last_one():
     ]
 
 
-def test_the_next_excerpt_does_not_inherit_the_last_speaker():
-    text = PLAY + "\n[...]\n\nA speech whose speaker is in the chunk before this one."
-    assert split_speeches(text)[-1][1] is None
+@pytest.mark.parametrize("seam", ["\n[...]\n\n", "\n[Lends the tongue vows]\n", "\n"])
+def test_the_next_chunk_does_not_inherit_the_last_speaker(seam):
+    # The next chunk opens mid-speech; its speaker line is in a chunk the model was not shown.
+    text = PLAY + seam + "Appears no other thing to me. What a piece of work is man."
+    assert [speaker for _unit, speaker in split_speeches(text)][-1] is None
 
 
 @pytest.mark.parametrize(
