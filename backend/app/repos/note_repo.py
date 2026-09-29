@@ -67,6 +67,15 @@ class NoteRepo:
         result = await self.session.execute(select(func.count(NoteModel.id)))
         return result.scalar_one()
 
+    async def favorite_count(self) -> int:
+        """Favorites among notes not archived."""
+        result = await self.session.execute(
+            select(func.count(NoteModel.id)).where(
+                NoteModel.archived.is_(False), NoteModel.is_favorite.is_(True)
+            )
+        )
+        return result.scalar_one()
+
     async def list_recent(self, limit: int = 8) -> list[tuple[str, str]]:
         result = await self.session.execute(
             select(NoteModel.id, NoteModel.content)

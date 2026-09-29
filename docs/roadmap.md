@@ -96,7 +96,7 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | — | 0.11.0 | The docked reader — **shipped** | | A passage captured in the reader resolves back to its locus for page, video and web; no modal opens from the reader |
 | — | 0.12.0 | The Brief — **parked** | | None; no rung waits on it |
 | I. Every host | 0.13.x | Every host is a first-class host — **0.13.9 released; exit gate open.** **Checkpoint A** | #24, #99, #110, #154, #155, #156 | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator; `make smoke` green on Windows and against the bundled macOS app |
-| II. Stability | 0.14.x | Gates you can believe — **0.14.2 released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
+| II. Stability | 0.14.x | Gates you can believe — **0.14.3 released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
 | | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #160, #161, #162, #185, #186, #187, #188, #189, #191, #195 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
 | III. Cloud readiness | 0.16.0 | Device auth and pairing | | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail | #48 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
@@ -517,6 +517,8 @@ GitHub-only failures that no local run reproduces.
   `memory_db` is now a per-test file copied from a schema template (#192); the bespoke
   `:memory:` engines keep the defect (#195). Also a macOS screenshot pastes into a note (#193).
 - **0.14.2:** the reader no longer opens a document on the previous document's note (#194).
+- **0.14.3:** favourites, note-editor list and task editing, and fewer flashcards that ask why
+  when the text never says (#198). The favourites counts moved into repos to keep the SQL ratchet.
 
 This rung exists to shrink as the ladder runs. It grows only if a later rung breaks the
 no-new-quarantine rule, and that is the signal to move it back up.
@@ -537,7 +539,8 @@ Ask on a false premise (#158), web chunk hygiene (#159), the flashcard floors (#
 0.53 of delivered cards are good, and no checker applied after generation lifts that above 0.62 (#191).
 A prompt that asks for a reason only where the text states one, plus a check that rejects unnamed
 subjects, raised hand-graded good-among-delivered from 0.49 to 0.71 over two local runs (2026-09-29).
-The remaining failures are invented links and misread text, which point at extracting facts at ingest.
+The remaining failures are invented links and misread text; choosing the sentences in code before
+the model writes a card is being tested in #191.
 
 **Query-time graph expansion buys no retrieval quality.** `run_eval.py --ablation`, 2026-09-21, dev
 library, GLiNER held resident and the arms confirmed to diverge before and after each dataset. On the

@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-09-29
+
+### Added
+- **Favourites.** Star a document in the library or the reader, or a note, and find it again under a Favourites filter in Library and Notes.
+- **The note editor has list and task editing.** Tab and Shift+Tab indent and dedent list items, task checkboxes can be ticked in place, and a shortcuts dialog shows the keys for macOS, Windows or Linux.
+
 ### Fixed
 - **Generated flashcards often asked why something happened when the text never said why, or named no subject ("the narrator", "in this system").** The prompt now asks for a reason only where the text states one, and a question that leaves its subject unnamed is rejected. Hand-graded on the local model over two runs, good cards among those delivered rose from 0.49 to 0.71.
 
