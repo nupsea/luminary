@@ -380,8 +380,24 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
                   return false
                 },
               },
+              // Line boundary navigation: End / Home (Windows, Linux, and external keyboards on Mac)
               {
                 key: "End",
+                run: (v) => {
+                  const line = v.state.doc.lineAt(v.state.selection.main.head)
+                  v.dispatch({ selection: { anchor: line.to }, scrollIntoView: true })
+                  return true
+                },
+                shift: (v) => {
+                  const { anchor } = v.state.selection.main
+                  const line = v.state.doc.lineAt(v.state.selection.main.head)
+                  v.dispatch({ selection: { anchor, head: line.to }, scrollIntoView: true })
+                  return true
+                },
+                preventDefault: true,
+              },
+              {
+                key: "Cmd-ArrowRight",
                 mac: "Cmd-ArrowRight",
                 run: (v) => {
                   const line = v.state.doc.lineAt(v.state.selection.main.head)
@@ -398,6 +414,28 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
               },
               {
                 key: "Home",
+                run: (v) => {
+                  const head = v.state.selection.main.head
+                  const line = v.state.doc.lineAt(head)
+                  const firstNonWs = line.text.search(/\S/)
+                  const indentPos = firstNonWs === -1 ? line.from : line.from + firstNonWs
+                  const target = head === indentPos ? line.from : indentPos
+                  v.dispatch({ selection: { anchor: target }, scrollIntoView: true })
+                  return true
+                },
+                shift: (v) => {
+                  const { anchor, head } = v.state.selection.main
+                  const line = v.state.doc.lineAt(head)
+                  const firstNonWs = line.text.search(/\S/)
+                  const indentPos = firstNonWs === -1 ? line.from : line.from + firstNonWs
+                  const target = head === indentPos ? line.from : indentPos
+                  v.dispatch({ selection: { anchor, head: target }, scrollIntoView: true })
+                  return true
+                },
+                preventDefault: true,
+              },
+              {
+                key: "Cmd-ArrowLeft",
                 mac: "Cmd-ArrowLeft",
                 run: (v) => {
                   const head = v.state.selection.main.head

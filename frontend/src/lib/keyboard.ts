@@ -36,3 +36,28 @@ export function isArrowKey(key: string): boolean {
 export function arrowDelta(key: string): number {
   return key === "ArrowLeft" || key === "ArrowUp" ? -1 : 1
 }
+
+/**
+ * Returns true if running on macOS or iOS (browser or Tauri desktop app).
+ * Checks User-Agent Client Hints, navigator.platform, and navigator.userAgent.
+ */
+export function isMacPlatform(): boolean {
+  if (typeof navigator === "undefined") return false
+  const nav = navigator as unknown as { userAgentData?: { platform?: string } }
+  const platform = nav.userAgentData?.platform || navigator.platform || navigator.userAgent || ""
+  return /Mac|iPhone|iPod|iPad/i.test(platform)
+}
+
+/**
+ * Returns primary modifier label: "Cmd" on macOS, "Ctrl" on Windows/Linux.
+ */
+export function getModifierLabel(): "Cmd" | "Ctrl" {
+  return isMacPlatform() ? "Cmd" : "Ctrl"
+}
+
+/**
+ * Returns primary modifier symbol: "⌘" on macOS, "Ctrl" on Windows/Linux.
+ */
+export function getModifierSymbol(): "⌘" | "Ctrl" {
+  return isMacPlatform() ? "⌘" : "Ctrl"
+}

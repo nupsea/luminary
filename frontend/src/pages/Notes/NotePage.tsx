@@ -55,6 +55,7 @@ import {
 import { downloadNoteMarkdown } from "@/lib/noteExport"
 import { appendCapture } from "@/lib/noteCapture"
 import { useNoteSaveShortcut } from "@/lib/noteEditorUtils"
+import { getModifierLabel } from "@/lib/keyboard"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
 import {
   addNoteToCollection,
@@ -190,13 +191,14 @@ export default function NotePage() {
   }, [note?.id])
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const modLabel = getModifierLabel()
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "e") {
         e.preventDefault()
         setReadingView((v) => !v)
-      } else if ((e.metaKey || e.ctrlKey) && e.key === "/") {
+      } else if ((e.metaKey || e.ctrlKey) && (e.key === "/" || e.code === "Slash")) {
         e.preventDefault()
         setShortcutsOpen((v) => !v)
       }
@@ -426,7 +428,7 @@ export default function NotePage() {
               className={`rounded p-1 hover:bg-accent hover:text-foreground ${
                 readingView ? "text-primary" : "text-muted-foreground"
               }`}
-              title={readingView ? "Back to editor (Cmd+E)" : "Reading view (Cmd+E)"}
+              title={readingView ? `Back to editor (${modLabel}+E)` : `Reading view (${modLabel}+E)`}
             >
               {readingView ? <PencilLine size={14} /> : <BookOpen size={14} />}
             </button>
@@ -469,7 +471,7 @@ export default function NotePage() {
               type="button"
               onClick={() => setShortcutsOpen(true)}
               className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-              title="Keyboard shortcuts (Cmd+/)"
+              title={`Keyboard shortcuts (${modLabel}+/)`}
             >
               <Keyboard size={14} />
             </button>
