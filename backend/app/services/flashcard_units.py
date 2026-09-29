@@ -170,8 +170,7 @@ def _paragraphs(text: str) -> list[tuple[bool, list[str], str | None]]:
     for line in text.splitlines():
         stripped = line.strip()
         # A blank line ends a paragraph, and so does the "[...]" that joins separate excerpts.
-        # Chunks are joined by a blank line too, so it also ends the speech: a speaker carried
-        # into the next chunk credited Hamlet's "What a piece of work is man" to the Queen.
+        # Chunks are joined by a blank line and may open mid-speech, so it ends the speech too.
         if stripped in ("", "[...]"):
             speaker = None
             runs.append((True, [], speaker))
@@ -231,9 +230,8 @@ def _learnable_words(unit: str) -> int:
 def choose_units(units: list[str], count: int, skip: set[str] | None = None) -> list[str]:
     """The *count* longest prose units, in passage order.
 
-    Length after furniture is cut was the whole salience signal on 497 hand-labelled units:
-    0.70 of top-3 picks worth learning, against 0.52 for passage order and 0.68 for a trained
-    ranker (#191).
+    Length after furniture is cut was the whole salience signal measured in #191; a trained
+    ranker did no better.
     """
     skip = skip or set()
     ranked = sorted(
@@ -250,8 +248,8 @@ def _content(text: str) -> set[str]:
 def best_unit(answer: str, units: list[str]) -> tuple[str, float]:
     """The unit that carries most of *answer*, and the share of the answer it carries.
 
-    The model's own sentence number is not trusted: it named the wrong sentence for 31 of 149
-    graded cards, which would have stored a quote that does not support the card.
+    The model's own sentence number is not trusted: it often names the wrong sentence, which
+    would store a quote that does not support the card.
     """
     words = _content(answer)
     if not words or not units:

@@ -318,8 +318,8 @@ class Settings(BaseSettings):
     # appearing. Must not equal the generation model (self-judging).
     FLASHCARD_FACTUALITY_MODEL: str = ""
     # Unit-first flashcards: code picks the sentences, the model phrases one card each (#191).
-    # Off until a blind comparison on real ingested documents agrees with the passage-level
-    # result (good cards 0.59 to 0.72 over three runs); that comparison is what turns it on.
+    # Off because the unit path ignores the difficulty choice and genre guidance (no Bloom level);
+    # it turns on once those are decided, having beaten the shipped prompt in every type twice.
     FLASHCARD_UNIT_SELECTION: bool = False
     # Prompt arm for the model matrix (P6). `shipped` renders the contract plus
     # the accommodations a model still needs; `bare` renders the contract alone.

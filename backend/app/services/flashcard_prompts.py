@@ -543,9 +543,8 @@ def _build_genre_system_prompt(genre: str) -> str:
     return prefix + FLASHCARD_SYSTEM
 
 
-# Unit-first generation: code has chosen the sentences, so the model only phrases one card per
-# sentence. Measured against the shipped prompt on #191, three blind runs: good cards 0.59 to
-# 0.72 on ordinary passages, fiction 0.38 to 0.70.
+# Unit-first generation (#191): code has chosen the sentences, so the model only phrases one
+# card per sentence.
 FLASHCARD_UNITS_SYSTEM = (
     "You write flashcards that help a reader remember what they studied.\n\n"
     "You get a passage and some numbered sentences chosen from it. Write exactly one card for "
