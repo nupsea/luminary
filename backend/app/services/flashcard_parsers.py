@@ -237,6 +237,22 @@ _SOURCE_REFERENCE = (
         rf"|discuss|present|emphasi|list|call|treat|warn|assert)(?:e?s|ed|ing|y|ies)?\b",
         re.I,
     ),
+    # "according to sentence four", "the first paragraph" -- a position only the prompt had.
+    re.compile(
+        r"\bsentence\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b"
+        r"|\b(?:first|second|third|last|next|previous)\s+(?:sentence|paragraph)\b",
+        re.I,
+    ),
+)
+
+# An answer that concedes the source has none, or a bracketed placeholder for one. Fired on 477
+# hand-graded #191 cards: 6 hits, all bad.
+_NO_ANSWER = re.compile(
+    rf"\b{_SOURCE_NOUN}\b[^.]*?\b(?:does\s+not|doesn't|did\s+not)\s+"
+    r"(?:explicitly\s+|directly\s+|clearly\s+)?(?:state|say|mention|specify|describe)"
+    # A bracketed phrase, not a bracketed value: "[1, 2, 3]" answers a code card.
+    r"|^\s*\[[A-Z][a-z]+\s[^\]]*\]\W*$",
+    re.I,
 )
 
 
@@ -264,6 +280,8 @@ REJECT_DEICTIC = "deictic"
 REJECT_BLOATED = "bloated"
 REJECT_ENUMERATED = "enumerated"
 REJECT_UNGROUNDED = "ungrounded"
+# Unit-first cards only: a model handed a sentence sometimes pastes it back as the "question".
+REJECT_NOT_A_QUESTION = "not_a_question"
 
 # A quote has to be specific enough that finding it in the text means something.
 # Counting words alone fails code: `def factorial(n):` is a precise, checkable
@@ -399,6 +417,23 @@ def grounding_state(source_excerpt: str | None, source_text: str | None) -> str:
     return GROUNDING_UNSUPPORTED
 
 
+def _pointing_message(q: str) -> str | None:
+    """Why *q* cannot stand alone on a card: it leads, points at its source, or names nobody."""
+    q_lower = q.lower()
+    for phrase in _LEADING_PHRASES:
+        if phrase in q_lower:
+            return f"leading/deictic phrase in question ({phrase!r})"
+    for rule in _SOURCE_REFERENCE:
+        match = rule.search(q)
+        if match:
+            pointed = " ".join(match.group(0).split())
+            return f"question points at its source ({pointed!r})"
+    unnamed = _UNNAMED_REFERENT.search(q)
+    if unnamed:
+        return f"question leaves its subject unnamed ({unnamed.group(0)!r})"
+    return None
+
+
 def card_rejection(
     question: str,
     answer: str,
@@ -436,19 +471,12 @@ def card_rejection(
 
     if a_words < _MIN_ANSWER_WORDS:
         return REJECT_SHORT_ANSWER, f"answer too short ({a_words} word)"
+    if _NO_ANSWER.search(a):
+        return REJECT_EMPTY_FIELD, "answer says the source does not give one"
 
-    q_lower = q.lower()
-    for phrase in _LEADING_PHRASES:
-        if phrase in q_lower:
-            return REJECT_DEICTIC, f"leading/deictic phrase in question ({phrase!r})"
-    for rule in _SOURCE_REFERENCE:
-        match = rule.search(q)
-        if match:
-            pointed = " ".join(match.group(0).split())
-            return REJECT_DEICTIC, f"question points at its source ({pointed!r})"
-    unnamed = _UNNAMED_REFERENT.search(q)
-    if unnamed:
-        return REJECT_DEICTIC, f"question leaves its subject unnamed ({unnamed.group(0)!r})"
+    pointing = _pointing_message(q)
+    if pointing:
+        return REJECT_DEICTIC, pointing
 
     enumerated = sum(1 for line in a.splitlines() if _ENUM_LINE.match(line))
     if enumerated > _MAX_ENUMERATED_ITEMS:
@@ -465,27 +493,31 @@ def card_rejection(
 
     # Grounding is only checkable when the caller knows which text the card came
     # from. Generators that build cards from concepts or gaps rather than a
-    # passage pass nothing and skip these two rules.
-    if source_text:
-        excerpt = (source_excerpt or "").strip()
-        if len(excerpt) < _MIN_EXCERPT_CHARS or len(excerpt.split()) < _MIN_EXCERPT_TOKENS:
-            return (
-                REJECT_UNGROUNDED,
-                f"no usable source quote ({len(excerpt)} chars)",
-            )
-        # Text the prompt supplied can never be a card's evidence, even if a
-        # passage happens to contain it. A verification the system can satisfy
-        # with its own material verifies nothing.
-        if _is_prompt_supplied(excerpt):
-            return (
-                REJECT_UNGROUNDED,
-                "source quote is the prompt's own example, not the document",
-            )
-        if not excerpt_is_verbatim(excerpt, source_text):
-            return (
-                REJECT_UNGROUNDED,
-                f"source quote is not in the text ({excerpt[:60]!r})",
-            )
+    # passage pass nothing and skip these rules.
+    return _grounding_rejection(source_excerpt, source_text) if source_text else None
+
+
+def _grounding_rejection(source_excerpt: str | None, source_text: str) -> tuple[str, str] | None:
+    """The card must quote *source_text* verbatim, with a quote the prompt did not supply."""
+    excerpt = (source_excerpt or "").strip()
+    if len(excerpt) < _MIN_EXCERPT_CHARS or len(excerpt.split()) < _MIN_EXCERPT_TOKENS:
+        return (
+            REJECT_UNGROUNDED,
+            f"no usable source quote ({len(excerpt)} chars)",
+        )
+    # Text the prompt supplied can never be a card's evidence, even if a
+    # passage happens to contain it. A verification the system can satisfy
+    # with its own material verifies nothing.
+    if _is_prompt_supplied(excerpt):
+        return (
+            REJECT_UNGROUNDED,
+            "source quote is the prompt's own example, not the document",
+        )
+    if not excerpt_is_verbatim(excerpt, source_text):
+        return (
+            REJECT_UNGROUNDED,
+            f"source quote is not in the text ({excerpt[:60]!r})",
+        )
     return None
 
 

@@ -541,3 +541,36 @@ def _build_genre_system_prompt(genre: str) -> str:
     strategy = _GENRE_STRATEGY.get(genre, "")
     prefix = f"{label}{strategy}\n" if strategy else label
     return prefix + FLASHCARD_SYSTEM
+
+
+# Unit-first generation: code has chosen the sentences, so the model only phrases one card per
+# sentence. Measured against the shipped prompt on #191, three blind runs: good cards 0.59 to
+# 0.72 on ordinary passages, fiction 0.38 to 0.70.
+FLASHCARD_UNITS_SYSTEM = (
+    "You write flashcards that help a reader remember what they studied.\n\n"
+    "You get a passage and some numbered sentences chosen from it. Write exactly one card for "
+    "each numbered sentence. The card tests what that sentence says; use the passage only to "
+    "understand it.\n\n"
+    "Rules:\n"
+    "- The answer must be stated by that sentence. Keep it short: a phrase or one sentence.\n"
+    "- Name the subject in the question: the character, thing or idea by its name as the "
+    'passage gives it. Never "he", "she", "it", "they", "the narrator", "the author", '
+    '"this system", "the text" or "the passage".\n'
+    '- Ask "why" only when the sentence itself gives the reason. Otherwise ask what, who, '
+    "which, when or how, about what the sentence states.\n"
+    "- Do not ask about something the sentence does not say."
+)
+
+FLASHCARD_UNITS_USER_SPEC = PromptSpec(
+    task="flashcards_units",
+    contract=(
+        "Passage:\n{text}\n\nSentences:\n{sentences}\n\n"
+        'Reply with JSON: {{"cards": [{{"id": 1, "question": "...", "answer": "..."}}, ...]}}'
+    ),
+    accommodations=(NO_FENCES,),
+)
+
+
+def flashcard_units_user_tmpl() -> str:
+    """The unit-first user prompt, rendered for the model that will generate the cards."""
+    return render_for(FLASHCARD_UNITS_USER_SPEC, "generation")

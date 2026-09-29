@@ -20,6 +20,7 @@ from typing import Any, Literal
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models import (
     ChunkModel,
     CollectionMemberModel,
@@ -42,6 +43,8 @@ from app.services.flashcard_factuality import (
 from app.services.flashcard_grounding import contiguous_runs, run_containing
 from app.services.flashcard_parsers import (
     GROUNDING_UNCHECKED,
+    REJECT_NOT_A_QUESTION,
+    REJECT_UNGROUNDED,
     _build_cloze_question,
     _parse_cloze_llm_response,
     _parse_cloze_text,
@@ -57,6 +60,7 @@ from app.services.flashcard_prompts import (
     _DIFFICULTY_GUIDELINES,
     CLOZE_SYSTEM,
     CLOZE_USER_TMPL,
+    FLASHCARD_UNITS_SYSTEM,
     GRAPH_FLASHCARD_SYSTEM,
     GRAPH_FLASHCARD_USER_TMPL,
     NOTES_CARD_FROM_CONCEPTS_SYSTEM,
@@ -67,10 +71,12 @@ from app.services.flashcard_prompts import (
     _build_genre_system_prompt,
     _infer_genre,
     bloom_from,
+    flashcard_units_user_tmpl,
     flashcard_user_tmpl,
     notes_concept_extract_system,
 )
 from app.services.flashcard_search import _sync_flashcard_fts
+from app.services.flashcard_units import MIN_ANSWER_COVERAGE, best_unit, choose_units, split_units
 from app.services.llm import LLMAPIConnectionError, LLMServiceUnavailableError
 from app.telemetry import trace_chain
 from app.types import DocumentProfile
@@ -824,6 +830,49 @@ async def _generate_concept_cards(
     return await _collect_with_backfill(min(count, len(concepts)), _batch)
 
 
+async def _unit_cards(
+    llm: Any, text: str, want: int, used: set[str], model: str | None, document_id: str
+) -> list[dict]:
+    """One call phrasing a card for each of *want* sentences code chose from *text*.
+
+    A card quotes the sentence that carries its answer, so the quote is verbatim by construction
+    and the gate's verbatim rule cannot fail here; the coverage floor is the check that can.
+    Sentences in *used* were asked about by an earlier batch and are skipped.
+    """
+    units = split_units(text)
+    chosen = choose_units(units, want, skip=used)
+    if not chosen:
+        return []
+    used.update(chosen)
+    prompt = flashcard_units_user_tmpl().format(
+        text=text, sentences="\n".join(f"{n}. {u}" for n, u in enumerate(chosen, 1))
+    )
+    raw = await llm.generate(
+        prompt,
+        system=FLASHCARD_UNITS_SYSTEM,
+        model=model,
+        stream=False,
+        response_format={"type": "json_object"},
+    )
+    cards: list[dict] = []
+    for item in _parse_llm_response(raw, document_id, expect="object"):
+        if not isinstance(item, dict):
+            continue
+        question = card_field(item, "question", "front", "q")
+        answer = card_field(item, "answer", "back", "a")
+        unit, coverage = best_unit(answer, units)
+        if not question.rstrip(" \"'\u201d\u2019)]").endswith("?"):
+            llm_output_stats.record_card_gate(REJECT_NOT_A_QUESTION)
+            logger.info("flashcard: dropped unit card, not a question: %r", question[:80])
+            continue
+        if coverage < MIN_ANSWER_COVERAGE:
+            llm_output_stats.record_card_gate(REJECT_UNGROUNDED)
+            logger.info("flashcard: dropped unit card, answer in no sentence: %r", answer[:80])
+            continue
+        cards.append({"question": question, "answer": answer, "source_excerpt": unit})
+    return cards
+
+
 async def generate(
     document_id: str,
     scope: Literal["full", "section"],
@@ -1019,28 +1068,33 @@ async def generate(
     call_a: Any = None
     deduped = 0
 
+    unit_first = get_settings().FLASHCARD_UNIT_SELECTION
+    asked_units: set[str] = set()
+
     async def _batch(want: int, avoid: list[str]) -> list[dict]:
         nonlocal call_q, call_a, deduped
-        batch_prompt = flashcard_user_tmpl().format(
-            count=want,
-            difficulty=difficulty,
-            difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
-            extra_instructions=extra_instructions,
-            text=combined_text,
-        ) + _avoid_suffix(avoid)
-        raw = await llm.generate(
-            batch_prompt,
-            system=system_prompt,
-            model=model or _generation_model(),
-            stream=False,
-            response_format={"type": "json_object"},
-        )
+        if unit_first:
+            parsed = await _unit_cards(
+                llm, combined_text, want, asked_units, model or _generation_model(), document_id
+            )
+        else:
+            batch_prompt = flashcard_user_tmpl().format(
+                count=want,
+                difficulty=difficulty,
+                difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
+                extra_instructions=extra_instructions,
+                text=combined_text,
+            ) + _avoid_suffix(avoid)
+            raw = await llm.generate(
+                batch_prompt,
+                system=system_prompt,
+                model=model or _generation_model(),
+                stream=False,
+                response_format={"type": "json_object"},
+            )
+            parsed = _parse_llm_response(raw, document_id, expect="object")
         screened = await _screen_factuality(
-            _gate_cards(
-                _parse_llm_response(raw, document_id, expect="object"),
-                source_text=combined_text,
-            ),
-            combined_text,
+            _gate_cards(parsed, source_text=combined_text), combined_text
         )
         if not screened:
             return []

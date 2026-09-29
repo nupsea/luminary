@@ -143,6 +143,7 @@ def isolated_data_dir(tmp_path_factory):
         "LITELLM_GENERATION_MODEL",
         "VISION_MODEL",
         "FLASHCARD_FACTUALITY_MODEL",
+        "FLASHCARD_UNIT_SELECTION",
         "LUMINARY_MEMORY_PROFILE",
     ):
         os.environ[_knob] = str(Settings.model_fields[_knob].default)
