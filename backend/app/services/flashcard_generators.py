@@ -76,7 +76,13 @@ from app.services.flashcard_prompts import (
     notes_concept_extract_system,
 )
 from app.services.flashcard_search import _sync_flashcard_fts
-from app.services.flashcard_units import MIN_ANSWER_COVERAGE, best_unit, choose_units, split_units
+from app.services.flashcard_units import (
+    MIN_ANSWER_COVERAGE,
+    best_unit,
+    choose_units,
+    listed_sentence,
+    split_speeches,
+)
 from app.services.llm import LLMAPIConnectionError, LLMServiceUnavailableError
 from app.telemetry import trace_chain
 from app.types import DocumentProfile
@@ -839,14 +845,15 @@ async def _unit_cards(
     and the gate's verbatim rule cannot fail here; the coverage floor is the check that can.
     Sentences in *used* were asked about by an earlier batch and are skipped.
     """
-    units = split_units(text)
+    speeches = split_speeches(text)
+    units = [unit for unit, _speaker in speeches]
+    speaker = dict(speeches)
     chosen = choose_units(units, want, skip=used)
     if not chosen:
         return []
     used.update(chosen)
-    prompt = flashcard_units_user_tmpl().format(
-        text=text, sentences="\n".join(f"{n}. {u}" for n, u in enumerate(chosen, 1))
-    )
+    listed = (f"{n}. {listed_sentence(u, speaker[u])}" for n, u in enumerate(chosen, 1))
+    prompt = flashcard_units_user_tmpl().format(text=text, sentences="\n".join(listed))
     raw = await llm.generate(
         prompt,
         system=FLASHCARD_UNITS_SYSTEM,

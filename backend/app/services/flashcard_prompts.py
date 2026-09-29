@@ -558,7 +558,9 @@ FLASHCARD_UNITS_SYSTEM = (
     '"this system", "the text" or "the passage".\n'
     '- Ask "why" only when the sentence itself gives the reason. Otherwise ask what, who, '
     "which, when or how, about what the sentence states.\n"
-    "- Do not ask about something the sentence does not say."
+    "- Do not ask about something the sentence does not say.\n"
+    '- A sentence listed as "Name says: ..." is spoken by that character; credit it to them '
+    "and to no one else."
 )
 
 FLASHCARD_UNITS_USER_SPEC = PromptSpec(

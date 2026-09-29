@@ -14,6 +14,8 @@ from app.services.flashcard_units import (
     MIN_ANSWER_COVERAGE,
     best_unit,
     choose_units,
+    listed_sentence,
+    split_speeches,
     split_units,
 )
 
@@ -41,6 +43,61 @@ def test_a_section_label_stays_with_its_own_paragraph():
     units = split_units(text)
     assert units[0] == "The last sentence of chunk one."
     assert units[1] == "[Book XII] Ulysses was tied to the mast."
+
+
+PLAY = (
+    "Farewell, and let your haste commend your duty.\n"
+    "LAERTES.\n"
+    "Think it no more.\n"
+    "For nature crescent does not grow alone\n"
+    "In thews and bulk, but as this temple waxes.\n"
+    "\n"
+    "OPHELIA.\n"
+    "I shall the effect of this good lesson keep.\n"
+)
+
+
+def test_a_speaker_line_starts_a_speech_rather_than_ending_the_last_one():
+    assert split_speeches(PLAY) == [
+        ("Farewell, and let your haste commend your duty.", None),
+        ("Think it no more.", "Laertes"),
+        (
+            "For nature crescent does not grow alone In thews and bulk, but as this temple waxes.",
+            "Laertes",
+        ),
+        ("I shall the effect of this good lesson keep.", "Ophelia"),
+    ]
+
+
+def test_the_next_excerpt_does_not_inherit_the_last_speaker():
+    text = PLAY + "\n[...]\n\nA speech whose speaker is in the chunk before this one."
+    assert split_speeches(text)[-1][1] is None
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        ("NOTES:", "ELSE:"),
+        ("N.E.", "N.S."),
+        ("CHAPTER II.", "CHAPTER III."),
+        ("ACT I.", "SCENE II."),
+        ("HAMLET.",),
+    ],
+)
+def test_headings_and_a_lone_label_are_not_speakers(labels):
+    text = "\n".join(f"{label}\nA sentence that follows the label line here." for label in labels)
+    assert all(speaker is None for _unit, speaker in split_speeches(text))
+
+
+def test_a_label_that_finishes_a_sentence_is_not_a_speaker():
+    text = "Input byte from the port into\nAL.\n\nInput word from the port into\nAX.\n"
+    assert all(speaker is None for _unit, speaker in split_speeches(text))
+
+
+def test_the_model_sees_the_speaker_and_not_the_section_label():
+    unit = "[the_gita > CHAPTER II — Sanjaya.] Thou wilt win Swarga's safety."
+    assert listed_sentence(unit, None) == "Thou wilt win Swarga's safety."
+    assert listed_sentence("Think it no more.", "Laertes") == "Laertes says: Think it no more."
 
 
 def test_code_is_grouped_rather_than_split_at_dots():
@@ -186,6 +243,21 @@ async def test_unit_cards_drop_a_pasted_sentence_and_an_unsupported_answer():
     moved = {k: after[k] - before.get(k, 0) for k in after}
     assert moved["card_reject_not_a_question"] == 1
     assert moved["card_reject_ungrounded"] == 1
+
+
+async def test_a_speech_is_listed_with_its_speaker_and_quoted_verbatim():
+    llm = _llm(
+        [
+            {
+                "id": 1,
+                "question": "What does Laertes say nature does not do alone?",
+                "answer": "Nature crescent does not grow alone in thews and bulk.",
+            }
+        ]
+    )
+    cards = await _unit_cards(llm, PLAY, 1, set(), None, "doc")
+    assert "1. Laertes says: For nature crescent" in llm.generate.call_args.args[0]
+    assert cards[0]["source_excerpt"].startswith("For nature crescent")
 
 
 async def test_a_later_batch_asks_about_sentences_not_yet_used():

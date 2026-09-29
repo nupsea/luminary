@@ -34,6 +34,17 @@ _CITATION = re.compile(
     r"|\bpages?\s+\d+\s*[–-]\s*\d+|\bpp\.\s*\d+|\d+\s*\(\d+\)\s*:\s*\d+"
 )
 
+# A play's speaker line, alone on its line. Colons and inner dots are excluded ("NOTES:", "N.E."
+# and "ELSE:" were the library's false hits); heading words and numerals rule out "CHAPTER II.".
+_SPEAKER_LINE = re.compile(r"^[A-Z][A-Z' -]{1,30}\.$")
+_HEADING_WORD = re.compile(
+    r"\b(?:ACT|SCENE|CHAPTER|BOOK|PART|SECTION|CANTO|VOLUME|NOTES?|CONTENTS|PREFACE|FOOTNOTES"
+    r"|INTRODUCTION|EPILOGUE|PROLOGUE|APPENDIX|FINIS|END|[IVXLC]+)\b"
+)
+# A chunk's section label ("[CHAPTER II — Sanjaya.]") read inside a sentence was taken for its
+# speaker, so the model never sees it there; the stored quote keeps it.
+_LEADING_LABEL = re.compile(r"^\s*\[[^\]]*\]\s*")
+
 _WORD = re.compile(r"[a-z0-9]+")
 # The list the coverage floor below was measured with; a different list moves the floor.
 _STOP = frozenset(
@@ -136,22 +147,63 @@ def _merge_short(pieces: list[str]) -> list[str]:
     return merged
 
 
-def _paragraphs(text: str) -> list[tuple[bool, list[str]]]:
-    """(is_prose, lines) per paragraph; a prose/code switch also starts a new one."""
-    runs: list[tuple[bool, list[str]]] = []
+def _speaker_lines(text: str) -> set[str]:
+    """A play's speaker lines ("LAERTES."), when *text* has at least two different speakers.
+
+    A line that finishes an unfinished one is the end of a sentence, not a speaker: the manual's
+    "Input byte from imm8 I/O port address into\\nAL.".
+    """
+    lines = [line.strip() for line in text.splitlines()]
+    found = {
+        line
+        for prev, line in zip(["", *lines], lines, strict=False)
+        if _SPEAKER_LINE.match(line)
+        and not _HEADING_WORD.search(line)
+        and not prev[-1:].islower()
+    }
+    return found if len(found) >= 2 else set()
+
+
+def _paragraphs(text: str) -> list[tuple[bool, list[str], str | None]]:
+    """(is_prose, lines, speaker) per paragraph; a prose/code switch also starts a new one."""
+    speaker_lines = _speaker_lines(text)
+    speaker: str | None = None
+    runs: list[tuple[bool, list[str], str | None]] = []
     for line in text.splitlines():
         stripped = line.strip()
-        # A blank line ends a paragraph, and so does the "[...]" that joins separate excerpts.
+        # A blank line ends a paragraph, and so does the "[...]" that joins separate excerpts;
+        # the next excerpt starts mid-play, so its speaker is unknown.
         if stripped in ("", "[...]"):
-            runs.append((True, []))
+            if stripped:
+                speaker = None
+            runs.append((True, [], speaker))
+            continue
+        if stripped in speaker_lines:
+            speaker = stripped.rstrip(".").title()
+            runs.append((True, [], speaker))
             continue
         prose = _is_prose(line)
         kept = stripped if prose else line
         if runs and runs[-1][0] == prose and runs[-1][1]:
             runs[-1][1].append(kept)
         else:
-            runs.append((prose, [kept]))
+            runs.append((prose, [kept], speaker))
     return [run for run in runs if run[1]]
+
+
+def split_speeches(text: str) -> list[tuple[str, str | None]]:
+    """(unit, speaker) for each unit of *text*; the speaker is None outside a play's speeches."""
+    pairs: list[tuple[str, str | None]] = []
+    for prose, lines, speaker in _paragraphs(text):
+        if prose:
+            sentences = [s.strip() for s in _SENT_END.split(" ".join(lines)) if s.strip()]
+            pairs.extend((u, speaker) for u in _merge_short(sentences))
+        else:
+            step = _CODE_LINES_PER_UNIT
+            pairs.extend(
+                ("\n".join(lines[i : i + step]), speaker) for i in range(0, len(lines), step)
+            )
+    return pairs
 
 
 def split_units(text: str) -> list[str]:
@@ -159,17 +211,15 @@ def split_units(text: str) -> list[str]:
 
     Hard-wrapped prose lines are joined first, so a sentence broken across lines stays one unit.
     Short pieces merge within their paragraph only, so a section label never joins the previous
-    chunk's last sentence.
+    chunk's last sentence, and a speaker line never joins the previous speech.
     """
-    units: list[str] = []
-    for prose, lines in _paragraphs(text):
-        if prose:
-            sentences = [s.strip() for s in _SENT_END.split(" ".join(lines)) if s.strip()]
-            units.extend(_merge_short(sentences))
-        else:
-            step = _CODE_LINES_PER_UNIT
-            units.extend("\n".join(lines[i : i + step]) for i in range(0, len(lines), step))
-    return units
+    return [unit for unit, _speaker in split_speeches(text)]
+
+
+def listed_sentence(unit: str, speaker: str | None) -> str:
+    """How a chosen unit is shown to the model: section label cut, speaker named."""
+    body = _LEADING_LABEL.sub("", unit, count=1) or unit
+    return f"{speaker} says: {body}" if speaker else body
 
 
 def _learnable_words(unit: str) -> int:
