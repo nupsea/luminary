@@ -979,7 +979,7 @@ export function stepInto(view: EditorView, field: StateField<DecorationSet>, dir
   return true
 }
 
-export function stepHorizontal(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -1): boolean {
+function stepHorizontal(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -1): boolean {
   const sel = view.state.selection.main
   if (!sel.empty) return false
   const { doc } = view.state
