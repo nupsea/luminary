@@ -131,6 +131,7 @@ from app.workflows.ingestion import (
     run_ingestion,
 )
 from app.workflows.ingestion_nodes._shared import _persist_extraction_report
+from app.workflows.ingestion_nodes.finalize import launch_followup
 from app.workflows.oreilly_ingestion import start_oreilly_ingestion
 
 logger = logging.getLogger(__name__)
@@ -785,9 +786,7 @@ async def ingest_document(
                     }
                 missing = [m for m in PREGENERATE_MODES if m not in existing_modes]
                 if missing:
-                    task = asyncio.create_task(_ingestion_module._run_pregenerate(existing.id))
-                    _background_tasks.add(task)
-                    task.add_done_callback(_background_tasks.discard)
+                    launch_followup(existing.id, _ingestion_module._run_pregenerate(existing.id))
                     logger.info(
                         "Backfilling missing summaries for complete doc",
                         extra={"doc_id": existing.id, "missing_modes": missing},
@@ -1800,6 +1799,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
     svc = get_document_deletion_service()
     deleted = []
     for document_id in body.ids:
+        await get_ingestion_jobs().cancel(document_id)
         async with get_session_factory()() as session:
             # Existence check + cascade delete share one session per document;
             # delete_sqlite_cascade uses the session directly for multi-table cleanup.

@@ -40,6 +40,8 @@ class IngestionJobRegistry:
 
     def __init__(self) -> None:
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        # Post-ingest work (summaries, tags) that outlives the ingestion task.
+        self._followups: dict[str, set[asyncio.Task[Any]]] = {}
 
     def launch(self, document_id: str, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
         """Schedule ``coro`` as the ingestion task for ``document_id``.
@@ -78,6 +80,19 @@ class IngestionJobRegistry:
                 exc_info=exc,
             )
 
+    def track_followup(self, document_id: str, task: asyncio.Task[Any]) -> None:
+        """Attach post-ingest work to ``document_id`` so :meth:`cancel` stops it too (#186)."""
+        self._followups.setdefault(document_id, set()).add(task)
+        task.add_done_callback(lambda t, did=document_id: self._drop_followup(did, t))
+
+    def _drop_followup(self, document_id: str, task: asyncio.Task[Any]) -> None:
+        tasks = self._followups.get(document_id)
+        if tasks is None:
+            return
+        tasks.discard(task)
+        if not tasks:
+            self._followups.pop(document_id, None)
+
     def get(self, document_id: str) -> asyncio.Task[None] | None:
         return self._tasks.get(document_id)
 
@@ -93,17 +108,21 @@ class IngestionJobRegistry:
         document_id: str,
         timeout: float = DEFAULT_CANCEL_TIMEOUT_SECONDS,
     ) -> bool:
-        """Cancel the task for ``document_id`` and await its teardown.
+        """Cancel the ingestion and follow-up tasks for ``document_id``; await teardown.
 
         Returns ``True`` if a running task was cancelled within ``timeout``,
-        ``False`` if no task was running or the task didn't finish in time.
+        ``False`` if none was running or teardown didn't finish in time.
         """
-        task = self._tasks.get(document_id)
-        if task is None or task.done():
+        candidates = [self._tasks.get(document_id), *self._followups.get(document_id, ())]
+        tasks = [t for t in candidates if t is not None and not t.done()]
+        if not tasks:
             return False
-        task.cancel()
+        for task in tasks:
+            task.cancel()
         try:
-            await asyncio.wait_for(_swallow_cancel(task), timeout=timeout)
+            await asyncio.wait_for(
+                asyncio.gather(*(_swallow_cancel(t) for t in tasks)), timeout=timeout
+            )
         except TimeoutError:
             logger.warning(
                 "Ingestion task did not finish cancelling within timeout",
@@ -137,9 +156,10 @@ class IngestionJobRegistry:
     def reset(self) -> None:
         """Test helper: drop all tracked tasks without awaiting them."""
         self._tasks.clear()
+        self._followups.clear()
 
 
-async def _swallow_cancel(task: asyncio.Task[None]) -> None:
+async def _swallow_cancel(task: asyncio.Task[Any]) -> None:
     """Await ``task`` to completion, suppressing ``CancelledError``.
 
     Other exceptions raised during teardown are intentionally swallowed; they

@@ -20,6 +20,8 @@ These small nodes complete the ingestion pipeline:
 import asyncio
 import logging
 import uuid
+from collections.abc import Coroutine
+from typing import Any
 
 from sqlalchemy import update as _update
 
@@ -28,6 +30,7 @@ from app.models import DocumentModel, EnrichmentJobModel
 from app.services.activity_service import ActivityService
 from app.services.document_tagger import enrich_document_tags
 from app.services.enrichment_worker import get_enrichment_worker
+from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.model_router import resolve
 from app.services.section_summarizer import (
     defer_section_summaries,
@@ -61,6 +64,15 @@ def _background_refusal(doc_id: str, work: str) -> bool:
     return True
 
 
+def launch_followup(doc_id: str, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
+    """Run post-ingest work that deleting the document cancels (#186)."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    get_ingestion_jobs().track_followup(doc_id, task)
+    return task
+
+
 async def _run_pregenerate(doc_id: str) -> None:
     """Background task: pre-generate summaries and invalidate library cache."""
 
@@ -76,12 +88,11 @@ async def _run_pregenerate(doc_id: str) -> None:
             extra={"doc_id": doc_id},
             exc_info=exc,
         )
-    finally:
-        # Always refresh the library summary — a new document was ingested regardless
-        # of whether its individual summaries could be generated (e.g. Ollama offline).
-        # Refreshed here rather than left for the next question to trigger: that put a
-        # whole library synthesis in front of an Ask that had to wait for it.
-        await svc.refresh_library_summary()
+    # Refreshed even when the document's summaries failed, but not from `finally`:
+    # a cancelled task (the document was deleted) must not start a library synthesis.
+    # Refreshed here rather than left for the next question to trigger: that put a
+    # whole library synthesis in front of an Ask that had to wait for it.
+    await svc.refresh_library_summary()
 
 
 async def _run_progressive_summarization(doc_id: str) -> None:
@@ -358,9 +369,7 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
         # followed by deferred section summaries and detailed assembly in background.
         deferred = state.get("defer_section_summaries")
         coro = _run_progressive_summarization(doc_id) if deferred else _run_pregenerate(doc_id)
-        pregenerate_task = asyncio.create_task(coro)
-        _background_tasks.add(pregenerate_task)
-        pregenerate_task.add_done_callback(_background_tasks.discard)
+        launch_followup(doc_id, coro)
     except Exception as exc:
         logger.warning(
             "enrichment_enqueue_node: pregenerate schedule failed (non-fatal): %s",
@@ -373,9 +382,7 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
     # do not propagate.
     try:
         if not _background_refusal(doc_id, "auto-tag"):
-            auto_tag_task = asyncio.create_task(enrich_document_tags(doc_id))
-            _background_tasks.add(auto_tag_task)
-            auto_tag_task.add_done_callback(_background_tasks.discard)
+            launch_followup(doc_id, enrich_document_tags(doc_id))
     except Exception as exc:
         logger.warning(
             "enrichment_enqueue_node: auto-tag schedule failed (non-fatal): %s",
