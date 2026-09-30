@@ -843,6 +843,7 @@ export default function NotesPage() {
         collectionParam,
         isFavorites ? true : undefined,
       ),
+    staleTime: 30_000,
     gcTime: 60_000,
   })
 

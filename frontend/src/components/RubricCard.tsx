@@ -147,18 +147,19 @@ export function RubricCard({ rubric, documentId }: RubricCardProps) {
         )}
       </div>
 
-      {/* Clarity */}
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-foreground uppercase tracking-wide">Clarity</span>
-          <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${scoreBadgeClass(rubric.clarity.score)}`}>
-            {rubric.clarity.score}/100
-          </span>
-        </div>
-        {rubric.clarity.evidence && (
+      {/* Only with its evidence: teach-back writes none, and a bare number read as
+          blank feedback. Feynman's rubric carries it. */}
+      {rubric.clarity.evidence && (
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-foreground uppercase tracking-wide">Clarity</span>
+            <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${scoreBadgeClass(rubric.clarity.score)}`}>
+              {rubric.clarity.score}/100
+            </span>
+          </div>
           <p className="text-xs italic text-muted-foreground">{rubric.clarity.evidence}</p>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

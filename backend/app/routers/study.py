@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
@@ -102,7 +103,7 @@ from app.services.background import fire_and_forget, task_registry
 from app.services.flashcard_search import _sync_flashcard_fts
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
-from app.services.llm_json import parse_llm_json_object
+from app.services.llm_json import parse_llm_json_object, salvage_llm_json_object
 from app.services.mastery_service import get_mastery_service
 from app.services.misconceptions import (
     PASSING_TEACHBACK_SCORE,
@@ -202,8 +203,6 @@ _TEACHBACK_USER_TMPL = (
     "material the question did not ask about.\n"
     "misconceptions: claims that contradict the passage. Empty if there are none "
     "-- do not invent one to seem thorough.\n"
-    "evidence: one sentence copied word for word from the PASSAGE that supports "
-    "your accuracy score. Copy it exactly; do not paraphrase.\n"
     "accuracy -- how much of what the student said the passage supports:\n"
     "  90-100  every claim is in the passage\n"
     "  70-89   the substance is in the passage, with one unsupported aside\n"
@@ -218,21 +217,20 @@ _TEACHBACK_USER_TMPL = (
     "  40-69   about half of what the question asked for\n"
     "  1-39    a fragment of it\n"
     "  0       nothing the question asked for\n"
-    "clarity: 0-100, how clearly it was put.\n\n"
+    "clarity: 0-100, how clearly it was put.\n"
+    "evidence: one sentence copied word for word from the PASSAGE that supports "
+    "your accuracy score. Copy it exactly; do not paraphrase.\n\n"
     'Output JSON: {{"correct_points": [str], '
-    '"missing_points": [str], "misconceptions": [str], "evidence": str, '
-    '"accuracy": int, "completeness": int, "clarity": int}}'
+    '"missing_points": [str], "misconceptions": [str], '
+    '"accuracy": int, "completeness": int, "clarity": int, "evidence": str}}'
 )
 
-# The three dimensions above are integers, and deliberately not a fourth free-text
-# field. A `clarity_comment` string asked for after them was measured emitting
-# malformed JSON on the local model in 3 of 6 failures -- the model dropped the
-# opening quote and wrote `"clarity_comment": The explanation is clear...`, which
-# fails the whole parse and costs the learner their score. Numbers after prose are
-# safe; prose after numbers is not. Do not add a free-text field to this call
-# without re-running the parse-rate arm of the measurement -- which is also why
-# the three integers stay last in the output shape even though the score is now
-# derived from two of them.
+# Field order is load-bearing. The quote goes last: the local model opens it with an
+# escaped quote, loses the string boundary and swallows whatever follows, so with the
+# integers after it 5 of 30 replies lost their score. Last, a broken quote costs only
+# itself (`salvage_llm_json_object` keeps the pairs before it). No free-text field
+# before the integers either: a `clarity_note` there was empty on 7 of 10 real
+# answers and moved the scores. Re-run evals/run_teachback_eval.py before changing it.
 
 # A passage for a *prompt*, not for a substring search. `passage_for_card` falls
 # back to the whole document when a card predates `source_chunk_ids`, which is
@@ -976,9 +974,17 @@ async def reopen_session(
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session(
     session_id: str,
+    if_unused: bool = False,
     repo: StudyRepo = Depends(get_study_repo),
 ) -> None:
-    """Delete a study session and all associated review events and teachback results."""
+    """Delete a study session and all associated review events and teachback results.
+
+    ``if_unused`` deletes only a session with no attempt in it, and is a no-op otherwise.
+    """
+    if if_unused:
+        if await repo.discard_session_if_unused(session_id):
+            logger.info("Unused study session discarded", extra={"session_id": session_id})
+        return
     await repo.delete_session_cascade(session_id)
     logger.info("Study session deleted", extra={"session_id": session_id})
 
@@ -2638,12 +2644,13 @@ async def _mark_teachback_error(tb_id: str) -> None:
 async def _evaluate_teachback_llm(prompt: str) -> dict | None:
     """Run the teachback evaluation, retrying once on an unparseable reply.
 
-    Local models drop a malformed object often enough that a single bad
-    completion should not cost the learner their score.
+    Temperature 0: sampled, the same explanation scored 30 on one submission and
+    94 on the next. The retry samples, because a greedy retry repeats the reply
+    that just failed.
     """
     llm = get_llm_service()
-    for attempt in (1, 2):
-        raw = await llm.generate(prompt=prompt, system=_TEACHBACK_SYSTEM)
+    for attempt, temperature in ((1, 0.0), (2, None)):
+        raw = await llm.generate(prompt=prompt, system=_TEACHBACK_SYSTEM, temperature=temperature)
         parsed = _parse_teachback_response(raw)
         if parsed is not None:
             return parsed
@@ -2683,6 +2690,16 @@ def _string_list(value: object) -> list[str]:
     return out
 
 
+def _unescape_bare_quotes(raw: str) -> str:
+    """Repair `"evidence": \\"...\\"`, the local model's usual way of quoting the passage.
+
+    Only for a reply that has already failed to parse: inside a valid string `: \\"` is
+    a legitimate escape. The quote it recovers is still checked against the passage.
+    """
+    raw = re.sub(r'(":\s*)\\"', r'\1"', raw)
+    return re.sub(r'\\"(\s*[,}])', r'"\1', raw)
+
+
 def _parse_teachback_response(raw: str) -> dict | None:
     """Parse the teachback rubric from an LLM completion. None when unparseable.
 
@@ -2695,15 +2712,20 @@ def _parse_teachback_response(raw: str) -> dict | None:
     the response schema, the JSON columns, the misconception rows -- is typed
     for `list[str]`. See `_string_list`.
     """
-    parsed = parse_llm_json_object(raw)
+    # The dimensions are required below whichever of these produced the object.
+    parsed = (
+        parse_llm_json_object(raw)
+        or parse_llm_json_object(_unescape_bare_quotes(raw))
+        or salvage_llm_json_object(raw)
+    )
     if parsed is None:
-        logger.warning("Failed to parse teachback JSON", extra={"raw": raw[:200]})
+        logger.warning("Failed to parse teachback JSON", extra={"raw": raw[:2000]})
         return None
     # Overwrites any `score` the model volunteered unasked, which is the point:
     # the headline has to be a function of the breakdown printed under it.
     score = _score_from_dimensions(parsed)
     if score is None:
-        logger.warning("Teachback reply carried no usable dimensions", extra={"raw": raw[:200]})
+        logger.warning("Teachback reply carried no usable dimensions", extra={"raw": raw[:2000]})
         return None
     parsed["score"] = score
     for field in ("correct_points", "missing_points", "misconceptions"):
@@ -2755,6 +2777,24 @@ async def _llm_correction_card_payload(
     return data
 
 
+def _restates_question(candidate: str, original: str) -> bool:
+    """Whether a correction card hands back the question it was correcting.
+
+    Word-set Jaccard over the whole question. The deck's duplicate rules are too loose
+    here: a correction is about its card's passage by design, so it shares names and
+    context. Bracketed: "What did she think regarding cleaning up in the cottage..."
+    returned as "What did Snow White think regarding..." is 0.83; "What distinguishes
+    spaced repetition from massed practice?" correcting "What is spaced repetition?"
+    is 0.43.
+    """
+
+    def words(text: str) -> set[str]:
+        return {w for w in re.sub(r"[^\w\s]", "", text.lower()).split() if len(w) > 2}
+
+    a, b = words(candidate), words(original)
+    return bool(a and b) and len(a & b) / len(a | b) >= 0.6
+
+
 async def _insert_correction_flashcard(
     card: FlashcardModel,
     payload: dict,
@@ -2776,6 +2816,9 @@ async def _insert_correction_flashcard(
     verdict = card_rejection(question, answer, excerpt, source)
     if verdict:
         logger.info("teachback: dropped correction card (%s): %r", verdict[1], question[:80])
+        return None
+    if _restates_question(question, card.question):
+        logger.info("teachback: dropped correction card (repeats its card): %r", question[:80])
         return None
 
     new_id = str(uuid.uuid4())

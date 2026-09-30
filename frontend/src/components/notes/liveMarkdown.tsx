@@ -123,6 +123,68 @@ const EXCALIDRAW_COMMENT = /^<!-- luminary:excalidraw=.+ -->$/
 export interface LiveMarkdownOptions {
   /** Gives a rendered diagram the same edit button the preview has. */
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
+  /** Handler to open a linked note when clicked. */
+  onNoteLinkClick?: (noteId: string) => void
+}
+
+class NoteLinkWidget extends WidgetType {
+  readonly id: string
+  readonly text: string
+  readonly onOpenNote?: (id: string) => void
+
+  constructor(id: string, text: string, onOpenNote?: (id: string) => void) {
+    super()
+    this.id = id
+    this.text = text
+    this.onOpenNote = onOpenNote
+  }
+
+  eq(other: NoteLinkWidget): boolean {
+    return this.id === other.id && this.text === other.text
+  }
+
+  toDOM(): HTMLElement {
+    const btn = document.createElement("button")
+    btn.type = "button"
+    btn.className = "cm-md-note-link-pill"
+    btn.setAttribute("title", `Open note: ${this.text}`)
+    btn.setAttribute("aria-label", `Linked note: ${this.text}`)
+
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+    icon.setAttribute("viewBox", "0 0 24 24")
+    icon.setAttribute("width", "12")
+    icon.setAttribute("height", "12")
+    icon.setAttribute("fill", "none")
+    icon.setAttribute("stroke", "currentColor")
+    icon.setAttribute("stroke-width", "2")
+    icon.setAttribute("stroke-linecap", "round")
+    icon.setAttribute("stroke-linejoin", "round")
+    icon.setAttribute("class", "cm-md-note-link-icon")
+    icon.innerHTML = `<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>`
+
+    const label = document.createElement("span")
+    label.className = "cm-md-note-link-text"
+    label.textContent = this.text
+
+    btn.appendChild(icon)
+    btn.appendChild(label)
+
+    btn.addEventListener("mousedown", (e) => {
+      e.stopPropagation()
+    })
+
+    btn.addEventListener("click", (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      this.onOpenNote?.(this.id)
+    })
+
+    return btn
+  }
+
+  ignoreEvent(event: Event): boolean {
+    return event.type === "mousedown" || event.type === "click"
+  }
 }
 
 function forceEditorMeasure(view: EditorView) {
@@ -142,12 +204,14 @@ function RenderedBlockContent({
   view,
   host,
   onEditDiagram,
+  onNoteLinkClick,
 }: {
   source: string
   delimited: boolean
   view: EditorView
   host: HTMLElement
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
+  onNoteLinkClick?: (noteId: string) => void
 }) {
   const [copied, setCopied] = useState(false)
   const from = view.posAtDOM(host)
@@ -266,6 +330,7 @@ function RenderedBlockContent({
       <MarkdownRenderer
         reading={false}
         className="[&_.prose]:my-0 [&_figure]:my-1.5 [&_img]:my-1"
+        onNoteLinkClick={onNoteLinkClick}
         onImageLoad={() => {
           forceEditorMeasure(view)
         }}
@@ -301,16 +366,19 @@ class RenderedBlock extends WidgetType {
   readonly source: string
   readonly delimited: boolean
   private readonly onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
+  private readonly onNoteLinkClick?: (noteId: string) => void
 
   constructor(
     source: string,
     delimited: boolean,
     onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void,
+    onNoteLinkClick?: (noteId: string) => void,
   ) {
     super()
     this.source = source
     this.delimited = delimited
     this.onEditDiagram = onEditDiagram
+    this.onNoteLinkClick = onNoteLinkClick
   }
 
   get estimatedHeight(): number {
@@ -336,6 +404,7 @@ class RenderedBlock extends WidgetType {
         view={view}
         host={host}
         onEditDiagram={this.onEditDiagram}
+        onNoteLinkClick={this.onNoteLinkClick}
       />,
     )
     // The renderer paints after this returns, and an image finishes later
@@ -580,10 +649,24 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
           state.doc.sliceString(range.from, range.to),
           delimited,
           options.onEditDiagram,
+          options.onNoteLinkClick,
         ),
       }).range(range.from, range.to),
     )
     return true
+  }
+
+  const docText = state.doc.toString()
+  const NOTE_LINK_MATCH_RE = /(?:\[\[|\[)([a-f0-9-]+)\|([^\]\n]+)(?:\]\]|\])/g
+  const noteLinks: Array<{ from: number; to: number; id: string; label: string }> = []
+  let linkMatch: RegExpExecArray | null
+  while ((linkMatch = NOTE_LINK_MATCH_RE.exec(docText)) !== null) {
+    noteLinks.push({
+      from: linkMatch.index,
+      to: linkMatch.index + linkMatch[0].length,
+      id: linkMatch[1],
+      label: linkMatch[2],
+    })
   }
 
   for (const { from, to } of mathBlockRanges(state.doc.toString())) {
@@ -599,6 +682,9 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
 
   syntaxTree(state).iterate({
     enter: (node) => {
+      if (noteLinks.some((l) => node.from >= l.from && node.to <= l.to)) {
+        return false
+      }
       if (rendersAsBlock(node.name)) {
         if (!renderBlock(node.from, node.to, isDelimitedBlock(node.name))) {
           if (node.name === "Table") {
@@ -748,11 +834,57 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
     },
   })
 
+  // Render note links that are not currently being edited as interactive pills
+  for (const link of noteLinks) {
+    if (rendered.some((r) => link.from >= r.from && link.to <= r.to)) continue
+    const isEditing = selection.some((r) => r.from <= link.to && r.to >= link.from)
+    if (!isEditing) {
+      marks.push(
+        Decoration.replace({
+          widget: new NoteLinkWidget(link.id, link.label, options.onNoteLinkClick),
+        }).range(link.from, link.to),
+      )
+    }
+  }
+
   marks.sort((a, b) => a.from - b.from || a.value.startSide - b.value.startSide)
   return Decoration.set(marks, true)
 }
 
 const liveTheme = EditorView.theme({
+  ".cm-md-note-link-pill": {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
+    padding: "1px 8px",
+    margin: "0 2px",
+    borderRadius: "9999px",
+    fontSize: "0.85em",
+    fontWeight: "500",
+    lineHeight: "1.4",
+    verticalAlign: "baseline",
+    cursor: "pointer",
+    backgroundColor: "hsl(var(--primary) / 0.1)",
+    color: "hsl(var(--primary))",
+    border: "1px solid hsl(var(--primary) / 0.25)",
+    transition: "all 0.15s ease",
+    userSelect: "none",
+  },
+  ".cm-md-note-link-pill:hover": {
+    backgroundColor: "hsl(var(--primary) / 0.2)",
+    borderColor: "hsl(var(--primary) / 0.45)",
+    transform: "translateY(-0.5px)",
+  },
+  ".cm-md-note-link-icon": {
+    flexShrink: "0",
+    opacity: "0.85",
+  },
+  ".cm-md-note-link-text": {
+    maxWidth: "320px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
   ".cm-md-quote": {
     borderLeft: "2px solid hsl(var(--border))",
     paddingLeft: "10px",

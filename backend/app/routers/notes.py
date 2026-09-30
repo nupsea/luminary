@@ -849,9 +849,16 @@ async def autocomplete_notes(
     rows = (
         await repo.list_recent(limit=8)
         if not q.strip()
-        else await repo.autocomplete_content(q, limit=8)
+        else await repo.autocomplete_content(q.strip(), limit=8)
     )
-    return [NoteAutocompleteItem(id=nid, preview=content[:100]) for nid, content in rows]
+    return [
+        NoteAutocompleteItem(
+            id=nid,
+            preview=(title.strip() if title and title.strip() else content[:100].strip())
+            or "Untitled note",
+        )
+        for nid, content, title in rows
+    ]
 
 
 @router.post("/{note_id}/links", response_model=NoteLinkItem, status_code=201)

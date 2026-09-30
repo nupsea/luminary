@@ -22,6 +22,7 @@ from sqlalchemy import select
 from app.main import app
 from app.models import FlashcardModel, TeachbackResultModel
 from app.routers.study import (
+    _TEACHBACK_USER_TMPL,
     _parse_teachback_response,
     _rubric_from_evaluation,
     _score_from_dimensions,
@@ -372,3 +373,57 @@ def test_parse_teachback_returns_none_when_unreadable(raw):
     """Never a fabricated 0: the learner reads it as "you got nothing right",
     it drags the session average down, and it reaches FSRS as a failed card."""
     assert _parse_teachback_response(raw) is None
+
+
+# Returned by qwen3.5:4b on 2026-09-30: the quote opens with an escaped quote outside
+# any string, which fails the strict parse of an otherwise complete reply.
+_BARE_QUOTE_REPLY = (
+    '{"correct_points": ["owns and operates the merchant\'s account during settlement"], '
+    '"missing_points": [], "misconceptions": [], "accuracy": 90, "completeness": 100, '
+    '"clarity": 85, "evidence": \\"It also owns and operates the merchant\'s account '
+    "during settlement, which doesn't happen in real-time.\\\"}"
+)
+
+
+def test_a_bare_escaped_quote_is_repaired_and_keeps_its_evidence():
+    parsed = _parse_teachback_response(_BARE_QUOTE_REPLY)
+    assert parsed is not None
+    assert parsed["score"] == 94
+    assert parsed["evidence"].startswith("It also owns and operates")
+
+
+def test_a_broken_trailing_quote_costs_only_the_quote():
+    """The integers come before the quote, so a quote the model never closed leaves
+    the score intact; with the quote first, 5 of 30 replies lost their score."""
+    raw = (
+        '{"correct_points": [], "missing_points": ["x"], "misconceptions": [], '
+        '"accuracy": 30, "completeness": 50, "clarity": 80, "evidence": "lived in a cas'
+    )
+    parsed = _parse_teachback_response(raw)
+    assert parsed is not None
+    assert parsed["score"] == 38
+    assert "evidence" not in parsed
+
+
+def test_the_quote_is_asked_for_after_the_scores():
+    shape = _TEACHBACK_USER_TMPL[_TEACHBACK_USER_TMPL.index("Output JSON") :]
+    assert shape.index('"clarity": int') < shape.index('"evidence": str')
+    assert shape.index('"misconceptions"') < shape.index('"accuracy": int')
+
+
+@pytest.mark.asyncio
+async def test_the_evaluation_is_greedy_and_its_retry_samples():
+    """Sampled, one explanation scored 30 and then 94. A greedy retry would repeat
+    the reply that just failed, so only the retry samples."""
+    from unittest.mock import AsyncMock
+
+    from app.routers.study import _evaluate_teachback_llm
+
+    llm = AsyncMock()
+    llm.generate = AsyncMock(side_effect=["not json", "{" + _DIMS + "}"])
+    with patch("app.routers.study.get_llm_service", return_value=llm):
+        parsed = await _evaluate_teachback_llm("prompt")
+
+    assert parsed is not None
+    temps = [call.kwargs["temperature"] for call in llm.generate.call_args_list]
+    assert temps == [0.0, None]

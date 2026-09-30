@@ -125,7 +125,12 @@ export function NoteShortcutsDialog({ open, onOpenChange }: NoteShortcutsDialogP
         {
           keys: ["[["],
           description: "Link to another note",
-          detail: "Triggers note autocompletion search dialog",
+          detail: "Type [[ to search and link notes directly",
+        },
+        {
+          keys: [MOD, "K"],
+          description: "Insert or create note link",
+          detail: "Wraps selection or triggers note link search",
         },
         {
           keys: [MOD, "E"],

@@ -31,6 +31,13 @@ describe("parseLinkMarkers", () => {
     const result = parseLinkMarkers("[[abc-123|Gradient Descent]]")
     expect(result[0].raw).toBe("[[abc-123|Gradient Descent]]")
   })
+
+  it("parses single bracket [id|text] markers gracefully", () => {
+    const result = parseLinkMarkers("See [abc-123|Flow Note] here")
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe("abc-123")
+    expect(result[0].text).toBe("Flow Note")
+  })
 })
 
 describe("buildLinkMarker", () => {

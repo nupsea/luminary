@@ -230,3 +230,44 @@ async def test_session_cards_404_unknown_session(test_db):
         resp = await client.get(f"/study/sessions/{uuid.uuid4()}/cards")
 
     assert resp.status_code == 404
+
+
+# DELETE /study/sessions/{id}?if_unused=true
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("attempt", [None, "review", "pending_teachback"])
+async def test_discard_if_unused_keeps_any_run_with_an_attempt(test_db, attempt):
+    """A run left without an answer is discarded; one holding a review, or a teach-back
+    still being graded, is kept. The empty one sat in history beside the real run."""
+    from app.models import TeachbackResultModel
+
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    sess = _make_session(doc_id=doc_id, cards_reviewed=0, cards_correct=0)
+    sess.ended_at = None
+    card = _make_card(doc_id)
+    async with factory() as session:
+        session.add_all([sess, card])
+        if attempt == "review":
+            session.add(_make_review_event(sess.id, card.id))
+        elif attempt == "pending_teachback":
+            session.add(
+                TeachbackResultModel(
+                    id=str(uuid.uuid4()),
+                    flashcard_id=card.id,
+                    user_explanation="Mostly with her mother.",
+                    score=0,
+                    status="pending",
+                    session_id=sess.id,
+                )
+            )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.delete(f"/study/sessions/{sess.id}", params={"if_unused": "true"})
+        listed = await client.get("/study/sessions")
+
+    assert resp.status_code == 204
+    ids = {item["id"] for item in listed.json()["items"]}
+    assert (sess.id in ids) is (attempt is not None)

@@ -106,3 +106,54 @@ class TestEvidenceIsVerified:
 def test_the_response_shape_is_unchanged(field):
     """The UI reads these; adding grounding must not move them."""
     assert field in _TEACHBACK_USER_TMPL
+
+
+_STORY = (
+    "Before her father married the Queen her stepmother, she and a Prince who lived in "
+    "a nearby kingdom were spending time together. When he visited, they would take "
+    "walks in the royal garden."
+)
+_STEPMOTHER_CARD = (
+    "Who was Snow White spending time with before her father married the Queen's stepmother?"
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("question", "kept"),
+    [
+        # Returned by the model on 2026-09-30 for the card it was correcting.
+        (_STEPMOTHER_CARD, False),
+        ("What did Snow White and the Prince do when he visited?", True),
+        # Same passage as its card, different question: a real correction.
+        ("What did Snow White and the Prince do before her father remarried?", True),
+    ],
+)
+async def test_a_correction_card_that_repeats_its_card_is_dropped(question, kept):
+    """The same question twice in one run teaches nothing and reads as a bug."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.routers.study import _insert_correction_flashcard
+
+    card = SimpleNamespace(
+        question=_STEPMOTHER_CARD,
+        answer="a Prince who lived in a nearby kingdom.",
+        source_excerpt="she and a Prince who lived in a nearby kingdom were spending time together",
+        document_id="doc",
+        chunk_id="chunk",
+        source_chunk_ids=["chunk"],
+    )
+    payload = {
+        "question": question,
+        "answer": "They took walks in the royal garden.",
+        "source_excerpt": "When he visited, they would take walks in the royal garden."
+        if "visited" in question
+        else card.source_excerpt,
+    }
+    session = MagicMock()
+    with patch("app.routers.study._sync_flashcard_fts", AsyncMock()):
+        new_id = await _insert_correction_flashcard(card, payload, session, _STORY)
+
+    assert (new_id is not None) is kept
+    assert session.add.called is kept

@@ -12,6 +12,7 @@ function resolveLabel(from: string): string {
   // A `from` may carry the query that reproduces where it came from.
   const path = from.split("?")[0]
   if (path.startsWith("/collections/")) return "Back to Collection"
+  if (path.startsWith("/notes/")) return "Back to Note"
   return BACK_LABELS[path] ?? "Back"
 }
 

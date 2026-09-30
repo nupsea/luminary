@@ -70,7 +70,7 @@ const SLASH_ITEMS: SlashItem[] = [
     label: "Link to note",
     detail: "[[",
     section: "Insert",
-    keywords: ["wiki", "backlink", "connect"],
+    keywords: ["link", "note", "wiki", "backlink", "connect", "page"],
     run: (view, from, to) => {
       view.dispatch({
         changes: { from, to, insert: "[[" },

@@ -15,6 +15,7 @@ import {
   FileText,
   Keyboard,
   LayoutGrid,
+  Link2,
   List,
   Loader2,
   PanelRight,
@@ -222,9 +223,9 @@ export default function NotePage() {
   // refetch the whole notes list for every autosave.
   useEffect(() => {
     return () => {
-      void qc.invalidateQueries({ queryKey: ["notes"] })
-      void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-      void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+      void qc.invalidateQueries({ queryKey: ["notes"], refetchType: "none" })
+      void qc.invalidateQueries({ queryKey: ["reader-notes"], refetchType: "none" })
+      void qc.invalidateQueries({ queryKey: ["notes-groups"], refetchType: "none" })
     }
   }, [qc])
 
@@ -308,13 +309,17 @@ export default function NotePage() {
   }
 
   async function handleOpenLinkedNote(targetId: string) {
-    try {
-      await flush()
-    } catch {
-      toast.error("Could not save note before navigating")
-      return
+    // Prefetch target note query so navigation renders instantly with zero loading delay
+    void qc.prefetchQuery({ queryKey: ["note", targetId], queryFn: () => getNote(targetId) })
+    if (saveStatus === "saving" || saveStatus === "error") {
+      try {
+        await flush()
+      } catch {
+        toast.error("Could not save note before navigating")
+        return
+      }
     }
-    navigate(`/notes/${targetId}`, { state: { from: "/notes" } })
+    navigate(`/notes/${targetId}`, { state: { from: note?.id ? `/notes/${note.id}` : "/notes" } })
   }
 
   const linkCompletion = useMemo<NoteLinkCompletionConfig>(
@@ -411,11 +416,13 @@ export default function NotePage() {
         <div className="mb-2 flex items-center gap-2">
           <button
             onClick={() => {
-              // A `from` carrying a query names a place, not a history step:
-              // the reader that expanded this note wants it back in its panel.
-              if (fromPath?.includes("?")) navigate(fromPath)
-              else if (canGoBack) goBack()
-              else navigate("/notes")
+              if (fromPath === "/notes" || !canGoBack) {
+                navigate("/notes")
+              } else if (fromPath?.includes("?")) {
+                navigate(fromPath)
+              } else {
+                goBack()
+              }
             }}
             className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
@@ -466,6 +473,18 @@ export default function NotePage() {
               }}
               title="Dictate into note (Whisper)"
             />
+            {!readingView && (
+              <button
+                type="button"
+                onClick={() => {
+                  editorHandleRef.current?.insertBlock("[[")
+                }}
+                className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                title={`Link to note (${modLabel}+K)`}
+              >
+                <Link2 size={14} />
+              </button>
+            )}
             <PanelZoomResetButton panelId={readingView ? "note-preview" : "note-editor"} />
             <button
               type="button"
@@ -697,6 +716,7 @@ export default function NotePage() {
                 linkCompletion={linkCompletion}
                 editorRef={editorHandleRef}
                 onOpenShortcuts={() => setShortcutsOpen(true)}
+                onNoteLinkClick={(id) => void handleOpenLinkedNote(id)}
               />
               {note && (
                 <NoteBacklinks

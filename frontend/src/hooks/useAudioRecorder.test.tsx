@@ -50,7 +50,7 @@ beforeEach(() => {
   FakeRecorder.made = []
   apiPost.mockReset().mockResolvedValue({ text: "hello" })
   getUserMedia = vi.fn().mockResolvedValue({ getTracks: () => [{ stop: () => {} }] })
-  vi.stubGlobal("navigator", { mediaDevices: { getUserMedia } })
+  vi.stubGlobal("navigator", { language: "en-GB", mediaDevices: { getUserMedia } })
   vi.stubGlobal("MediaRecorder", FakeRecorder)
 })
 
@@ -100,5 +100,15 @@ describe("useAudioRecorder", () => {
     await rec.stop()
     const form = apiPost.mock.calls[0][1] as FormData
     expect((form.get("file") as File).name).toBe("voice_recording.ogg")
+  })
+
+  it("sends the UI language as the transcription hint", async () => {
+    const api = hook()
+    await api.startRecording()
+    const rec = FakeRecorder.made[0]
+    rec.emit("x")
+    await rec.stop()
+    const form = apiPost.mock.calls[0][1] as FormData
+    expect(form.get("language")).toBe("en")
   })
 })

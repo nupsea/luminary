@@ -295,6 +295,15 @@ export async function fetchMaterialHeadroom(
   return res.json() as Promise<MaterialHeadroom>
 }
 
+/** Deletes the session only if no attempt was made in it; the server decides. */
+export async function discardUnusedSession(sessionId: string): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/study/sessions/${encodeURIComponent(sessionId)}?if_unused=true`,
+    { method: "DELETE" },
+  )
+  if (!res.ok) throw new Error("Failed to discard session")
+}
+
 export async function deleteStudySession(sessionId: string): Promise<void> {
   const res = await fetch(
     `${API_BASE}/study/sessions/${encodeURIComponent(sessionId)}`,

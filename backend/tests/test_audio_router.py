@@ -1,6 +1,7 @@
 """Tests for POST /audio/transcribe."""
 
 import io
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,24 +25,18 @@ async def test_transcribe_empty_file():
 @pytest.mark.asyncio
 async def test_transcribe_audio_success():
     fake_transcriber = MagicMock()
-    fake_transcriber.transcribe.return_value = (
-        [
-            {"start": 0.0, "end": 2.5, "text": "Hello world."},
-            {"start": 2.5, "end": 5.0, "text": "This is a test explanation."},
-        ],
-        5.0,
-    )
+    fake_transcriber.dictate.return_value = ("Hello world. This is a test explanation.", 5.0)
 
     with patch("app.routers.audio.get_audio_transcriber", return_value=fake_transcriber):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             files = {"file": ("test.webm", io.BytesIO(b"RIFFdummydata"), "audio/webm")}
-            response = await client.post("/audio/transcribe", files=files)
+            response = await client.post("/audio/transcribe", files=files, data={"language": "en"})
             assert response.status_code == 200
             data = response.json()
             assert data["text"] == "Hello world. This is a test explanation."
             assert data["duration"] == 5.0
-            fake_transcriber.transcribe.assert_called_once()
+            assert fake_transcriber.dictate.call_args.kwargs == {"language": "en"}
 
 
 def _webm_tone(seconds: float = 1.0) -> bytes:
@@ -72,7 +67,7 @@ async def test_undecodable_recording_is_a_422_the_browser_can_read():
     from faster_whisper.audio import decode_audio
 
     fake_transcriber = MagicMock()
-    fake_transcriber.transcribe.side_effect = lambda path: (decode_audio(str(path)), 0.0)
+    fake_transcriber.dictate.side_effect = lambda path, language: (decode_audio(str(path)), 0.0)
     headerless = _webm_tone()[300:]
 
     with patch("app.routers.audio.get_audio_transcriber", return_value=fake_transcriber):
@@ -86,3 +81,30 @@ async def test_undecodable_recording_is_a_422_the_browser_can_read():
     assert response.status_code == 422
     assert "could not be read as audio" in response.json()["detail"]
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+@pytest.mark.parametrize(("hint", "pinned"), [("en", "en"), ("xx", None), (None, None)])
+def test_dictate_pins_only_a_language_whisper_knows(hint, pinned):
+    """A short clip is misdetected (Latin, p=0.40), so a known hint is pinned; an unknown
+    one falls back to detection rather than failing the transcription."""
+    pytest.importorskip("faster_whisper")
+    from types import SimpleNamespace
+
+    from app.services.audio_transcriber import AudioTranscriber
+
+    model = MagicMock()
+    model.transcribe.return_value = (
+        [SimpleNamespace(text=" Mostly with her mother. "), SimpleNamespace(text=" ")],
+        SimpleNamespace(duration=2.0, language="en", language_probability=0.9),
+    )
+    transcriber = AudioTranscriber.__new__(AudioTranscriber)
+    transcriber._model = model
+
+    assert transcriber.dictate(Path("clip.webm"), language=hint) == (
+        "Mostly with her mother.",
+        2.0,
+    )
+    kwargs = model.transcribe.call_args.kwargs
+    assert kwargs["language"] == pinned
+    assert kwargs["vad_filter"] is True
+    assert "initial_prompt" not in kwargs
