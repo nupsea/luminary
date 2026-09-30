@@ -92,7 +92,8 @@ if [ "$STATUS" -eq 200 ]; then
     check "GET /documents/$DOC_ID returns 200" "$STATUS" "200" "$BODY" ""
     check "GET /documents/$DOC_ID has channel_name key" "$STATUS" "200" "$BODY" "'channel_name' in d"
   else
-    echo "[SKIP] Could not extract document_id from upload response"
+    echo "[FAIL] upload response has no document_id"
+    FAIL=$((FAIL + 1))
   fi
 fi
 

@@ -35,7 +35,7 @@ items = json.load(sys.stdin)['items']
 best = max(items, key=lambda d: d.get('word_count') or 0, default=None)
 print(best['id'] if best else '')
 ")
-[ -n "$DOC" ] || { echo "S242 SKIP -- no documents in this library"; exit 0; }
+[ -n "$DOC" ] || { echo "SKIP: no documents in this library"; exit "$SMOKE_SKIP"; }
 
 PAGE=$(curl -s "${BASE}/sections/${DOC}/content?offset=0&limit=5")
 

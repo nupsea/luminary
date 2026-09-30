@@ -143,3 +143,10 @@ json.dump(spec, sys.stdout)' "$prefix" > "$cache" || { rm -f "$cache"; return 1;
     fi
     cat "$cache"
 }
+
+# smoke_partial_skip <reason>: one sub-check did not run while the rest of the script
+# did. all.sh reports it beside the pass, so a skipped check never reads as a pass (#187).
+smoke_partial_skip() {
+    echo "PARTIAL SKIP: $1"
+    printf '%s: %s\n' "$(basename "$0" .sh)" "$1" >> "$SMOKE_TMP/.partial-skips"
+}

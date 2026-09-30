@@ -10,6 +10,8 @@ PASS=0
 FAIL=0
 SKIP=0
 SKIPPED=()
+PARTIAL="$SMOKE_TMP/.partial-skips"
+: > "$PARTIAL"
 
 # A hang detector, not a latency bound: without it one stream that never closes
 # stalls the whole run with no verdict.
@@ -87,7 +89,11 @@ for script in "$SMOKE_DIR"/S*.sh; do
     echo "  [FAIL] $name (no verdict after ${SCRIPT_TIMEOUT}s; killed)"
     FAIL=$((FAIL + 1))
   elif [ "$status" -eq 0 ]; then
-    echo "  [PASS] $name"
+    if grep -q "^${name%.sh}: " "$PARTIAL"; then
+      echo "  [PASS] $name (partial: a sub-check was skipped)"
+    else
+      echo "  [PASS] $name"
+    fi
     PASS=$((PASS + 1))
   elif [ "$status" -eq "$SMOKE_SKIP" ]; then
     echo "  [SKIP] $name"
@@ -103,6 +109,10 @@ echo ""
 echo "Results: $PASS passed, $FAIL failed, $SKIP skipped ($MODE mode)"
 if [ "$SKIP" -gt 0 ]; then
   echo "Skipped: ${SKIPPED[*]}"
+fi
+if [ -s "$PARTIAL" ]; then
+  echo "Skipped sub-checks ($(wc -l < "$PARTIAL" | tr -d ' ')), each inside a script counted above as passed:"
+  sed 's/^/  /' "$PARTIAL"
 fi
 
 # Always, including after failures: a run that fails partway still ingested

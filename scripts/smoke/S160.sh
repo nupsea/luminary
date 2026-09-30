@@ -65,5 +65,5 @@ print('S160 fill-uncovered queued=%d OK' % d['queued'])
   [ "$HTTP_STATUS" -eq 202 ] || { echo "FAIL: expected HTTP 202, got $HTTP_STATUS"; exit 1; }
   echo "S160 smoke: POST /flashcards/health/$DOC_ID/fill-uncovered OK"
 else
-  echo "S160 smoke: fill-uncovered SKIP (no uncovered sections)"
+  smoke_partial_skip "POST fill-uncovered: doc=$DOC_ID has no uncovered sections"
 fi

@@ -45,8 +45,8 @@ STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/documents?limit=1")
 BODY=$(cat "$TMPFILE")
 rm -f "$TMPFILE"
 if [ "$STATUS" != "200" ]; then
-  echo "  SKIP: no documents endpoint or no documents available ($STATUS)"
-  echo "  Testing with 404 paths only"
+  echo "  FAIL: GET /documents returned $STATUS"
+  FAIL=1
 else
   DOC_ID=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items', []) if isinstance(d, dict) else d; print(items[0]['id'] if items else '')" 2>/dev/null || true)
   if [ -n "$DOC_ID" ]; then
@@ -85,7 +85,7 @@ else
       FAIL=1
     fi
   else
-    echo "  SKIP: no documents in library"
+    smoke_partial_skip "POST /collections/auto, GET by-document: the library has no document"
   fi
 fi
 
