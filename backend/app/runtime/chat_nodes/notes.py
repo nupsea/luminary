@@ -52,7 +52,7 @@ async def notes_node(state: ChatState) -> dict:
         logger.info("notes_node: generic subject, %d recent notes", len(recent))
         if not recent:
             return {"chunks": [], "section_context": None}
-        section_context = "\n\n".join(f"[From your notes] {content}" for _, content in recent)
+        section_context = "\n\n".join(f"[From your notes] {content}" for _, content, _ in recent)
         return {"chunks": [], "section_context": section_context, "notes_recent": True}
 
     q = state.get("rewritten_question") or state["question"]
