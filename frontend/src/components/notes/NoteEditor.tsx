@@ -29,6 +29,7 @@ export interface NoteEditorProps {
   /** External handle (outline navigation); defaults to an internal ref. */
   editorRef?: RefObject<MarkdownEditorHandle | null>
   onOpenShortcuts?: () => void
+  onNoteLinkClick?: (noteId: string) => void
 }
 
 export function NoteEditor({
@@ -41,6 +42,7 @@ export function NoteEditor({
   linkCompletion,
   editorRef: externalEditorRef,
   onOpenShortcuts,
+  onNoteLinkClick,
 }: NoteEditorProps) {
   const internalEditorRef = useRef<MarkdownEditorHandle | null>(null)
   const editorRef = externalEditorRef ?? internalEditorRef
@@ -94,11 +96,13 @@ export function NoteEditor({
           slashCommands={slashCommands}
           onEditDiagram={openDiagramEditor}
           onOpenShortcuts={onOpenShortcuts}
+          onNoteLinkClick={onNoteLinkClick}
           preview={
             previewContent.trim() ? (
               <MarkdownRenderer
                 reading
                 trackSourceLines
+                onNoteLinkClick={onNoteLinkClick}
                 onEditExcalidrawDiagram={openDiagramEditor}
                 onSetImageSize={(src, size) =>
                   onContentChange(setImageSizeInMarkdown(content, src, size, API_BASE))

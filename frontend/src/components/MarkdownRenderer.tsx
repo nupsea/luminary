@@ -1,6 +1,6 @@
 import { memo, type ReactNode, useEffect, useId, useMemo, useState } from "react"
 import type { Root, RootContent } from "hast"
-import { Pencil } from "lucide-react"
+import { FileText, Pencil } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
@@ -58,7 +58,7 @@ const IMAGE_SIZE_CLASS: Record<ImageSize, string> = {
   large: "prose-img:max-w-[800px] prose-img:max-h-[600px] prose-img:object-contain",
 }
 
-const NOTE_LINK_MARKER_RE = /\[\[([a-f0-9-]+)\|([^\]]+)\]\]/g
+const NOTE_LINK_MARKER_RE = /(?:\[\[|\[)([a-f0-9-]+)\|([^\]]+)(?:\]\]|\])/g
 
 function preprocessLinks(content: string): string {
   let text = content.replace(
@@ -368,8 +368,9 @@ function MarkdownBody({
               const isBroken = validNoteIds !== undefined && !validNoteIds.has(id)
               if (isBroken) {
                 return (
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-red-100 text-red-500 dark:bg-red-950 dark:text-red-400 line-through not-prose">
-                    {label}
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-500 dark:bg-red-950 dark:text-red-400 line-through not-prose">
+                    <FileText size={11} className="shrink-0" />
+                    <span>{label}</span>
                   </span>
                 )
               }
@@ -378,16 +379,18 @@ function MarkdownBody({
                   <button
                     type="button"
                     onClick={() => onNoteLinkClick(id)}
-                    className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900 dark:text-indigo-300 dark:hover:bg-indigo-800 font-medium not-prose cursor-pointer"
-                    title="Open linked note"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs bg-primary/10 text-primary hover:bg-primary/20 dark:bg-primary/20 dark:text-primary font-medium not-prose cursor-pointer transition-colors border border-primary/25 shadow-xs"
+                    title={`Open linked note: ${label}`}
                   >
-                    {label}
+                    <FileText size={11} className="shrink-0 opacity-80" />
+                    <span className="truncate max-w-[280px]">{label}</span>
                   </button>
                 )
               }
               return (
-                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 font-medium not-prose">
-                  {label}
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary font-medium not-prose border border-primary/20">
+                  <FileText size={11} className="shrink-0 opacity-80" />
+                  <span className="truncate max-w-[280px]">{label}</span>
                 </span>
               )
             }

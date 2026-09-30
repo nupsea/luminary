@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react"
-import { acceptCompletion, autocompletion, closeCompletion, completionStatus } from "@codemirror/autocomplete"
+import { acceptCompletion, autocompletion, closeCompletion, completionStatus, startCompletion } from "@codemirror/autocomplete"
 import { Compartment, EditorState, Prec } from "@codemirror/state"
 import {
   EditorView,
@@ -94,6 +94,8 @@ export interface MarkdownCodeEditorProps {
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
   /** Opens the keyboard shortcuts info modal. */
   onOpenShortcuts?: () => void
+  /** Handler when clicking a note link widget or pill. */
+  onNoteLinkClick?: (noteId: string) => void
 }
 
 import { usePanelZoomStore } from "@/store/panelZoomStore"
@@ -255,7 +257,7 @@ function extractImageFile(dataTransfer: DataTransfer | null): File | null {
 
 export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeEditorProps>(
   function MarkdownCodeEditor(
-    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live, onEditDiagram, onOpenShortcuts },
+    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live, onEditDiagram, onOpenShortcuts, onNoteLinkClick },
     ref,
   ) {
     const hostRef = useRef<HTMLDivElement>(null)
@@ -265,10 +267,14 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
     // The preview pane is a toggle, so live rendering has to be switchable on a
     // view that is already built.
     const liveRoom = useRef(new Compartment()).current
-    const latest = useRef({ onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onOpenShortcuts })
-    latest.current = { onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onOpenShortcuts }
+    const latest = useRef({ onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onOpenShortcuts, onNoteLinkClick })
+    latest.current = { onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onOpenShortcuts, onNoteLinkClick }
     const liveExtension = useCallback(
-      () => liveMarkdown({ onEditDiagram: (d) => latest.current.onEditDiagram?.(d) }),
+      () =>
+        liveMarkdown({
+          onEditDiagram: (d) => latest.current.onEditDiagram?.(d),
+          onNoteLinkClick: (id) => latest.current.onNoteLinkClick?.(id),
+        }),
       [],
     )
 
@@ -319,6 +325,18 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
               // prompt ArrowDown/Enter gets rejected and falls through to
               // cursor motion, killing the popup.
               interactionDelay: 30,
+            }),
+            EditorView.updateListener.of((update) => {
+              if (update.docChanged && latest.current.linkCompletion) {
+                const sel = update.state.selection.main
+                if (sel.empty) {
+                  const line = update.state.doc.lineAt(sel.from)
+                  const textBefore = line.text.slice(0, sel.from - line.from)
+                  if (textBefore.endsWith("[[")) {
+                    startCompletion(update.view)
+                  }
+                }
+              }
             }),
             Prec.highest(
               keymap.of([
@@ -509,6 +527,24 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
               {
                 key: "Mod-k",
                 run: (v) => {
+                  if (latest.current.linkCompletion) {
+                    const sel = v.state.selection.main
+                    if (!sel.empty) {
+                      const selected = v.state.sliceDoc(sel.from, sel.to)
+                      const insert = `[[${selected}`
+                      v.dispatch({
+                        changes: { from: sel.from, to: sel.to, insert },
+                        selection: { anchor: sel.from + insert.length },
+                      })
+                    } else {
+                      v.dispatch({
+                        changes: { from: sel.from, to: sel.from, insert: "[[" },
+                        selection: { anchor: sel.from + 2 },
+                      })
+                    }
+                    startCompletion(v)
+                    return true
+                  }
                   v.dispatch(toggleLinkSpec(v.state))
                   return true
                 },

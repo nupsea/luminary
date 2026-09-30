@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import NamedTuple
 
 from fastapi import Depends
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -76,22 +76,39 @@ class NoteRepo:
         )
         return result.scalar_one()
 
-    async def list_recent(self, limit: int = 8) -> list[tuple[str, str]]:
+    async def list_recent(
+        self, limit: int = 8
+    ) -> list[tuple[str, str, str | None]]:
         result = await self.session.execute(
-            select(NoteModel.id, NoteModel.content)
+            select(NoteModel.id, NoteModel.content, NoteModel.title)
+            .where(NoteModel.archived.is_(False))
             .order_by(NoteModel.updated_at.desc())
             .limit(limit)
         )
-        return [(row[0], row[1]) for row in result.all()]
+        return [(row[0], row[1], row[2]) for row in result.all()]
 
-    async def autocomplete_content(self, prefix: str, limit: int = 8) -> list[tuple[str, str]]:
+    async def autocomplete_content(
+        self, prefix: str, limit: int = 8
+    ) -> list[tuple[str, str, str | None]]:
+        clean = prefix.strip()
+        term = f"%{clean}%"
         result = await self.session.execute(
-            select(NoteModel.id, NoteModel.content)
-            .where(NoteModel.content.ilike(f"{prefix}%"))
-            .order_by(NoteModel.updated_at.desc())
+            select(NoteModel.id, NoteModel.content, NoteModel.title)
+            .where(
+                NoteModel.archived.is_(False),
+                (NoteModel.content.ilike(term)) | (NoteModel.title.ilike(term)),
+            )
+            .order_by(
+                case(
+                    (NoteModel.title.ilike(f"{clean}%"), 1),
+                    (NoteModel.content.ilike(f"{clean}%"), 2),
+                    else_=3,
+                ),
+                NoteModel.updated_at.desc(),
+            )
             .limit(limit)
         )
-        return [(row[0], row[1]) for row in result.all()]
+        return [(row[0], row[1], row[2]) for row in result.all()]
 
     # -- writes ------------------------------------------------------------
 
