@@ -4,7 +4,7 @@
  * properties rail, backlinks, and an outline rail for structured notes (3+ headings).
  */
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft,
@@ -27,7 +27,7 @@ import {
 } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { MarkdownRenderer, type ImageSize } from "@/components/MarkdownRenderer"
 import { usePanelZoomStore } from "@/store/panelZoomStore"
 import { PanelZoomResetButton } from "@/components/PanelZoomResetButton"
 import { NoteConceptChips } from "@/components/NoteConceptChips"
@@ -132,6 +132,12 @@ export default function NotePage() {
   // resetting scroll to the top of the note. Captured on click, before the
   // remount, and reapplied once the new instance is mounted below.
   const pendingScrollLineRef = useRef<number | null>(null)
+  const editContentRef = useRef(editContent)
+  editContentRef.current = editContent
+
+  const handleSetImageSize = useCallback((src: string, size: ImageSize) => {
+    setEditContent(setImageSizeInMarkdown(editContentRef.current, src, size, API_BASE))
+  }, [])
 
   const propsRailOpen = useNoteEditorUi((s) => s.propsRailOpen)
   const setPropsRailOpen = useNoteEditorUi((s) => s.setPropsRailOpen)
@@ -652,9 +658,7 @@ export default function NotePage() {
                 <MarkdownRenderer
                   reading
                   onNoteLinkClick={(id) => void handleOpenLinkedNote(id)}
-                  onSetImageSize={(src, size) =>
-                    setEditContent(setImageSizeInMarkdown(editContent, src, size, API_BASE))
-                  }
+                  onSetImageSize={handleSetImageSize}
                 >
                   {editContent}
                 </MarkdownRenderer>

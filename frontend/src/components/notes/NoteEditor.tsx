@@ -1,5 +1,5 @@
-import { useDeferredValue, useMemo, useRef, useState, type RefObject } from "react"
-import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { useCallback, useDeferredValue, useMemo, useRef, useState, type RefObject } from "react"
+import { MarkdownRenderer, type ImageSize } from "@/components/MarkdownRenderer"
 import { NoteDiagramDialog } from "@/components/NoteDiagramDialog"
 import { type MarkdownEditorHandle } from "@/components/notes/MarkdownCodeEditor"
 import {
@@ -49,9 +49,19 @@ export function NoteEditor({
   const [diagramOpen, setDiagramOpen] = useState(false)
   const [editingDiagramRef, setEditingDiagramRef] = useState<ExcalidrawNoteDiagramRef | null>(null)
 
+  const contentRef = useRef(content)
+  contentRef.current = content
+
   // In split mode, defer preview rendering so typing remains 100% fluid and concurrent
   const deferredContent = useDeferredValue(content)
   const previewContent = layout === "splitter" ? deferredContent : content
+
+  const handleSetImageSize = useCallback(
+    (src: string, size: ImageSize) => {
+      onContentChange(setImageSizeInMarkdown(contentRef.current, src, size, API_BASE))
+    },
+    [onContentChange],
+  )
 
   function handleDiagramSaved(markdown: string) {
     if (editingDiagramRef) {
@@ -104,9 +114,7 @@ export function NoteEditor({
                 trackSourceLines
                 onNoteLinkClick={onNoteLinkClick}
                 onEditExcalidrawDiagram={openDiagramEditor}
-                onSetImageSize={(src, size) =>
-                  onContentChange(setImageSizeInMarkdown(content, src, size, API_BASE))
-                }
+                onSetImageSize={handleSetImageSize}
               >
                 {previewContent}
               </MarkdownRenderer>
@@ -116,6 +124,7 @@ export function NoteEditor({
           }
         />
       </div>
+
       <NoteDiagramDialog
         open={diagramOpen}
         onOpenChange={setDiagramOpen}

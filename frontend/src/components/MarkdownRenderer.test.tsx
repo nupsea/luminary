@@ -52,5 +52,33 @@ describe("MarkdownRenderer image resolution", () => {
     expect(html).toContain("import")
     expect(html).toContain("time")
   })
+
+  it("renders markdown sections in a unified prose container without fragmenting into stacked single-child wrappers", () => {
+    const md = `## Heading 2
+
+Paragraph one text.
+
+### Heading 3
+
+Paragraph two text.`
+    const html = renderToStaticMarkup(<MarkdownRenderer reading>{md}</MarkdownRenderer>)
+
+    // Verify it contains a single prose wrapper rather than multiple fragmented wrappers
+    const proseMatches = html.match(/class="[^"]*prose[^"]*"/g)
+    expect(proseMatches?.length).toBe(1)
+    expect(html).toContain("<h2>Heading 2</h2>")
+    expect(html).toContain("<p>Paragraph one text.</p>")
+    expect(html).toContain("<h3>Heading 3</h3>")
+    expect(html).toContain("<p>Paragraph two text.</p>")
+  })
+
+  it("renders note links as styled badges", () => {
+    const md = "Reference: [[d67a222c-e161-45d6-9b65-90a6bb1015c|Attention Mechanism]]"
+    const html = renderToStaticMarkup(<MarkdownRenderer>{md}</MarkdownRenderer>)
+
+    expect(html).toContain("Attention Mechanism")
+    expect(html).not.toContain("d67a222c-e161-45d6-9b65-90a6bb1015c")
+  })
 })
+
 

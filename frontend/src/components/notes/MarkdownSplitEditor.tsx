@@ -42,7 +42,7 @@ export interface MarkdownSplitEditorProps {
 const DEFAULT_EDITOR_CLASS =
   "min-h-0 w-full flex-1 overflow-hidden rounded border-none bg-background text-foreground"
 
-const DEFAULT_PREVIEW_CLASS = "prose-sm flex-1 overflow-auto px-6 py-4"
+const DEFAULT_PREVIEW_CLASS = "flex-1 overflow-auto px-6 py-4"
 
 // Treat a pane as scrolled to its end within this many pixels. Not zero: at
 // fractional zoom levels scrollTop is sub-pixel while scrollHeight/clientHeight

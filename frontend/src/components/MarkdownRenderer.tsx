@@ -1,4 +1,14 @@
-import { memo, type ReactNode, useEffect, useId, useMemo, useState } from "react"
+import {
+  createContext,
+  memo,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+} from "react"
 import type { Root, RootContent } from "hast"
 import { FileText, Pencil } from "lucide-react"
 import ReactMarkdown from "react-markdown"
@@ -10,11 +20,10 @@ import rehypeRaw from "rehype-raw"
 import type { PluggableList } from "unified"
 import "katex/dist/katex.min.css"
 import { API_BASE } from "@/lib/config"
-import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
+import { findExcalidrawDiagrams, type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { resolveLuminaryAssetUrl } from "@/lib/noteAssets"
-import { SOURCE_LINE_ATTR, rehypeSourceLine } from "@/lib/rehypeSourceLine"
+import { SOURCE_LINE_ATTR, lineOffsetAt, rehypeSourceLine } from "@/lib/rehypeSourceLine"
 import { cn } from "@/lib/utils"
-import { splitMarkdownIntoBlocks } from "./markdownBlocks"
 
 export type ImageSize = "small" | "medium" | "large"
 
@@ -102,18 +111,12 @@ function MermaidBlock({ chart }: { chart: string }) {
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: "strict",
-          // Without this, a diagram that fails to parse is not just thrown -- mermaid
-          // also appends its own "Syntax error in text" bomb graphic to document.body.
-          // That orphan outlives this component, so a chat full of malformed diagrams
-          // stacks bombs down the page instead of showing the error box below.
           suppressErrorRendering: true,
           theme: document.documentElement.classList.contains("dark") ? "dark" : "default",
         })
         const { svg } = await mermaid.render(renderId, chart)
         if (!cancelled) setSvg(svg)
       } catch (err) {
-        // Belt and braces: older mermaid builds ignore suppressErrorRendering and still
-        // leave the temporary container behind on failure.
         document.getElementById(`d${renderId}`)?.remove()
         if (!cancelled) {
           setSvg("")
@@ -149,7 +152,9 @@ function MermaidBlock({ chart }: { chart: string }) {
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   )
-}function ExcalidrawDiagramPreview({
+}
+
+const ExcalidrawDiagramPreview = memo(function ExcalidrawDiagramPreview({
   diagram,
   index,
   onEdit,
@@ -194,7 +199,7 @@ function MermaidBlock({ chart }: { chart: string }) {
       </div>
     </figure>
   )
-}
+})
 
 /**
  * Strip inter-element whitespace text nodes from table structures before rehypeRaw.
@@ -242,26 +247,32 @@ function resolveImageUrl(src?: string, documentId?: string): string {
   return src
 }
 
-const MemoizedMarkdownImage = memo(function MemoizedMarkdownImage({
-  src,
-  alt,
-  documentId,
-  imageSize,
-  onSetImageSize,
-  onOpenMenu,
-  onImageLoad,
-}: {
-  src?: string
-  alt?: string
+interface MarkdownRendererContextValue {
   documentId?: string
   imageSize: ImageSize
   onSetImageSize?: (src: string, size: ImageSize) => void
   onOpenMenu: (menu: { src: string; x: number; y: number }) => void
   onImageLoad?: () => void
+  validNoteIds?: Set<string>
+  onNoteLinkClick?: (noteId: string) => void
+}
+
+const MarkdownRendererContext = createContext<MarkdownRendererContextValue | null>(null)
+
+const MarkdownImage = memo(function MarkdownImage({
+  src,
+  alt,
+}: {
+  src?: string
+  alt?: string
 }) {
+  const ctx = useContext(MarkdownRendererContext)
   const parsed = parseImageAlt(alt)
-  const size = parsed.size ?? imageSize
-  const resolvedSrc = resolveImageUrl(src, documentId)
+  const size = parsed.size ?? ctx?.imageSize ?? "medium"
+  const resolvedSrc = resolveImageUrl(src, ctx?.documentId)
+  const onSetImageSize = ctx?.onSetImageSize
+  const onOpenMenu = ctx?.onOpenMenu
+  const onImageLoad = ctx?.onImageLoad
 
   return (
     <img
@@ -270,7 +281,7 @@ const MemoizedMarkdownImage = memo(function MemoizedMarkdownImage({
       decoding="async"
       onLoad={onImageLoad}
       onClick={
-        onSetImageSize && resolvedSrc
+        onSetImageSize && resolvedSrc && onOpenMenu
           ? (e) => onOpenMenu({ src: resolvedSrc, x: e.clientX, y: e.clientY })
           : undefined
       }
@@ -286,6 +297,74 @@ const MemoizedMarkdownImage = memo(function MemoizedMarkdownImage({
     />
   )
 })
+
+const MarkdownPre = memo(function MarkdownPre({
+  children: preChildren,
+}: {
+  children?: ReactNode
+}) {
+  const child = Array.isArray(preChildren) ? preChildren[0] : preChildren
+  if (
+    typeof child === "object" &&
+    child !== null &&
+    "props" in child &&
+    typeof child.props === "object" &&
+    child.props !== null
+  ) {
+    const props = child.props as { className?: string; children?: ReactNode }
+    if (props.className?.includes("language-mermaid")) {
+      return <MermaidBlock chart={String(props.children ?? "").trim()} />
+    }
+  }
+  return <pre>{preChildren}</pre>
+})
+
+const MarkdownCode = memo(function MarkdownCode({
+  children: codeChildren,
+  ...props
+}: ComponentPropsWithoutRef<"code">) {
+  const ctx = useContext(MarkdownRendererContext)
+  const text = String(codeChildren)
+  const m = text.match(/^\[note:([a-f0-9-]+)\|(.+)\]$/)
+  if (m) {
+    const [, id, label] = m
+    const isBroken = ctx?.validNoteIds !== undefined && !ctx.validNoteIds.has(id)
+    if (isBroken) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-500 dark:bg-red-950 dark:text-red-400 line-through not-prose">
+          <FileText size={11} className="shrink-0" />
+          <span>{label}</span>
+        </span>
+      )
+    }
+    if (ctx?.onNoteLinkClick) {
+      return (
+        <button
+          type="button"
+          onClick={() => ctx.onNoteLinkClick!(id)}
+          className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs bg-primary/10 text-primary hover:bg-primary/20 dark:bg-primary/20 dark:text-primary font-medium not-prose cursor-pointer transition-colors border border-primary/25 shadow-xs"
+          title={`Open linked note: ${label}`}
+        >
+          <FileText size={11} className="shrink-0 opacity-80" />
+          <span className="truncate max-w-[280px]">{label}</span>
+        </button>
+      )
+    }
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary font-medium not-prose border border-primary/20">
+        <FileText size={11} className="shrink-0 opacity-80" />
+        <span className="truncate max-w-[280px]">{label}</span>
+      </span>
+    )
+  }
+  return <code {...props}>{codeChildren}</code>
+})
+
+const STABLE_MARKDOWN_COMPONENTS = {
+  pre: MarkdownPre,
+  img: MarkdownImage,
+  code: MarkdownCode,
+}
 
 function MarkdownBody({
   children,
@@ -303,9 +382,7 @@ function MarkdownBody({
   // Only inline substitutions — line numbering must survive for scroll sync.
   const processed = preprocessLinks(children)
   const [sizeMenu, setSizeMenu] = useState<{ src: string; x: number; y: number } | null>(null)
-  // Options go in a tuple, never applied here: unified calls every entry in this
-  // list as an attacher, so passing an already-applied transformer invokes it
-  // with no tree and throws out of <Markdown>, unmounting the app.
+
   const rehypePlugins: PluggableList = useMemo(
     () =>
       trackSourceLines
@@ -314,132 +391,66 @@ function MarkdownBody({
     [trackSourceLines, sourceLineOffset],
   )
 
+  const contextValue = useMemo<MarkdownRendererContextValue>(
+    () => ({
+      documentId,
+      imageSize,
+      validNoteIds,
+      onNoteLinkClick,
+      onSetImageSize,
+      onImageLoad,
+      onOpenMenu: setSizeMenu,
+    }),
+    [documentId, imageSize, validNoteIds, onNoteLinkClick, onSetImageSize, onImageLoad],
+  )
+
   return (
-    <div
-      className={cn(
-        // One typeface throughout, as everywhere else in the app; the two body
-        // modes differ by rhythm. Reading mode keeps prose's generous default
-        // spacing, chat tightens it so an answer does not sprawl.
-        "prose prose-base dark:prose-invert max-w-none font-sans leading-relaxed text-foreground/90 [font-size:inherit]",
-        "prose-headings:font-sans prose-headings:font-semibold prose-headings:tracking-tight",
-        reading ? "" : "prose-p:my-3 prose-li:my-1 prose-ul:my-4 prose-ol:my-4",
-        "prose-img:rounded-lg prose-img:shadow-md prose-img:mx-auto",
-        "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
-        IMAGE_SIZE_CLASS[imageSize],
-        className,
-      )}
-    >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={rehypePlugins}
-        components={{
-          pre: ({ children: preChildren }) => {
-            const child = Array.isArray(preChildren) ? preChildren[0] : preChildren
-            if (
-              typeof child === "object" &&
-              child !== null &&
-              "props" in child &&
-              typeof child.props === "object" &&
-              child.props !== null
-            ) {
-              const props = child.props as { className?: string; children?: ReactNode }
-              if (props.className?.includes("language-mermaid")) {
-                return <MermaidBlock chart={String(props.children ?? "").trim()} />
-              }
-            }
-            return <pre>{preChildren}</pre>
-          },
-          img: ({ src, alt }) => (
-            <MemoizedMarkdownImage
-              src={src}
-              alt={alt}
-              documentId={documentId}
-              imageSize={imageSize}
-              onSetImageSize={onSetImageSize}
-              onOpenMenu={setSizeMenu}
-              onImageLoad={onImageLoad}
-            />
-          ),
-          code: ({ children: codeChildren, ...props }) => {
-            const text = String(codeChildren)
-            const m = text.match(/^\[note:([a-f0-9-]+)\|(.+)\]$/)
-            if (m) {
-              const [, id, label] = m
-              const isBroken = validNoteIds !== undefined && !validNoteIds.has(id)
-              if (isBroken) {
-                return (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-500 dark:bg-red-950 dark:text-red-400 line-through not-prose">
-                    <FileText size={11} className="shrink-0" />
-                    <span>{label}</span>
-                  </span>
-                )
-              }
-              if (onNoteLinkClick) {
-                return (
-                  <button
-                    type="button"
-                    onClick={() => onNoteLinkClick(id)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs bg-primary/10 text-primary hover:bg-primary/20 dark:bg-primary/20 dark:text-primary font-medium not-prose cursor-pointer transition-colors border border-primary/25 shadow-xs"
-                    title={`Open linked note: ${label}`}
-                  >
-                    <FileText size={11} className="shrink-0 opacity-80" />
-                    <span className="truncate max-w-[280px]">{label}</span>
-                  </button>
-                )
-              }
-              return (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary font-medium not-prose border border-primary/20">
-                  <FileText size={11} className="shrink-0 opacity-80" />
-                  <span className="truncate max-w-[280px]">{label}</span>
-                </span>
-              )
-            }
-            return <code {...props}>{codeChildren}</code>
-          },
-        }}
+    <MarkdownRendererContext.Provider value={contextValue}>
+      <div
+        className={cn(
+          "prose prose-base dark:prose-invert max-w-none font-sans leading-relaxed text-foreground/90 [font-size:inherit]",
+          "prose-headings:font-sans prose-headings:font-semibold prose-headings:tracking-tight",
+          reading ? "" : "prose-p:my-3 prose-li:my-1 prose-ul:my-4 prose-ol:my-4",
+          "prose-img:rounded-lg prose-img:shadow-md prose-img:mx-auto",
+          "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
+          IMAGE_SIZE_CLASS[imageSize],
+          className,
+        )}
       >
-        {processed}
-      </ReactMarkdown>
-      {sizeMenu && onSetImageSize && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setSizeMenu(null)} />
-          <div
-            className="fixed z-50 flex gap-1 rounded-md border border-border bg-popover p-1 shadow-md not-prose"
-            style={{ left: sizeMenu.x, top: sizeMenu.y }}
-          >
-            {(["small", "medium", "large"] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => {
-                  onSetImageSize(sizeMenu.src, s)
-                  setSizeMenu(null)
-                }}
-                className="rounded px-2 py-0.5 text-xs capitalize text-foreground hover:bg-accent"
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkMath]}
+          rehypePlugins={rehypePlugins}
+          components={STABLE_MARKDOWN_COMPONENTS}
+        >
+          {processed}
+        </ReactMarkdown>
+        {sizeMenu && onSetImageSize && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setSizeMenu(null)} />
+            <div
+              className="fixed z-50 flex gap-1 rounded-md border border-border bg-popover p-1 shadow-md not-prose"
+              style={{ left: sizeMenu.x, top: sizeMenu.y }}
+            >
+              {(["small", "medium", "large"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => {
+                    onSetImageSize(sizeMenu.src, s)
+                    setSizeMenu(null)
+                  }}
+                  className="rounded px-2 py-0.5 text-xs capitalize text-foreground hover:bg-accent"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </MarkdownRendererContext.Provider>
   )
 }
-
-const MemoizedMarkdownBlock = memo(
-  function MemoizedMarkdownBlock(props: MarkdownRendererProps & { sourceLineOffset: number }) {
-    return <MarkdownBody {...props}>{props.children}</MarkdownBody>
-  },
-  (prev, next) =>
-    prev.children === next.children &&
-    prev.sourceLineOffset === next.sourceLineOffset &&
-    prev.imageSize === next.imageSize &&
-    prev.reading === next.reading &&
-    prev.className === next.className &&
-    prev.documentId === next.documentId &&
-    prev.validNoteIds === next.validNoteIds,
-)
 
 export function MarkdownRenderer({
   children,
@@ -454,49 +465,80 @@ export function MarkdownRenderer({
   documentId,
   onImageLoad,
 }: MarkdownRendererProps) {
-  const chunks = useMemo(() => splitMarkdownIntoBlocks(children), [children])
+  const diagrams = useMemo(() => findExcalidrawDiagrams(children), [children])
 
-  if (chunks.length === 0) {
-    return null
+  if (diagrams.length === 0) {
+    return (
+      <MarkdownBody
+        className={className}
+        validNoteIds={validNoteIds}
+        imageSize={imageSize}
+        reading={reading}
+        onNoteLinkClick={onNoteLinkClick}
+        onSetImageSize={onSetImageSize}
+        trackSourceLines={trackSourceLines}
+        documentId={documentId}
+        onImageLoad={onImageLoad}
+      >
+        {children}
+      </MarkdownBody>
+    )
   }
 
-  let diagramIndex = 0
+  const lastEnd = diagrams.at(-1)?.end ?? 0
 
   return (
-    <div className={cn("max-w-none", className)}>
-      {chunks.map((chunk) => {
-        if (chunk.isDiagram && chunk.diagramRef) {
-          const idx = diagramIndex++
-          return (
+    <div className={cn("max-w-none space-y-4", className)}>
+      {diagrams.map((diagram, index) => {
+        const previousEnd = index === 0 ? 0 : diagrams[index - 1].end
+        const before = children.substring(previousEnd, diagram.start)
+        const lineOffset = lineOffsetAt(children, previousEnd)
+        return (
+          <div key={diagram.scenePath || `diagram-${index}`}>
+            {before.trim() && (
+              <MarkdownBody
+                validNoteIds={validNoteIds}
+                imageSize={imageSize}
+                reading={reading}
+                onNoteLinkClick={onNoteLinkClick}
+                onSetImageSize={onSetImageSize}
+                trackSourceLines={trackSourceLines}
+                sourceLineOffset={lineOffset}
+                documentId={documentId}
+                onImageLoad={onImageLoad}
+              >
+                {before}
+              </MarkdownBody>
+            )}
             <ExcalidrawDiagramPreview
-              key={chunk.diagramRef.scenePath || `diagram-${idx}`}
-              diagram={chunk.diagramRef}
-              index={idx}
+              diagram={diagram}
+              index={index}
               onEdit={onEditExcalidrawDiagram}
               onImageLoad={onImageLoad}
-              sourceLine={trackSourceLines ? chunk.lineOffset + 1 : undefined}
+              sourceLine={
+                trackSourceLines ? lineOffsetAt(children, diagram.start) + 1 : undefined
+              }
             />
-          )
-        }
-
-        return (
-          <MemoizedMarkdownBlock
-            key={chunk.key}
-            sourceLineOffset={chunk.lineOffset}
-            className={className}
-            validNoteIds={validNoteIds}
-            imageSize={imageSize}
-            reading={reading}
-            onNoteLinkClick={onNoteLinkClick}
-            onSetImageSize={onSetImageSize}
-            trackSourceLines={trackSourceLines}
-            documentId={documentId}
-            onImageLoad={onImageLoad}
-          >
-            {chunk.source}
-          </MemoizedMarkdownBlock>
+          </div>
         )
       })}
+      {children.substring(lastEnd).trim() && (
+        <MarkdownBody
+          validNoteIds={validNoteIds}
+          imageSize={imageSize}
+          reading={reading}
+          onNoteLinkClick={onNoteLinkClick}
+          onSetImageSize={onSetImageSize}
+          trackSourceLines={trackSourceLines}
+          sourceLineOffset={lineOffsetAt(children, lastEnd)}
+          documentId={documentId}
+          onImageLoad={onImageLoad}
+        >
+          {children.substring(lastEnd)}
+        </MarkdownBody>
+      )}
     </div>
   )
 }
+
+
