@@ -113,7 +113,10 @@ below it. `ExplanationPanel`, `PracticePanel` and `FeynmanPanel` are faces, not 
 
 ## Dictation
 
-`POST /audio/transcribe` hands a browser recording to the same `AudioTranscriber` that ingests audio.
+`POST /audio/transcribe` hands a browser recording to the same `AudioTranscriber` that ingests audio,
+through `dictate`: beam search, VAD, and the UI language pinned, because detection on a few seconds
+of speech misreads English as another language. It is never primed with the question: Whisper then
+returns the question as the learner's answer on noisy audio.
 It needs the `transcription` component, which the installer may not carry, so the mic reads a
 `dictation` capability and is absent until it is installed. The macOS entitlements it needs are in
 `desktop-bundle.md`.

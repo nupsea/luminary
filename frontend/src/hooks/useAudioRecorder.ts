@@ -67,6 +67,9 @@ export function useAudioRecorder({ onTranscribed }: UseAudioRecorderOptions) {
         const formData = new FormData()
         const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm"
         formData.append("file", blob, `voice_recording.${ext}`)
+        // Whisper guesses the language of a short clip badly; the UI locale is the hint.
+        const language = navigator.language?.split("-")[0]
+        if (language) formData.append("language", language)
 
         try {
           const data = await apiPost<{ text?: string }>("/audio/transcribe", formData)

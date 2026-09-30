@@ -8,7 +8,7 @@ import logging
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from app.exceptions import InvalidInput
@@ -25,8 +25,11 @@ class TranscriptionResponse(BaseModel):
 
 
 @router.post("/transcribe", response_model=TranscriptionResponse)
-async def transcribe_audio(file: UploadFile = File(...)) -> TranscriptionResponse:
-    """Transcribe an audio recording into text using faster-whisper."""
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    language: str | None = Form(None),
+) -> TranscriptionResponse:
+    """Transcribe a dictated recording; ``language`` is an ISO 639-1 hint."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No audio file uploaded")
 
@@ -48,7 +51,7 @@ async def transcribe_audio(file: UploadFile = File(...)) -> TranscriptionRespons
             import av  # noqa: PLC0415 -- the media extra, absent from the bundle
 
             try:
-                segments, duration = transcriber.transcribe(tmp_path)
+                return transcriber.dictate(tmp_path, language=language)
             except av.error.FFmpegError as exc:
                 # A raised decode error escapes CORS and reads as a network failure.
                 logger.warning(
@@ -62,8 +65,6 @@ async def transcribe_audio(file: UploadFile = File(...)) -> TranscriptionRespons
                 raise InvalidInput(
                     "The recording could not be read as audio. Try recording again."
                 ) from exc
-            full_text = " ".join(seg["text"] for seg in segments).strip()
-            return full_text, duration
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()

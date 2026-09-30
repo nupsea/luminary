@@ -86,6 +86,30 @@ class AudioTranscriber:
         )
         return result, info.duration
 
+    def dictate(self, file_path: Path, *, language: str | None) -> tuple[str, float]:
+        """Transcribe a short spoken answer; returns (text, duration_seconds).
+
+        Language detection on a 3-5 s clip is a coin toss, so the caller's language is
+        pinned when Whisper knows it. No ``initial_prompt``: primed with the question,
+        Whisper returned the question itself as the learner's answer on noisy clips.
+        """
+        from faster_whisper.tokenizer import _LANGUAGE_CODES  # noqa: PLC0415
+
+        segments_iter, info = self._model.transcribe(
+            str(file_path),
+            beam_size=5,
+            language=language if language in _LANGUAGE_CODES else None,
+            vad_filter=True,
+        )
+        text = " ".join(seg.text.strip() for seg in segments_iter if seg.text.strip())
+        logger.info(
+            "AudioTranscriber: dictated %.1fs, language=%s p=%.2f",
+            info.duration,
+            info.language,
+            info.language_probability,
+        )
+        return text, info.duration
+
 
 @lru_cache(maxsize=1)
 def get_audio_transcriber() -> AudioTranscriber:
