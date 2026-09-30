@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.5] - 2026-09-30
+
+### Fixed
+- **Spoken teach-back answers came back garbled.** Dictation now tells Whisper the app's language and decodes with beam search, instead of guessing the language of a few seconds of speech (it once picked Latin).
+- **Teach-back grades changed between submissions of the same answer.** Grading is now deterministic, and the passage quote is asked for after the scores. On 35 test cards every answer now gets a score (was 113 of 140).
+- **An empty run appeared in history beside the real one.** Leaving a run without answering anything no longer keeps it.
+- **The same question came up twice in a run.** A correction card that restates the card it corrects is dropped.
+- **Clarity showed a blank after every evaluation.** It is no longer shown for teach-back.
+- **Note links and autocomplete** find notes by title as well as content, skip archived notes, and navigate instantly.
+
 ## [0.14.4] - 2026-09-30
 
 ### Added
