@@ -99,8 +99,8 @@ below it. `ExplanationPanel`, `PracticePanel` and `FeynmanPanel` are faces, not 
   teach-back.
 - **A teach-back is not graded by hand.** Scoring applies its own FSRS review, so the grade buttons
   appear on recall cards only; offering them on a scored card reviews it twice.
-  `InlineTeachbackFeedback` shows all three rubric dimensions and says so when the best-effort rubric
-  call comes back empty.
+  `InlineTeachbackFeedback` shows accuracy and completeness, and says so when they come back empty.
+  Clarity is not shown: the grader writes no feedback for it, and a bare number read as blank.
 - **Retry in place, never delete and retry.** Deleting a session removes its teach-back rows and
   review events but leaves the card's FSRS state advanced, so it keeps the schedule move it appeared
   to undo.

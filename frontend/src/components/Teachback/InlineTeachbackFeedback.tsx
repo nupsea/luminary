@@ -43,15 +43,9 @@ export function InlineTeachbackFeedback({ result }: { result: TeachbackResultIte
             score={result.rubric.completeness.score}
             body={completenessNote(result.rubric.completeness)}
           />
-          {/* Shown, and explicitly not part of the score: it is the one dimension
-              with no passage behind it, and it read 6/100 on an explanation whose
-              own correct_points named two right concepts. */}
-          <Dimension
-            label="Clarity"
-            score={result.rubric.clarity.score}
-            body="Feedback on how it was put. Not counted toward the score."
-            muted
-          />
+          {/* No Clarity row: it has no passage behind it and no feedback text, so it
+              read as blank. A clarity comment was tried on the local grader: empty on
+              7 of 10 answers, about content when present, and it moved the scores. */}
         </div>
       ) : (
         // Accuracy or completeness came back missing or out of range, so there is
@@ -101,24 +95,12 @@ export function InlineTeachbackFeedback({ result }: { result: TeachbackResultIte
   )
 }
 
-function Dimension({
-  label,
-  score,
-  body,
-  muted = false,
-}: {
-  label: string
-  score: number
-  body: string
-  muted?: boolean
-}) {
+function Dimension({ label, score, body }: { label: string; score: number; body: string }) {
   return (
     <div className="flex gap-2">
       {/* 0-100 per dimension, the scale _TEACHBACK_USER_TMPL asks the model for
           -- not the 0-5 a rubric is usually assumed to use. */}
-      <span
-        className={`w-28 shrink-0 font-semibold ${muted ? "text-muted-foreground" : "text-foreground"}`}
-      >
+      <span className="w-28 shrink-0 font-semibold text-foreground">
         {label} {score}/100
       </span>
       <span className="flex-1 text-muted-foreground">{body}</span>
