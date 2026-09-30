@@ -138,6 +138,24 @@ class StudyRepo:
         await self.session.delete(sess)
         await self.session.commit()
 
+    async def discard_session_if_unused(self, session_id: str) -> bool:
+        """Delete a session that holds no review and no teach-back attempt.
+
+        A run opened and left without an answer is not practice, and kept open it
+        sits in the history beside the run the learner actually did. A pending
+        teach-back row counts as an attempt, so a run left mid-grading survives.
+        """
+        sess = await self.get_session_or_404(session_id)
+        for model in (ReviewEventModel, TeachbackResultModel):
+            used = await self.session.execute(
+                select(model.id).where(model.session_id == session_id).limit(1)
+            )
+            if used.first() is not None:
+                return False
+        await self.session.delete(sess)
+        await self.session.commit()
+        return True
+
     async def purge_runs_without_live_cards(
         self,
         *,

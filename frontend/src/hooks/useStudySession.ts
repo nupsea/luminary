@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   type Flashcard,
   type TeachbackResultItem,
+  discardUnusedSession,
   endSession,
 } from "@/lib/studyApi"
 import {
@@ -116,10 +117,13 @@ export function useStudySession(
       if (sessionId && sessionState !== "complete") {
         const remaining = Math.max(queue.length - currentIndex, 0)
         // Only finalise if the queue was exhausted without hitting complete.
-        // reviewed=0 and partial-progress both stay open so a later Start
-        // auto-resumes the same session instead of creating a duplicate.
+        // Partial progress stays open so a later Start resumes it. A run left
+        // unanswered is discarded: kept open, it sat in history beside the run
+        // the learner switched to in the other mode.
         if (reviewed > 0 && remaining === 0) {
           await endSession(sessionId).catch(() => {})
+        } else if (reviewed === 0) {
+          await discardUnusedSession(sessionId).catch(() => {})
         }
       }
       setStudySessionId(null)

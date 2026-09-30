@@ -976,9 +976,17 @@ async def reopen_session(
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session(
     session_id: str,
+    if_unused: bool = False,
     repo: StudyRepo = Depends(get_study_repo),
 ) -> None:
-    """Delete a study session and all associated review events and teachback results."""
+    """Delete a study session and all associated review events and teachback results.
+
+    ``if_unused`` deletes only a session with no attempt in it, and is a no-op otherwise.
+    """
+    if if_unused:
+        if await repo.discard_session_if_unused(session_id):
+            logger.info("Unused study session discarded", extra={"session_id": session_id})
+        return
     await repo.delete_session_cascade(session_id)
     logger.info("Study session deleted", extra={"session_id": session_id})
 
