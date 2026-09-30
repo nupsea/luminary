@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
@@ -2763,6 +2764,24 @@ async def _llm_correction_card_payload(
     return data
 
 
+def _restates_question(candidate: str, original: str) -> bool:
+    """Whether a correction card hands back the question it was correcting.
+
+    Word-set Jaccard over the whole question. The deck's duplicate rules are too loose
+    here: a correction is about its card's passage by design, so it shares names and
+    context. Bracketed: "What did she think regarding cleaning up in the cottage..."
+    returned as "What did Snow White think regarding..." is 0.83; "What distinguishes
+    spaced repetition from massed practice?" correcting "What is spaced repetition?"
+    is 0.43.
+    """
+
+    def words(text: str) -> set[str]:
+        return {w for w in re.sub(r"[^\w\s]", "", text.lower()).split() if len(w) > 2}
+
+    a, b = words(candidate), words(original)
+    return bool(a and b) and len(a & b) / len(a | b) >= 0.6
+
+
 async def _insert_correction_flashcard(
     card: FlashcardModel,
     payload: dict,
@@ -2784,6 +2803,9 @@ async def _insert_correction_flashcard(
     verdict = card_rejection(question, answer, excerpt, source)
     if verdict:
         logger.info("teachback: dropped correction card (%s): %r", verdict[1], question[:80])
+        return None
+    if _restates_question(question, card.question):
+        logger.info("teachback: dropped correction card (repeats its card): %r", question[:80])
         return None
 
     new_id = str(uuid.uuid4())
