@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type RefObject } from "react"
+import { useDeferredValue, useMemo, useRef, useState, type RefObject } from "react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteDiagramDialog } from "@/components/NoteDiagramDialog"
 import { type MarkdownEditorHandle } from "@/components/notes/MarkdownCodeEditor"
@@ -44,9 +44,12 @@ export function NoteEditor({
 }: NoteEditorProps) {
   const internalEditorRef = useRef<MarkdownEditorHandle | null>(null)
   const editorRef = externalEditorRef ?? internalEditorRef
-
   const [diagramOpen, setDiagramOpen] = useState(false)
   const [editingDiagramRef, setEditingDiagramRef] = useState<ExcalidrawNoteDiagramRef | null>(null)
+
+  // In split mode, defer preview rendering so typing remains 100% fluid and concurrent
+  const deferredContent = useDeferredValue(content)
+  const previewContent = layout === "splitter" ? deferredContent : content
 
   function handleDiagramSaved(markdown: string) {
     if (editingDiagramRef) {
@@ -92,7 +95,7 @@ export function NoteEditor({
           onEditDiagram={openDiagramEditor}
           onOpenShortcuts={onOpenShortcuts}
           preview={
-            content.trim() ? (
+            previewContent.trim() ? (
               <MarkdownRenderer
                 reading
                 trackSourceLines
@@ -101,7 +104,7 @@ export function NoteEditor({
                   onContentChange(setImageSizeInMarkdown(content, src, size, API_BASE))
                 }
               >
-                {content}
+                {previewContent}
               </MarkdownRenderer>
             ) : (
               <p className="text-muted-foreground italic text-sm">Preview will appear here...</p>

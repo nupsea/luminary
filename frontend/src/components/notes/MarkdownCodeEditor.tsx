@@ -120,7 +120,6 @@ const editorTheme = EditorView.theme({
   },
   ".cm-content ::selection, .cm-line ::selection, .cm-scroller ::selection": {
     backgroundColor: "hsl(var(--primary) / 0.35) !important",
-    color: "#ffffff !important",
   },
   ".cm-selectionMatch": {
     backgroundColor: "hsl(var(--primary) / 0.2) !important",
@@ -599,6 +598,26 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
       })
       viewRef.current = view
       if (autoFocus) view.focus()
+
+      // When any asynchronous image (or diagram) finishes loading inside the editor,
+      // force CodeMirror's height map to re-measure so vertical mouse clicks and selections
+      // never desynchronize.
+      const handleImageLoad = (e: Event) => {
+        if ((e.target as HTMLElement)?.tagName === "IMG") {
+          // @ts-expect-error CodeMirror internal viewState
+          if (view.viewState) view.viewState.mustMeasureContent = true
+          view.requestMeasure()
+        }
+      }
+      view.scrollDOM.addEventListener("load", handleImageLoad, true)
+
+      const contentObserver = new ResizeObserver(() => {
+        // @ts-expect-error CodeMirror internal viewState
+        if (view.viewState) view.viewState.mustMeasureContent = true
+        view.requestMeasure()
+      })
+      contentObserver.observe(view.contentDOM)
+
       // Radix dialogs grab Escape at document capture -- before CM's own
       // handler -- so an open completion popup would either not close or take
       // the whole sheet with it. Window capture runs first; consume the key
@@ -612,6 +631,8 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
       }
       window.addEventListener("keydown", onEscapeCapture, { capture: true })
       return () => {
+        view.scrollDOM.removeEventListener("load", handleImageLoad, true)
+        contentObserver.disconnect()
         window.removeEventListener("keydown", onEscapeCapture, { capture: true })
         view.destroy()
         viewRef.current = null

@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react"
+import { memo, type ReactNode, useEffect, useId, useMemo, useState } from "react"
 import type { Root, RootContent } from "hast"
 import { Pencil } from "lucide-react"
 import ReactMarkdown from "react-markdown"
@@ -10,14 +10,15 @@ import rehypeRaw from "rehype-raw"
 import type { PluggableList } from "unified"
 import "katex/dist/katex.min.css"
 import { API_BASE } from "@/lib/config"
-import { findExcalidrawDiagrams, type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
+import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { resolveLuminaryAssetUrl } from "@/lib/noteAssets"
-import { SOURCE_LINE_ATTR, lineOffsetAt, rehypeSourceLine } from "@/lib/rehypeSourceLine"
+import { SOURCE_LINE_ATTR, rehypeSourceLine } from "@/lib/rehypeSourceLine"
 import { cn } from "@/lib/utils"
+import { splitMarkdownIntoBlocks } from "./markdownBlocks"
 
 export type ImageSize = "small" | "medium" | "large"
 
-interface MarkdownRendererProps {
+export interface MarkdownRendererProps {
   children: string
   className?: string
   /** When provided, note link IDs NOT in this set are rendered as broken (muted red). */
@@ -41,6 +42,8 @@ interface MarkdownRendererProps {
   sourceLineOffset?: number
   /** Parent document ID used to resolve relative image paths to document asset endpoints. */
   documentId?: string
+  /** Notified when any image finishes loading in the DOM. */
+  onImageLoad?: () => void
 }
 
 const IMAGE_SIZE_STYLE: Record<ImageSize, { maxWidth: string; maxHeight: string; objectFit: "contain" }> = {
@@ -146,18 +149,18 @@ function MermaidBlock({ chart }: { chart: string }) {
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   )
-}
-
-function ExcalidrawDiagramPreview({
+}function ExcalidrawDiagramPreview({
   diagram,
   index,
   onEdit,
   sourceLine,
+  onImageLoad,
 }: {
   diagram: ExcalidrawNoteDiagramRef
   index: number
   onEdit?: (diagram: ExcalidrawNoteDiagramRef) => void
   sourceLine?: number
+  onImageLoad?: () => void
 }) {
   return (
     <figure
@@ -184,6 +187,8 @@ function ExcalidrawDiagramPreview({
         <img
           src={resolveLuminaryAssetUrl(diagram.svgPath)}
           alt={`Diagram ${index + 1}`}
+          decoding="async"
+          onLoad={onImageLoad}
           className="mx-auto block max-h-[600px] max-w-[800px] object-contain"
         />
       </div>
@@ -194,7 +199,7 @@ function ExcalidrawDiagramPreview({
 /**
  * Strip inter-element whitespace text nodes from table structures before rehypeRaw.
  * Without this, rehypeRaw's HTML5 parser (parse5) foster-parents any whitespace text
- * nodes found inside <table>, <thead>, <tbody>, or <tr> to before the <table> element,
+ * nodes found inside <table>, <thead>, <tbody>, or <tr> to before the table element,
  * causing dozens of empty lines (900px+ of blank void) in white-space: pre-wrap containers.
  */
 function rehypeCleanTableWhitespace() {
@@ -237,7 +242,64 @@ function resolveImageUrl(src?: string, documentId?: string): string {
   return src
 }
 
-function MarkdownBody({ children, className, validNoteIds, imageSize = "medium", reading = false, onNoteLinkClick, onSetImageSize, trackSourceLines = false, sourceLineOffset = 0, documentId }: MarkdownRendererProps) {
+const MemoizedMarkdownImage = memo(function MemoizedMarkdownImage({
+  src,
+  alt,
+  documentId,
+  imageSize,
+  onSetImageSize,
+  onOpenMenu,
+  onImageLoad,
+}: {
+  src?: string
+  alt?: string
+  documentId?: string
+  imageSize: ImageSize
+  onSetImageSize?: (src: string, size: ImageSize) => void
+  onOpenMenu: (menu: { src: string; x: number; y: number }) => void
+  onImageLoad?: () => void
+}) {
+  const parsed = parseImageAlt(alt)
+  const size = parsed.size ?? imageSize
+  const resolvedSrc = resolveImageUrl(src, documentId)
+
+  return (
+    <img
+      src={resolvedSrc}
+      alt={parsed.alt}
+      decoding="async"
+      onLoad={onImageLoad}
+      onClick={
+        onSetImageSize && resolvedSrc
+          ? (e) => onOpenMenu({ src: resolvedSrc, x: e.clientX, y: e.clientY })
+          : undefined
+      }
+      title={onSetImageSize ? "Click to set display size" : undefined}
+      className={cn(
+        "rounded-lg shadow-md mx-auto my-4 block transition-opacity duration-150",
+        onSetImageSize && "cursor-pointer",
+        size === "small" && "max-w-[240px] max-h-[200px] object-contain",
+        size === "medium" && "max-w-[480px] max-h-[360px] object-contain",
+        size === "large" && "max-w-[800px] max-h-[600px] object-contain",
+      )}
+      style={IMAGE_SIZE_STYLE[size]}
+    />
+  )
+})
+
+function MarkdownBody({
+  children,
+  className,
+  validNoteIds,
+  imageSize = "medium",
+  reading = false,
+  onNoteLinkClick,
+  onSetImageSize,
+  trackSourceLines = false,
+  sourceLineOffset = 0,
+  documentId,
+  onImageLoad,
+}: MarkdownRendererProps) {
   // Only inline substitutions — line numbering must survive for scroll sync.
   const processed = preprocessLinks(children)
   const [sizeMenu, setSizeMenu] = useState<{ src: string; x: number; y: number } | null>(null)
@@ -253,18 +315,20 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium",
   )
 
   return (
-    <div className={cn(
-      // One typeface throughout, as everywhere else in the app; the two body
-      // modes differ by rhythm. Reading mode keeps prose's generous default
-      // spacing, chat tightens it so an answer does not sprawl.
-      "prose prose-base dark:prose-invert max-w-none font-sans leading-relaxed text-foreground/90 [font-size:inherit]",
-      "prose-headings:font-sans prose-headings:font-semibold prose-headings:tracking-tight",
-      reading ? "" : "prose-p:my-3 prose-li:my-1 prose-ul:my-4 prose-ol:my-4",
-      "prose-img:rounded-lg prose-img:shadow-md prose-img:mx-auto",
-      "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
-      IMAGE_SIZE_CLASS[imageSize],
-      className
-    )}>
+    <div
+      className={cn(
+        // One typeface throughout, as everywhere else in the app; the two body
+        // modes differ by rhythm. Reading mode keeps prose's generous default
+        // spacing, chat tightens it so an answer does not sprawl.
+        "prose prose-base dark:prose-invert max-w-none font-sans leading-relaxed text-foreground/90 [font-size:inherit]",
+        "prose-headings:font-sans prose-headings:font-semibold prose-headings:tracking-tight",
+        reading ? "" : "prose-p:my-3 prose-li:my-1 prose-ul:my-4 prose-ol:my-4",
+        "prose-img:rounded-lg prose-img:shadow-md prose-img:mx-auto",
+        "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
+        IMAGE_SIZE_CLASS[imageSize],
+        className,
+      )}
+    >
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={rehypePlugins}
@@ -285,32 +349,17 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium",
             }
             return <pre>{preChildren}</pre>
           },
-          img: ({ src, alt }) => {
-            const parsed = parseImageAlt(alt)
-            const size = parsed.size ?? imageSize
-            const resolvedSrc = resolveImageUrl(src, documentId)
-            return (
-              <img
-                src={resolvedSrc}
-                alt={parsed.alt}
-                loading="lazy"
-                onClick={
-                  onSetImageSize && resolvedSrc
-                    ? (e) => setSizeMenu({ src: resolvedSrc, x: e.clientX, y: e.clientY })
-                    : undefined
-                }
-                title={onSetImageSize ? "Click to set display size" : undefined}
-                className={cn(
-                  "rounded-lg shadow-md mx-auto my-4 block",
-                  onSetImageSize && "cursor-pointer",
-                  size === "small" && "max-w-[240px] max-h-[200px] object-contain",
-                  size === "medium" && "max-w-[480px] max-h-[360px] object-contain",
-                  size === "large" && "max-w-[800px] max-h-[600px] object-contain"
-                )}
-                style={IMAGE_SIZE_STYLE[size]}
-              />
-            )
-          },
+          img: ({ src, alt }) => (
+            <MemoizedMarkdownImage
+              src={src}
+              alt={alt}
+              documentId={documentId}
+              imageSize={imageSize}
+              onSetImageSize={onSetImageSize}
+              onOpenMenu={setSizeMenu}
+              onImageLoad={onImageLoad}
+            />
+          ),
           code: ({ children: codeChildren, ...props }) => {
             const text = String(codeChildren)
             const m = text.match(/^\[note:([a-f0-9-]+)\|(.+)\]$/)
@@ -375,6 +424,20 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium",
   )
 }
 
+const MemoizedMarkdownBlock = memo(
+  function MemoizedMarkdownBlock(props: MarkdownRendererProps & { sourceLineOffset: number }) {
+    return <MarkdownBody {...props}>{props.children}</MarkdownBody>
+  },
+  (prev, next) =>
+    prev.children === next.children &&
+    prev.sourceLineOffset === next.sourceLineOffset &&
+    prev.imageSize === next.imageSize &&
+    prev.reading === next.reading &&
+    prev.className === next.className &&
+    prev.documentId === next.documentId &&
+    prev.validNoteIds === next.validNoteIds,
+)
+
 export function MarkdownRenderer({
   children,
   className,
@@ -386,45 +449,51 @@ export function MarkdownRenderer({
   onSetImageSize,
   trackSourceLines = false,
   documentId,
+  onImageLoad,
 }: MarkdownRendererProps) {
-  const diagrams = findExcalidrawDiagrams(children)
+  const chunks = useMemo(() => splitMarkdownIntoBlocks(children), [children])
 
-  if (diagrams.length === 0) {
-    return (
-      <MarkdownBody className={className} validNoteIds={validNoteIds} imageSize={imageSize} reading={reading} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} documentId={documentId}>
-        {children}
-      </MarkdownBody>
-    )
+  if (chunks.length === 0) {
+    return null
   }
+
+  let diagramIndex = 0
 
   return (
     <div className={cn("max-w-none", className)}>
-      {diagrams.map((diagram, index) => {
-        const previousEnd = index === 0 ? 0 : diagrams[index - 1].end
-        const before = children.substring(previousEnd, diagram.start)
-        return (
-          <div key={`${diagram.scenePath}-${diagram.start}`}>
-            {before.trim() && (
-              <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} reading={reading} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} sourceLineOffset={lineOffsetAt(children, previousEnd)} documentId={documentId}>
-                {before}
-              </MarkdownBody>
-            )}
+      {chunks.map((chunk) => {
+        if (chunk.isDiagram && chunk.diagramRef) {
+          const idx = diagramIndex++
+          return (
             <ExcalidrawDiagramPreview
-              diagram={diagram}
-              index={index}
+              key={chunk.diagramRef.scenePath || `diagram-${idx}`}
+              diagram={chunk.diagramRef}
+              index={idx}
               onEdit={onEditExcalidrawDiagram}
-              sourceLine={
-                trackSourceLines ? lineOffsetAt(children, diagram.start) + 1 : undefined
-              }
+              onImageLoad={onImageLoad}
+              sourceLine={trackSourceLines ? chunk.lineOffset + 1 : undefined}
             />
-          </div>
+          )
+        }
+
+        return (
+          <MemoizedMarkdownBlock
+            key={chunk.key}
+            sourceLineOffset={chunk.lineOffset}
+            className={className}
+            validNoteIds={validNoteIds}
+            imageSize={imageSize}
+            reading={reading}
+            onNoteLinkClick={onNoteLinkClick}
+            onSetImageSize={onSetImageSize}
+            trackSourceLines={trackSourceLines}
+            documentId={documentId}
+            onImageLoad={onImageLoad}
+          >
+            {chunk.source}
+          </MemoizedMarkdownBlock>
         )
       })}
-      {children.substring(diagrams.at(-1)?.end ?? 0).trim() && (
-        <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} reading={reading} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} sourceLineOffset={lineOffsetAt(children, diagrams.at(-1)?.end ?? 0)} documentId={documentId}>
-          {children.substring(diagrams.at(-1)?.end ?? 0)}
-        </MarkdownBody>
-      )}
     </div>
   )
 }

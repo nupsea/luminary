@@ -142,7 +142,10 @@ export function MarkdownSplitEditor({
         // line just typed still falls below the preview's fold. Showing the end
         // of one pane must show the end of the other.
         const line = srcAtEnd ? null : editor.topSourceLine()
-        previewEl.scrollTop = line == null ? dstMax : lineToOffset(line, anchors)
+        const targetScroll = line == null ? dstMax : lineToOffset(line, anchors)
+        if (Math.abs(previewEl.scrollTop - targetScroll) > 2) {
+          previewEl.scrollTop = targetScroll
+        }
       } else {
         editor.scrollToSourceLine(
           srcAtEnd ? editor.lineCount() : offsetToLine(previewEl.scrollTop, anchors),
@@ -153,7 +156,10 @@ export function MarkdownSplitEditor({
       // dialogs wrap theirs in extra chrome). Proportional is all we can do.
       const srcMax = src.scrollHeight - src.clientHeight
       if (srcMax > 0) {
-        dst.scrollTop = srcAtEnd ? dstMax : (src.scrollTop / srcMax) * dstMax
+        const targetScroll = srcAtEnd ? dstMax : (src.scrollTop / srcMax) * dstMax
+        if (Math.abs(dst.scrollTop - targetScroll) > 2) {
+          dst.scrollTop = targetScroll
+        }
       }
     }
 
@@ -164,22 +170,14 @@ export function MarkdownSplitEditor({
 
   // Typing at the bottom of the editor does not always fire a scroll event (the
   // caret is already visible), and when it does the preview has not yet re-rendered
-  // the new text, so its anchors are stale. Either way the preview is left behind
-  // and freshly-typed content scrolls out of view. Re-sync after the preview
-  // re-renders on a content change.
+  // the new text, so its anchors are stale. Re-sync with a gentle debounce so fast
+  // typing never jitters the preview pane.
   useEffect(() => {
     if (layout !== "splitter") return
-    // Second frame catches preview height changes that land after the first
-    // paint (web fonts, images, KaTeX) and would leave the sync short.
-    let id2 = 0
-    const id = requestAnimationFrame(() => {
+    const timer = setTimeout(() => {
       syncScroll("write")
-      id2 = requestAnimationFrame(() => syncScroll("write"))
-    })
-    return () => {
-      cancelAnimationFrame(id)
-      cancelAnimationFrame(id2)
-    }
+    }, 120)
+    return () => clearTimeout(timer)
     // syncScroll reads live DOM through refs; re-run only when content/layout change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, layout])

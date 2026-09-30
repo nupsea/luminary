@@ -125,6 +125,16 @@ export interface LiveMarkdownOptions {
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
 }
 
+function forceEditorMeasure(view: EditorView) {
+  // Force layout re-measurement in CodeMirror when external assets (like images) finish loading
+  // @ts-expect-error CodeMirror internal viewState
+  if (view.viewState) {
+    // @ts-expect-error CodeMirror internal viewState
+    view.viewState.mustMeasureContent = true
+  }
+  view.requestMeasure()
+}
+
 // eslint-disable-next-line react-refresh/only-export-components
 function RenderedBlockContent({
   source,
@@ -256,6 +266,9 @@ function RenderedBlockContent({
       <MarkdownRenderer
         reading={false}
         className="[&_.prose]:my-0 [&_figure]:my-1.5 [&_img]:my-1"
+        onImageLoad={() => {
+          forceEditorMeasure(view)
+        }}
         onEditExcalidrawDiagram={
           onEditDiagram &&
           ((diagram) => {
@@ -284,6 +297,7 @@ function RenderedBlockContent({
 class RenderedBlock extends WidgetType {
   private root: Root | null = null
   private endDrag: (() => void) | null = null
+  private observer: ResizeObserver | null = null
   readonly source: string
   readonly delimited: boolean
   private readonly onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
@@ -297,6 +311,14 @@ class RenderedBlock extends WidgetType {
     this.source = source
     this.delimited = delimited
     this.onEditDiagram = onEditDiagram
+  }
+
+  get estimatedHeight(): number {
+    if (isImageOnlyParagraph(this.source)) return 320
+    if (this.source.includes("<!-- luminary:excalidraw=")) return 380
+    if (this.delimited && this.source.startsWith("$$")) return 80
+    const lines = this.source.split("\n").length
+    return Math.max(lines * 28, 60)
   }
 
   eq(other: RenderedBlock) {
@@ -317,9 +339,15 @@ class RenderedBlock extends WidgetType {
       />,
     )
     // The renderer paints after this returns, and an image finishes later
-    // still, so the height CodeMirror measured here is always the wrong one.
-    const observer = new ResizeObserver(() => view.requestMeasure())
+    // still. Force CodeMirror to refresh its height map when the block settles.
+    const observer = new ResizeObserver(() => {
+      // @ts-expect-error CodeMirror internal viewState
+      if (view.viewState) view.viewState.mustMeasureContent = true
+      view.requestMeasure()
+    })
     observer.observe(host)
+    this.observer = observer
+
     // Clicking a rendered block is how its source comes back, and the caret has
     // to land on the line that was clicked: at the block's start instead, the
     // first keystroke goes in front of the block and destroys it.
@@ -357,7 +385,7 @@ class RenderedBlock extends WidgetType {
         return
       }
       view.dispatch({ selection: { anchor } })
-      this.startDrag(view, anchor)
+      this.startDrag(view, anchor, event)
     })
 
     host.addEventListener("dblclick", (event) => {
@@ -376,13 +404,14 @@ class RenderedBlock extends WidgetType {
 
   /**
    * `ignoreEvent` hides a drag that starts on a widget from CodeMirror's own
-   * selection tracking; this replicates it. One dispatch per frame, as CodeMirror
-   * does: faster dispatches outrun layout and draw the selection off the widget.
+   * selection tracking; this replicates it. One dispatch per frame, with a movement threshold.
    */
-  private startDrag(view: EditorView, anchor: number) {
+  private startDrag(view: EditorView, anchor: number, startEvent: MouseEvent) {
     this.endDrag?.()
     let frame = 0
     let pending: { x: number; y: number } | null = null
+    let dragging = false
+
     const flush = () => {
       frame = 0
       if (!pending) return
@@ -390,17 +419,27 @@ class RenderedBlock extends WidgetType {
       pending = null
       if (head !== null) view.dispatch({ selection: { anchor, head } })
     }
+
     const onMove = (event: MouseEvent) => {
+      const dx = event.clientX - startEvent.clientX
+      const dy = event.clientY - startEvent.clientY
+      if (!dragging && Math.sqrt(dx * dx + dy * dy) < 6) return
+      dragging = true
       pending = { x: event.clientX, y: event.clientY }
       if (!frame) frame = requestAnimationFrame(flush)
     }
+
     const onUp = () => this.endDrag?.()
+
     window.addEventListener("mousemove", onMove)
-    window.addEventListener("mouseup", onUp)
+    window.addEventListener("mouseup", onUp, { capture: true })
+    window.addEventListener("blur", onUp)
+
     this.endDrag = () => {
       cancelAnimationFrame(frame)
       window.removeEventListener("mousemove", onMove)
-      window.removeEventListener("mouseup", onUp)
+      window.removeEventListener("mouseup", onUp, { capture: true })
+      window.removeEventListener("blur", onUp)
       this.endDrag = null
     }
   }
@@ -423,6 +462,8 @@ class RenderedBlock extends WidgetType {
 
   destroy(dom: HTMLElement) {
     this.endDrag?.()
+    this.observer?.disconnect()
+    this.observer = null
     const root = this.root
     this.root = null
     // Unmounting inside CodeMirror's update would unmount a React tree while
