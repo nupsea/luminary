@@ -395,6 +395,9 @@ class ArticleExtractor:
         """
         soup = BeautifulSoup(html, "html.parser")
         protected: dict[str, str] = {}
+        # MediaWiki's per-heading "[edit]" links; left in, they reach chunks and citations (#159).
+        for editsection in soup.find_all(class_="mw-editsection"):
+            editsection.decompose()
         # Order matters: hydrate first so a lazy <img> inside a <figure> has a
         # src before the figure is rewritten, and protect <pre> before the
         # inline pass, which must never reach inside a code block.

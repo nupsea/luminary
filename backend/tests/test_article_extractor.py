@@ -1,3 +1,6 @@
+import re
+from pathlib import Path
+
 import pytest
 
 trafilatura = pytest.importorskip("trafilatura")
@@ -395,3 +398,18 @@ class TestAccessGate:
             '<script type="application/ld+json">{"isAccessibleForFree": true}</script>'
         )
         assert ArticleExtractor._detect_access_gate(html) == []
+
+
+class TestWikipediaEditLinks:
+    """MediaWiki's section-edit links are page chrome, not article text (#159)."""
+
+    async def test_no_edit_link_reaches_the_stored_text(self):
+        html = (Path(__file__).parent / "fixtures" / "wikipedia_article.html").read_text()
+        parsed = await ArticleExtractor().extract(
+            "https://en.wikipedia.org/wiki/Lighthouse", doc_id="wiki", rendered_html=html
+        )
+        text = parsed.sections[0].text
+        assert "Before the development of clearly defined ports" in text
+        assert "Fresnel lens" in text
+        assert "Modern construction" in text
+        assert not re.search(r"\bedit\b", text, re.I)
