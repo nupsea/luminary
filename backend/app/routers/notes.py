@@ -854,7 +854,8 @@ async def autocomplete_notes(
     return [
         NoteAutocompleteItem(
             id=nid,
-            preview=(title.strip() if title and title.strip() else content[:100].strip()) or "Untitled note",
+            preview=(title.strip() if title and title.strip() else content[:100].strip())
+            or "Untitled note",
         )
         for nid, content, title in rows
     ]

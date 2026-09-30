@@ -31,9 +31,7 @@ async def test_transcribe_audio_success():
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             files = {"file": ("test.webm", io.BytesIO(b"RIFFdummydata"), "audio/webm")}
-            response = await client.post(
-                "/audio/transcribe", files=files, data={"language": "en"}
-            )
+            response = await client.post("/audio/transcribe", files=files, data={"language": "en"})
             assert response.status_code == 200
             data = response.json()
             assert data["text"] == "Hello world. This is a test explanation."
