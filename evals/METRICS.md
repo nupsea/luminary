@@ -99,9 +99,7 @@ ablation updates the numbers you see everywhere.
 
 After both fixes, `fts` recovers to **0.6–1.0 across every doc** (was 0 on several)
 and sometimes beats `vector` (time_machine, paper) — a real contributor, not a dead
-arm. It also resolves an apparent `graph == rrf` tie: with `graph_expand` on, RRF's
-dense arm uses the graph-expanded query (= the `graph` strategy), and when `fts`
-returned nothing RRF collapsed onto it; now that `fts` contributes, they diverge.
+arm.
 
 ---
 

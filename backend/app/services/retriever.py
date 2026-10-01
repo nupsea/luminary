@@ -15,11 +15,9 @@ from app.services import (
 )
 from app.services.llm_admission import awaited
 from app.services.retriever_strategies import (  # noqa: F401
-    _GRAPH_EXPAND_MAX_TOKENS,
     _diversify,
     _expand_context,
     _get_reranker,
-    _graph_expand,
     _hyde_expand,
     _sanitize_fts_query,
 )
@@ -28,7 +26,7 @@ from app.types import ScoredChunk
 
 logger = logging.getLogger(__name__)
 
-RetrievalStrategy = Literal["rrf", "vector", "fts", "graph"]
+RetrievalStrategy = Literal["rrf", "vector", "fts"]
 
 RRF_K = 60
 # Guardrail on request-supplied rerank depth: cross-encoder latency is linear
@@ -451,7 +449,6 @@ class HybridRetriever:
         spell_correct: bool | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
-        graph_expand: bool = True,
         expand_context: bool = True,
         strategy: RetrievalStrategy = "rrf",
     ) -> list[ScoredChunk]:
@@ -533,26 +530,16 @@ class HybridRetriever:
             rerank_adaptive if rerank_adaptive is not None else settings.RERANK_BLEND_ADAPTIVE
         )
 
-        # graph_expand flows only into the dense vector search. Embeddings
-        # reward semantic similarity, so appending canonical entity tokens
-        # helps match chunks whose surface form differs from the question.
-        # SQLite FTS5 MATCH uses AND semantics across terms, so appending
-        # tokens that may be absent from the corpus collapses BM25 recall to
-        # zero -- keep the keyword side on the unexpanded query.
-        # HyDE, by contrast, augments with a full hypothetical answer that is
-        # designed to share vocabulary with the source text, so it flows into
-        # both vector and keyword (preserving the behavior).
-        vector_query = await _graph_expand(query) if graph_expand and strategy == "rrf" else query
-        keyword_query = query
+        # HyDE shares the source text's vocabulary, so unlike other expansion it
+        # can reach FTS5, whose MATCH is AND across tokens.
+        search_query = query
         if hyde:
             with awaited():
-                vector_query = await _hyde_expand(vector_query)
-            keyword_query = vector_query
+                search_query = await _hyde_expand(query)
 
         with trace_retrieval("hybrid", query=query) as span:
             span.set_attribute("retrieval.hyde", hyde)
             span.set_attribute("retrieval.rerank", rerank)
-            span.set_attribute("retrieval.graph_expand", graph_expand)
             span.set_attribute("retrieval.strategy", strategy)
             if rerank:
                 span.set_attribute("retrieval.rerank_depth", candidate_pool)
@@ -570,26 +557,19 @@ class HybridRetriever:
             if strategy == "vector":
                 results = (
                     await asyncio.to_thread(
-                        self.vector_search, vector_query, document_ids, candidate_pool
+                        self.vector_search, search_query, document_ids, candidate_pool
                     )
                 )[:leg_k]
             elif strategy == "fts":
-                results = (
-                    await self.keyword_search(keyword_query, document_ids, k=candidate_pool)
-                )[:leg_k]
-            elif strategy == "graph":
-                expanded_query = await _graph_expand(vector_query)
-                results = (
-                    await asyncio.to_thread(
-                        self.vector_search, expanded_query, document_ids, candidate_pool
-                    )
-                )[:leg_k]
+                results = (await self.keyword_search(search_query, document_ids, k=candidate_pool))[
+                    :leg_k
+                ]
             else:
                 vector_results, keyword_results = await asyncio.gather(
                     asyncio.to_thread(
-                        self.vector_search, vector_query, document_ids, candidate_pool
+                        self.vector_search, search_query, document_ids, candidate_pool
                     ),
-                    self.keyword_search(keyword_query, document_ids, k=candidate_pool),
+                    self.keyword_search(search_query, document_ids, k=candidate_pool),
                 )
                 # When reranking, ask rrf_merge for the full candidate pool so
                 # the cross-encoder can re-score them. Skip diversification

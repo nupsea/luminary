@@ -30,7 +30,7 @@ NOT_IO = {
 }
 
 # Pre-existing debt. May only shrink.
-BASELINE = 44
+BASELINE = 43
 
 
 def _sync_store_calls(path: Path) -> list[str]:

@@ -23,12 +23,12 @@ def _chunk(source: str = "vector") -> ScoredChunk:
         section_heading="",
         page=0,
         score=1.0,
-        source="vector" if source == "graph" else source,  # type: ignore[arg-type]
+        source=source,  # type: ignore[arg-type]
     )
 
 
 @pytest.mark.asyncio
-async def test_retriever_strategy_vector_skips_keyword_and_graph(monkeypatch):
+async def test_retriever_strategy_vector_skips_keyword(monkeypatch):
     retriever = HybridRetriever()
     calls: list[str] = []
 
@@ -66,33 +66,8 @@ async def test_retriever_strategy_fts_skips_vector(monkeypatch):
     assert rows[0].chunk_id == "keyword-1"
 
 
-@pytest.mark.asyncio
-async def test_retriever_strategy_graph_expands_then_vector(monkeypatch):
-    import app.services.retriever as retriever_module
-
-    retriever = HybridRetriever()
-    calls: list[str] = []
-
-    async def fake_graph_expand(query: str) -> str:
-        calls.append(f"graph:{query}")
-        return "expanded query"
-
-    def fake_vector(query, document_ids, k):  # noqa: ANN001
-        calls.append(f"vector:{query}")
-        return [_chunk("graph")]
-
-    monkeypatch.setattr(retriever_module, "_graph_expand", fake_graph_expand)
-    monkeypatch.setattr(retriever, "vector_search", fake_vector)
-
-    rows = await retriever.retrieve("query", ["doc-1"], 5, strategy="graph", expand_context=False)
-
-    assert calls == ["graph:query", "vector:expanded query"]
-    assert rows[0].chunk_id == "graph-1"
-
-
 def test_run_eval_ablation_produces_one_metric_set_per_arm(monkeypatch):
     strategies_seen: list[str] = []
-    expand_flags: list[bool] = []
     rerank_flags: list[bool] = []
     history_rows: list[tuple[str, dict]] = []
     store_rows: list[tuple[str, dict]] = []
@@ -122,7 +97,6 @@ def test_run_eval_ablation_produces_one_metric_set_per_arm(monkeypatch):
         lambda *args, **kwargs: (
             (
                 strategies_seen.append(kwargs.get("strategy", "rrf")),
-                expand_flags.append(kwargs.get("graph_expand", True)),
                 rerank_flags.append(bool(kwargs.get("rerank", False))),
             )
             and ["answer hint"]
@@ -151,25 +125,19 @@ def test_run_eval_ablation_produces_one_metric_set_per_arm(monkeypatch):
 
     run_eval.main()
 
-    # Five arms issue strategy="rrf" -- rrf, rrf-nogx, rrf+rerank-ce,
-    # rrf+rerank, rrf+rerank-nogx -- and the L1 pool-recall arm adds one more.
-    assert strategies_seen == ["vector", "fts", "graph"] + ["rrf"] * 6
-    # Only the -nogx arms switch expansion off; everything else inherits the
-    # /search default, which is what the shipped pipeline runs with.
-    assert expand_flags == [True, True, True, True, False, True, True, False, True]
+    # Three arms issue strategy="rrf" -- rrf, rrf+rerank-ce, rrf+rerank -- and
+    # the L1 pool-recall arm adds one more.
+    assert strategies_seen == ["vector", "fts"] + ["rrf"] * 4
     # Only the arms that declare a reranker get one. The last entry is the
     # rrf-pool recall arm, which measures the L1 candidate pool and must not.
-    assert rerank_flags == [False, False, False, False, False, True, True, True, False]
+    assert rerank_flags == [False, False, False, True, True, False]
     assert history_rows[0][0] == "ablation"
     assert set(history_rows[0][1]["ablation_metrics"]) == {
         "vector",
         "fts",
-        "graph",
         "rrf",
-        "rrf-nogx",
         "rrf+rerank-ce",
         "rrf+rerank",
-        "rrf+rerank-nogx",
         "rrf-pool",
     }
     assert history_rows[0][1]["ablation_metrics"]["rrf-pool"] == {
