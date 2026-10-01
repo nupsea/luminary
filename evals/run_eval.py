@@ -51,6 +51,7 @@ from evals.lib.environment import (  # noqa: E402
 )
 from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.loader import load_golden as _lib_load_golden  # noqa: E402
+from evals.lib.search import ranked_matches  # noqa: E402
 from evals.lib.manifest import (  # noqa: E402
     GOLDEN_DIR,
     MANIFEST_PATH,
@@ -314,12 +315,10 @@ def search_chunks(
         params["document_id"] = document_id
         params["limit"] = "20"
     else:
-        # No pin: /search's per-document groups are flattened and re-sorted by
-        # global_rank below, which IS the retriever's final order, so an
-        # unscoped run measures the regime real chat uses. (An earlier warning
-        # here claimed the opposite and was wrong -- the sort it says is missing
-        # is forty lines down.) What it cannot do is attribute a miss to routing
-        # versus ranking; run_corpus_routing.py separates those.
+        # No pin: `ranked_matches` restores the retriever's final order across
+        # document groups, so an unscoped run measures the regime real chat
+        # uses. What it cannot do is attribute a miss to routing versus
+        # ranking; run_corpus_routing.py separates those.
         params["limit"] = str(limit or 20)
     if limit is not None:
         params["limit"] = str(limit)
@@ -345,18 +344,7 @@ def search_chunks(
         resp.raise_for_status()
         body = resp.json()
 
-        # Restore the retriever's global order via global_rank. Never sort by
-        # relevance_score: its polarity is strategy-dependent (FTS BM25 is
-        # MORE NEGATIVE = MORE relevant) and rrf diversification intentionally
-        # deviates from pure score order. The stable sort with an inf default
-        # degrades to the grouped flatten order against a backend without the
-        # field.
-        all_matches = []
-        for group in body.get("results", []):
-            if document_id and group.get("document_id") != document_id:
-                continue
-            all_matches.extend(group.get("matches", []))
-        all_matches.sort(key=lambda m: m.get("global_rank", float("inf")))
+        all_matches = ranked_matches(body, document_id)
         return [m.get("text", "") for m in all_matches[: limit or 10]]
     except (httpx.HTTPError, ValueError) as exc:
         # An empty list here would be indistinguishable from a search that found
