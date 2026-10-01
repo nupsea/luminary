@@ -546,6 +546,10 @@ def test_python_extra_installs_outside_the_bundle(tmp_path, monkeypatch):
         return proc
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+    # The install then downloads the Whisper weights; this test is about where pip writes.
+    monkeypatch.setitem(
+        components_module._EXTRA_WEIGHTS, "transcription", (lambda: True, lambda: None)
+    )
 
     async def _run():
         return [e async for e in components_module.install_component("transcription")]
