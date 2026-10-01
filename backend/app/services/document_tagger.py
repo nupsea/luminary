@@ -260,7 +260,7 @@ async def _fetch_doc_excerpt(doc_id: str) -> tuple[str, str, str] | None:
     return doc.title, summary, excerpt
 
 
-def _fetch_entity_tags(
+async def _fetch_entity_tags(
     doc_id: str,
     min_mentions: int,
     allowed_types: tuple[str, ...] = ("CONCEPT",),
@@ -272,12 +272,12 @@ def _fetch_entity_tags(
     Score-ranked, so slicing to `limit` keeps the most-mentioned entities --
     the cap acts as a dynamic threshold: a long book keeps its central
     concepts, a short doc keeps all of its (low-count) ones. Returns [] on any
-    Kuzu error.
+    graph error.
     """
     try:
         svc = _graph_module.get_graph_service()
         pairs = (
-            svc.get_entities_with_counts(
+            await svc.get_entities_with_counts(
                 doc_id, min_mentions=min_mentions, allowed_types=allowed_types
             )
             or []
@@ -369,7 +369,7 @@ async def enrich_document_tags(doc_id: str) -> int:
         allowed_types = _allowed_entity_types_for(content_type)
         budget = _entity_tag_budget(await _count_chunks(doc_id), settings.AUTO_TAG_ENTITY_CAP_MAX)
         entity_raw: list[str] = (
-            _fetch_entity_tags(
+            await _fetch_entity_tags(
                 doc_id,
                 settings.AUTO_TAG_ENTITY_MIN_MENTIONS,
                 allowed_types=allowed_types,
@@ -562,7 +562,7 @@ async def prune_auto_entity_tags() -> dict[str, int]:
             budget = _entity_tag_budget(
                 chunk_count_by_doc.get(d, 0), settings.AUTO_TAG_ENTITY_CAP_MAX
             )
-            fresh_names = _fetch_entity_tags(
+            fresh_names = await _fetch_entity_tags(
                 d,
                 settings.AUTO_TAG_ENTITY_MIN_MENTIONS,
                 allowed_types=allowed_types,
@@ -585,8 +585,8 @@ async def prune_auto_entity_tags() -> dict[str, int]:
             # where the fresh graph query returned something for this doc,
             # drop tags the current rules wouldn't generate. LLM-sourced
             # (doc-1) rows are exempt -- they come from a different pipeline.
-            # Defensive: if the graph re-query is empty for this doc (Kuzu
-            # unavailable, or no entities indexed), skip gate 2 entirely.
+            # Defensive: if the graph re-query is empty for this doc (no entities
+            # indexed), skip gate 2 entirely.
             if (doc_id, tag_full) in llm_keys:
                 continue
             fresh = fresh_entity_by_doc.get(doc_id, set())

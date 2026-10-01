@@ -3,8 +3,8 @@
 Wipes the existing concepts and rebuilds the flat concept layer via the node pipeline
 (concept_pipeline.run_pipeline) -- NOT the old 1:1 entity promotion. See docs/concepts.md.
 
-Run OFFLINE (server stopped) so it can hold the Kuzu lock and use the LLM without
-starving the live event loop. Self-migrates the schema. Idempotent (wipe + rebuild).
+Run OFFLINE (server stopped) so it can use the LLM without starving the live event
+loop. Self-migrates the schema. Idempotent (wipe + rebuild).
 
     make concepts
     # or:

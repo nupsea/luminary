@@ -1,7 +1,7 @@
 """persist_concepts node -- write the flat concept layer to the stores (NW5).
 
-Wipes the old concept layer, then persists concepts (level 2) as ConceptModel rows, Kuzu
-Concept nodes + lateral RELATED_TO edges, and LanceDB centroid vectors. Identity is a STABLE
+Wipes the old concept layer, then persists concepts (level 2) as ConceptModel rows,
+lateral `graph_concept_edges`, and LanceDB centroid vectors. Identity is a STABLE
 lineage-signature slug (hash of
 member entities), not the volatile label -- so re-runs keep the same identity and user
 overrides re-apply (docs/concepts.md §6). Concept→chunk lineage is stashed in

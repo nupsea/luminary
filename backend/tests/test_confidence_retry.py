@@ -90,7 +90,7 @@ async def test_augment_node_sets_retry_attempted():
     state = _make_state(primary_strategy="search_node")
 
     with patch("app.runtime.chat_nodes.confidence.get_retriever"):
-        # For search_node strategy, augment uses Kuzu (no retriever call for search)
+        # For search_node strategy, augment uses the graph (no retriever call for search)
         # Mock graph service to raise so we fall through non-fatally
         with patch("app.services.graph.get_graph_service", side_effect=Exception("no graph")):
             result = await augment_node(state)
@@ -152,33 +152,23 @@ async def test_augment_non_fatal():
 
 @pytest.mark.asyncio
 async def test_graph_knowledge_supplements_factual():
-    """augment_node for search_node strategy appends Kuzu graph lines to section_context."""
+    """augment_node for search_node strategy appends entity graph lines to section_context."""
     state = _make_state(
         primary_strategy="search_node",
         question="Who is Odysseus?",
         section_context="",
     )
 
-    mock_conn = MagicMock()
-    # First execute() call (CO_OCCURS): returns 1 result
-    co_occurs_result = MagicMock()
-    co_occurs_result.has_next.side_effect = [True, False]
-    co_occurs_result.get_next.return_value = ["Telemachus", 0.9]
-
-    related_to_result = MagicMock()
-    related_to_result.has_next.return_value = False
-
-    mock_conn.execute.side_effect = [co_occurs_result, related_to_result]
+    async def _neighbours(name, kind, document_ids, limit=10):
+        return [("Telemachus", 0.9, "")] if kind == "CO_OCCURS" else []
 
     mock_graph_svc = MagicMock()
-    mock_graph_svc._conn = mock_conn
+    mock_graph_svc.get_entity_neighbours = AsyncMock(side_effect=_neighbours)
 
     with patch("app.services.graph.get_graph_service", return_value=mock_graph_svc):
         result = await augment_node(state)
 
     combined_context = result.get("section_context", "")
     assert combined_context, "section_context must be non-empty after graph augment"
-    assert "Odysseus" in combined_context or "graph" in combined_context.lower(), (
-        f"Expected graph lines in section_context, got: {combined_context[:200]}"
-    )
+    assert "Odysseus --co-occurs--> Telemachus (weight=0.9)" in combined_context
     assert result.get("retry_attempted") is True

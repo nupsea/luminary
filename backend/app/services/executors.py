@@ -10,8 +10,7 @@ Worse, they are unkillable. ``concurrent.futures.thread`` registers an
 ``atexit`` hook that joins every worker thread, and those threads are not
 daemons, so a SIGTERM arriving mid-download does not end the process -- it waits
 for the download to finish first. A desktop app that takes minutes to quit
-reads as a hang, and a supervisor that then SIGKILLs it can leave the Kuzu lock
-held against the next launch.
+reads as a hang, and a supervisor that then SIGKILLs it cuts any write short.
 """
 
 import logging

@@ -5,7 +5,7 @@ AC7: GET /mastery/heatmap returns chapter x concept grid
 """
 
 import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -51,7 +51,7 @@ async def test_db(tmp_path, monkeypatch):
 async def test_get_mastery_concepts_empty(test_db):
     """AC6: GET /mastery/concepts with nonexistent document_id returns 200 with empty list."""
     with patch("app.services.mastery_service.get_graph_service") as mock_graph_factory:
-        mock_graph = MagicMock()
+        mock_graph = AsyncMock()
         mock_graph.get_entities_by_type_for_document.return_value = {}
         mock_graph.get_concept_clusters.return_value = []
         mock_graph_factory.return_value = mock_graph
@@ -73,7 +73,7 @@ async def test_get_mastery_concepts_empty(test_db):
 async def test_get_mastery_heatmap_empty(test_db):
     """AC7: GET /mastery/heatmap with nonexistent document_id returns 200 empty."""
     with patch("app.services.mastery_service.get_graph_service") as mock_graph_factory:
-        mock_graph = MagicMock()
+        mock_graph = AsyncMock()
         mock_graph.get_entities_by_type_for_document.return_value = {}
         mock_graph_factory.return_value = mock_graph
 
@@ -121,7 +121,7 @@ async def test_get_mastery_heatmap_with_data(test_db):
         await session.commit()
 
     with patch("app.services.mastery_service.get_graph_service") as mock_graph_factory:
-        mock_graph = MagicMock()
+        mock_graph = AsyncMock()
         mock_graph.get_entities_by_type_for_document.return_value = {"CONCEPT": ["closures"]}
         mock_graph.get_concept_clusters.return_value = []
         mock_graph_factory.return_value = mock_graph

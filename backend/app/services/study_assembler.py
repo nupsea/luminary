@@ -7,8 +7,7 @@ unmapped, topic mix, thin-scope warning).
 
 Pure: it reads and assembles but writes nothing. The router owns the StudyEvent row
 and the transaction. Honors I-1 (single session, no shared-session gather), I-2
-(LanceDB via to_thread -- only reached through scope_resolver), I-3 (Kuzu guards in
-the graph repo).
+(LanceDB via to_thread -- only reached through scope_resolver).
 
 Generation (Lane B) is a seam here: `want_generated` is accepted and surfaced in the
 preview, but minting new questions from material is wired by a later Phase 1 increment.

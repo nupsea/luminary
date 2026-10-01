@@ -1,862 +1,483 @@
-"""Tests for KuzuService and GET /graph endpoints."""
+"""Tests for GraphService and the GET /graph endpoints."""
 
 import pytest
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete, select
 
-from app.services.graph import KuzuService
-
-# Unit tests for KuzuService (uses a temp directory)
-
-
-@pytest.fixture()
-def graph_svc(tmp_path):
-    """Create a fresh KuzuService in a temp directory."""
-    return KuzuService(data_dir=str(tmp_path))
+from app.main import app
+from app.models import DocumentModel, GraphEntityModel, NoteLinkModel
+from app.services.graph import DocumentGraph, get_graph_service
+from tests.graph_seed import add_documents, add_graph, add_note, add_raw_edge, edges
 
 
-def test_upsert_entity_and_retrieve(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "Albert Einstein", "PERSON")
-    result = graph_svc._conn.execute("MATCH (e:Entity {id: 'e1'}) RETURN e.name, e.type")
-    assert result.has_next()
-    row = result.get_next()
-    assert row[0] == "Albert Einstein"
-    assert row[1] == "PERSON"
+@pytest.fixture
+def svc(memory_db):
+    return get_graph_service()
 
 
-def test_upsert_entity_increments_frequency(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "Tesla", "ORGANIZATION")
-    graph_svc.upsert_entity("e1", "Tesla", "ORGANIZATION")
-    result = graph_svc._conn.execute("MATCH (e:Entity {id: 'e1'}) RETURN e.frequency")
-    row = result.get_next()
-    assert row[0] == 2
+async def _entity(memory_db, entity_id: str) -> GraphEntityModel | None:
+    async with memory_db.factory() as s:
+        return await s.get(GraphEntityModel, entity_id)
 
 
-def test_upsert_document(graph_svc: KuzuService):
-    graph_svc.upsert_document("d1", "My Paper", "paper")
-    result = graph_svc._conn.execute("MATCH (d:Document {id: 'd1'}) RETURN d.title")
-    assert result.has_next()
-    assert result.get_next()[0] == "My Paper"
+async def _entity_ids(memory_db) -> set[str]:
+    async with memory_db.factory() as s:
+        return set(await s.scalars(select(GraphEntityModel.id)))
 
 
-def test_add_mention_creates_edge(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "Newton", "PERSON")
-    graph_svc.upsert_document("d1", "Physics Book", "book")
-    graph_svc.add_mention("e1", "d1")
-    result = graph_svc._conn.execute(
-        "MATCH (e:Entity)-[r:MENTIONED_IN]->(d:Document {id: 'd1'}) RETURN r.count"
+# Writes
+
+
+async def test_a_written_entity_reads_back(memory_db, svc):
+    await add_graph(memory_db, "d1", {"e1": ("Albert Einstein", "PERSON")})
+    e = await _entity(memory_db, "e1")
+    assert (e.name, e.type, e.document_id) == ("Albert Einstein", "PERSON", "d1")
+
+
+async def test_each_mention_adds_to_frequency(memory_db, svc):
+    graph = DocumentGraph()
+    graph.add_entity("e1", "Tesla", "ORGANIZATION")
+    graph.add_entity("e1", "Tesla", "ORGANIZATION")
+    await add_documents(memory_db, "d1")
+    await svc.write_document_graph("d1", graph)
+    await svc.write_document_graph("d1", graph)
+
+    e = await _entity(memory_db, "e1")
+    assert (e.frequency, e.mention_count) == (4, 4)
+
+
+async def test_aliases_are_stored(memory_db, svc):
+    graph = DocumentGraph()
+    graph.add_entity("e1", "sherlock holmes", "PERSON", aliases=["holmes", "mr. holmes"])
+    await add_documents(memory_db, "d1")
+    await svc.write_document_graph("d1", graph)
+    assert (await _entity(memory_db, "e1")).aliases == ["holmes", "mr. holmes"]
+
+
+async def test_a_graph_for_a_deleted_document_is_not_written(memory_db, svc):
+    graph = DocumentGraph()
+    graph.add_entity("e1", "Newton", "PERSON")
+    assert await svc.write_document_graph("gone", graph) is False
+    assert await _entity_ids(memory_db) == set()
+
+
+async def test_replace_drops_the_documents_old_entities_only(memory_db, svc):
+    await add_graph(
+        memory_db,
+        "d1",
+        {"e1": ("ulysses", "PERSON"), "e2": ("telemachus", "PERSON")},
+        co_occurs=(("e1", "e2"),),
     )
-    assert result.has_next()
-    assert result.get_next()[0] == 1
+    await add_graph(memory_db, "d2", {"e3": ("achilles", "PERSON")})
+
+    fresh = DocumentGraph()
+    fresh.add_entity("e4", "penelope", "PERSON")
+    await svc.write_document_graph("d1", fresh, replace=True)
+
+    assert await _entity_ids(memory_db) == {"e3", "e4"}
+    assert await svc.count_for_document("d1") == (1, 0)
 
 
-def test_add_mention_increments_count(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "Newton", "PERSON")
-    graph_svc.upsert_document("d1", "Physics Book", "book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e1", "d1")
-    result = graph_svc._conn.execute(
-        "MATCH (e:Entity)-[r:MENTIONED_IN]->(d:Document {id: 'd1'}) RETURN r.count"
+async def test_co_occurrence_weight_accumulates(memory_db, svc):
+    pair = {"e1": ("Newton", "PERSON"), "e2": ("Gravity", "CONCEPT")}
+    await add_graph(memory_db, "d1", pair, co_occurs=(("e1", "e2"),))
+    await add_graph(memory_db, "d1", pair, co_occurs=(("e1", "e2"),))
+    [edge] = await edges(memory_db, "CO_OCCURS")
+    assert (edge.source_id, edge.target_id, edge.weight) == ("e1", "e2", pytest.approx(2.0))
+
+
+async def test_an_entity_is_never_recorded_as_co_occurring_with_itself(memory_db, svc):
+    await add_graph(memory_db, "d1", {"e1": ("Ulysses", "PERSON")}, co_occurs=(("e1", "e1"),))
+    assert await edges(memory_db, "CO_OCCURS") == []
+
+
+async def test_an_edge_to_an_unknown_entity_is_dropped(memory_db, svc):
+    await add_graph(
+        memory_db,
+        "d1",
+        {"e1": ("closures", "CONCEPT")},
+        edges=(("PREREQUISITE_OF", "e1", "nowhere", {"confidence": 0.9}),),
     )
-    assert result.get_next()[0] == 2
+    assert await edges(memory_db, "PREREQUISITE_OF") == []
 
 
-def test_delete_entities_for_document(graph_svc: KuzuService):
-    """Entities mentioned in the doc are DETACH-deleted with their edges;
-    entities of other documents survive."""
-    graph_svc.upsert_document("d1", "Odyssey", "book")
-    graph_svc.upsert_document("d2", "Iliad", "book")
-    graph_svc.upsert_entity("e1", "ulysses", "PERSON")
-    graph_svc.upsert_entity("e2", "telemachus", "PERSON")
-    graph_svc.upsert_entity("e3", "achilles", "PERSON")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
-    graph_svc.add_mention("e3", "d2")
-    graph_svc.add_co_occurrence("e1", "e2", "d1")
-
-    removed = graph_svc.delete_entities_for_document("d1")
-
-    assert removed == 2
-    entity_count, edge_count = graph_svc.count_for_document("d1")
-    assert (entity_count, edge_count) == (0, 0)
-    result = graph_svc._conn.execute("MATCH (e:Entity) RETURN e.id")
-    remaining = set()
-    while result.has_next():
-        remaining.add(result.get_next()[0])
-    assert remaining == {"e3"}
+# Deletion (#204)
 
 
-def test_add_co_occurrence(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "Newton", "PERSON")
-    graph_svc.upsert_entity("e2", "Gravity", "CONCEPT")
-    graph_svc.add_co_occurrence("e1", "e2", "d1")
-    result = graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'})-[r:CO_OCCURS]->(b:Entity {id: 'e2'})"
-        " WHERE r.document_id = 'd1' RETURN r.weight"
+async def test_deleting_a_document_deletes_its_graph_and_nothing_else(memory_db, svc):
+    await add_graph(
+        memory_db,
+        "d1",
+        {"e1": ("Darwin", "PERSON"), "e2": ("Evolution", "CONCEPT")},
+        co_occurs=(("e1", "e2"),),
     )
-    assert result.has_next()
-    assert result.get_next()[0] == pytest.approx(1.0)
+    await add_graph(
+        memory_db,
+        "d2",
+        {"e3": ("Darwin", "PERSON"), "e4": ("Finches", "CONCEPT")},
+        co_occurs=(("e3", "e4"),),
+    )
+    await svc.add_same_concept_edge("e1", "e3", "d1", "d2", 0.9)
+
+    async with memory_db.factory() as s:
+        await s.execute(delete(DocumentModel).where(DocumentModel.id == "d1"))
+        await s.commit()
+
+    assert await _entity_ids(memory_db) == {"e3", "e4"}
+    assert [(e.source_id, e.target_id) for e in await edges(memory_db, "CO_OCCURS")] == [
+        ("e3", "e4")
+    ]
+    assert await svc.get_same_concept_edges() == []
+    assert await svc.get_document_ids_for_entity("Darwin") == ["d2"]
 
 
-def test_get_graph_for_document(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "Darwin", "PERSON")
-    graph_svc.upsert_entity("e2", "Evolution", "CONCEPT")
-    graph_svc.upsert_document("d1", "Origin of Species", "book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
+async def test_the_chat_graph_node_reads_only_live_documents_in_scope(memory_db, svc):
+    """#205: half the CO_OCCURS edges in a real library belonged to deleted documents,
+    and the chat graph node fed them into answers."""
+    from app.runtime.chat_nodes.graph import _graph_lines_for_entity
 
-    data = graph_svc.get_graph_for_document("d1")
-    node_ids = {n["id"] for n in data["nodes"]}
-    assert "e1" in node_ids
-    assert "e2" in node_ids
-    assert len(data["nodes"]) == 2
+    for doc, partner in (("d1", "Minerva"), ("d2", "Penelope"), ("d3", "Circe")):
+        await add_graph(
+            memory_db,
+            doc,
+            {f"{doc}-u": ("Ulysses", "PERSON"), f"{doc}-p": (partner, "PERSON")},
+            co_occurs=((f"{doc}-u", f"{doc}-p"),),
+        )
+    async with memory_db.factory() as s:
+        await s.execute(delete(DocumentModel).where(DocumentModel.id == "d3"))
+        await s.commit()
+
+    everywhere = await _graph_lines_for_entity("Ulysses", None)
+    assert sorted(everywhere) == [
+        "Ulysses --co-occurs--> Minerva (weight=1.0)",
+        "Ulysses --co-occurs--> Penelope (weight=1.0)",
+    ]
+    assert await _graph_lines_for_entity("Ulysses", ["d2"]) == [
+        "Ulysses --co-occurs--> Penelope (weight=1.0)"
+    ]
+
+
+# Views
+
+
+async def test_get_graph_for_document(memory_db, svc):
+    await add_graph(memory_db, "d1", {"e1": ("Darwin", "PERSON"), "e2": ("Evolution", "CONCEPT")})
+    data = await svc.get_graph_for_document("d1")
+    assert {n["id"] for n in data["nodes"]} == {"e1", "e2"}
     for n in data["nodes"]:
         assert n["document_id"] == "d1"
         assert n["document_ids"] == ["d1"]
 
 
-def test_get_graph_for_documents_merges(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "Darwin", "PERSON")
-    graph_svc.upsert_entity("e2", "Evolution", "CONCEPT")
-    graph_svc.upsert_document("d1", "Book One", "book")
-    graph_svc.upsert_document("d2", "Book Two", "book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d2")
-
-    data = graph_svc.get_graph_for_documents(["d1", "d2"])
-    nodes_by_id = {n["id"]: n for n in data["nodes"]}
-    assert "e1" in nodes_by_id
-    assert "e2" in nodes_by_id
-    assert nodes_by_id["e1"]["document_id"] == "d1"
-    assert "d1" in nodes_by_id["e1"]["document_ids"]
-    assert nodes_by_id["e2"]["document_id"] == "d2"
-    assert "d2" in nodes_by_id["e2"]["document_ids"]
+async def test_empty_graph_for_unknown_document(memory_db, svc):
+    assert await svc.get_graph_for_document("nonexistent") == {"nodes": [], "edges": []}
 
 
-def test_get_graph_for_documents_scopes_co_occurrence_edges(graph_svc: KuzuService):
-    """Edges must stay scoped to the requested docs and to in-scope entities.
-
-    The entity-membership filter moved from Cypher into Python (an entity-id IN
-    list cost one query parameter per entity, per document); these are the two
-    properties that filter was carrying.
-    """
-    for eid, name in (("e1", "Darwin"), ("e2", "Evolution"), ("e3", "Kepler")):
-        graph_svc.upsert_entity(eid, name, "CONCEPT")
-    graph_svc.upsert_document("d1", "Book One", "book")
-    graph_svc.upsert_document("d2", "Book Two", "book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
-    graph_svc.add_mention("e3", "d2")
-    graph_svc.add_co_occurrence("e1", "e2", "d1")
-    # Same doc, but e3 is only mentioned in d2 -- out of scope for a d1 request.
-    graph_svc.add_co_occurrence("e1", "e3", "d1")
-    graph_svc.add_co_occurrence("e1", "e3", "d2")
-
-    data = graph_svc.get_graph_for_documents(["d1"])
-    pairs = {(e["source"], e["target"]) for e in data["edges"]}
-    assert ("e1", "e2") in pairs
-    assert ("e1", "e3") not in pairs
-
-    both = graph_svc.get_graph_for_documents(["d1", "d2"])
-    both_pairs = {(e["source"], e["target"]) for e in both["edges"]}
-    assert ("e1", "e2") in both_pairs
-    assert ("e1", "e3") in both_pairs
+async def test_get_graph_for_documents_merges(memory_db, svc):
+    await add_graph(memory_db, "d1", {"e1": ("Darwin", "PERSON")})
+    await add_graph(memory_db, "d2", {"e2": ("Evolution", "CONCEPT")})
+    nodes = {n["id"]: n for n in (await svc.get_graph_for_documents(["d1", "d2"]))["nodes"]}
+    assert nodes["e1"]["document_ids"] == ["d1"]
+    assert nodes["e2"]["document_ids"] == ["d2"]
 
 
-def test_delete_document(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "Darwin", "PERSON")
-    graph_svc.upsert_document("d1", "Origin", "book")
-    graph_svc.add_mention("e1", "d1")
-
-    graph_svc.delete_document("d1")
-
-    result = graph_svc._conn.execute("MATCH (d:Document {id: 'd1'}) RETURN d.id")
-    assert not result.has_next()
-
-    # Edge should be gone too
-    result = graph_svc._conn.execute(
-        "MATCH (e:Entity)-[r:MENTIONED_IN]->(d:Document {id: 'd1'}) RETURN r.count"
+async def test_get_graph_for_documents_scopes_co_occurrence_edges(memory_db, svc):
+    await add_graph(
+        memory_db,
+        "d1",
+        {"e1": ("Darwin", "CONCEPT"), "e2": ("Evolution", "CONCEPT")},
+        co_occurs=(("e1", "e2"),),
     )
-    assert not result.has_next()
+    await add_graph(
+        memory_db,
+        "d2",
+        {"e3": ("Kepler", "CONCEPT"), "e4": ("Orbits", "CONCEPT")},
+        co_occurs=(("e3", "e4"),),
+    )
+
+    one = await svc.get_graph_for_documents(["d1"])
+    assert {(e["source"], e["target"]) for e in one["edges"]} == {("e1", "e2")}
+    both = await svc.get_graph_for_documents(["d1", "d2"])
+    assert {(e["source"], e["target"]) for e in both["edges"]} == {("e1", "e2"), ("e3", "e4")}
 
 
-def test_empty_graph_for_unknown_document(graph_svc: KuzuService):
-    data = graph_svc.get_graph_for_document("nonexistent")
-    assert data == {"nodes": [], "edges": []}
+async def test_get_graph_for_document_includes_tech_edges(memory_db, svc):
+    await add_graph(
+        memory_db,
+        "d1",
+        {"e1": ("numpy", "LIBRARY"), "e2": ("ndarray", "DATA_STRUCTURE")},
+        edges=(("IMPLEMENTS", "e1", "e2", {}),),
+    )
+    data = await svc.get_graph_for_document("d1")
+    assert "IMPLEMENTS" in {e.get("relation") for e in data["edges"]}
 
 
-def test_get_entities_by_type_for_document(graph_svc: KuzuService):
-    """get_entities_by_type_for_document groups canonical names by entity type."""
-    graph_svc.upsert_entity("e1", "sherlock holmes", "PERSON")
-    graph_svc.upsert_entity("e2", "dr. watson", "PERSON")
-    graph_svc.upsert_entity("e3", "baker street", "PLACE")
-    graph_svc.upsert_document("d1", "Test Doc", "book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
-    graph_svc.add_mention("e3", "d1")
-
-    result = graph_svc.get_entities_by_type_for_document("d1")
-
-    assert set(result.get("PERSON", [])) == {"sherlock holmes", "dr. watson"}
-    assert set(result.get("PLACE", [])) == {"baker street"}
-
-
-def test_get_entities_by_type_for_document_empty(graph_svc: KuzuService):
-    """Returns empty dict for unknown document_id."""
-    result = graph_svc.get_entities_by_type_for_document("nonexistent")
-    assert result == {}
+async def test_get_entities_by_type_for_document(memory_db, svc):
+    await add_graph(
+        memory_db,
+        "d1",
+        {
+            "e1": ("sherlock holmes", "PERSON"),
+            "e2": ("dr. watson", "PERSON"),
+            "e3": ("baker street", "PLACE"),
+        },
+    )
+    result = await svc.get_entities_by_type_for_document("d1")
+    assert set(result["PERSON"]) == {"sherlock holmes", "dr. watson"}
+    assert result["PLACE"] == ["baker street"]
+    assert await svc.get_entities_by_type_for_document("nonexistent") == {}
 
 
-def test_upsert_entity_writes_aliases(graph_svc: KuzuService):
-    """upsert_entity stores aliases as pipe-delimited string in fresh S86 schema."""
-    graph_svc.upsert_entity("e1", "sherlock holmes", "PERSON", aliases=["holmes", "mr. holmes"])
-
-    result = graph_svc._conn.execute("MATCH (e:Entity {id: 'e1'}) RETURN e.aliases")
-    assert result.has_next()
-    aliases_val = result.get_next()[0]
-    # aliases column present in fresh DB (S86 schema); value is pipe-delimited
-    assert aliases_val == "holmes|mr. holmes"
-
-
-# Integration tests via FastAPI TestClient
+async def test_get_entities_by_type_filters_and_returns_fields(memory_db, svc):
+    await add_graph(
+        memory_db,
+        "d1",
+        {"e1": ("numpy", "LIBRARY"), "e2": ("alice", "PERSON"), "e3": ("sqlalchemy", "LIBRARY")},
+    )
+    libs = await svc.get_entities_by_type("d1", "LIBRARY")
+    assert {e["name"] for e in libs} == {"numpy", "sqlalchemy"}
+    assert set(libs[0]) == {"id", "name", "type", "frequency"}
+    assert await svc.get_entities_by_type("d1", "PLACE") == []
 
 
-@pytest.fixture()
-def client(tmp_path, monkeypatch):
-    """FastAPI test client with KuzuService pointing to temp dir."""
-    import app.services.graph as graph_module
-    from app.main import app as fastapi_app
-
-    # Patch the singleton to use a temp-dir KuzuService
-    svc = KuzuService(data_dir=str(tmp_path))
-    monkeypatch.setattr(graph_module, "_graph_service", svc)
-
-    return TestClient(fastapi_app)
+# SAME_CONCEPT contradictions
 
 
-def test_get_graph_document_endpoint(client: TestClient, tmp_path, monkeypatch):
-    import app.services.graph as graph_module
-
-    svc: KuzuService = graph_module._graph_service  # type: ignore[assignment]
-    svc.upsert_entity("e1", "Curie", "PERSON")
-    svc.upsert_document("d1", "Radioactivity", "paper")
-    svc.add_mention("e1", "d1")
-
-    resp = client.get("/graph/d1")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data["nodes"]) == 1
-    assert data["nodes"][0]["label"] == "Curie"
-
-
-def test_get_graph_multi_doc_endpoint(client: TestClient, tmp_path, monkeypatch):
-    import app.services.graph as graph_module
-
-    svc: KuzuService = graph_module._graph_service  # type: ignore[assignment]
-    svc.upsert_entity("e1", "Curie", "PERSON")
-    svc.upsert_entity("e2", "Radium", "CONCEPT")
-    svc.upsert_document("d1", "Paper One", "paper")
-    svc.upsert_document("d2", "Paper Two", "paper")
-    svc.add_mention("e1", "d1")
-    svc.add_mention("e2", "d2")
-
-    resp = client.get("/graph?doc_ids=d1,d2")
-    assert resp.status_code == 200
-    data = resp.json()
-    node_ids = {n["id"] for n in data["nodes"]}
-    assert "e1" in node_ids
-    assert "e2" in node_ids
-
-
-def test_get_graph_empty_doc_ids(client: TestClient):
-    resp = client.get("/graph?doc_ids=")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["nodes"] == []
-
-
-# SAME_CONCEPT contradiction edges — doc-scoped Cypher filter
-
-
-def _seed_same_concept(svc: KuzuService) -> None:
-    for e in ("e1", "e2", "e3", "e4"):
-        svc.upsert_entity(e, e, "CONCEPT")
-    # contradiction touching d1/d2
-    svc.add_same_concept_edge(
+async def _seed_same_concept(memory_db, svc) -> None:
+    for doc, entity in (("d1", "e1"), ("d2", "e2"), ("d3", "e3"), ("d4", "e4")):
+        await add_graph(memory_db, doc, {entity: (entity, "CONCEPT")})
+    await svc.add_same_concept_edge(
         "e1", "e2", "d1", "d2", 0.9, contradiction=True, contradiction_note="A says X, B says Y"
     )
-    # contradiction touching d3/d4 (unrelated to d1)
-    svc.add_same_concept_edge(
+    await svc.add_same_concept_edge(
         "e3", "e4", "d3", "d4", 0.8, contradiction=True, contradiction_note="C says P, D says Q"
     )
-    # non-contradiction touching d1 — must be excluded
-    svc.add_same_concept_edge("e1", "e3", "d1", "d3", 0.7, contradiction=False)
+    await svc.add_same_concept_edge("e1", "e3", "d1", "d3", 0.7, contradiction=False)
 
 
-def test_contradiction_edges_for_docs_scopes_to_requested_docs(graph_svc: KuzuService):
-    _seed_same_concept(graph_svc)
-    rows = graph_svc.get_contradiction_edges_for_docs(["d1"])
-    assert len(rows) == 1
-    assert rows[0]["contradiction_note"] == "A says X, B says Y"
-    assert rows[0]["contradiction"] is True
-
-
-def test_contradiction_edges_for_docs_matches_source_or_target(graph_svc: KuzuService):
-    _seed_same_concept(graph_svc)
-    # d4 appears only as a target_doc_id
-    rows = graph_svc.get_contradiction_edges_for_docs(["d4"])
+async def test_contradiction_edges_for_docs_scopes_to_requested_docs(memory_db, svc):
+    await _seed_same_concept(memory_db, svc)
+    rows = await svc.get_contradiction_edges_for_docs(["d1"])
+    assert [(r["contradiction_note"], r["contradiction"]) for r in rows] == [
+        ("A says X, B says Y", True)
+    ]
+    # d4 is only ever a target document.
+    rows = await svc.get_contradiction_edges_for_docs(["d4"])
     assert {r["contradiction_note"] for r in rows} == {"C says P, D says Q"}
+    assert await svc.get_contradiction_edges_for_docs([]) == []
 
 
-def test_contradiction_edges_for_docs_equivalent_to_python_filter(graph_svc: KuzuService):
-    """The Cypher filter returns exactly what a full scan + Python filter would."""
-    _seed_same_concept(graph_svc)
-    all_edges = graph_svc.get_same_concept_edges()
+async def test_contradiction_edges_equal_a_full_scan_filtered(memory_db, svc):
+    await _seed_same_concept(memory_db, svc)
+    all_edges = await svc.get_same_concept_edges()
     for docs in (["d1"], ["d2"], ["d3", "d4"], ["d1", "d3"], ["nope"]):
         expected = {
             (e["entity_id_a"], e["entity_id_b"])
             for e in all_edges
             if e["contradiction"] and (e["source_doc_id"] in docs or e["target_doc_id"] in docs)
         }
-        rows = graph_svc.get_contradiction_edges_for_docs(docs)
-        got = {(e["entity_id_a"], e["entity_id_b"]) for e in rows}
-        assert got == expected, f"mismatch for {docs}"
+        rows = await svc.get_contradiction_edges_for_docs(docs)
+        assert {(e["entity_id_a"], e["entity_id_b"]) for e in rows} == expected, docs
 
 
-def test_contradiction_edges_for_docs_empty_input(graph_svc: KuzuService):
-    _seed_same_concept(graph_svc)
-    assert graph_svc.get_contradiction_edges_for_docs([]) == []
+async def test_a_second_link_records_a_contradiction_but_never_clears_one(memory_db, svc):
+    await _seed_same_concept(memory_db, svc)
+    await svc.add_same_concept_edge("e2", "e1", "d2", "d1", 0.9, contradiction=False)
+    rows = await svc.get_contradiction_edges_for_docs(["d1"])
+    assert [r["contradiction_note"] for r in rows] == ["A says X, B says Y"]
 
 
-# PREREQUISITE_OF edges and prerequisite-chain traversal
+# Prerequisites
 
 
-def test_add_prerequisite_creates_edge(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "natural selection", "CONCEPT")
-    graph_svc.upsert_entity("e2", "variation", "CONCEPT")
-    graph_svc.add_prerequisite("e1", "e2", "doc1", 0.9)
-    result = graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'})-[r:PREREQUISITE_OF]->(b:Entity {id: 'e2'})"
-        " WHERE r.document_id = 'doc1' RETURN r.confidence"
+def _chain(*pairs: tuple[str, str]) -> tuple:
+    return tuple(("PREREQUISITE_OF", a, b, {"confidence": 0.9}) for a, b in pairs)
+
+
+async def test_add_prerequisite_with_section_is_one_edge(memory_db, svc):
+    await add_graph(
+        memory_db, "d1", {"e1": ("closures", "CONCEPT"), "e2": ("functions", "CONCEPT")}
     )
-    assert result.has_next()
-    assert result.get_next()[0] == pytest.approx(0.9)
+    for _ in range(2):
+        await svc.add_prerequisite_with_section("e1", "e2", "d1", 0.85, "sec-1")
+    [edge] = await edges(memory_db, "PREREQUISITE_OF")
+    assert (edge.confidence, edge.source_section_id) == (pytest.approx(0.85), "sec-1")
 
 
-def test_add_prerequisite_idempotent(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "a", "CONCEPT")
-    graph_svc.upsert_entity("e2", "b", "CONCEPT")
-    graph_svc.add_prerequisite("e1", "e2", "d1")
-    graph_svc.add_prerequisite("e1", "e2", "d1")
-    result = graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'})-[r:PREREQUISITE_OF]->(b:Entity {id: 'e2'})"
-        " WHERE r.document_id = 'd1' RETURN count(r)"
+async def test_get_prerequisite_edges_for_document(memory_db, svc):
+    await add_graph(
+        memory_db,
+        "d1",
+        {"e1": ("natural selection", "CONCEPT"), "e2": ("variation", "CONCEPT")},
+        edges=_chain(("e1", "e2")),
     )
-    assert result.get_next()[0] == 1
+    [edge] = await svc.get_prerequisite_edges_for_document("d1")
+    assert (edge["from_entity"], edge["to_entity"]) == ("natural selection", "variation")
+    assert edge["confidence"] == pytest.approx(0.9)
 
 
-def test_get_prerequisite_edges_for_document(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "natural selection", "CONCEPT")
-    graph_svc.upsert_entity("e2", "variation", "CONCEPT")
-    graph_svc.upsert_document("d1", "Biology", "book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
-    graph_svc.add_prerequisite("e1", "e2", "d1", 0.9)
-    edges = graph_svc.get_prerequisite_edges_for_document("d1")
-    assert len(edges) == 1
-    assert edges[0]["from_entity"] == "natural selection"
-    assert edges[0]["to_entity"] == "variation"
-    assert edges[0]["confidence"] == pytest.approx(0.9)
-
-
-def test_get_learning_path_topological_order(graph_svc: KuzuService):
-    """Chain: C -> B -> A (C requires B which requires A).
-    Topological order should have A before B before C.
-    """
-    graph_svc.upsert_entity("ea", "a", "CONCEPT")
-    graph_svc.upsert_entity("eb", "b", "CONCEPT")
-    graph_svc.upsert_entity("ec", "c", "CONCEPT")
-    graph_svc.upsert_document("d1", "Doc", "book")
-    for eid in ("ea", "eb", "ec"):
-        graph_svc.add_mention(eid, "d1")
-    graph_svc.add_prerequisite("ec", "eb", "d1")  # c requires b
-    graph_svc.add_prerequisite("eb", "ea", "d1")  # b requires a
-
-    result = graph_svc.get_learning_path("c", "d1")
-    assert len(result["nodes"]) == 3
-    names = [n.name for n in result["nodes"]]
-    assert names.index("a") < names.index("b")
-    assert names.index("b") < names.index("c")
-
-
-def test_get_learning_path_unknown_entity_returns_empty(graph_svc: KuzuService):
-    graph_svc.upsert_document("d1", "Doc", "book")
-    result = graph_svc.get_learning_path("nonexistent", "d1")
-    assert result["nodes"] == []
-    assert result["edges"] == []
-
-
-def test_get_learning_path_no_prereq_edges_returns_empty(graph_svc: KuzuService):
-    """Entity exists but has no PREREQUISITE_OF edges."""
-    graph_svc.upsert_entity("e1", "gravity", "CONCEPT")
-    graph_svc.upsert_document("d1", "Physics", "book")
-    graph_svc.add_mention("e1", "d1")
-    result = graph_svc.get_learning_path("gravity", "d1")
-    assert result["nodes"] == []
-    assert result["edges"] == []
-
-
-def test_get_learning_path_cycle_handled_gracefully(graph_svc: KuzuService):
-    """Cyclic PREREQUISITE_OF edges (A requires B, B requires A) must not raise or loop.
-
-    Kahn's algorithm drops cyclic nodes from topo_order.  The result may be
-    partial or empty, but the method must return without error.
-    """
-    graph_svc.upsert_entity("e1", "concept alpha", "CONCEPT")
-    graph_svc.upsert_entity("e2", "concept beta", "CONCEPT")
-    graph_svc.upsert_document("d1", "Cyclic Doc", "book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
-    # Create cycle: alpha requires beta AND beta requires alpha
-    graph_svc.add_prerequisite("e1", "e2", "d1")
-    graph_svc.add_prerequisite("e2", "e1", "d1")
-
-    result = graph_svc.get_learning_path("concept alpha", "d1")
-    # Must not raise; result is a valid dict with the expected keys
-    assert "nodes" in result
-    assert "edges" in result
-    # Cyclic nodes have no in-degree=0 node, so topo_order is empty -> empty nodes
-    assert isinstance(result["nodes"], list)
-
-
-# S135: Tech relation edges
-
-
-def test_schema_creates_tech_edge_tables(graph_svc: KuzuService):
-    """_create_schema creates all 6 tech edge tables (S135)."""
-    required = {"IMPLEMENTS", "EXTENDS", "USES", "REPLACES", "DEPENDS_ON", "VERSION_OF"}
-    # CREATE REL TABLE IF NOT EXISTS is idempotent — no error means table exists
-    for label in required:
-        graph_svc._conn.execute(
-            f"CREATE REL TABLE IF NOT EXISTS {label}(FROM Entity TO Entity, document_id STRING)"
-        )
-
-
-def test_add_tech_relation_implements(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "numpy", "LIBRARY")
-    graph_svc.upsert_entity("e2", "ndarray", "DATA_STRUCTURE")
-    graph_svc.upsert_document("d1", "Python Tutorial", "tech_book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
-
-    graph_svc.add_tech_relation("e1", "e2", "IMPLEMENTS", "d1")
-
-    result = graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'})-[r:IMPLEMENTS]->(b:Entity {id: 'e2'}) RETURN r.document_id"
+async def test_get_learning_path_topological_order(memory_db, svc):
+    await add_graph(
+        memory_db,
+        "d1",
+        {"ea": ("a", "CONCEPT"), "eb": ("b", "CONCEPT"), "ec": ("c", "CONCEPT")},
+        edges=_chain(("ec", "eb"), ("eb", "ea")),
     )
-    assert result.has_next()
-    assert result.get_next()[0] == "d1"
+    names = [n.name for n in (await svc.get_learning_path("c", "d1"))["nodes"]]
+    assert names == ["a", "b", "c"]
 
 
-def test_add_tech_relation_depends_on(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "celery", "LIBRARY")
-    graph_svc.upsert_entity("e2", "redis", "LIBRARY")
-    graph_svc.upsert_document("d1", "Task Queue Guide", "tech_book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
+async def test_get_learning_path_is_empty_without_a_path(memory_db, svc):
+    await add_graph(memory_db, "d1", {"e1": ("gravity", "CONCEPT")})
+    for start in ("nonexistent", "gravity"):
+        result = await svc.get_learning_path(start, "d1")
+        assert (result["nodes"], result["edges"]) == ([], [])
 
-    graph_svc.add_tech_relation("e1", "e2", "DEPENDS_ON", "d1")
 
-    result = graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'})-[r:DEPENDS_ON]->(b:Entity {id: 'e2'}) RETURN r.document_id"
+async def test_get_learning_path_survives_a_cycle(memory_db, svc):
+    await add_graph(
+        memory_db,
+        "d1",
+        {"e1": ("concept alpha", "CONCEPT"), "e2": ("concept beta", "CONCEPT")},
+        edges=_chain(("e1", "e2"), ("e2", "e1")),
     )
-    assert result.has_next()
+    result = await svc.get_learning_path("concept alpha", "d1")
+    assert isinstance(result["nodes"], list) and "edges" in result
 
 
-def test_add_tech_relation_idempotent(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "fastapi", "LIBRARY")
-    graph_svc.upsert_entity("e2", "pydantic", "LIBRARY")
-    graph_svc.add_tech_relation("e1", "e2", "USES", "d1")
-    graph_svc.add_tech_relation("e1", "e2", "USES", "d1")  # idempotent
-
-    result = graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'})-[r:USES]->(b:Entity {id: 'e2'})"
-        " WHERE r.document_id = 'd1' RETURN count(r)"
+async def test_get_entry_point_concepts_returns_roots(memory_db, svc):
+    await add_graph(
+        memory_db,
+        "d1",
+        {
+            "e1": ("closures", "CONCEPT"),
+            "e2": ("functions", "CONCEPT"),
+            "e3": ("variables", "CONCEPT"),
+        },
+        edges=_chain(("e1", "e2"), ("e2", "e3")),
     )
-    assert result.get_next()[0] == 1
+    assert await svc.get_entry_point_concepts("d1", limit=10) == ["variables"]
 
 
-def test_add_tech_relation_invalid_label_raises(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "a", "LIBRARY")
-    graph_svc.upsert_entity("e2", "b", "LIBRARY")
-    with pytest.raises(ValueError, match="Unknown tech relation label"):
-        graph_svc.add_tech_relation("e1", "e2", "INVALID_LABEL", "d1")
+# Notes on the Map (S172)
 
 
-def test_add_version_of(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "python 3.13", "LIBRARY")
-    graph_svc.upsert_entity("e2", "python 3", "LIBRARY")
-    graph_svc.upsert_document("d1", "Python Guide", "tech_book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
+async def test_include_notes_returns_note_nodes_and_edges(memory_db, svc):
+    await add_graph(memory_db, "d1", {"e1": ("backpropagation", "CONCEPT")})
+    await add_note(memory_db, "n1", "Notes on backprop training", "e1")
 
-    graph_svc.add_version_of("e1", "e2", "d1")
+    data = await svc.get_graph_for_document("d1", include_notes=True)
+    [note] = [n for n in data["nodes"] if n.get("type") == "note"]
+    assert (note["note_id"], note["label"]) == ("n1", "Notes on backprop training")
+    [edge] = [e for e in data["edges"] if e.get("relation") == "WRITTEN_ABOUT"]
+    assert (edge["source"], edge["target"]) == ("n1", "e1")
 
-    result = graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'})-[r:VERSION_OF]->(b:Entity {id: 'e2'}) RETURN r.document_id"
+    plain = await svc.get_graph_for_document("d1")
+    assert not [n for n in plain["nodes"] if n.get("type") == "note"]
+
+
+async def test_a_note_about_entities_out_of_scope_is_excluded(memory_db, svc):
+    await add_graph(memory_db, "d1", {"e1": ("neural nets", "CONCEPT")})
+    await add_graph(memory_db, "d2", {"e2": ("attention", "CONCEPT")})
+    await add_note(memory_db, "n1", "Neural net notes", "e1")
+    await add_note(memory_db, "n2", "Attention notes", "e2")
+
+    data = await svc.get_graph_for_document("d1", include_notes=True)
+    assert {n["note_id"] for n in data["nodes"] if n.get("type") == "note"} == {"n1"}
+
+
+async def test_links_between_notes_in_scope_are_included(memory_db, svc):
+    await add_graph(memory_db, "d1", {"e1": ("optimization", "CONCEPT")})
+    await add_note(memory_db, "n1", "Note on SGD", "e1")
+    await add_note(memory_db, "n2", "Note on Adam", "e1")
+    async with memory_db.factory() as s:
+        s.add(NoteLinkModel(id="l1", source_note_id="n1", target_note_id="n2", link_type="see"))
+        await s.commit()
+
+    data = await svc.get_graph_for_document("d1", include_notes=True)
+    links = [(e["source"], e["target"]) for e in data["edges"] if e.get("relation") == "LINKS_TO"]
+    assert links == [("n1", "n2")]
+
+
+async def test_get_graph_for_documents_include_notes(memory_db, svc):
+    await add_graph(memory_db, "d1", {"e1": ("physics", "CONCEPT")})
+    await add_graph(memory_db, "d2", {"e2": ("physics", "CONCEPT")})
+    await add_note(memory_db, "n1", "Physics note", "e1")
+    await add_note(memory_db, "n1", "Physics note", "e2")
+
+    data = await svc.get_graph_for_documents(["d1", "d2"], include_notes=True)
+    assert [n["note_id"] for n in data["nodes"] if n.get("type") == "note"] == ["n1"]
+
+
+# Co-occurring pairs (I-49)
+
+
+async def test_a_self_pair_already_in_the_graph_is_never_handed_out(memory_db, svc):
+    """Self-pairs written before the guard existed stay in older graphs; the read
+    excludes them, or the protagonist paired with himself is every document's top pair."""
+    await add_graph(
+        memory_db,
+        "d1",
+        {"e1": ("Ulysses", "PERSON"), "e2": ("Minerva", "PERSON")},
+        co_occurs=(("e1", "e2"),),
     )
-    assert result.has_next()
+    await add_raw_edge(memory_db, "CO_OCCURS", "e1", "e1", "d1", weight=62.0)
 
-
-def test_add_version_of_idempotent(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "python 3.13", "LIBRARY")
-    graph_svc.upsert_entity("e2", "python 3", "LIBRARY")
-    graph_svc.add_version_of("e1", "e2", "d1")
-    graph_svc.add_version_of("e1", "e2", "d1")
-
-    result = graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'})-[r:VERSION_OF]->(b:Entity {id: 'e2'})"
-        " WHERE r.document_id = 'd1' RETURN count(r)"
-    )
-    assert result.get_next()[0] == 1
-
-
-def test_get_entities_by_type_filters_correctly(graph_svc: KuzuService):
-    """AC6: get_entities_by_type returns only entities of the requested type."""
-    graph_svc.upsert_document("d1", "Python Guide", "tech_book")
-    graph_svc.upsert_entity("e1", "numpy", "LIBRARY")
-    graph_svc.upsert_entity("e2", "alice", "PERSON")
-    graph_svc.upsert_entity("e3", "sqlalchemy", "LIBRARY")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
-    graph_svc.add_mention("e3", "d1")
-
-    libs = graph_svc.get_entities_by_type("d1", "LIBRARY")
-    lib_names = {e["name"] for e in libs}
-    assert lib_names == {"numpy", "sqlalchemy"}
-
-    persons = graph_svc.get_entities_by_type("d1", "PERSON")
-    assert len(persons) == 1
-    assert persons[0]["name"] == "alice"
-
-
-def test_get_entities_by_type_empty_for_unknown_type(graph_svc: KuzuService):
-    graph_svc.upsert_document("d1", "Test", "book")
-    graph_svc.upsert_entity("e1", "newton", "PERSON")
-    graph_svc.add_mention("e1", "d1")
-    result = graph_svc.get_entities_by_type("d1", "LIBRARY")
-    assert result == []
-
-
-def test_get_entities_by_type_returns_required_fields(graph_svc: KuzuService):
-    graph_svc.upsert_document("d1", "Test", "tech_book")
-    graph_svc.upsert_entity("e1", "numpy", "LIBRARY")
-    graph_svc.add_mention("e1", "d1")
-    result = graph_svc.get_entities_by_type("d1", "LIBRARY")
-    assert len(result) == 1
-    entity = result[0]
-    assert "id" in entity
-    assert "name" in entity
-    assert "type" in entity
-    assert "frequency" in entity
-    assert entity["type"] == "LIBRARY"
-
-
-def test_get_graph_for_document_includes_tech_edges(graph_svc: KuzuService):
-    """get_graph_for_document returns IMPLEMENTS/DEPENDS_ON edges alongside CO_OCCURS."""
-    graph_svc.upsert_document("d1", "Python Arch", "tech_book")
-    graph_svc.upsert_entity("e1", "numpy", "LIBRARY")
-    graph_svc.upsert_entity("e2", "ndarray", "DATA_STRUCTURE")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
-    graph_svc.add_tech_relation("e1", "e2", "IMPLEMENTS", "d1")
-
-    data = graph_svc.get_graph_for_document("d1")
-    edge_relations = {e.get("relation") for e in data["edges"] if "relation" in e}
-    assert "IMPLEMENTS" in edge_relations
-
-
-def test_entities_by_type_api_endpoint(client, tmp_path, monkeypatch):
-    """AC6: GET /graph/entities/{doc_id}?type=LIBRARY returns only LIBRARY entities."""
-    import app.services.graph as graph_module
-
-    svc: KuzuService = graph_module._graph_service  # type: ignore[assignment]
-    svc.upsert_document("d1", "Python Guide", "tech_book")
-    svc.upsert_entity("e1", "numpy", "LIBRARY")
-    svc.upsert_entity("e2", "einstein", "PERSON")
-    svc.add_mention("e1", "d1")
-    svc.add_mention("e2", "d1")
-
-    resp = client.get("/graph/entities/d1?type=LIBRARY")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "entities" in data
-    assert len(data["entities"]) == 1
-    assert data["entities"][0]["name"] == "numpy"
-    assert data["entities"][0]["type"] == "LIBRARY"
-
-
-def test_entities_endpoint_not_captured_by_document_id_route(client):
-    """Verify /graph/entities/doc1 is not matched as document_id='entities'."""
-    resp = client.get("/graph/entities/doc1?type=LIBRARY")
-    # Should return the entity list endpoint, not the graph-for-document endpoint
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "entities" in data  # entity list response, not graph document response
-
-
-# S139: add_prerequisite_with_section, has_prerequisite_edges,
-#       get_entry_point_concepts, get_prerequisite_edges_for_graph
-
-
-def test_add_prerequisite_with_section_creates_edge(graph_svc: KuzuService):
-    """add_prerequisite_with_section writes a PREREQUISITE_OF edge."""
-    graph_svc.upsert_entity("e1", "closures", "CONCEPT")
-    graph_svc.upsert_entity("e2", "functions", "CONCEPT")
-    graph_svc.add_prerequisite_with_section(
-        dependent_id="e1",
-        prerequisite_id="e2",
-        document_id="d1",
-        confidence=0.85,
-        source_section_id="sec-1",
-    )
-    result = graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'})-[r:PREREQUISITE_OF]->(b:Entity {id: 'e2'})"
-        " WHERE r.document_id = 'd1' RETURN r.confidence"
-    )
-    assert result.has_next()
-    assert result.get_next()[0] == pytest.approx(0.85)
-
-
-def test_add_prerequisite_with_section_idempotent(graph_svc: KuzuService):
-    """add_prerequisite_with_section is idempotent; calling twice writes one edge."""
-    graph_svc.upsert_entity("e1", "decorators", "CONCEPT")
-    graph_svc.upsert_entity("e2", "functions", "CONCEPT")
-    graph_svc.add_prerequisite_with_section("e1", "e2", "d1", 0.9, "sec-1")
-    graph_svc.add_prerequisite_with_section("e1", "e2", "d1", 0.9, "sec-1")
-    result = graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'})-[r:PREREQUISITE_OF]->(b:Entity {id: 'e2'})"
-        " WHERE r.document_id = 'd1' RETURN count(r)"
-    )
-    assert result.get_next()[0] == 1
-
-
-def test_has_prerequisite_edges_true(graph_svc: KuzuService):
-    """has_prerequisite_edges returns True when at least one edge exists."""
-    graph_svc.upsert_entity("e1", "async", "CONCEPT")
-    graph_svc.upsert_entity("e2", "coroutines", "CONCEPT")
-    graph_svc.add_prerequisite("e1", "e2", "d1", 0.8)
-    assert graph_svc.has_prerequisite_edges("d1") is True
-
-
-def test_has_prerequisite_edges_false_no_edges(graph_svc: KuzuService):
-    """has_prerequisite_edges returns False when no PREREQUISITE_OF edges exist for doc."""
-    assert graph_svc.has_prerequisite_edges("no-such-doc") is False
-
-
-def test_get_entry_point_concepts_returns_roots(graph_svc: KuzuService):
-    """get_entry_point_concepts returns entities that are prereqs for others but have none."""
-    # Chain: closures -> functions -> variables
-    # 'variables' has no prereqs and IS a prereq for 'functions' -> entry point
-    # 'functions' has a prereq ('variables') -> not an entry point
-    # 'closures' has a prereq ('functions') -> not an entry point
-    graph_svc.upsert_entity("e1", "closures", "CONCEPT")
-    graph_svc.upsert_entity("e2", "functions", "CONCEPT")
-    graph_svc.upsert_entity("e3", "variables", "CONCEPT")
-    graph_svc.upsert_document("d1", "Python 101", "tech_book")
-    for eid in ("e1", "e2", "e3"):
-        graph_svc.add_mention(eid, "d1")
-    graph_svc.add_prerequisite("e1", "e2", "d1")  # closures requires functions
-    graph_svc.add_prerequisite("e2", "e3", "d1")  # functions requires variables
-
-    concepts = graph_svc.get_entry_point_concepts("d1", limit=10)
-    assert "variables" in concepts
-    assert "closures" not in concepts
-    assert "functions" not in concepts
-
-
-def test_get_prerequisite_edges_for_graph_wire_format(graph_svc: KuzuService):
-    """get_prerequisite_edges_for_graph returns {source, target, weight, relation} dicts."""
-    graph_svc.upsert_entity("e1", "iterators", "CONCEPT")
-    graph_svc.upsert_entity("e2", "generators", "CONCEPT")
-    graph_svc.upsert_document("d1", "Advanced Python", "tech_book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
-    graph_svc.add_prerequisite("e1", "e2", "d1", 0.95)
-
-    edges = graph_svc.get_prerequisite_edges_for_graph("d1")
-    assert len(edges) == 1
-    e = edges[0]
-    assert e["source"] == "e1"
-    assert e["target"] == "e2"
-    assert e["weight"] == pytest.approx(0.95)
-    assert e["relation"] == "PREREQUISITE_OF"
-
-
-# S172: Note nodes in Viz graph (include_notes param)
-
-
-def _upsert_note_for_entity(
-    svc: KuzuService,
-    note_id: str,
-    preview: str,
-    entity_id: str,
-    rel_type: str = "WRITTEN_ABOUT",
-) -> None:
-    """Helper: upsert a Note node and connect it to an Entity via rel_type."""
-    conn = svc._conn
-    # Upsert Note node
-    r = conn.execute("MATCH (n:Note {id: $id}) RETURN n.id", {"id": note_id})
-    if not r.has_next():
-        conn.execute(
-            "CREATE (:Note {id: $id, note_id: $nid, preview: $prev, created_at: '2026-01-01'})",
-            {"id": note_id, "nid": note_id, "prev": preview},
-        )
-    # Create edge
-    if rel_type == "WRITTEN_ABOUT":
-        conn.execute(
-            "MATCH (n:Note {id: $nid}), (e:Entity {id: $eid})"
-            " CREATE (n)-[:WRITTEN_ABOUT {confidence: 0.9}]->(e)",
-            {"nid": note_id, "eid": entity_id},
-        )
-    else:
-        conn.execute(
-            "MATCH (n:Note {id: $nid}), (e:Entity {id: $eid})"
-            " CREATE (n)-[:TAG_IS_CONCEPT {tag: 'test'}]->(e)",
-            {"nid": note_id, "eid": entity_id},
-        )
-
-
-def test_include_notes_returns_note_nodes(graph_svc: KuzuService):
-    """get_graph_for_document with include_notes=True returns Note nodes."""
-    graph_svc.upsert_entity("e1", "backpropagation", "CONCEPT")
-    graph_svc.upsert_document("d1", "Deep Learning", "book")
-    graph_svc.add_mention("e1", "d1")
-    _upsert_note_for_entity(graph_svc, "n1", "Notes on backprop training", "e1")
-
-    data = graph_svc.get_graph_for_document("d1", include_notes=True)
-    note_nodes = [n for n in data["nodes"] if n.get("type") == "note"]
-    assert len(note_nodes) == 1
-    nn = note_nodes[0]
-    assert nn["note_id"] == "n1"
-    assert nn["label"] == "Notes on backprop training"
-    # WRITTEN_ABOUT edge present
-    note_edges = [e for e in data["edges"] if e.get("relation") == "WRITTEN_ABOUT"]
-    assert len(note_edges) == 1
-    assert note_edges[0]["source"] == "n1"
-    assert note_edges[0]["target"] == "e1"
-
-
-def test_include_notes_false_excludes_notes(graph_svc: KuzuService):
-    """get_graph_for_document without include_notes returns no Note nodes."""
-    graph_svc.upsert_entity("e1", "gradient", "CONCEPT")
-    graph_svc.upsert_document("d1", "ML Book", "book")
-    graph_svc.add_mention("e1", "d1")
-    _upsert_note_for_entity(graph_svc, "n1", "Gradient notes", "e1")
-
-    data = graph_svc.get_graph_for_document("d1")  # include_notes=False by default
-    note_nodes = [n for n in data["nodes"] if n.get("type") == "note"]
-    assert len(note_nodes) == 0
-
-
-def test_isolated_note_excluded(graph_svc: KuzuService):
-    """A Note with no edges to entities in scope is NOT included."""
-    graph_svc.upsert_entity("e1", "neural nets", "CONCEPT")
-    graph_svc.upsert_entity("e2", "attention", "CONCEPT")
-    graph_svc.upsert_document("d1", "Deep Learning", "book")
-    graph_svc.add_mention("e1", "d1")
-    # n1 connects to e1 (in scope for d1)
-    _upsert_note_for_entity(graph_svc, "n1", "Neural net notes", "e1")
-    # n2 connects to e2 (NOT in scope for d1 since e2 not mentioned in d1)
-    _upsert_note_for_entity(graph_svc, "n2", "Attention notes", "e2")
-
-    data = graph_svc.get_graph_for_document("d1", include_notes=True)
-    note_ids = {n["note_id"] for n in data["nodes"] if n.get("type") == "note"}
-    assert "n1" in note_ids
-    assert "n2" not in note_ids
-
-
-def test_links_to_edges_included(graph_svc: KuzuService):
-    """LINKS_TO edges between notes in scope are included when include_notes=True."""
-    graph_svc.upsert_entity("e1", "optimization", "CONCEPT")
-    graph_svc.upsert_document("d1", "Optimization Book", "book")
-    graph_svc.add_mention("e1", "d1")
-    _upsert_note_for_entity(graph_svc, "n1", "Note on SGD", "e1")
-    _upsert_note_for_entity(graph_svc, "n2", "Note on Adam", "e1")
-    # Add LINKS_TO edge between n1 and n2
-    graph_svc._conn.execute(
-        "MATCH (a:Note {id: 'n1'}), (b:Note {id: 'n2'})"
-        " CREATE (a)-[:LINKS_TO {link_type: 'elaborates'}]->(b)"
-    )
-
-    data = graph_svc.get_graph_for_document("d1", include_notes=True)
-    links_to_edges = [e for e in data["edges"] if e.get("relation") == "LINKS_TO"]
-    assert len(links_to_edges) == 1
-    assert links_to_edges[0]["source"] == "n1"
-    assert links_to_edges[0]["target"] == "n2"
-
-
-def test_get_graph_for_documents_include_notes(graph_svc: KuzuService):
-    """get_graph_for_documents with include_notes=True includes Note nodes."""
-    graph_svc.upsert_entity("e1", "physics", "CONCEPT")
-    graph_svc.upsert_document("d1", "Physics Book", "book")
-    graph_svc.upsert_document("d2", "Physics Book 2", "book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e1", "d2")
-    _upsert_note_for_entity(graph_svc, "n1", "Physics note", "e1")
-
-    data = graph_svc.get_graph_for_documents(["d1", "d2"], include_notes=True)
-    note_nodes = [n for n in data["nodes"] if n.get("type") == "note"]
-    assert len(note_nodes) == 1
-    assert note_nodes[0]["note_id"] == "n1"
-
-
-def test_an_entity_is_never_recorded_as_co_occurring_with_itself(graph_svc: KuzuService):
-    graph_svc.upsert_entity("e1", "Ulysses", "PERSON")
-    graph_svc.add_co_occurrence("e1", "e1", "d1")
-
-    result = graph_svc._conn.execute(
-        "MATCH (a:Entity)-[r:CO_OCCURS]->(b:Entity) WHERE a.id = b.id RETURN count(r)"
-    )
-    assert result.get_next()[0] == 0
-
-
-def test_a_self_pair_already_in_the_graph_is_never_handed_out(graph_svc: KuzuService):
-    """8,235 of 74,376 edges in a real library are an entity with itself, written
-    before the guard existed. Those documents will not be re-ingested, so the read
-    excludes them too -- otherwise the heaviest pair on every document stays a
-    protagonist paired with himself, and the card generator is handed him first."""
-    graph_svc.upsert_entity("e1", "Ulysses", "PERSON")
-    graph_svc.upsert_entity("e2", "Minerva", "PERSON")
-    graph_svc.upsert_document("d1", "the_odyssey", "book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
-    graph_svc.add_co_occurrence("e1", "e2", "d1")
-    # Written the way ingestion used to, past the guard that now refuses it.
-    graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'}), (b:Entity {id: 'e1'})"
-        " CREATE (a)-[:CO_OCCURS {weight: 62.0, document_id: 'd1'}]->(b)"
-    )
-
-    pairs = graph_svc.get_co_occurring_pairs_for_document("d1", limit=5)
-
-    assert all(a != b for a, b, _ in pairs), pairs
+    pairs = await svc.get_co_occurring_pairs_for_document("d1", limit=5)
     assert [(a, b) for a, b, _ in pairs] == [("Ulysses", "Minerva")]
 
 
-def test_one_pair_is_handed_out_once_however_its_edges_point(graph_svc: KuzuService):
-    """Direction was mention order, so an existing graph holds both, with separate
-    weights. Undeduped they spend two of the caller's k pairs on one question."""
-    graph_svc.upsert_entity("e1", "Ulysses", "PERSON")
-    graph_svc.upsert_entity("e2", "Minerva", "PERSON")
-    graph_svc.upsert_document("d1", "the_odyssey", "book")
-    graph_svc.add_mention("e1", "d1")
-    graph_svc.add_mention("e2", "d1")
-    graph_svc.add_co_occurrence("e1", "e2", "d1")
-    graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e2'}), (b:Entity {id: 'e1'})"
-        " CREATE (a)-[:CO_OCCURS {weight: 17.0, document_id: 'd1'}]->(b)"
+async def test_one_pair_is_handed_out_once_however_its_edges_point(memory_db, svc):
+    await add_graph(
+        memory_db,
+        "d1",
+        {"e1": ("Ulysses", "PERSON"), "e2": ("Minerva", "PERSON")},
+        co_occurs=(("e1", "e2"),),
     )
+    await add_raw_edge(memory_db, "CO_OCCURS", "e2", "e1", "d1", weight=17.0)
 
-    pairs = graph_svc.get_co_occurring_pairs_for_document("d1", limit=5)
-
+    pairs = await svc.get_co_occurring_pairs_for_document("d1", limit=5)
     assert len(pairs) == 1, pairs
+
+
+# API
+
+
+@pytest.fixture
+async def client(memory_db):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c
+
+
+async def test_get_graph_document_endpoint(memory_db, client):
+    await add_graph(memory_db, "d1", {"e1": ("Curie", "PERSON")})
+    resp = await client.get("/graph/d1")
+    assert resp.status_code == 200
+    assert [n["label"] for n in resp.json()["nodes"]] == ["Curie"]
+
+
+async def test_get_graph_multi_doc_endpoint(memory_db, client):
+    await add_graph(memory_db, "d1", {"e1": ("Curie", "PERSON")})
+    await add_graph(memory_db, "d2", {"e2": ("Radium", "CONCEPT")})
+    resp = await client.get("/graph?doc_ids=d1,d2")
+    assert resp.status_code == 200
+    assert {n["id"] for n in resp.json()["nodes"]} == {"e1", "e2"}
+
+
+async def test_get_graph_empty_doc_ids(memory_db, client):
+    resp = await client.get("/graph?doc_ids=")
+    assert resp.status_code == 200
+    assert resp.json()["nodes"] == []
+
+
+async def test_entities_by_type_api_endpoint(memory_db, client):
+    await add_graph(memory_db, "d1", {"e1": ("numpy", "LIBRARY"), "e2": ("einstein", "PERSON")})
+    resp = await client.get("/graph/entities/d1?type=LIBRARY")
+    assert resp.status_code == 200
+    assert [(e["name"], e["type"]) for e in resp.json()["entities"]] == [("numpy", "LIBRARY")]
+
+
+async def test_entities_endpoint_not_captured_by_document_id_route(memory_db, client):
+    resp = await client.get("/graph/entities/doc1?type=LIBRARY")
+    assert resp.status_code == 200
+    assert "entities" in resp.json()

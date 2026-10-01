@@ -163,7 +163,7 @@ async def purge_junk_concepts(
 
 # --- concept-layer rebuild (the UI's "make concepts") ---------------------------------
 # A global wipe-and-rebuild from the entity graph. Runs IN-PROCESS as a background task so it
-# shares the live Kuzu/SQLite/LanceDB connections (no offline lock fight). Single job at a time;
+# shares the live SQLite/LanceDB connections (no offline lock fight). Single job at a time;
 # status is polled. Heavy: entity clustering + per-batch LLM scoring -- minutes on a big library,
 # needs Ollama. Resets the concept mastery rollup (card FSRS state survives); corrections re-apply.
 

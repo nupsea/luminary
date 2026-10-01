@@ -3,8 +3,7 @@
 Ensures all tests use an isolated temp directory for DATA_DIR instead of the
 production ~/.luminary path.  This prevents:
 
-  - Kuzu file lock conflicts when a dev backend is running concurrently
-  - Accidental reads/writes to production SQLite, LanceDB, or Kuzu data
+  - Accidental reads/writes to production SQLite or LanceDB data
 
 Individual test files may still monkeypatch DATA_DIR further (e.g. test_db
 fixtures with in-memory SQLite).  The session fixture provides the safe
@@ -17,6 +16,7 @@ import asyncio.base_events
 import concurrent.futures
 import os
 import shutil
+import socket
 import time
 import warnings
 from pathlib import Path
@@ -61,6 +61,32 @@ def in_memory_keyring():
     keyring.set_keyring(backend)
     yield backend
     keyring.core._keyring_backend = None  # noqa: SLF001
+
+
+_HUB_HOSTS = ("huggingface.co", "hf.co")
+
+
+@pytest.fixture(autouse=True)
+def no_model_hub_traffic(monkeypatch):
+    """Refuse every Hugging Face lookup and fail the test that made it.
+
+    Download paths swallow their own errors (an install reports `failed` and the
+    test still passes), so refusing alone would hide the call; failing names it.
+    """
+    attempts: list[str] = []
+    real_getaddrinfo = socket.getaddrinfo
+
+    def guarded(host, *args, **kwargs):
+        name = str(host).lower()
+        if any(name == h or name.endswith("." + h) for h in _HUB_HOSTS):
+            attempts.append(name)
+            raise socket.gaierror(f"tests may not reach {name}")
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", guarded)
+    yield
+    if attempts:
+        pytest.fail(f"test reached the model hub: {sorted(set(attempts))}")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -184,8 +210,7 @@ def _reset_lancedb_singleton():
     instance until LanceDB spills to disk under memory pressure and errors
     (LanceError(IO): Spill) -- which flakes note/embed-adjacent tests. Resetting
     per test gives each a fresh, small store (recreated lazily against the
-    current DATA_DIR; on-disk data for shared dirs is reopened intact). Kuzu is
-    intentionally left alone to avoid file-lock churn from rapid reopens.
+    current DATA_DIR; on-disk data for shared dirs is reopened intact).
     """
     import app.services.vector_store as _vs_module
 
@@ -199,7 +224,7 @@ def _reset_lancedb_singleton():
 # in `asyncio.Runner.close()` -> `loop.shutdown_default_executor(THREAD_JOIN_TIMEOUT)`.
 # That constant is **300 seconds**, and the join waits out every thread the loop's
 # default executor is still running -- which is every `asyncio.to_thread` call, and
-# I-2 puts LanceDB and Kuzu there, with the embedder and GLiNER loads landing there
+# I-2 puts LanceDB there, with the embedder and GLiNER loads landing there
 # too. One fire-and-forget task still inside a `to_thread` when the client exits
 # therefore parks `TestClient.__exit__` until that call returns on its own, far past
 # the 120s per-test timeout, which kills the session and blames whichever test

@@ -1,7 +1,7 @@
 """Cascading deletion service for a single document.
 
-Owns the 18-table SQLite cascade, LanceDB vector cleanup, Kuzu graph node
-removal, and filesystem asset cleanup that `DELETE /documents/{id}` and
+Owns the SQLite cascade (graph tables included), LanceDB vector cleanup, and
+filesystem asset cleanup that `DELETE /documents/{id}` and
 `POST /documents/bulk-delete` both need.
 
 Caller (the router) is responsible for cancelling any in-flight ingestion
@@ -10,9 +10,8 @@ embeddings as it progresses; deleting mid-stage would either hit SQLite
 locks or leave orphan rows in tables we just emptied.
 
 Service vs repo: this is *not* a `DocumentRepo` method because the cascade
-fans out to three external systems (LanceDB, Kuzu, filesystem) on top of
-SQLite. The repo layer is single-system; cross-system orchestration is a
-service responsibility.
+fans out to LanceDB and the filesystem on top of SQLite. The repo layer is
+single-system; cross-system orchestration is a service responsibility.
 """
 
 from __future__ import annotations
@@ -40,6 +39,11 @@ from app.models import (
     FeynmanSessionModel,
     FlashcardModel,
     GraphConceptDocumentModel,
+    GraphDiagramDepictionModel,
+    GraphDiagramEdgeModel,
+    GraphDiagramNodeModel,
+    GraphEntityEdgeModel,
+    GraphEntityModel,
     ImageModel,
     LearningGoalModel,
     LearningObjectiveModel,
@@ -58,7 +62,6 @@ from app.models import (
     SummaryModel,
     WebReferenceModel,
 )
-from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 
 # indirect: get_lancedb_service is patched in tests
 from app.services import vector_store as _vector_store_module
@@ -93,6 +96,11 @@ _DOCUMENT_ID_CHILD_TABLES: tuple[type, ...] = (
     DocumentTagIndexModel,
     DocumentTagProvenanceModel,
     GraphConceptDocumentModel,
+    GraphDiagramDepictionModel,
+    GraphDiagramEdgeModel,
+    GraphDiagramNodeModel,
+    GraphEntityEdgeModel,
+    GraphEntityModel,
 )
 
 # Deleted by the explicit statements in `delete_sqlite_cascade` rather than by the
@@ -272,13 +280,6 @@ class DocumentDeletionService:
             _vector_store_module.get_lancedb_service().delete_document(document_id)
         except Exception:
             logger.warning("Failed to delete LanceDB vectors for document %s", document_id)
-
-    def delete_kuzu_nodes(self, document_id: str) -> None:
-        """Drop Document node + edges. Non-fatal: failures are logged."""
-        try:
-            _graph_module.get_graph_service().delete_document(document_id)
-        except Exception:
-            logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
 
     def delete_filesystem_assets(self, document_id: str) -> None:
         """Drop extracted images dir + raw file. Non-fatal."""

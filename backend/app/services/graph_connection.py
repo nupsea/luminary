@@ -1,185 +1,33 @@
-"""Shared Kuzu database + connection wrapper.
+"""Read-only access to a `graph.kuzu` left by Luminary up to 0.15.0.
 
-Owns the `kuzu.Database`, `kuzu.Connection`, the serialization lock, and
-the schema-creation DDL. Repos under `app.services.graph_*` take a
-`KuzuConnection` and use its `.conn` attribute (the raw kuzu connection).
-
-Schema creation is idempotent (`CREATE ... IF NOT EXISTS`).
+Only the one-time import (`services/graph_import.py`) opens it, and never for writing:
+the file stays as it was, so an older build still finds its graph.
 """
 
 from __future__ import annotations
 
-import logging
-import threading
 from pathlib import Path
 
 import kuzu
 
-from app.exceptions import DependencyUnavailable
-
-logger = logging.getLogger(__name__)
-
 
 class GraphDatabaseLockedError(RuntimeError):
-    """Another live process holds the Kuzu write lock."""
+    """Another live process holds the Kuzu lock."""
 
 
-class GraphDatabaseUnreadableError(DependencyUnavailable):
-    """The graph file exists but Kuzu cannot open it.
+def open_read_only(data_dir: str) -> kuzu.Connection:
+    """A read-only connection to `<data_dir>/graph.kuzu`.
 
-    Distinct from a lock, which clears itself. This does not: every request
-    that touches the graph fails identically until the file is replaced.
+    Kuzu's lock is an OS file lock the kernel drops when its holder exits, so a held
+    lock means a live process (an older Luminary still running): wait for it, never
+    clear it (I-24).
     """
-
-
-# Signatures of a graph Kuzu can find but not read, taken from the real failure:
-# "Load table failed: table 0 doesn't exist in catalog". Anything else -- a full
-# disk, a permissions fault -- is not ours to reinterpret and propagates
-# unchanged, so a genuine fault is never disguised as a rebuildable one.
-_UNREADABLE_MARKERS = ("load table failed", "catalog")
-
-
-def _open_database(db_path: str) -> kuzu.Database:
+    db_path = str(Path(data_dir).expanduser() / "graph.kuzu")
     try:
-        return kuzu.Database(db_path)
+        return kuzu.Connection(kuzu.Database(db_path, read_only=True))
     except RuntimeError as exc:
-        message = str(exc).lower()
-
-        if "lock" in message:
-            # Kuzu takes an exclusive OS-level file lock, which the kernel drops the
-            # moment the holder dies -- verified against SIGKILL. So this is never a
-            # stale lock from a crash: some process is alive and holding it right now,
-            # most likely a second server or an offline script (`make concepts`).
-            # Killing the holder would interrupt a live write, which is how a graph DB
-            # gets corrupted.
+        if "lock" in str(exc).lower():
             raise GraphDatabaseLockedError(
-                f"The knowledge graph at {db_path} is locked by another running process. "
-                "Stop the other Luminary server or offline script (e.g. `make concepts`) "
-                "and retry. The lock releases on its own when that process exits."
+                f"The knowledge graph at {db_path} is locked by another running process."
             ) from exc
-
-        if any(marker in message for marker in _UNREADABLE_MARKERS):
-            # Unlike a lock this never clears, and Kuzu reports it as a bare
-            # RuntimeError, which reached the client as a 500 with a stack trace on
-            # every document in the library. The graph is derived data -- entities and
-            # edges built during ingestion -- so it can be rebuilt; it is never
-            # rebuilt here, because silently recreating the file would discard the
-            # user's extracted graph without telling them it was gone.
-            raise GraphDatabaseUnreadableError(
-                f"The knowledge graph at {db_path} exists but cannot be opened ({exc}). "
-                "It is derived from your documents: move the file aside and re-ingest "
-                "to rebuild it. Nothing else in the library is affected."
-            ) from exc
-
         raise
-
-
-class ThreadSafeKuzuConnection:
-    """Thread-safe proxy wrapper for kuzu.Connection to serialize all executions."""
-
-    def __init__(self, conn: kuzu.Connection, lock: threading.RLock) -> None:
-        self._conn = conn
-        self._lock = lock
-
-    def execute(self, *args, **kwargs):
-        with self._lock:
-            return self._conn.execute(*args, **kwargs)
-
-    def __getattr__(self, name: str):
-        return getattr(self._conn, name)
-
-
-class KuzuConnection:
-    """Thin wrapper around a Kuzu DB + Connection pair.
-
-    `.conn` is wrapped in ThreadSafeKuzuConnection to automatically serialize
-    all repos' `.conn.execute(...)` calls under the reentrant lock.
-    """
-
-    def __init__(self, data_dir: str) -> None:
-        db_path = str(Path(data_dir).expanduser() / "graph.kuzu")
-        self.db = _open_database(db_path)
-        # Use RLock to allow reentrant query locking inside transactions (e.g. note_graph)
-        self.lock = threading.RLock()
-        raw_conn = kuzu.Connection(self.db)
-        self.conn = ThreadSafeKuzuConnection(raw_conn, self.lock)
-        self._create_schema()
-        logger.info("KuzuConnection initialized", extra={"db_path": db_path})
-
-    def _create_schema(self) -> None:
-        """Create node and edge tables if they do not exist."""
-        stmts = [
-            # Node tables
-            "CREATE NODE TABLE IF NOT EXISTS Entity("
-            "id STRING PRIMARY KEY, name STRING, type STRING, frequency INT64, aliases STRING)",
-            "CREATE NODE TABLE IF NOT EXISTS Document("
-            "id STRING PRIMARY KEY, title STRING, content_type STRING)",
-            # Diagram-derived node table -- must be created before DEPICTS edge
-            "CREATE NODE TABLE IF NOT EXISTS DiagramNode("
-            "id STRING PRIMARY KEY, name STRING, node_type STRING,"
-            " source_image_id STRING, document_id STRING, frequency INT64)",
-            # Edge tables
-            "CREATE REL TABLE IF NOT EXISTS MENTIONED_IN(FROM Entity TO Document, count INT64)",
-            "CREATE REL TABLE IF NOT EXISTS CO_OCCURS("
-            "FROM Entity TO Entity, weight FLOAT, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS RELATED_TO("
-            "FROM Entity TO Entity, relation_label STRING, confidence FLOAT)",
-            "CREATE REL TABLE IF NOT EXISTS CALLS(FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS PREREQUISITE_OF("
-            "FROM Entity TO Entity, document_id STRING, confidence FLOAT)",
-            # Tech relation edges
-            "CREATE REL TABLE IF NOT EXISTS IMPLEMENTS(FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS EXTENDS(FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS USES(FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS REPLACES(FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS DEPENDS_ON(FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS VERSION_OF(FROM Entity TO Entity, document_id STRING)",
-            # Diagram-derived edge tables
-            "CREATE REL TABLE IF NOT EXISTS CONNECTS_TO("
-            "FROM DiagramNode TO DiagramNode, document_id STRING, label STRING)",
-            "CREATE REL TABLE IF NOT EXISTS STORES_IN("
-            "FROM DiagramNode TO DiagramNode, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS SENDS_TO("
-            "FROM DiagramNode TO DiagramNode, document_id STRING, message STRING)",
-            "CREATE REL TABLE IF NOT EXISTS HAS_FIELD("
-            "FROM DiagramNode TO DiagramNode, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS REFERENCES_DM("
-            "FROM DiagramNode TO DiagramNode, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS LEADS_TO("
-            "FROM DiagramNode TO DiagramNode, document_id STRING, condition STRING)",
-            # DEPICTS: links a diagram-derived node to an existing Entity
-            "CREATE REL TABLE IF NOT EXISTS DEPICTS("
-            "FROM DiagramNode TO Entity, document_id STRING)",
-            # SAME_CONCEPT: cross-document concept links
-            # Uses INT64 for contradiction (not BOOLEAN) for Kuzu compatibility
-            "CREATE REL TABLE IF NOT EXISTS SAME_CONCEPT("
-            "FROM Entity TO Entity,"
-            " source_doc_id STRING, target_doc_id STRING,"
-            " confidence FLOAT, contradiction INT64,"
-            " contradiction_note STRING, prefer_source STRING)",
-            # Note graph -- Note nodes + edges to Entity and Document
-            "CREATE NODE TABLE IF NOT EXISTS Note("
-            "id STRING PRIMARY KEY, note_id STRING, preview STRING, created_at STRING)",
-            "CREATE REL TABLE IF NOT EXISTS WRITTEN_ABOUT(FROM Note TO Entity, confidence FLOAT)",
-            "CREATE REL TABLE IF NOT EXISTS TAG_IS_CONCEPT(FROM Note TO Entity, tag STRING)",
-            "CREATE REL TABLE IF NOT EXISTS DERIVED_FROM(FROM Note TO Document)",
-            # Zettelkasten links -- explicit typed note-to-note connections
-            "CREATE REL TABLE IF NOT EXISTS LINKS_TO(FROM Note TO Note, link_type STRING)",
-            # --- Concept layer (the studyable atom; see docs/concepts.md) ---
-            # A Concept is promoted from a cluster of Entities; it is NOT an Entity.
-            # SQLite owns the hot learning state; this node owns the topology.
-            "CREATE NODE TABLE IF NOT EXISTS Concept("
-            "id STRING PRIMARY KEY, slug STRING, label STRING, kind STRING, status STRING)",
-            # concept<->concept edges. Distinct names from the Entity-level RELATED_TO /
-            # PREREQUISITE_OF (Kuzu rel tables are typed by endpoint pair).
-            "CREATE REL TABLE IF NOT EXISTS CONCEPT_RELATED_TO("
-            "FROM Concept TO Concept, weight FLOAT, status STRING)",
-            "CREATE REL TABLE IF NOT EXISTS CONCEPT_PREREQUISITE_OF("
-            "FROM Concept TO Concept, confidence FLOAT)",
-            # provenance: availability (which docs extracted it) + the Entity bridge
-            "CREATE REL TABLE IF NOT EXISTS EXTRACTED_FROM(FROM Concept TO Document)",
-            "CREATE REL TABLE IF NOT EXISTS PROMOTED_FROM("
-            "FROM Concept TO Entity, confidence FLOAT)",
-        ]
-        for stmt in stmts:
-            self.conn.execute(stmt)

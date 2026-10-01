@@ -9,19 +9,14 @@ Unit tests (AC2):
 
 Integration test (AC4, marked slow):
   - test_prereq_edges_written_after_enrich: ingest minimal fixture,
-    run PrereqExtractorService.enrich(), assert Kuzu edges exist.
+    run PrereqExtractorService.enrich(), assert graph edges exist.
 """
 
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-import app.services.graph as graph_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.services.prereq_extractor import _parse_prereqs
 
 # Pure function tests (AC2)
@@ -95,51 +90,28 @@ def test_parse_prereqs_missing_fields():
     assert result == []
 
 
-# Integration test: enrich() writes Kuzu edges (AC4)
+# Integration test: enrich() writes graph edges (AC4)
 
 
 @pytest.mark.slow
-async def test_prereq_edges_written_after_enrich(tmp_path):
-    """Ingest a minimal fixture, run PrereqExtractorService.enrich(),
-    assert PREREQUISITE_OF edges exist in Kuzu.
+async def test_prereq_edges_written_after_enrich(memory_db):
+    """Run PrereqExtractorService.enrich() over one section summary; the
+    PREREQUISITE_OF edge it reports is in the graph. Only LiteLLM is mocked."""
+    from tests.graph_seed import add_graph
 
-    Mocks litellm to return a fixed prerequisite JSON per section call.
-    Uses real Kuzu (tmp_path) and real SQLite (in-memory).
-    Only mocks LiteLLM (external system boundary).
-    """
-    import os
-
-    # Point DATA_DIR to tmp_path so Kuzu uses an isolated DB
-    os.environ["DATA_DIR"] = str(tmp_path)
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    graph_module._graph_service = None
-
-    # Create in-memory SQLite
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    sm = async_sessionmaker(engine, expire_on_commit=False)
-    db_module._engine = engine
-    db_module._session_factory = sm
-
-    await create_all_tables(engine)
-
-    # Seed: Document node, Entity nodes, SectionSummaryModel
+    sm = memory_db.factory
     doc_id = str(uuid.uuid4())
     section_id = str(uuid.uuid4())
-
-    # Seed graph nodes
-    from app.services.graph import get_graph_service
-
-    gv = get_graph_service()
-    gv.upsert_document(doc_id, "Python Tutorial", "tech_book")
-
     entity_closures_id = str(uuid.uuid4())
     entity_decorators_id = str(uuid.uuid4())
-    gv.upsert_entity(entity_closures_id, "closures", "CONCEPT")
-    gv.upsert_entity(entity_decorators_id, "decorators", "CONCEPT")
-    gv.add_mention(entity_closures_id, doc_id)
-    gv.add_mention(entity_decorators_id, doc_id)
+    await add_graph(
+        memory_db,
+        doc_id,
+        {
+            entity_closures_id: ("closures", "CONCEPT"),
+            entity_decorators_id: ("decorators", "CONCEPT"),
+        },
+    )
 
     # Seed SectionSummaryModel
     from app.models import SectionSummaryModel
@@ -172,18 +144,13 @@ async def test_prereq_edges_written_after_enrich(tmp_path):
 
     assert count >= 1, f"Expected at least 1 edge written, got {count}"
 
-    # Query Kuzu: assert PREREQUISITE_OF edge exists
-    result = gv._conn.execute(
-        "MATCH (a:Entity)-[r:PREREQUISITE_OF]->(b:Entity)"
-        " WHERE r.document_id = $did RETURN a.name, b.name",
-        {"did": doc_id},
-    )
-    edges = []
-    while result.has_next():
-        row = result.get_next()
-        edges.append((row[0], row[1]))
+    from app.services.graph import get_graph_service
 
-    assert len(edges) >= 1, f"Expected PREREQUISITE_OF edges in Kuzu, got none. Edges: {edges}"
+    edges = [
+        (e["from_entity"], e["to_entity"])
+        for e in await get_graph_service().get_prerequisite_edges_for_document(doc_id)
+    ]
+    assert len(edges) >= 1, "Expected PREREQUISITE_OF edges, got none"
     # decorators requires closures: (decorators, closures) edge expected
     assert any("closures" in pair for pair in edges), (
         f"Expected 'closures' in edge targets. Got: {edges}"

@@ -82,14 +82,11 @@ async def test_reindex_writes_entity_tail_fts_and_vectors(factory):
     embedder = MagicMock()
     embedder.encode.side_effect = lambda texts: [[0.0] * 4 for _ in texts]
     lancedb = MagicMock()
-    graph = MagicMock()
-    graph.get_entities_by_type_for_document.return_value = {}
 
     with (
         patch("app.services.ner.get_entity_extractor", return_value=extractor),
         patch("app.services.embedder.get_embedding_service", return_value=embedder),
         patch("app.services.vector_store.get_lancedb_service", return_value=lancedb),
-        patch("app.services.graph.get_graph_service", return_value=graph),
     ):
         assert await _run(_args("d1")) == 0
 

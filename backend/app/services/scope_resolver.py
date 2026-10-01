@@ -7,7 +7,7 @@ to their already-linked concepts here; minting unmapped cards / candidate concep
 from free material is wired by the Study Launcher work in later phases.
 
 Returns concept ids only -- the assembler (Phase 1) interleaves due cards and
-generated questions on top. Honors I-3 (Kuzu has_next guards live in the graph repo).
+generated questions on top.
 """
 
 from __future__ import annotations

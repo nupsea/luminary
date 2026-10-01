@@ -1,7 +1,6 @@
 """Unit tests for S171: Note-to-note bidirectional links."""
 
 import uuid
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,14 +28,10 @@ def test_create_link_returns_201(client):
     src = _create_note(client, "source note content")
     tgt = _create_note(client, "target note content")
 
-    with patch(
-        "app.services.note_graph.NoteGraphService.upsert_links_to_edge",
-        new_callable=AsyncMock,
-    ):
-        resp = client.post(
-            f"/notes/{src['id']}/links",
-            json={"target_note_id": tgt["id"], "link_type": "elaborates"},
-        )
+    resp = client.post(
+        f"/notes/{src['id']}/links",
+        json={"target_note_id": tgt["id"], "link_type": "elaborates"},
+    )
 
     assert resp.status_code == 201
     data = resp.json()
@@ -70,18 +65,14 @@ def test_create_link_409_duplicate(client):
     src = _create_note(client, "source note")
     tgt = _create_note(client, "target note")
 
-    with patch(
-        "app.services.note_graph.NoteGraphService.upsert_links_to_edge",
-        new_callable=AsyncMock,
-    ):
-        client.post(
-            f"/notes/{src['id']}/links",
-            json={"target_note_id": tgt["id"], "link_type": "supports"},
-        )
-        resp = client.post(
-            f"/notes/{src['id']}/links",
-            json={"target_note_id": tgt["id"], "link_type": "supports"},
-        )
+    client.post(
+        f"/notes/{src['id']}/links",
+        json={"target_note_id": tgt["id"], "link_type": "supports"},
+    )
+    resp = client.post(
+        f"/notes/{src['id']}/links",
+        json={"target_note_id": tgt["id"], "link_type": "supports"},
+    )
 
     assert resp.status_code == 409
 
@@ -94,20 +85,12 @@ def test_delete_link_returns_204(client):
     src = _create_note(client, "source note")
     tgt = _create_note(client, "target note")
 
-    with patch(
-        "app.services.note_graph.NoteGraphService.upsert_links_to_edge",
-        new_callable=AsyncMock,
-    ):
-        client.post(
-            f"/notes/{src['id']}/links",
-            json={"target_note_id": tgt["id"], "link_type": "see-also"},
-        )
+    client.post(
+        f"/notes/{src['id']}/links",
+        json={"target_note_id": tgt["id"], "link_type": "see-also"},
+    )
 
-    with patch(
-        "app.services.note_graph.NoteGraphService.delete_links_to_edge",
-        new_callable=AsyncMock,
-    ):
-        resp = client.delete(f"/notes/{src['id']}/links/{tgt['id']}?link_type=see-also")
+    resp = client.delete(f"/notes/{src['id']}/links/{tgt['id']}?link_type=see-also")
 
     assert resp.status_code == 204
 
@@ -128,18 +111,14 @@ def test_get_links_3_note_chain(client):
     note_b = _create_note(client, "Note B content")
     note_c = _create_note(client, "Note C content")
 
-    with patch(
-        "app.services.note_graph.NoteGraphService.upsert_links_to_edge",
-        new_callable=AsyncMock,
-    ):
-        client.post(
-            f"/notes/{note_a['id']}/links",
-            json={"target_note_id": note_b["id"], "link_type": "elaborates"},
-        )
-        client.post(
-            f"/notes/{note_b['id']}/links",
-            json={"target_note_id": note_c["id"], "link_type": "see-also"},
-        )
+    client.post(
+        f"/notes/{note_a['id']}/links",
+        json={"target_note_id": note_b["id"], "link_type": "elaborates"},
+    )
+    client.post(
+        f"/notes/{note_b['id']}/links",
+        json={"target_note_id": note_c["id"], "link_type": "see-also"},
+    )
 
     # A: 1 outgoing, 0 incoming
     resp_a = client.get(f"/notes/{note_a['id']}/links")

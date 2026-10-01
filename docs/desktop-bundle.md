@@ -27,7 +27,8 @@ is `stage`. Same contract the release tarball already relies on
 (`.github/workflows/release.yml`).
 
 Everything writable lives in the app's local data directory:
-`luminary.db`, `vectors/`, `graph.kuzu`, `models/`, `ollama/models/`, `.env`.
+`luminary.db`, `vectors/`, `models/`, `ollama/models/`, `.env`, and `graph.kuzu` in
+libraries from before 0.15.0 (read once by the graph import, never written).
 That is `~/Library/Application Support/sh.luminary.app/` on macOS,
 `%LOCALAPPDATA%\sh.luminary.app\` on Windows and `~/.local/share/sh.luminary.app/`
 on Linux. **Local, never roaming**: `stage::data_dir` uses `app_local_data_dir`,
@@ -61,8 +62,8 @@ CORS nor `TrustedHostMiddleware` needs relaxing — a webview on
   a reader wedges the backend seconds into startup.
 - **The backend's working directory is `DATA_DIR`**, which turns the
   CWD-relative `.env` lookup into a user-editable file in a findable place.
-- **Single instance is enforced** by `tauri-plugin-single-instance`. Kuzu takes
-  an exclusive file lock, so a second instance cannot open the library at all.
+- **Single instance is enforced** by `tauri-plugin-single-instance`. A second
+  backend on the same library would contend for its port and SQLite's write lock.
   `RunEvent::Reopen` handles the macOS case that plugin does not cover —
   Spotlight or the Dock reactivating an app that is already running — by
   unminimizing and focusing the existing window.

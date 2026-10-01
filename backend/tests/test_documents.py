@@ -377,25 +377,30 @@ async def test_delete_document_calls_lancedb(test_db):
     mock_lancedb.delete_document.assert_called_once_with(doc_id)
 
 
-async def test_delete_document_calls_graph_service(test_db):
-    """DELETE /documents/{id} calls get_graph_service().delete_document."""
+async def test_delete_document_deletes_its_graph(test_db, memory_db):
+    """#204: the graph cascades with the document, so no stale edge can outlive it."""
+    from tests.graph_seed import add_graph
+
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(_make_doc(doc_id))
         await session.commit()
+    await add_graph(
+        memory_db,
+        doc_id,
+        {"e1": ("Darwin", "PERSON"), "e2": ("Finches", "CONCEPT")},
+        co_occurs=(("e1", "e2"),),
+    )
 
-    mock_lancedb = MagicMock()
-    mock_graph = MagicMock()
-    with (
-        patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb),
-        patch("app.services.graph.get_graph_service", return_value=mock_graph),
-    ):
+    with patch("app.services.vector_store.get_lancedb_service", return_value=MagicMock()):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.delete(f"/documents/{doc_id}")
 
     assert resp.status_code == 204
-    mock_graph.delete_document.assert_called_once_with(doc_id)
+    from app.services.graph import get_graph_service
+
+    assert await get_graph_service().count_for_document(doc_id) == (0, 0)
 
 
 async def test_delete_document_404(test_db):

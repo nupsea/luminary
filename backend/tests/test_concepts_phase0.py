@@ -32,7 +32,7 @@ async def test_db(tmp_path, monkeypatch):
 
     orig_engine, orig_factory = db_module._engine, db_module._session_factory
     db_module._engine, db_module._session_factory = engine, factory
-    # fresh Kuzu under tmp_path (singleton is otherwise suite-wide)
+    # fresh graph service (singleton is otherwise suite-wide)
     orig_graph = graph_module._graph_service
     graph_module._graph_service = None
     yield engine, factory

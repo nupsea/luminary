@@ -5,7 +5,7 @@ Run with:
 
 All tests use the all_books_ingested session fixture which:
   - ingests all 3 books with real ML (BAAI/bge-m3 + GLiNER), LiteLLM mocked
-  - creates a shared temp SQLite + LanceDB + Kuzu environment
+  - creates a shared temp SQLite + LanceDB environment
   - asserts each book reaches stage='complete'
 """
 
@@ -126,7 +126,7 @@ async def test_alice_known_entities_extracted(all_books_ingested):
     alice_doc_id = all_books_ingested["Alice in Wonderland"]["doc_id"]
     graph = graph_module.get_graph_service()
 
-    by_type = graph.get_entities_by_type_for_document(alice_doc_id)
+    by_type = await graph.get_entities_by_type_for_document(alice_doc_id)
     names = {name.lower() for type_names in by_type.values() for name in type_names}
 
     assert any("alice" in n for n in names), f"'alice' not found in entities: {sorted(names)[:30]}"
@@ -144,7 +144,7 @@ async def test_odyssey_known_entities_extracted(all_books_ingested):
     odyssey_doc_id = all_books_ingested["The Odyssey"]["doc_id"]
     graph = graph_module.get_graph_service()
 
-    by_type = graph.get_entities_by_type_for_document(odyssey_doc_id)
+    by_type = await graph.get_entities_by_type_for_document(odyssey_doc_id)
     names = {name.lower() for type_names in by_type.values() for name in type_names}
 
     # Butler translation uses "Ulysses" throughout; accept either form

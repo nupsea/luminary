@@ -1,8 +1,8 @@
 """Exit when the desktop shell that started us is gone.
 
 macOS has no `PR_SET_PDEATHSIG`, so a shell that crashes or is force-quit never
-gets to stop its children. A surviving backend keeps Kuzu's exclusive file lock,
-which does not degrade the next launch -- it blocks it outright. Polling the
+gets to stop its children. A surviving backend keeps serving the old port and
+holding the library, which blocks the next launch outright. Polling the
 parent is the only mechanism that still works when the shell had no opportunity
 to run any code at all.
 

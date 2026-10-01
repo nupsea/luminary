@@ -44,10 +44,10 @@ def _encode(names):
 
 
 class _FakeGraph:
-    def get_all_document_ids(self):
+    async def get_all_document_ids(self):
         return ["d1", "d2"]
 
-    def get_entities_detailed_for_document(self, doc_id):
+    async def get_entities_detailed_for_document(self, doc_id):
         dom = "data" if doc_id == "d1" else "phil"
         return [
             {"name": n, "type": "CONCEPT", "frequency": 5}

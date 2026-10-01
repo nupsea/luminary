@@ -11,17 +11,16 @@ the end with where they went.
 
 ## Async / Concurrency
 
-**I-2. Wrap every synchronous LanceDB and Kuzu call, and any long CPU call, in `asyncio.to_thread`.**
+**I-2. Wrap every synchronous LanceDB call, and any long CPU call, in `asyncio.to_thread`.**
 One worker serves every request, and in `public` mode the SPA's route chunks too, so a blocking call
-stalls the whole app (a 23MB PDF parsed inline froze the loop for 44.9s). Kuzu is safe off-thread:
-`ThreadSafeKuzuConnection` serialises `execute()`. `chunk`, `entity_extract` and `transcribe` are still
-inline.
+stalls the whole app (a 23MB PDF parsed inline froze the loop for 44.9s). The graph is async SQLite
+and needs no wrap. `chunk`, `entity_extract` and `transcribe` are still inline.
+`tests/test_async_store_calls.py` ratchets the count.
 
 **I-40. Shutdown time is decided by the work inside the loop's default executor, not by the tasks awaiting it.**
 `asyncio.Runner.close()` joins the default executor for up to 300s, and every `to_thread` runs there,
 so task-draining fixes never bound a quit. `lifespan` ends in `_release_default_executor` (20s join,
-then detach); unbounded, the desktop supervisor SIGKILLs a mid-write thread and leaves the Kuzu lock
-held. Fixtures bound the join at 30s (`tests/conftest.py`, `tests/task_drain.py`).
+then detach); unbounded, the desktop supervisor SIGKILLs a mid-write thread. Fixtures bound the join at 30s (`tests/conftest.py`, `tests/task_drain.py`).
 `tests/test_quit_is_bounded.py` and `tests/test_testclient_teardown_is_bounded.py` fail CI otherwise.
 The recurring `test_e2e_upload` timeout is a different class (aiosqlite workers waiting on a dead
 loop's future): a green run is not evidence there.
@@ -202,10 +201,19 @@ nothing it planned survives, inside the request that deletes the cards.
 
 ## Knowledge layer
 
-**I-24. Never add code that clears a Kuzu lock or kills its holder.**
+**I-24. The graph import never clears a Kuzu lock or kills its holder.**
 The kernel releases Kuzu's lock the instant the holder dies, so a stale lock cannot exist and
-"clearing" one can only kill a live writer mid-write. A held lock is a real second process: surface
-it. This is a POSIX statement; Windows locks are mandatory (roadmap, 0.13.x).
+"clearing" one can only kill a live writer mid-write. A held lock is a real second process (an older
+Luminary still running): the import records the domain `deferred` and retries next launch. This is a
+POSIX statement; Windows locks are mandatory (roadmap, 0.13.x). `tests/test_graph_lock.py` guards it.
+
+**I-63. Every graph row cascades from the row it describes.**
+Kuzu had no foreign keys, so deleting a document left its entities and edges behind: 51% of
+`CO_OCCURS` edges in a real library belonged to deleted documents and reached chat answers (#204,
+#205), and deleted notes kept their nodes (#65). Each `graph_*` table references `documents`, `notes`,
+`concepts` or `graph_entities` with `ON DELETE CASCADE`; a graph write for a row deleted mid-run fails
+the foreign key and is dropped, never stored. Never add a graph table, or a column standing in for a
+reference, without the cascade. `test_graph.py`, `test_note_graph.py` and `test_documents.py` guard it.
 
 ## Ingestion
 
@@ -281,7 +289,7 @@ Kept so existing references resolve.
 | # | Now |
 |---|---|
 | I-1 | `patterns.md`: never share an `AsyncSession` across `asyncio.gather` tasks |
-| I-3 | `patterns.md`: guard Kuzu `get_next()` with `has_next()` |
+| I-3 | Retired with Kuzu (guard `get_next()` with `has_next()`); `graph_import_read.rows` still does |
 | I-4 | `patterns.md`: FTS5 UNINDEXED columns are read through the content shadow table |
 | I-5, I-6 | `patterns.md`: lazy imports for cycles; `get_settings` at module level |
 | I-7 | `patterns.md`: persist before LLM calls in SSE generators, explicit rollback |

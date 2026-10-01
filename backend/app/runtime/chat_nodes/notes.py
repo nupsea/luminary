@@ -1,7 +1,7 @@
 """notes_node and notes_gap_node.
 
 notes_node (intent='notes'): search user notes via NoteSearchService,
-optionally enrich top-3 with Kuzu entity names, return as
+optionally enrich top-3 with graph entity names, return as
 section_context for synthesize_node.
 
 notes_gap_node (intent='notes_gap'): detect gaps between user notes
@@ -68,7 +68,7 @@ async def notes_node(state: ChatState) -> dict:
         logger.info("notes_node: no note results for query=%r", q[:50])
         return {"chunks": [], "section_context": None}
 
-    # Enrich top-3 notes with Kuzu entity names
+    # Enrich top-3 notes with graph entity names
     note_lines = []
     for i, r in enumerate(results):
         line = "[From your notes] " + r.content

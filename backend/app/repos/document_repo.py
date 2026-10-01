@@ -1,7 +1,7 @@
 """Repository for `DocumentModel` reads and writes.
 
 Owns simple `session.execute / commit` calls for the documents router.
-The cascading delete (18 child tables, LanceDB + Kuzu + filesystem
+The cascading delete (18 child tables, LanceDB + filesystem
 side-effects) and the heavily denormalized `list_documents` query (10+
 correlated scalar subqueries) stay inline -- both are bespoke
 orchestrations, not reusable repo methods.

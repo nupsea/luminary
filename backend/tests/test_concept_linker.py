@@ -6,13 +6,21 @@ Unit tests:
   - AC2: mock LLM contradiction response; assert edge gains contradiction=True and note
   - Pure function tests: _compute_match_confidence, _parse_year
 
-Integration test (marked @pytest.mark.slow):
-  - AC3: ingest two tech documents both mentioning the same concept; SAME_CONCEPT edge exists
+The linking tests run against the real SQLite graph; only the LLM is mocked.
 """
+
+import json
 
 import pytest
 
-from app.services.concept_linker import _compute_match_confidence, _parse_year
+from app.models import SectionSummaryModel
+from app.services.concept_linker import (
+    ConceptLinkerService,
+    _compute_match_confidence,
+    _parse_year,
+)
+from app.services.graph import get_graph_service
+from tests.graph_seed import add_graph
 
 # Pure function tests
 
@@ -99,372 +107,86 @@ def test_parse_year_out_of_range():
     assert result is None
 
 
-# AC1: SAME_CONCEPT edge created for matching concepts
+# Linking against the real graph (AC1, AC2)
 
 
-@pytest.mark.asyncio
-async def test_ac1_same_concept_edge_created(tmp_path, monkeypatch):
-    """Two CONCEPT nodes from different docs with matching names produce SAME_CONCEPT edge.
-
-    Uses doc_a concept 'dependency injection' and doc_b concept 'dependency injection
-    framework' -- the shorter is a substring of the longer, so confidence=0.8 (Rule B).
-    This satisfies AC1: confidence > 0.
-
-    Note: 'DI' vs 'dependency injection' does not match via the three matching rules
-    (no substring, no 2-token overlap). The AC spec implies abbreviation detection;
-    our implementation uses the same rules as EntityDisambiguator which handles
-    longer/shorter name variants but not acronyms. We test a realistic matching case
-    where both names clearly refer to the same concept.
-
-    Uses a simplified mock of the graph service and session.
-    """
-    from app.services.concept_linker import ConceptLinkerService
-
-    # Track calls to add_same_concept_edge
-    edges_added: list[dict] = []
-
-    class MockGraphService:
-        def get_entities_by_type_for_document(self, doc_id: str):
-            if doc_id == "doc_a":
-                return {"CONCEPT": ["dependency injection"]}
-            elif doc_id == "doc_b":
-                # 'dependency injection' is a substring of this name (Rule B)
-                return {"CONCEPT": ["dependency injection framework"]}
-            return {}
-
-        def get_same_concept_edges(self):
-            return edges_added
-
-        def get_concept_clusters(self):
-            return []
-
-        def add_same_concept_edge(
-            self,
-            entity_id_a,
-            entity_id_b,
-            source_doc_id,
-            target_doc_id,
-            confidence,
-            contradiction=False,
-            contradiction_note="",
-            prefer_source="",
-        ):
-            edges_added.append(
-                {
-                    "entity_id_a": entity_id_a,
-                    "entity_id_b": entity_id_b,
-                    "confidence": confidence,
-                    "contradiction": contradiction,
-                    "contradiction_note": contradiction_note,
-                }
-            )
-
-        def _conn(self):
-            pass
-
-        # Expose _conn as attribute with execute method for _get_entity_ids_for_doc
-        class _ConnMock:
-            def execute(self, query, params=None):
-                class Result:
-                    _rows = (
-                        [("name_a", "eid_a_1")]
-                        if "doc_a" in str(params)
-                        else [("dependency injection", "eid_b_1")]
-                    )
-
-                    def has_next(self):
-                        return bool(self._rows)
-
-                    def get_next(self):
-                        return self._rows.pop(0)
-
-                return Result()
-
-        _conn = _ConnMock()
-
-    mock_graph = MockGraphService()
-
-    # Mock session
-    class MockResult:
-        def __init__(self, rows):
-            self._rows = rows
-
-        def all(self):
-            return self._rows
-
-        def scalars(self):
-            class Scalars:
-                def all(inner_self):
-                    return ["Dependency injection is a design pattern..."] * 2
-
-            return Scalars()
-
-        def __iter__(self):
-            return iter(self._rows)
-
-        def first(self):
-            return self._rows[0] if self._rows else None
-
-    class MockSession:
-        async def execute(self, stmt):
-            # Return other doc_ids for the first query (select DocumentModel.id)
-            # Rows must be subscriptable with [0]
-            return MockResult([("doc_b",)])
-
-        async def commit(self):
-            pass
-
-    svc = ConceptLinkerService()
-
-    # Patch get_graph_service to return mock
-    monkeypatch.setattr("app.services.concept_linker.get_graph_service", lambda: mock_graph)
-
-    # Patch _detect_contradiction to return no contradiction
-    async def mock_detect(concept_name, summary_a, summary_b):
-        return {"has_contradiction": False, "note": "", "prefer_source": ""}
-
-    monkeypatch.setattr(svc, "_detect_contradiction", mock_detect)
-
-    # Patch _get_entity_ids_for_doc on the class (self is first arg)
-    def mock_get_entity_ids(self, graph_svc, doc_id):
-        if doc_id == "doc_a":
-            return {"dependency injection": "eid_a_1"}
-        elif doc_id == "doc_b":
-            return {"dependency injection framework": "eid_b_1"}
-        return {}
-
-    monkeypatch.setattr(ConceptLinkerService, "_get_entity_ids_for_doc", mock_get_entity_ids)
-
-    session = MockSession()
-    count = await svc.link_for_document("doc_a", session)
-
-    assert count >= 1, f"Expected at least one edge, got {count}"
-    assert len(edges_added) >= 1
-    assert edges_added[0]["confidence"] > 0
+async def _seed_two_documents(memory_db, name_a: str, name_b: str) -> None:
+    await add_graph(memory_db, "doc_a", {"eid_a_1": (name_a, "CONCEPT")})
+    await add_graph(memory_db, "doc_b", {"eid_b_1": (name_b, "CONCEPT")})
 
 
-# AC2: Mock LLM contradiction response -> edge gains contradiction=True
+def _llm_says(monkeypatch, verdict: dict) -> list[dict]:
+    """Make the contradiction check return `verdict`; returns the calls it received."""
+    import app.services.llm as llm_module
 
+    calls: list[dict] = []
 
-@pytest.mark.asyncio
-async def test_ac2_contradiction_detection(monkeypatch):
-    """When LLM returns has_contradiction=True, edge gains contradiction=True and note."""
-    import json
-
-    from app.services.concept_linker import ConceptLinkerService
-
-    edges_added: list[dict] = []
-
-    class MockGraphService:
-        def get_entities_by_type_for_document(self, doc_id: str):
-            if doc_id == "doc_a":
-                return {"CONCEPT": ["dependency injection"]}
-            elif doc_id == "doc_b":
-                return {"CONCEPT": ["dependency injection"]}
-            return {}
-
-        def add_same_concept_edge(
-            self,
-            entity_id_a,
-            entity_id_b,
-            source_doc_id,
-            target_doc_id,
-            confidence,
-            contradiction=False,
-            contradiction_note="",
-            prefer_source="",
-        ):
-            edges_added.append(
-                {
-                    "contradiction": contradiction,
-                    "contradiction_note": contradiction_note,
-                    "prefer_source": prefer_source,
-                }
-            )
-
-    class MockLLMResponse:
+    class _Resp:
         class _Choice:
             class _Message:
-                content = json.dumps(
-                    {
-                        "has_contradiction": True,
-                        "note": "A says constructor injection; B says setter injection",
-                        "prefer_source": "b",
-                    }
-                )
+                content = json.dumps(verdict)
 
             message = _Message()
 
         choices = [_Choice()]
 
-    async def mock_litellm_acompletion(**kwargs):
-        return MockLLMResponse()
+    async def _acompletion(**kwargs):
+        calls.append(kwargs)
+        return _Resp()
 
-    import app.services.llm as llm_module
-
-    monkeypatch.setattr(llm_module.litellm, "acompletion", mock_litellm_acompletion)
-
-    mock_graph = MockGraphService()
-    monkeypatch.setattr("app.services.concept_linker.get_graph_service", lambda: mock_graph)
-
-    def mock_get_entity_ids(self, graph_svc, doc_id):
-        if doc_id == "doc_a":
-            return {"dependency injection": "eid_a_1"}
-        elif doc_id == "doc_b":
-            return {"dependency injection": "eid_b_1"}
-        return {}
-
-    monkeypatch.setattr(ConceptLinkerService, "_get_entity_ids_for_doc", mock_get_entity_ids)
-
-    class MockResult:
-        def __init__(self, rows=None):
-            self._rows = rows or []
-
-        def all(self):
-            return self._rows
-
-        def scalars(self):
-            class Scalars:
-                def all(inner_self):
-                    return ["Constructor injection is preferred in modern Java frameworks."]
-
-            return Scalars()
-
-        def __iter__(self):
-            return iter(self._rows)
-
-        def first(self):
-            return self._rows[0] if self._rows else None
-
-    class MockSession:
-        async def execute(self, stmt):
-            return MockResult([("doc_b",)])
-
-        async def commit(self):
-            pass
-
-    svc = ConceptLinkerService()
-    count = await svc.link_for_document("doc_a", MockSession())
-
-    assert count >= 1, f"Expected at least one edge, got {count}"
-    assert len(edges_added) >= 1
-    edge = edges_added[0]
-    assert edge["contradiction"] is True
-    note = edge["contradiction_note"].lower()
-    assert "constructor" in note or "setter" in note
-    assert edge["prefer_source"] == "b"
+    monkeypatch.setattr(llm_module.litellm, "acompletion", _acompletion)
+    return calls
 
 
-# GET /graph/concepts/linked endpoint unit test
+async def test_ac1_same_concept_edge_created(memory_db, monkeypatch):
+    """'dependency injection' is a substring of 'dependency injection framework' (Rule B,
+    confidence 0.8). Without section summaries no contradiction check is made."""
+    await _seed_two_documents(memory_db, "dependency injection", "dependency injection framework")
+    calls = _llm_says(monkeypatch, {"has_contradiction": True, "note": "x", "prefer_source": "a"})
+
+    async with memory_db.factory() as session:
+        count = await ConceptLinkerService().link_for_document("doc_a", session)
+
+    assert count == 1
+    [edge] = await get_graph_service().get_same_concept_edges()
+    assert (edge["entity_id_a"], edge["entity_id_b"]) == ("eid_a_1", "eid_b_1")
+    assert edge["confidence"] == pytest.approx(0.8)
+    assert edge["contradiction"] is False
+    assert calls == []
 
 
-@pytest.mark.asyncio
-async def test_get_concept_clusters_endpoint_empty(monkeypatch):
+async def test_ac2_contradiction_detection(memory_db, monkeypatch):
+    """When the LLM reports a contradiction, the edge records it with its note."""
+    await _seed_two_documents(memory_db, "dependency injection", "dependency injection")
+    async with memory_db.factory() as s:
+        for doc, text in (
+            ("doc_a", "Dependency injection should use constructor injection."),
+            ("doc_b", "Dependency injection should use setter injection."),
+        ):
+            s.add(
+                SectionSummaryModel(
+                    id=f"sum-{doc}", document_id=doc, heading="h", content=text, unit_index=0
+                )
+            )
+        await s.commit()
+    note = "A says constructor injection; B says setter injection"
+    calls = _llm_says(monkeypatch, {"has_contradiction": True, "note": note, "prefer_source": "b"})
+
+    async with memory_db.factory() as session:
+        count = await ConceptLinkerService().link_for_document("doc_a", session)
+
+    assert count == 1 and len(calls) == 1
+    [edge] = await get_graph_service().get_contradiction_edges_for_docs(["doc_a"])
+    assert (edge["contradiction_note"], edge["prefer_source"]) == (note, "b")
+
+
+async def test_get_concept_clusters_endpoint_empty(memory_db):
     """GET /graph/concepts/linked returns empty clusters when no SAME_CONCEPT edges exist."""
     from httpx import ASGITransport, AsyncClient
 
     from app.main import app
-    from app.services.graph import KuzuService
-
-    def mock_get_concept_clusters(self):
-        return []
-
-    monkeypatch.setattr(KuzuService, "get_concept_clusters", mock_get_concept_clusters)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/graph/concepts/linked")
     assert resp.status_code == 200
-    data = resp.json()
-    assert "clusters" in data
-    assert data["clusters"] == []
-
-
-# AC3: Integration test using real Kuzu DB (marked slow)
-
-
-@pytest.mark.slow
-@pytest.mark.asyncio
-async def test_ac3_same_concept_edge_in_real_kuzu(tmp_path, monkeypatch):
-    """Two tech documents with overlapping CONCEPT names produce a SAME_CONCEPT edge in Kuzu.
-
-    Uses a real KuzuService instance in tmp_path (no mocking of the graph layer).
-    Mocks: litellm.acompletion (no LLM required), SQLAlchemy session (no DB required).
-    """
-    import json
-
-    from app.services.concept_linker import ConceptLinkerService
-    from app.services.graph import KuzuService
-
-    # Create a real Kuzu DB in tmp_path
-    graph_svc = KuzuService(str(tmp_path))
-
-    # Seed Document and Entity nodes
-    graph_svc.upsert_document("doc_tech_a", "Python Design Patterns", "tech_book")
-    graph_svc.upsert_document("doc_tech_b", "Java Architecture Patterns", "tech_book")
-
-    graph_svc.upsert_entity("eid_a_1", "dependency injection", "CONCEPT")
-    graph_svc.upsert_entity("eid_b_1", "dependency injection framework", "CONCEPT")
-
-    graph_svc.add_mention("eid_a_1", "doc_tech_a")
-    graph_svc.add_mention("eid_b_1", "doc_tech_b")
-
-    # Patch get_graph_service to return our real instance
-    monkeypatch.setattr("app.services.concept_linker.get_graph_service", lambda: graph_svc)
-
-    # Mock litellm to avoid LLM calls
-    class _FakeLLMResp:
-        class _Choice:
-            class _Message:
-                content = json.dumps(
-                    {
-                        "has_contradiction": False,
-                        "note": "",
-                        "prefer_source": "",
-                    }
-                )
-
-            message = _Message()
-
-        choices = [_Choice()]
-
-    import app.services.llm as llm_module
-
-    monkeypatch.setattr(llm_module.litellm, "acompletion", lambda **kw: _FakeLLMResp())
-
-    # Minimal mock session: returns doc_tech_b as other document
-    class MockResult:
-        def __init__(self, rows):
-            self._rows = rows
-
-        def all(self):
-            return self._rows
-
-        def scalars(self):
-            class S:
-                def all(inner):
-                    return ["Dependency injection is a design pattern used in Python."]
-
-            return S()
-
-        def first(self):
-            return self._rows[0] if self._rows else None
-
-    class MockSession:
-        async def execute(self, stmt):
-            return MockResult([("doc_tech_b",)])
-
-        async def commit(self):
-            pass
-
-    svc = ConceptLinkerService()
-    count = await svc.link_for_document("doc_tech_a", MockSession())
-
-    assert count >= 1, f"Expected at least one SAME_CONCEPT edge, got {count}"
-
-    # Verify the edge exists in Kuzu
-    edges = graph_svc.get_same_concept_edges()
-    assert len(edges) >= 1, "No SAME_CONCEPT edges found in Kuzu"
-    edge = edges[0]
-    assert edge["confidence"] > 0
-    # 'dependency injection' is a substring of 'dependency injection framework' -> Rule B (0.8)
-    assert edge["confidence"] == pytest.approx(0.8, abs=1e-5)
+    assert resp.json()["clusters"] == []

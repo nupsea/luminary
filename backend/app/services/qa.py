@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 NOT_FOUND_SENTINEL = "NOT_FOUND_IN_CONTENT"
 
-# Query rewriting — resolve vague pronouns via Kuzu entity lookup
+# Query rewriting — resolve vague pronouns via graph entity lookup
 
 VAGUE_REF_RE = re.compile(
     r"\b(they|he|she|it|them|the author|the speaker|the protagonist|"
@@ -36,9 +36,9 @@ async def _maybe_rewrite_query(
     """Return a (possibly rewritten) query with vague references resolved.
 
     Contract:
-    - No vague refs detected → returns question unchanged (0 LLM calls, 0 Kuzu queries).
+    - No vague refs detected → returns question unchanged (0 LLM calls, 0 graph queries).
     - document_ids is None (all-docs scope) → returns question unchanged.
-    - Kuzu returns 0 entities → returns question unchanged.
+    - The graph has 0 entities → returns question unchanged.
     - LLM fails → logs warning and returns question unchanged (non-fatal).
     - prior_context: last user turn from conversation history — prepended to the
       rewrite prompt so the LLM can resolve vague follow-up pronouns.
@@ -48,9 +48,9 @@ async def _maybe_rewrite_query(
     if document_ids is None:
         return question
     try:
-        entity_names = get_graph_service().get_entities_for_documents(document_ids)
+        entity_names = await get_graph_service().get_entities_for_documents(document_ids)
     except Exception:
-        logger.warning("_maybe_rewrite_query: Kuzu lookup failed", exc_info=True)
+        logger.warning("_maybe_rewrite_query: graph lookup failed", exc_info=True)
         return question
     if not entity_names:
         return question

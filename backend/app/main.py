@@ -70,7 +70,6 @@ from app.services.concept_linker import concept_link_handler
 from app.services.diagram_extractor import diagram_extract_handler
 from app.services.enrichment_worker import get_enrichment_worker
 from app.services.executors import shutdown_model_executor
-from app.services.graph import get_graph_service
 from app.services.graph_import import run_graph_import
 from app.services.image_enricher import image_analyze_handler
 from app.services.image_extractor import image_extract_handler
@@ -114,13 +113,13 @@ async def lifespan(app: FastAPI):
     configure_logging(settings.LOG_LEVEL)
 
     # Before the migration below: if the desktop shell dies while we are still
-    # starting, nothing else would ever stop us, and the Kuzu lock we go on to
-    # take would block the user's next launch.
+    # starting, nothing else would ever stop us, and the database we go on to
+    # open would stay held against the user's next launch.
     watch_parent()
 
     # Initial DB setup
     status = get_startup_status()
-    status.set_state("db", "loading", "SQLite schema + LanceDB and Kuzu stores")
+    status.set_state("db", "loading", "SQLite schema + LanceDB store")
     engine = get_engine()
     try:
         await init_database(engine)
@@ -131,11 +130,11 @@ async def lifespan(app: FastAPI):
 
     # Before anything reads the graph tables, so none is read half-filled. Bounded: the
     # dev library's 98k graph rows copy in under a second.
-    await run_graph_import(settings.DATA_DIR, lambda: get_graph_service()._connection.conn)
+    await run_graph_import(settings.DATA_DIR)
     await optimize_database(engine)
 
     # NOTE: concept regeneration is a manual offline step (with the server stopped
-    # so it can hold the Kuzu lock and not starve the event loop):
+    # so it does not starve the event loop):
     #   make concepts
     # See docs/concepts.md.
 
@@ -386,8 +385,7 @@ async def lifespan(app: FastAPI):
     logger.info("Luminary backend shutting down")
 
     # Every step here is bounded. A desktop app that takes minutes to quit reads
-    # as a hang, and a supervisor that gives up and SIGKILLs can leave the Kuzu
-    # lock held against the next launch.
+    # as a hang, and a supervisor that gives up and SIGKILLs a write mid-flight.
     await get_enrichment_worker().stop()
     await get_ingestion_jobs().cancel_all()
 
@@ -421,14 +419,14 @@ async def lifespan(app: FastAPI):
 # `asyncio.to_thread` call runs there (I-40). A quit can therefore sit for five
 # minutes behind one embed or one model load.
 #
-# 20s is chosen against the two cases that bracket it. A Kuzu or LanceDB write is
+# 20s is chosen against the two cases that bracket it. A SQLite or LanceDB write is
 # sub-second to a few seconds, so a real write finishes inside it and is never
 # abandoned mid-flight; a model load is tens of seconds and is abandoned, which is
 # the trade `shutdown_model_executor` already makes for the same reason.
 #
 # **Bounding this is safer than not bounding it.** Unbounded, the desktop shell's
 # supervisor gives up and SIGKILLs -- killing whatever is mid-write with no grace
-# at all, and leaving the Kuzu lock held against the next launch. A bounded,
+# at all. A bounded,
 # orderly abandon is the better of the two, not a free one.
 _EXECUTOR_RELEASE_GRACE_S = 20.0
 

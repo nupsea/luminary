@@ -1,5 +1,5 @@
 ---
-description: The Concept primitive -- the single studyable atom. The canonical answer to "what is a concept" and how it differs from a Kuzu Entity. Read before any concept/mastery/graph work.
+description: The Concept primitive -- the single studyable atom. The canonical answer to "what is a concept" and how it differs from a graph Entity. Read before any concept/mastery/graph work.
 ---
 
 # Concepts -- the studyable atom
@@ -10,10 +10,10 @@ you *study* and the only thing that carries mastery. Everything else is either m
 
 ## Entity vs Concept (the fundamental distinction)
 
-Today the Kuzu graph stores **`Entity`** nodes (GLiNER zero-shot NER). An Entity and a Concept are
+Today the graph stores **`Entity`** rows (GLiNER zero-shot NER). An Entity and a Concept are
 **not** the same thing -- conflating them is the central mistake this design avoids.
 
-| | **Entity** (exists today, Kuzu) | **Concept** (net-new) |
+| | **Entity** (exists today, `graph_entities`) | **Concept** (net-new) |
 |---|---|---|
 | What it is | a *mention* -- a lexical NER surface-form | *something you can master* -- a pedagogical unit |
 | Identity | the string label; many entities per real idea | a stable `id`; deduplicated across mentions/aliases |
@@ -298,7 +298,7 @@ grouped them, what score let it through.
 - Full-text entity->chunk matching OOM-killed `make concepts` (exit 143) -> use the short
   `entities_text`, not full chunk text.
 - All-pairs concept edges exploded persist + produced a hairball -> k-NN with a cutoff.
-- Never run heavy concept work in the live server lifespan -- sync Kuzu starves the event loop.
+- Never run heavy concept work in the live server lifespan -- it starves the event loop.
   Offline `make concepts`, with the server stopped, is the only supported path.
 
 ---

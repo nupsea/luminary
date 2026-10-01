@@ -21,9 +21,8 @@ from langgraph.graph import END
 from app.runtime.chat_nodes._shared import _chunk_to_dict, _read_rerank_enabled
 from app.runtime.chat_nodes.graph import (
     _extract_entities_from_question,
-    _query_kuzu_for_entity,
+    _graph_lines_for_entity,
 )
-from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services import (
     note_search as _note_search_module,  # indirect: get_note_search_service is patched
 )
@@ -75,7 +74,7 @@ async def augment_node(state: ChatState) -> dict:
     """Augment context with a complementary strategy when confidence is low.
 
     Selects the complementary strategy based on primary_strategy:
-      search_node / factual / exploratory → Kuzu entity graph lines → section_context
+      search_node / factual / exploratory → entity graph lines → section_context
       graph_node (relational)             → hybrid search k=15, rerank per setting → chunks
       summary_node                        → hybrid search k=10, rerank per setting → chunks
       comparative_node                    → hybrid search k=10, no doc filter, rerank per setting →
@@ -100,14 +99,9 @@ async def augment_node(state: ChatState) -> dict:
 
     try:
         if primary in ("search_node", "factual", "exploratory"):
-            # Complementary: Kuzu entity graph relationships
-            entity_names = _extract_entities_from_question(question)
-            try:
-                conn = _graph_module.get_graph_service()._conn
-                for name in entity_names[:5]:
-                    new_section_lines.extend(_query_kuzu_for_entity(conn, name))
-            except Exception:
-                logger.warning("augment_node: Kuzu query failed", exc_info=True)
+            # Complementary: entity graph relationships
+            for name in _extract_entities_from_question(question)[:5]:
+                new_section_lines.extend(await _graph_lines_for_entity(name, effective_doc_ids))
 
         elif primary == "graph_node":
             # Complementary: broader hybrid search k=15, same rerank setting search_node uses

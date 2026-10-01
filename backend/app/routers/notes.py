@@ -241,9 +241,7 @@ async def create_note(
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     graph_task = asyncio.create_task(
-        _upsert_note_graph(
-            note.id, note.content, note.document_id, note.tags or [], req.source_document_ids
-        )
+        _upsert_note_graph(note.id, note.content, note.document_id, note.tags or [])
     )
     _background_tasks.add(graph_task)
     graph_task.add_done_callback(_background_tasks.discard)
@@ -490,7 +488,7 @@ async def _apply_note_update(
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     graph_task = asyncio.create_task(
-        _upsert_note_graph(note.id, note.content, note.document_id, note.tags or [], list(src_rows))
+        _upsert_note_graph(note.id, note.content, note.document_id, note.tags or [])
     )
     _background_tasks.add(graph_task)
     graph_task.add_done_callback(_background_tasks.discard)
@@ -546,9 +544,6 @@ async def delete_note(
 
     await _fts_delete(note_id, session)
     await _sync_tag_index(note_id, [], session)
-    # Delete Note graph node synchronously before removing the SQL row
-
-    await get_note_graph_service().delete_note_node(note_id)
     await repo.delete_by_id(note_id)
 
     await asyncio.to_thread(get_lancedb_service().delete_note_vector, note_id)
@@ -557,7 +552,7 @@ async def delete_note(
 
 @router.get("/{note_id}/entities", response_model=list[NoteEntityItem])
 async def get_note_entities(note_id: str) -> list[NoteEntityItem]:
-    """Return entities linked to a note via WRITTEN_ABOUT or TAG_IS_CONCEPT Kuzu edges."""
+    """Return the entities a note is about: named in its text, or matched by a tag."""
 
     entities = await get_note_graph_service().get_entities_for_note(note_id)
     return [NoteEntityItem(**e) for e in entities]
@@ -869,7 +864,7 @@ async def create_note_link(
 ) -> NoteLinkItem:
     """Create a typed link from note_id to req.target_note_id.
 
-    Fires an async Kuzu edge upsert. Returns 404 if source or target note missing.
+    Returns 404 if source or target note missing.
     Returns 409 if the (source, target, link_type) triple already exists.
     """
 
@@ -887,13 +882,6 @@ async def create_note_link(
         link_type=req.link_type,
         created_at=datetime.now(UTC),
     )
-
-    # Fire-and-forget Kuzu edge upsert
-    task = asyncio.create_task(
-        get_note_graph_service().upsert_links_to_edge(note_id, req.target_note_id, req.link_type)
-    )
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
 
     return NoteLinkItem(
         id=link.id,
@@ -913,7 +901,7 @@ async def delete_note_link(
 ) -> None:
     """Delete a typed link from note_id to target_note_id.
 
-    Fires an async Kuzu edge delete. Returns 404 if link not found.
+    Returns 404 if link not found.
     """
 
     link = await repo.find_link(note_id, target_note_id, link_type)
@@ -921,12 +909,6 @@ async def delete_note_link(
         raise HTTPException(status_code=404, detail="Link not found")
 
     await repo.delete_link(link)
-
-    task = asyncio.create_task(
-        get_note_graph_service().delete_links_to_edge(note_id, target_note_id, link_type)
-    )
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
 
 
 @router.get("/{note_id}/links", response_model=NoteLinksResponse)

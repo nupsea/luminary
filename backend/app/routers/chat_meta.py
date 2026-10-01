@@ -1,6 +1,5 @@
 """GET /chat/suggestions, POST /chat/suggestions/{id}/asked, GET /chat/explorations."""
 
-import asyncio
 import logging
 import re
 
@@ -311,7 +310,7 @@ async def get_suggestions(
 
 async def _handle_all_scope(svc) -> SuggestionResponse:  # noqa: ANN001
     """Handle cross-document (all-scope) suggestions."""
-    shared = await asyncio.to_thread(get_graph_service().get_cross_document_entities, limit=10)
+    shared = await get_graph_service().get_cross_document_entities(limit=10)
 
     # An empty library gets NO pills — the chat empty state ("Your library is
     # empty, upload a document...") is the correct, non-clickable guidance. Fake
@@ -371,9 +370,7 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
         )
         headings = [r[0] for r in sections_result.all() if r[0]]
 
-    entities = await asyncio.to_thread(
-        get_graph_service().get_entities_by_type_for_document, document_id
-    )
+    entities = await get_graph_service().get_entities_by_type_for_document(document_id)
 
     logger.info(
         "suggestions: doc=%s content_type=%s entities=%d headings=%d",
@@ -418,10 +415,8 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
 async def get_explorations(
     document_id: str = Query(..., description="Document ID to derive entity-pair suggestions for"),
 ) -> list[ExplorationSuggestion]:
-    """Return up to 5 proactive exploration suggestions from Kuzu RELATED_TO entity pairs."""
-    pairs = await asyncio.to_thread(
-        get_graph_service().get_related_entity_pairs_for_document, document_id, limit=5
-    )
+    """Return up to 5 proactive exploration suggestions from RELATED_TO entity pairs."""
+    pairs = await get_graph_service().get_related_entity_pairs_for_document(document_id, limit=5)
     suggestions: list[ExplorationSuggestion] = []
     for name_a, name_b, label, _conf in pairs:
         display_a = name_a.title()

@@ -192,7 +192,7 @@ async def upload_db(tmp_path, monkeypatch):
     """Isolated environment for integration_http tests.
 
     - In-memory SQLite
-    - Temp LanceDB / Kuzu dirs
+    - Temp LanceDB dir
     - Mocked EmbeddingService + EntityExtractor (no model downloads)
     - litellm.acompletion mocked to return 'notes'
     """

@@ -2,7 +2,7 @@
 
 `with TestClient(app)` ends in `asyncio.Runner.close()`, which joins the loop's
 default executor for `asyncio.constants.THREAD_JOIN_TIMEOUT` -- **300 seconds**.
-Every `asyncio.to_thread` call runs there (I-2 puts LanceDB and Kuzu in it, and
+Every `asyncio.to_thread` call runs there (I-2 puts LanceDB in it, and
 the embedder and GLiNER loads land there too), so a single fire-and-forget task
 still inside one when the client exits parks teardown until that call returns.
 At 300s that is past the 120s per-test timeout, so the session dies and the

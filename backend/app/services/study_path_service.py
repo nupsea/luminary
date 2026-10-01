@@ -58,7 +58,7 @@ class StudyPathService:
         """Return FSRS-aware ordered study path for a concept in a document.
 
         Algorithm:
-        1. Call KuzuService.get_learning_path(concept, document_id) to get topo-ordered nodes.
+        1. Call GraphService.get_learning_path(concept, document_id) to get topo-ordered nodes.
         2. For each node (prerequisite-first order):
            a. Find all flashcards in the document whose chunk text contains the concept name.
            b. Compute avg fsrs_stability across those flashcards.
@@ -68,7 +68,7 @@ class StudyPathService:
         Concept-to-flashcard linkage is approximate: uses ChunkModel.text.ilike(f"%{concept}%").
         """
         graph_svc = get_graph_service()
-        lp = graph_svc.get_learning_path(concept, document_id)
+        lp = await graph_svc.get_learning_path(concept, document_id)
 
         path_items: list[StudyPathItem] = []
         for node in lp.get("nodes", []):
@@ -121,7 +121,7 @@ class StudyPathService:
         (highest ROI for new learners).
         """
         graph_svc = get_graph_service()
-        candidates = graph_svc.get_entry_point_concepts(document_id, limit=10)
+        candidates = await graph_svc.get_entry_point_concepts(document_id, limit=10)
 
         if not candidates:
             return StartConceptsResponse(document_id=document_id, concepts=[])

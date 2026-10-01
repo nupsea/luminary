@@ -96,7 +96,7 @@ async def test_suggestions_book_document(db_session):
         "PLACE": ["Ithaca"],
     }
 
-    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service", return_value=AsyncMock()) as mock_graph:
         mock_graph.return_value.get_entities_by_type_for_document.return_value = entities
         from app.routers.chat_meta import get_suggestions
 
@@ -115,7 +115,7 @@ async def test_suggestions_null_document_id(db_session):
     """Null document_id returns cross-document entity suggestions."""
     shared_entities = ["quantum entanglement", "Schrodinger", "wave function"]
 
-    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service", return_value=AsyncMock()) as mock_graph:
         mock_graph.return_value.get_cross_document_entities.return_value = shared_entities
 
         from app.routers.chat_meta import get_suggestions
@@ -143,7 +143,7 @@ async def test_suggestions_technical_document(db_session):
         "TECHNOLOGY": ["Redis", "PostgreSQL"],
     }
 
-    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service", return_value=AsyncMock()) as mock_graph:
         mock_graph.return_value.get_entities_by_type_for_document.return_value = entities
 
         from app.routers.chat_meta import get_suggestions
@@ -170,7 +170,7 @@ async def test_suggestions_video_document(db_session):
         "PERSON": ["Geoffrey Hinton"],
     }
 
-    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service", return_value=AsyncMock()) as mock_graph:
         mock_graph.return_value.get_entities_by_type_for_document.return_value = entities
 
         from app.routers.chat_meta import get_suggestions
@@ -189,7 +189,7 @@ async def test_suggestions_video_document(db_session):
 async def test_suggestions_empty_library(db_session):
     """A genuinely empty library (no documents) returns NO pills -- the chat empty
     state provides the (non-clickable) onboarding guidance instead."""
-    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service", return_value=AsyncMock()) as mock_graph:
         mock_graph.return_value.get_cross_document_entities.return_value = []
 
         from app.routers.chat_meta import get_suggestions
@@ -203,7 +203,7 @@ async def test_suggestions_empty_library(db_session):
 async def test_suggestions_missing_document_returns_no_pills(db_session):
     """A stale/missing document id (e.g. deleted doc) returns NO pills, never fake
     onboarding chips that would submit their own text as a dead question."""
-    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service", return_value=AsyncMock()) as mock_graph:
         mock_graph.return_value.get_entities_by_type_for_document.return_value = {}
 
         from app.routers.chat_meta import get_suggestions
@@ -222,7 +222,7 @@ async def test_suggestions_populated_library_no_shared_entities(db_session):
     db_session.add(doc)
     await db_session.commit()
 
-    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service", return_value=AsyncMock()) as mock_graph:
         mock_graph.return_value.get_cross_document_entities.return_value = []
 
         from app.routers.chat_meta import get_suggestions
@@ -247,7 +247,7 @@ async def test_suggestions_returns_four(db_session):
 
     entities = {"CONCEPT": ["one-concept"]}
 
-    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service", return_value=AsyncMock()) as mock_graph:
         mock_graph.return_value.get_entities_by_type_for_document.return_value = entities
 
         from app.routers.chat_meta import get_suggestions
@@ -270,7 +270,7 @@ async def test_fewer_generated_than_four_are_topped_up_from_templates(db_session
     ]
 
     with (
-        patch("app.routers.chat_meta.get_graph_service") as mock_graph,
+        patch("app.routers.chat_meta.get_graph_service", return_value=AsyncMock()) as mock_graph,
         patch.object(SuggestionService, "get_multi_doc_summaries", AsyncMock(return_value="s")),
         patch.object(SuggestionService, "get_grounding_passages", AsyncMock(return_value=["p"])),
         patch.object(SuggestionService, "generate_suggestions", AsyncMock(return_value=generated)),
@@ -340,7 +340,7 @@ async def test_suggestions_not_in_history(db_session):
 
     with (
         patch(
-            "app.routers.chat_meta.get_graph_service",
+            "app.routers.chat_meta.get_graph_service", return_value=AsyncMock()
         ) as mock_graph,
         patch(
             "app.services.llm.litellm.acompletion",
@@ -455,7 +455,7 @@ async def test_fallback_on_llm_unavailable(db_session):
     }
 
     with (
-        patch("app.routers.chat_meta.get_graph_service") as mock_graph,
+        patch("app.routers.chat_meta.get_graph_service", return_value=AsyncMock()) as mock_graph,
         patch(
             "app.services.llm.litellm.acompletion",
             side_effect=litellm_mod.ServiceUnavailableError(

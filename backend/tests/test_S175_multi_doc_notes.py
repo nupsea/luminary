@@ -5,7 +5,6 @@ Tests cover:
 - GET /notes?document_id= returns notes linked via NoteSourceModel (not just NoteModel.document_id)
 - GET /notes/{id} response includes source_document_ids
 - PATCH /notes/{id} syncs NoteSourceModel rows (remove old, add new)
-- NoteGraphService.upsert_note_node emits DERIVED_FROM for each NoteSourceModel row
 - db_init migration backfills NoteSourceModel from notes.document_id
 """
 
@@ -179,60 +178,6 @@ def test_patch_note_without_source_document_ids_does_not_change_pivot(client):
     assert resp.status_code == 200
     data = resp.json()
     assert doc_id_1 in data["source_document_ids"]
-
-
-# Test: upsert_note_node emits DERIVED_FROM for each source_document_id
-
-
-def test_upsert_note_node_emits_derived_from_for_each_source(tmp_path):
-    """NoteGraphService._upsert_note_node_locked emits DERIVED_FROM for each source_document_id."""
-    from app.services.graph import KuzuService
-    from app.services.note_graph import NoteGraphService
-
-    ks = KuzuService(str(tmp_path))
-    svc = NoteGraphService()
-
-    doc_id_1 = str(uuid.uuid4())
-    doc_id_2 = str(uuid.uuid4())
-    note_id = str(uuid.uuid4())
-
-    # Seed two Document nodes in Kuzu
-    ks._conn.execute(
-        "CREATE (:Document {id: $id, title: 'Doc 1', content_type: 'book'})",
-        {"id": doc_id_1},
-    )
-    ks._conn.execute(
-        "CREATE (:Document {id: $id, title: 'Doc 2', content_type: 'book'})",
-        {"id": doc_id_2},
-    )
-
-    with patch("app.services.graph.get_graph_service", return_value=ks):
-        with patch(
-            "app.services.note_graph.NoteGraphService._extract_entities",
-            return_value=[],
-        ):
-            asyncio.run(
-                svc.upsert_note_node(
-                    note_id=note_id,
-                    content="test note",
-                    document_id=None,
-                    tags=[],
-                    source_document_ids=[doc_id_1, doc_id_2],
-                )
-            )
-
-    # Verify DERIVED_FROM edges exist for both documents
-    r1 = ks._conn.execute(
-        "MATCH (n:Note {id: $nid})-[:DERIVED_FROM]->(d:Document {id: $did}) RETURN n.id",
-        {"nid": note_id, "did": doc_id_1},
-    )
-    assert r1.has_next(), "DERIVED_FROM edge to doc_id_1 not found"
-
-    r2 = ks._conn.execute(
-        "MATCH (n:Note {id: $nid})-[:DERIVED_FROM]->(d:Document {id: $did}) RETURN n.id",
-        {"nid": note_id, "did": doc_id_2},
-    )
-    assert r2.has_next(), "DERIVED_FROM edge to doc_id_2 not found"
 
 
 # Test: migration backfills NoteSourceModel from notes.document_id

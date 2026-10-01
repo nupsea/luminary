@@ -11,7 +11,6 @@ Swappable: the type policy + frequency floor live in _shared (CONCEPT_TYPES / NO
 
 from __future__ import annotations
 
-import asyncio
 from collections import Counter
 
 from app.services.graph import get_graph_service
@@ -27,13 +26,13 @@ from app.workflows.concept_nodes._shared import (
 )
 
 
-def _gather() -> tuple[dict[str, EntityRec], dict[str, list[dict]]]:
-    """Synchronous graph read (run off the loop). Returns (by_name, raw_per_doc)."""
+async def _gather() -> tuple[dict[str, EntityRec], dict[str, list[dict]]]:
+    """Returns (by_name, raw_per_doc)."""
     graph = get_graph_service()
     by_name: dict[str, EntityRec] = {}
     raw_per_doc: dict[str, list[dict]] = {}
-    for doc_id in graph.get_all_document_ids():
-        recs = graph.get_entities_detailed_for_document(doc_id)
+    for doc_id in await graph.get_all_document_ids():
+        recs = await graph.get_entities_detailed_for_document(doc_id)
         for r in recs:
             r["name"] = clean_name(r.get("name", ""))
         raw_per_doc[doc_id] = recs
@@ -57,7 +56,7 @@ def _gather() -> tuple[dict[str, EntityRec], dict[str, list[dict]]]:
 
 
 async def select_entities(state: ConceptPipelineState) -> ConceptPipelineState:
-    by_name, raw_per_doc = await asyncio.to_thread(_gather)
+    by_name, raw_per_doc = await _gather()
 
     dropped: Counter = Counter()  # reason -> count
     dropped_types: Counter = Counter()  # entity type -> count (for the noise breakdown)

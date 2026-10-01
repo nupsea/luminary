@@ -1,10 +1,8 @@
-"""Kuzu lock handling.
+"""Kuzu lock handling for the one-time graph import (I-24).
 
-Boot used to `lsof` the graph file and SIGTERM whatever held it, to clear a "stale
-lock". Kuzu's lock is an exclusive OS file lock that the kernel releases when the
-holder dies, so a stale lock cannot outlive its process -- the only thing that code
-could ever kill was a LIVE process mid-write, which is how a graph database gets
-corrupted. It is gone; a held lock now raises an actionable error instead.
+Kuzu's lock is an OS file lock the kernel releases when the holder dies, so a held lock
+means a live process (an older Luminary still running). The import waits for it and
+never clears it: the only thing clearing it could kill is a live process mid-write.
 """
 
 import subprocess
@@ -13,13 +11,13 @@ import textwrap
 
 import pytest
 
-from app.services.graph_connection import GraphDatabaseLockedError, _open_database
+from app.services.graph_connection import GraphDatabaseLockedError, open_read_only
 
 
 @pytest.fixture
 def lock_holder(tmp_path):
     """A real second process holding the Kuzu lock. Mocking this would prove nothing."""
-    db = tmp_path / "held.kuzu"
+    db = tmp_path / "graph.kuzu"
     src = textwrap.dedent(f"""
         import kuzu, time
         db = kuzu.Database(r"{db}")
@@ -30,7 +28,7 @@ def lock_holder(tmp_path):
     proc = subprocess.Popen([sys.executable, "-c", src], stdout=subprocess.PIPE, text=True)
     try:
         assert proc.stdout.readline().strip() == "HOLDING"
-        yield db, proc
+        yield tmp_path, proc
     finally:
         proc.kill()
         proc.wait()
@@ -38,10 +36,10 @@ def lock_holder(tmp_path):
 
 @pytest.mark.slow
 def test_locked_database_raises_actionable_error_and_spares_the_holder(lock_holder):
-    db, proc = lock_holder
+    data_dir, proc = lock_holder
 
     with pytest.raises(GraphDatabaseLockedError) as exc:
-        _open_database(str(db))
+        open_read_only(str(data_dir))
 
     assert "locked by another running process" in str(exc.value)
     # The holder must survive. Boot killing it is the bug being fixed.
@@ -52,47 +50,19 @@ def test_locked_database_raises_actionable_error_and_spares_the_holder(lock_hold
 def test_lock_is_released_when_holder_dies(lock_holder):
     # Why no stale-lock recovery is needed: SIGKILL leaves the holder no chance to
     # clean up, and the lock still clears.
-    db, proc = lock_holder
+    data_dir, proc = lock_holder
     proc.kill()
     proc.wait()
 
-    _open_database(str(db))  # must not raise
+    open_read_only(str(data_dir))  # must not raise
 
 
 def test_unrelated_runtime_errors_are_not_swallowed(tmp_path, monkeypatch):
     import app.services.graph_connection as gc
 
-    def _boom(_path):
+    def _boom(_path, **_kwargs):
         raise RuntimeError("disk on fire")
 
     monkeypatch.setattr(gc.kuzu, "Database", _boom)
     with pytest.raises(RuntimeError, match="disk on fire"):
-        _open_database(str(tmp_path / "x.kuzu"))
-
-
-def test_a_corrupt_graph_reports_itself_as_rebuildable(tmp_path, monkeypatch):
-    """An unreadable graph is a 503 with guidance, not a 500 with a stack trace.
-
-    Kuzu reports a graph it cannot read as a bare RuntimeError, which escaped to
-    the client on every document in the library -- the whole concept layer
-    failing identically with an error naming a catalog table. Unlike a lock this
-    never clears on its own.
-    """
-    import app.services.graph_connection as gc
-    from app.services.graph_connection import GraphDatabaseUnreadableError
-
-    def _corrupt(_path):
-        raise RuntimeError(
-            "Runtime exception: Load table failed: table 0 doesn't exist in catalog."
-        )
-
-    monkeypatch.setattr(gc.kuzu, "Database", _corrupt)
-    with pytest.raises(GraphDatabaseUnreadableError) as exc:
-        _open_database(str(tmp_path / "graph.kuzu"))
-
-    # 503, so the client can tell "rebuild this" from "the server broke".
-    assert exc.value.status_code == 503
-    # The graph is never recreated here: doing so would discard the user's
-    # extracted entities without telling them.
-    assert not (tmp_path / "graph.kuzu").exists()
-    assert "re-ingest" in str(exc.value)
+        open_read_only(str(tmp_path))

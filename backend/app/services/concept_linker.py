@@ -202,7 +202,7 @@ class ConceptLinkerService:
     async def link_for_document(self, document_id: str, session) -> int:
         """Compare concept/algorithm entities in document_id against all other documents.
 
-        Creates SAME_CONCEPT edges in Kuzu for matched concept pairs.
+        Creates SAME_CONCEPT links for matched concept pairs.
         Runs contradiction detection (capped at _MAX_CONTRADICTION_CALLS LLM calls).
         Also parses and stores DocumentModel.publication_year if not yet set.
 
@@ -211,7 +211,7 @@ class ConceptLinkerService:
         graph_svc = get_graph_service()
 
         # 1. Get CONCEPT/ALGORITHM entities for this document
-        source_by_type = graph_svc.get_entities_by_type_for_document(document_id)
+        source_by_type = await graph_svc.get_entities_by_type_for_document(document_id)
         source_entities: list[dict] = []
         for etype in _LINKABLE_TYPES:
             for name in source_by_type.get(etype, []):
@@ -244,7 +244,7 @@ class ConceptLinkerService:
         # {etype: [(name, doc_id)]}
         other_entities: list[dict] = []
         for other_doc_id in other_doc_ids:
-            other_by_type = graph_svc.get_entities_by_type_for_document(other_doc_id)
+            other_by_type = await graph_svc.get_entities_by_type_for_document(other_doc_id)
             for etype in _LINKABLE_TYPES:
                 for name in other_by_type.get(etype, []):
                     other_entities.append({"name": name, "type": etype, "doc_id": other_doc_id})
@@ -261,11 +261,12 @@ class ConceptLinkerService:
         edges_created = 0
         contradiction_calls = 0
 
-        # Need entity IDs to call add_same_concept_edge; query them from Kuzu
-        source_entity_ids = self._get_entity_ids_for_doc(graph_svc, document_id)
+        source_entity_ids = await graph_svc.get_entity_ids_by_name(document_id, _LINKABLE_TYPES)
         other_entity_ids: dict[str, dict[str, str]] = {}  # doc_id -> {name -> id}
         for other_doc_id in other_doc_ids:
-            other_entity_ids[other_doc_id] = self._get_entity_ids_for_doc(graph_svc, other_doc_id)
+            other_entity_ids[other_doc_id] = await graph_svc.get_entity_ids_by_name(
+                other_doc_id, _LINKABLE_TYPES
+            )
 
         for src_ent in source_entities:
             src_name = src_ent["name"]
@@ -320,7 +321,7 @@ class ConceptLinkerService:
                             exc_info=True,
                         )
 
-                graph_svc.add_same_concept_edge(
+                await graph_svc.add_same_concept_edge(
                     entity_id_a=src_id,
                     entity_id_b=tgt_id,
                     source_doc_id=document_id,
@@ -373,25 +374,6 @@ class ConceptLinkerService:
             contradiction_calls,
         )
         return edges_created
-
-    def _get_entity_ids_for_doc(self, graph_svc, document_id: str) -> dict[str, str]:
-        """Return {name -> entity_id} for CONCEPT/ALGORITHM entities in a document."""
-        try:
-            result = graph_svc._conn.execute(
-                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did})"
-                " WHERE e.type IN ['CONCEPT', 'ALGORITHM']"
-                " RETURN e.name, e.id",
-                {"did": document_id},
-            )
-            mapping: dict[str, str] = {}
-            while result.has_next():
-                row = result.get_next()
-                if row[0] and row[1]:
-                    mapping[row[0]] = row[1]
-            return mapping
-        except Exception:
-            logger.debug("_get_entity_ids_for_doc failed for doc=%s", document_id, exc_info=True)
-            return {}
 
 
 async def concept_link_handler(document_id: str, job_id: str) -> None:

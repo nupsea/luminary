@@ -4,8 +4,8 @@ The desktop shell terminates the backend and Ollama together. On Unix that is a
 SIGTERM to the process group, and `lifespan`'s shutdown runs: the enrichment
 worker drains, ingestion jobs cancel, and every task registry is emptied before
 the database closes. **Windows has no SIGTERM.** Terminating the process instead
-skips all of that, so post-ingest work is cut mid-write and SQLite, LanceDB and
-Kuzu are left disagreeing -- the divergence class of #65, landed on the platform
+skips all of that, so post-ingest work is cut mid-write and SQLite and LanceDB
+are left disagreeing -- the divergence class of #65, landed on the platform
 with the least testing.
 
 So the shell asks over HTTP, waits, and only then terminates. What arrives here
