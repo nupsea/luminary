@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChunkModel, ConceptModel
-from app.services.graph import get_graph_service
+from app.repos.graph_concept_repo import GraphConceptRepo
 
 logger = logging.getLogger(__name__)
 
@@ -100,14 +100,11 @@ class OkfContextService:
             ).all():
                 chunk_text[cid] = text
 
-        graph = get_graph_service()
+        graph = GraphConceptRepo(session)
         neighbours: dict[str, list[str]] = {}
         needed_labels: set[str] = set()
         for c in concepts:
-            try:
-                nbrs = graph.get_concept_neighbors(c.id, limit=5)
-            except Exception:
-                nbrs = []
+            nbrs = await graph.neighbors(c.id, limit=5)
             neighbours[c.id] = nbrs
             needed_labels.update(nbrs)
         label_of = {c.id: c.label for c in concepts}

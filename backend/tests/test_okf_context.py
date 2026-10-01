@@ -12,16 +12,8 @@ import app.services.graph as graph_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import ChunkModel, ConceptModel
+from app.models import ChunkModel, ConceptModel, GraphConceptEdgeModel
 from app.services.okf_context import get_okf_context_service
-
-
-class _FakeGraph:
-    def __init__(self, nbrs=None):
-        self._n = nbrs or {}
-
-    def get_concept_neighbors(self, cid, limit=5):
-        return self._n.get(cid, [])
 
 
 @pytest.fixture
@@ -73,11 +65,11 @@ async def _seed(factory):
         await s.commit()
 
 
-async def test_build_context_includes_evidence_and_related(test_db, monkeypatch):
-    monkeypatch.setattr(
-        "app.services.okf_context.get_graph_service", lambda: _FakeGraph({"c1": ["c2"]})
-    )
+async def test_build_context_includes_evidence_and_related(test_db):
     await _seed(test_db)
+    async with test_db() as s:
+        s.add(GraphConceptEdgeModel(kind="related", source_id="c1", target_id="c2"))
+        await s.commit()
     async with test_db() as s:
         ctx = await get_okf_context_service().build_concept_context(s, ["c1"])
     assert "## Partitioning" in ctx
@@ -95,7 +87,6 @@ async def test_resolve_query_lexical(test_db):
 
 
 async def test_grounded_endpoint_grounds_and_degrades(test_db, monkeypatch):
-    monkeypatch.setattr("app.services.okf_context.get_graph_service", lambda: _FakeGraph({}))
 
     async def _complete(messages, **k):
         assert "Grounding context" in messages[1]["content"]  # the OKF block reaches the model

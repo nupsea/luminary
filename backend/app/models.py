@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -1057,6 +1058,61 @@ class ClusterSuggestionModel(Base):
     confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class GraphConceptEdgeModel(Base):
+    """A concept-to-concept edge. The concepts rows are the nodes; deleting one drops its edges."""
+
+    __tablename__ = "graph_concept_edges"
+    __table_args__ = (
+        UniqueConstraint("kind", "source_id", "target_id", name="uq_graph_concept_edge"),
+        CheckConstraint("kind IN ('related', 'prerequisite')", name="ck_graph_concept_edge_kind"),
+        Index("ix_graph_concept_edges_target", "kind", "target_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    source_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), nullable=False
+    )
+    target_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), nullable=False
+    )
+    weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # proposed | confirmed
+    status: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 0.17.0's library scope; unread until then.
+    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class GraphConceptDocumentModel(Base):
+    """A document a concept was extracted from."""
+
+    __tablename__ = "graph_concept_documents"
+    __table_args__ = (Index("ix_graph_concept_documents_document", "document_id"),)
+
+    concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), primary_key=True
+    )
+    document_id: Mapped[str] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
+    )
+    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class GraphImportStateModel(Base):
+    """Progress of the one-time Kuzu-to-SQLite graph import, one row per domain."""
+
+    __tablename__ = "graph_import_state"
+
+    domain: Mapped[str] = mapped_column(String, primary_key=True)
+    # done | failed | deferred
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    attempted_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    imported_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    skipped_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class NoteLinkModel(Base):

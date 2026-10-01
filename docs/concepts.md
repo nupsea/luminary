@@ -24,7 +24,7 @@ Today the Kuzu graph stores **`Entity`** nodes (GLiNER zero-shot NER). An Entity
 
 **Entities are raw material; Concepts are the curated, studyable layer above them.** A Concept is
 minted by *promoting* an Entity cluster (see [lifecycle](#lifecycle)) -- it is never just a renamed
-Entity. The Kuzu `(:Concept)-[:PROMOTED_FROM]->(:Entity)` edge preserves that provenance.
+Entity. `evidence_json.members` records the entities it was promoted from.
 
 > Why this matters in practice: mastery used to be faked by `chunk.text ILIKE '%name%'`
 > (`mastery_service.py`, `study_path_service.py`) -- a string match against an Entity label. That
@@ -38,7 +38,7 @@ The same Concept is represented across four stores. **Two are source of truth; t
 | Store | Owns | Truth? | Invariants |
 |---|---|---|---|
 | **SQLite** `concepts` | hot, mutable state -- see schema below; `flashcards.concept_id` | **yes** | I-1 (no shared AsyncSession across `gather`) |
-| **Kuzu** `(:Concept {id})` | topology -- node + concept-concept edges, routes, prereqs, provenance edges | **yes** | I-3 (`has_next()` before `get_next()`) |
+| **SQLite** `graph_concept_edges`, `graph_concept_documents` | topology -- concept-concept edges (related, prerequisite) and the documents a concept came from | **yes** | rows cascade with their concept and document |
 | **LanceDB** `concept_vectors_v1` | 384-dim vector (chunk/bge-small space) for similarity/linking/dedup | derived | I-2 (`to_thread`), I-20 |
 | **OKF** `okf/concepts/<slug>.md` | portable text projection (frontmatter + evidence + links) | derived (Phase 5) | edits flow back only as `overrides`; never a transport |
 
@@ -63,22 +63,20 @@ concepts(
 `mapping_status` (`mapped | unmapped | proposed`). See
 [two-lane-model.md](two-lane-model.md#unmapped-cards).
 
-### Kuzu topology (source of truth for the graph)
+### Topology (source of truth for the graph)
+
+`repos/graph_concept_repo.py` owns it. The `concepts` rows are the nodes.
 
 ```
-(:Concept {id, slug, label, kind, status})
-(:Concept)-[:CONCEPT_RELATED_TO {weight, status}]->(:Concept)   -- inferred; status proposed|confirmed|rejected
-(:Concept)-[:CONCEPT_PREREQUISITE_OF {confidence}]->(:Concept)  -- ordering for routes
-(:Concept)-[:EXTRACTED_FROM]->(:Document)                       -- availability / provenance
-(:Concept)-[:PROMOTED_FROM {confidence}]->(:Entity)             -- bridge to the NER layer
+graph_concept_edges(kind, source_id -> concepts, target_id -> concepts, weight, confidence, status)
+  kind 'related'       -- inferred; status proposed|confirmed|rejected
+  kind 'prerequisite'  -- ordering for routes
+graph_concept_documents(concept_id -> concepts, document_id -> documents)  -- availability / provenance
 ```
 
-> Storage note: the concept-concept edges use `CONCEPT_`-prefixed names because Kuzu rel
-> tables are typed by their endpoint pair and the Entity-level `RELATED_TO` / `PREREQUISITE_OF`
-> tables already exist. Conceptually they are the same "related"/"prerequisite" relations.
-
-The existing `WRITTEN_ABOUT (Note -> Entity)` engagement edges are reachable through
-`PROMOTED_FROM`, so "N notes touch this concept" is a graph query, not a new store.
+A write to a missing concept or document stores nothing rather than raising, so a concept rebuild
+never fails on a document deleted mid-run. Libraries from before 0.15.0 had these edges in Kuzu;
+`services/graph_import.py` copies them once at startup.
 
 ### LanceDB vector (derived -- for similarity, not retrieval)
 
@@ -98,7 +96,7 @@ seeding, scope->concept resolution. **Never** a retrieval primary -- chunk vecto
 ### OKF projection (derived -- Phase 5)
 
 One Markdown file per concept: front-matter from the SQLite state, body = evidence quotes, links =
-Kuzu edges. See [concepts.md](concepts.md). The file is **not** the truth; a user edit becomes an `override`
+concept edges. See [concepts.md](concepts.md). The file is **not** the truth; a user edit becomes an `override`
 that re-applies after re-parse -- the same channel as a graph rename/merge.
 
 ## Lifecycle
@@ -274,9 +272,9 @@ This is what makes `make concepts` safe to run repeatedly (manual + idle/backgro
 The abstraction lineage is persisted, not thrown away -- it is the single source for generation
 material, mastery, evidence receipts, and doc-overview membership:
 
-- `concepts.parent_id` (SQLite) is unused in the flat layer; membership truth is Kuzu edges (I-23).
-- `(:Concept)-[:PROMOTED_FROM]->(:Entity)` -- which entities make up a concept.
-- `(:Concept)-[:EXTRACTED_FROM]->(:Document)` -- availability/provenance.
+- `concepts.parent_id` (SQLite) is unused in the flat layer.
+- `evidence_json.members` -- which entities make up a concept.
+- `graph_concept_documents` -- availability/provenance.
 - entity->chunk occurrence index (from `chunk.entities_text`) -- resolves a concept to its passages
   for generation and evidence; `evidence_json = {chunk_ids, document_ids, members}`.
 
@@ -334,5 +332,5 @@ is local.
 
 ### What it does not do
 
-It is derived, never a source of truth. SQLite, LanceDB and Kuzu hold the state; this assembles
+It is derived, never a source of truth. SQLite and LanceDB hold the state; this assembles
 a view of it for a prompt. Nothing reads it back, and losing it costs nothing but a rebuild.

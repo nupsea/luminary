@@ -55,13 +55,14 @@ a missing entry silently exempts a whole layer rather than failing loudly.
 - **SQLite** (`~/.luminary/luminary.db`): all structured metadata -- documents, chunks, sections, summaries, flashcards, notes, Q&A history, and **concepts** (hot learning state: mastery, FSRS stability, origin, status, evidence refs). Schema is Alembic-versioned and migrated to head on boot (I-23)
 - **LanceDB**: dense embeddings for chunks and notes (both bge-small, 384-dim, one shared space) and **concepts** (384-dim centroid of evidence chunks, in the same space -- derived, for similarity/linking/dedup, never retrieval-primary)
 - **SQLite FTS5**: `chunks_fts` and `notes_fts` virtual tables for BM25 keyword search
-- **Kuzu**: knowledge graph -- Entity, Document, Note, **Concept** nodes + 20+ relationship types. `Concept` is the studyable atom (topology: edges/routes/prereqs, `PROMOTED_FROM` an Entity cluster); `Entity` remains the raw NER layer beneath it.
+- **SQLite graph tables**: concept topology (`graph_concept_edges`, `graph_concept_documents`), cascading with their concepts and documents.
+- **Kuzu**: the entity graph -- Entity, Document, Note, DiagramNode nodes and their relationships. `Entity` is the raw NER layer beneath concepts.
 
 ## Knowledge layer (the Concept primitive)
 
 A **Concept** is the single studyable atom -- distinct from a Kuzu `Entity` (a lexical NER
 mention). Concepts carry mastery and are the routing unit for sessions and study. Source of truth =
-SQLite (state) + Kuzu (topology); derived projections = LanceDB vector + OKF Markdown files. Before
+SQLite (state and topology); derived projections = LanceDB vector + OKF Markdown files. Before
 any concept/mastery/graph/study work, read:
 
 - `docs/concepts.md` -- the Concept primitive (the canonical "what is a concept").

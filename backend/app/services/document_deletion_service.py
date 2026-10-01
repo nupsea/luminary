@@ -39,6 +39,7 @@ from app.models import (
     EnrichmentJobModel,
     FeynmanSessionModel,
     FlashcardModel,
+    GraphConceptDocumentModel,
     ImageModel,
     LearningGoalModel,
     LearningObjectiveModel,
@@ -91,6 +92,7 @@ _DOCUMENT_ID_CHILD_TABLES: tuple[type, ...] = (
     ChatSuggestionHistoryModel,
     DocumentTagIndexModel,
     DocumentTagProvenanceModel,
+    GraphConceptDocumentModel,
 )
 
 # Deleted by the explicit statements in `delete_sqlite_cascade` rather than by the

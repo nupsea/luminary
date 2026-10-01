@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config import Settings, get_settings
-from app.database import get_db, get_engine, get_session_factory
+from app.database import get_db, get_engine, get_session_factory, optimize_database
 from app.db_init import init_database
 from app.exceptions import LuminaryError
 from app.models import SettingsModel
@@ -70,6 +70,8 @@ from app.services.concept_linker import concept_link_handler
 from app.services.diagram_extractor import diagram_extract_handler
 from app.services.enrichment_worker import get_enrichment_worker
 from app.services.executors import shutdown_model_executor
+from app.services.graph import get_graph_service
+from app.services.graph_import import run_graph_import
 from app.services.image_enricher import image_analyze_handler
 from app.services.image_extractor import image_extract_handler
 from app.services.ingestion_jobs import get_ingestion_jobs
@@ -126,6 +128,11 @@ async def lifespan(app: FastAPI):
         status.set_state("db", "failed", str(exc))
         raise
     status.set_state("db", "ready")
+
+    # Before anything reads the graph tables, so none is read half-filled. Bounded: the
+    # dev library's 98k graph rows copy in under a second.
+    await run_graph_import(settings.DATA_DIR, lambda: get_graph_service()._connection.conn)
+    await optimize_database(engine)
 
     # NOTE: concept regeneration is a manual offline step (with the server stopped
     # so it can hold the Kuzu lock and not starve the event loop):
