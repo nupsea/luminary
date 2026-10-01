@@ -179,6 +179,14 @@ back. Say so in the release notes.
   `~/Library/Application Support/sh.luminary.app`, to confirm first-run setup
   still works.
 
+## After tagging
+
+`release.yml`'s `quality-summary` job measures the tagged commit and appends a
+"Code quality at vX.Y.Z" section to the release notes, with a column for the
+previous release when that release carries `quality-summary.json`
+(`backend/tools/quality_report.py`). If the job fails, the release has no summary
+until it is re-run; do not write one by hand.
+
 ## If a release is bad
 
 Assets can be replaced in place; the tag stays.

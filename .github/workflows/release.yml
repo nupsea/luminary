@@ -133,3 +133,78 @@ jobs:
           || gh release upload "$GITHUB_REF_NAME" \
             "luminary-$VERSION-macos.tar.gz" \
             "luminary-$VERSION-macos.tar.gz.sha256" --clobber
+
+  # The code-quality summary in the release notes, measured at the tag (#189). Tag
+  # pushes do not run ci.yml, so this job measures for itself. A number it cannot
+  # measure fails the job; it never publishes an empty or partial table.
+  quality-summary:
+    needs: [macos-tarball]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      # Same provisioning as ci.yml: tests that embed for real need the weights (I-57).
+      - name: Download the local models
+        run: cd backend && uv run python -m app.services.model_prefetch --models-dir "$HOME/.cache/luminary/test-models"
+
+      - name: Backend coverage
+        run: cd backend && uv run --with pytest-cov==7.1.0 pytest --cov=app --cov-report="json:$RUNNER_TEMP/backend-cov.json"
+
+      - name: Frontend coverage
+        run: cd frontend && npx vitest run --coverage --coverage.reporter=json-summary --coverage.reportsDirectory="$RUNNER_TEMP/frontend-cov"
+
+      # knip exits non-zero when it finds something; the count is the point here,
+      # and output that is not a knip report fails the summary step.
+      - name: knip
+        run: cd frontend && (npm run --silent knip -- --reporter json > "$RUNNER_TEMP/knip.json" || true)
+
+      - name: Previous release's summary
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          if [ -n "$PREV" ] && gh release download "$PREV" -p quality-summary.json -D "$RUNNER_TEMP/previous"; then
+            echo "args=--previous $RUNNER_TEMP/previous/quality-summary.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "No generated summary on ${PREV:-an earlier tag}; this one has no comparison column."
+          fi
+
+      - name: Append the summary to the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd backend
+          uv run python -m tools.quality_report --version "${GITHUB_REF_NAME#v}" \
+            --backend-cov "$RUNNER_TEMP/backend-cov.json" \
+            --frontend-cov "$RUNNER_TEMP/frontend-cov/coverage-summary.json" \
+            --knip "$RUNNER_TEMP/knip.json" \
+            ${{ steps.previous.outputs.args }} \
+            --json-out "$RUNNER_TEMP/quality-summary.json" > "$RUNNER_TEMP/quality-summary.md"
+          # A re-run replaces the section rather than appending a second one.
+          gh release view "$GITHUB_REF_NAME" --json body -q .body \
+            | sed '/^## Code quality at /,$d' > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/quality-summary.md" >> "$RUNNER_TEMP/notes.md"
+          gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/quality-summary.json" --clobber
