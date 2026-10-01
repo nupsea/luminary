@@ -1402,16 +1402,12 @@ export interface paths {
          * Get Document Asset
          * @description Serve an embedded image from a document (its EPUB archive or extracted images).
          */
-        get: operations["get_document_asset_documents__document_id__asset__asset_path__head"];
+        get: operations["get_document_asset_documents__document_id__asset__asset_path__get"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
-        /**
-         * Get Document Asset
-         * @description Serve an embedded image from a document (its EPUB archive or extracted images).
-         */
-        head: operations["get_document_asset_documents__document_id__asset__asset_path__head"];
+        head?: never;
         patch?: never;
         trace?: never;
     };
@@ -14244,39 +14240,7 @@ export interface operations {
             };
         };
     };
-    get_document_asset_documents__document_id__asset__asset_path__head: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                document_id: string;
-                asset_path: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_document_asset_documents__document_id__asset__asset_path__head: {
+    get_document_asset_documents__document_id__asset__asset_path__get: {
         parameters: {
             query?: never;
             header?: never;

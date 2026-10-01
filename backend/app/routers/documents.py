@@ -1745,7 +1745,10 @@ def _read_epub_image_sync(epub_path: str, clean_path: str) -> tuple[bytes, str] 
         return z.read(matched), mime
 
 
-@router.api_route("/{document_id}/asset/{asset_path:path}", methods=["GET", "HEAD"])
+@router.get("/{document_id}/asset/{asset_path:path}")
+# One route for both methods gave them one OpenAPI operation id, which the generated
+# client types declare twice.
+@router.head("/{document_id}/asset/{asset_path:path}", include_in_schema=False)
 async def get_document_asset(document_id: str, asset_path: str) -> Response:
     """Serve an embedded image from a document (its EPUB archive or extracted images)."""
     async with get_session_factory()() as session:
