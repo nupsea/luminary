@@ -97,8 +97,8 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | — | 0.12.0 | The Brief — **parked** | | None; no rung waits on it |
 | I. Every host | 0.13.x | Every host is a first-class host — **0.13.9 released; exit gate open.** **Checkpoint A** | #24, #99, #110, #154, #155, #156 | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator; `make smoke` green on Windows and against the bundled macOS app |
 | II. Stability | 0.14.x | Gates you can believe — **0.14.3 released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
-| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #160, #161, #162, #185, #186, #187, #188, #189, #191, #195, #204, #205 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
-| III. Cloud readiness | 0.16.0 | Device auth and pairing | | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
+| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #160, #161, #185, #186, #187, #188, #189, #191, #204, #205 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
+| III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement | #162, #195, #221, #222, #223 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail | #48 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
 | | 0.18.0 | Your own server. **Checkpoint C** | | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key |
 | IV. Separation | 0.19.0 | Components separated for mobile | | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
@@ -352,8 +352,8 @@ and `verify-citation` green. Not yet run:
 
 Defects that were written here have moved to the tracker: `eval-summary` scoring a stored summary
 (#154), the Windows proxy for model pulls (#155) and split GPU/CPU offload (#156) belong to this
-phase. The false-premise answer (#158), Wikipedia `[edit]` links (#159), flashcard floors (#160)
-and YouTube verification (#162) belong to 0.15.0. Three instrument defects listed here were fixed
+phase. The false-premise answer (#158), Wikipedia `[edit]` links (#159) and flashcard floors (#160)
+belong to 0.15.0; YouTube verification (#162) moved to 0.16.0. Three instrument defects listed here were fixed
 on `master` before the move: `eval-ingest` re-resolves a document by filename (#143), atomicity is
 structural (`is_atomic`), and a judge verdict outside its enum is excluded rather than crashing
 the run.
@@ -540,10 +540,10 @@ A prompt that asks for a reason only where the text states one, plus a check tha
 subjects, raised hand-graded good-among-delivered from 0.49 to 0.71 over two local runs (2026-09-29).
 Choosing the sentences in code before the model writes a card (#191, `FLASHCARD_UNIT_SELECTION`)
 beat that prompt in every document type on two blind runs over 19 library documents, 0.69 and 0.73
-to 0.84 and 0.88, and is on by default since 0.14.4. Open: the unit path ignores the difficulty
-choice and gives no Bloom level (`backend/app/services/flashcard_generators.py`, `_unit_cards`);
-"hard" as worded today asks for analysis the sentence does not state, so it needs its own design and
-a graded run before it is honoured. The remaining misses
+to 0.84 and 0.88, and is on by default since 0.14.4. Moved to 0.16.0 (#222): the unit path ignores
+the difficulty choice, stores it on the card anyway, and gives no Bloom level
+(`backend/app/services/flashcard_generators.py`, `_unit_cards`). "Hard" as worded today asks for
+analysis the sentence does not state, so it needs its own design and a graded run. The remaining misses
 are speakers the source mislabels (the Gita's chapter headings name the wrong speaker) and misread
 text.
 
@@ -590,13 +590,16 @@ was absent from Kuzu. Open: #185's two-arm timeout run has not been done; graph 
 SQLite now, but GLiNER extraction still runs inline (I-2). `kuzu` stays a dependency for the import
 until 1.0.0-rc, which deletes the import and tells users to delete `graph.kuzu`.
 
-**The last of the document-model work belongs here.** `form`, `domain` and `register` are written at
-ingest by `_persist_classification`, and `DocumentProfile` owns the policy. What remains is retiring
-the legacy `content_type` projection and `is_technical`. It is a migration, and migrations get more
-expensive with every user.
+**Retiring `content_type` is not a mechanical refactor, so it moved to 0.16.0 (#223).** `form`,
+`domain` and `register` are written at ingest by `_persist_classification`, but chunking, the book
+prompt guideline and front-matter skipping still key on the legacy label. The stored `form` disagrees
+with the label's mapping on 13 of 67 dev-library documents (2026-10-01), so dropping the column
+changes what one document in five receives, and needs a measurement first. 0.15.0 ships the prep:
+readers take the kind from `DocumentProfile.of(doc)` (`backend/app/types.py`), still built from the
+legacy columns, and the quality ratchet counts `content_type` references per file, shrink-only.
 
-YouTube ingest is re-verified on every platform (#162) before the checkpoint's manual gate relies on
-it. Then Checkpoint B: the app is stable enough that the next three rungs open it to the network.
+YouTube ingest re-verification (#162) moved to 0.16.0: it needs traffic the development network does
+not allow. Then Checkpoint B: the app is stable enough that the next three rungs open it to the network.
 
 ### 5. Device auth and pairing — 0.16.0
 
@@ -797,7 +800,7 @@ lines with their own copies of manifest, search and history plumbing.
 | Rung | Refactor, as the rung's first PR |
 |---|---|
 | 0.14 | **Done.** The ratchets above run in `make ci`, coverage floors included (#177, #182). `qa.stream_answer` moved to `runtime/qa_stream.py` and `KNOWN_VIOLATIONS` is empty (#181). One shared DB fixture replaces 96 copies (#180). The 19 smoke scripts that never called the server are pytest tests or deleted (#179) |
-| 0.15 | Split `summarizer.py` into `summary_prompts.py` and `summary_assembly.py` (both pure), `repos/summary_repo.py` (its 24 queries), and `library_summary.py` (the library-wide half, with its Kuzu read). The same prep for the other `content_type`/`is_technical` readers the retirement touches (37 files), starting with `flashcard_generators.generate` and `parser._parse_pdf`. Eval runners share one `evals/lib` path for manifest, search and history |
+| 0.15 | **Done.** `summarizer.py` split into `summary_prompts.py` and `summary_assembly.py` (both pure), `repos/summary_repo.py` and `library_summary.py`; `sql_outside_repos` for it went from 22 to 0. `content_type` readers go through `DocumentProfile.of`, starting with flashcard generation, and the ratchet counts the rest (234 references in 33 files) so none is added. Eval runners read `/search` order through `evals/lib/search.py`, beside the shared manifest and history |
 | 0.16–0.17 | Repos extracted from `routers/study.py` (103 queries) and `routers/documents.py` (42), then from the services with the most direct SQL, before `library_id` lands, so the scope is added in one place. `get_collection_study_dashboard` and `list_documents` are split on the way. The 53 `DATA_DIR` joins go through the path resolver |
 | 0.18 | `main.lifespan` (300 lines) becomes named startup phases |
 | 0.19 | `fetch` onto `apiClient`, then `DocumentReader` (1,946 lines), `PDFViewer`, `Notes` and `ChatConversation` split into `packages/domain` hooks and `packages/ui` views |
