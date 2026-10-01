@@ -302,7 +302,6 @@ def search_chunks(
     strategy: str = "rrf",
     limit: int | None = None,
     expand_context: bool = True,
-    graph_expand: bool = True,
 ) -> list[str]:
     """Run GET /search and return up to top-10 chunk texts.
 
@@ -340,10 +339,6 @@ def search_chunks(
             params["rerank_adaptive"] = "true"
     if strategy != "rrf":
         params["strategy"] = strategy
-    # /search defaults graph_expand to true, so every arm carries expansion
-    # unless it is switched off explicitly.
-    if not graph_expand:
-        params["graph_expand"] = "false"
     try:
         request_timeout = 60.0 if (hyde or rerank or limit) else 30.0
         resp = httpx.get(f"{backend_url}/search", params=params, timeout=request_timeout)
@@ -812,18 +807,12 @@ def main() -> None:
         # RERANK_BLEND_ALPHA). "rrf+rerank-ce" pins blend=0 to isolate the pure
         # cross-encoder, so the run always records what the RRF/CE blend buys
         # over CE alone -- the L2 analogue of the rrf-pool recall arm.
-        # /search enables graph_expand by default, so every rrf arm below
-        # carries it. The -nogx pairs switch it off to price what the entity
-        # aliases actually buy, before and after the cross-encoder.
         strategy_specs = [
-            ("vector", "vector", False, None, None, True),
-            ("fts", "fts", False, None, None, True),
-            ("graph", "graph", False, None, None, True),
-            ("rrf", "rrf", False, None, None, True),
-            ("rrf-nogx", "rrf", False, None, None, False),
-            ("rrf+rerank-ce", "rrf", True, args.rerank_depth, 0.0, True),
-            ("rrf+rerank", "rrf", True, args.rerank_depth, None, True),
-            ("rrf+rerank-nogx", "rrf", True, args.rerank_depth, None, False),
+            ("vector", "vector", False, None, None),
+            ("fts", "fts", False, None, None),
+            ("rrf", "rrf", False, None, None),
+            ("rrf+rerank-ce", "rrf", True, args.rerank_depth, 0.0),
+            ("rrf+rerank", "rrf", True, args.rerank_depth, None),
         ]
         # Depth sweep arms measure the L2 recall ceiling directly: reranked
         # HR@5 is bounded by HR@depth of the RRF pool, so if HR@5 climbs with
@@ -831,9 +820,9 @@ def main() -> None:
         # were never in ANY leg's candidates and no L2 tuning can recover them.
         for depth_str in (s.strip() for s in args.rerank_depths.split(",") if s.strip()):
             depth = int(depth_str)
-            strategy_specs.append((f"rrf+rerank@{depth}", "rrf", True, depth, None, True))
+            strategy_specs.append((f"rrf+rerank@{depth}", "rrf", True, depth, None))
         ablation_metrics: dict[str, dict[str, float]] = {}
-        for label, search_strategy, do_rerank, depth, blend, gx in strategy_specs:
+        for label, search_strategy, do_rerank, depth, blend in strategy_specs:
             samples: list[dict] = []
             for i, row in enumerate(rows, start=1):
                 question = row["question"]
@@ -861,7 +850,6 @@ def main() -> None:
                     rerank_threshold=args.rerank_threshold,
                     rerank_blend=blend,
                     strategy=search_strategy,
-                    graph_expand=gx,
                 )
                 samples.append(
                     {
