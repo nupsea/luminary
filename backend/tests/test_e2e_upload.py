@@ -19,6 +19,7 @@ Run integration_http tests:
 
 import asyncio
 import os
+import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -39,7 +40,6 @@ import app.services.summarizer as summarizer_module
 import app.services.vector_store as vs_module
 import app.workflows.ingestion as ingestion_module
 from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -188,10 +188,10 @@ class _MockEmbeddingService:
 
 
 @pytest.fixture
-async def upload_db(tmp_path, monkeypatch):
+async def upload_db(tmp_path, monkeypatch, _schema_template):
     """Isolated environment for integration_http tests.
 
-    - In-memory SQLite
+    - A per-test SQLite file (see memory_db: `:memory:` is one shared connection)
     - Temp LanceDB dir
     - Mocked EmbeddingService + EntityExtractor (no model downloads)
     - litellm.acompletion mocked to return 'notes'
@@ -213,9 +213,12 @@ async def upload_db(tmp_path, monkeypatch):
     monkeypatch.setattr(litellm, "acompletion", AsyncMock(return_value=mock_resp))
     llm_module._llm_service = None
 
-    # Set up in-memory SQLite
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+    # A file, not `:memory:`: on one shared connection the enrichment worker's rollback
+    # undid finalize's uncommitted stage="complete", and the poll timed out at
+    # "indexing" (#185; GitHub, 2026-10-01).
+    db_file = tmp_path / "test.db"
+    shutil.copyfile(_schema_template, db_file)
+    engine = make_engine(f"sqlite+aiosqlite:///{db_file}")
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     # Swap DB singletons
