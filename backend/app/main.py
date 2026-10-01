@@ -385,7 +385,7 @@ async def lifespan(app: FastAPI):
     logger.info("Luminary backend shutting down")
 
     # Every step here is bounded. A desktop app that takes minutes to quit reads
-    # as a hang, and a supervisor that gives up and SIGKILLs a write mid-flight.
+    # as a hang, and a supervisor that gives up SIGKILLs whatever is mid-write.
     await get_enrichment_worker().stop()
     await get_ingestion_jobs().cancel_all()
 
@@ -426,8 +426,7 @@ async def lifespan(app: FastAPI):
 #
 # **Bounding this is safer than not bounding it.** Unbounded, the desktop shell's
 # supervisor gives up and SIGKILLs -- killing whatever is mid-write with no grace
-# at all. A bounded,
-# orderly abandon is the better of the two, not a free one.
+# at all. A bounded, orderly abandon is the better of the two, not a free one.
 _EXECUTOR_RELEASE_GRACE_S = 20.0
 
 

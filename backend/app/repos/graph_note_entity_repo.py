@@ -66,15 +66,6 @@ class GraphNoteEntityRepo:
         )
         return [(n, t, k, float(c)) for n, t, k, c in result]
 
-    async def note_ids_for_name(self, name: str) -> list[str]:
-        result = await self.session.execute(
-            select(NoteEntity.note_id)
-            .join(Entity, Entity.id == NoteEntity.entity_id)
-            .where(func.lower(Entity.name) == name.lower())
-            .distinct()
-        )
-        return [row[0] for row in result]
-
     async def links_for_entities(
         self, entity_ids: set[str]
     ) -> list[tuple[str, str, str, float, str]]:

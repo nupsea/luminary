@@ -249,10 +249,6 @@ class GraphEntityRepo:
             stmt = stmt.limit(limit)
         return [tuple(row) for row in await self.session.execute(stmt)]
 
-    async def has_edges(self, document_id: str, kind: str) -> bool:
-        stmt = select(Edge.id).where(Edge.document_id == document_id, Edge.kind == kind).limit(1)
-        return (await self.session.scalar(stmt)) is not None
-
     async def neighbours_by_name(
         self, name: str, kind: str, document_ids: list[str] | None, limit: int
     ) -> list[tuple[str, float, str]]:
