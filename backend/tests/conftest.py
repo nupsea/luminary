@@ -17,6 +17,7 @@ import asyncio.base_events
 import concurrent.futures
 import os
 import shutil
+import socket
 import time
 import warnings
 from pathlib import Path
@@ -61,6 +62,32 @@ def in_memory_keyring():
     keyring.set_keyring(backend)
     yield backend
     keyring.core._keyring_backend = None  # noqa: SLF001
+
+
+_HUB_HOSTS = ("huggingface.co", "hf.co")
+
+
+@pytest.fixture(autouse=True)
+def no_model_hub_traffic(monkeypatch):
+    """Refuse every Hugging Face lookup and fail the test that made it.
+
+    Download paths swallow their own errors (an install reports `failed` and the
+    test still passes), so refusing alone would hide the call; failing names it.
+    """
+    attempts: list[str] = []
+    real_getaddrinfo = socket.getaddrinfo
+
+    def guarded(host, *args, **kwargs):
+        name = str(host).lower()
+        if any(name == h or name.endswith("." + h) for h in _HUB_HOSTS):
+            attempts.append(name)
+            raise socket.gaierror(f"tests may not reach {name}")
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", guarded)
+    yield
+    if attempts:
+        pytest.fail(f"test reached the model hub: {sorted(set(attempts))}")
 
 
 @pytest.fixture(scope="session", autouse=True)
