@@ -29,6 +29,8 @@ from evals.lib.schemas import FlashcardGoldenEntry  # noqa: E402
 from evals.lib.scoring_history import append_history  # noqa: E402
 from evals.lib.store import store_results  # noqa: E402
 
+# TODO(#160, #226): inherited placeholder floors. Clarity's judge scale has no anchors, and no run
+# has reached 3.5; re-derive the floors once the judge can resolve a change.
 THRESHOLDS = {"factuality": 0.85, "atomicity": 0.80, "clarity_avg": 3.5}
 
 
