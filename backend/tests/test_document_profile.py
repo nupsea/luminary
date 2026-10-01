@@ -280,3 +280,30 @@ class TestGenreWiring:
         undetermined = self._doc(content_type="tech_book", form="prose", domain="general")
         assert DocumentProfile(form="prose", domain="general").card_genre is None
         assert _infer_genre(undetermined) == "technical"
+
+
+class TestProfileOfStoredDocument:
+    """`DocumentProfile.of` reads the legacy columns, so a reader moved onto it
+    behaves as it did when it tested `content_type` itself."""
+
+    @staticmethod
+    def _row(content_type: str, form: str, is_technical: bool | None = None):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            content_type=content_type, is_technical=is_technical, form=form, domain=None
+        )
+
+    def test_front_matter_follows_the_legacy_book_label_not_the_stored_form(self) -> None:
+        # A `book` the classifier stored as `article`, and a `tech_article` stored as `prose`:
+        # both disagreements exist in a real library, and only the label decided before.
+        assert DocumentProfile.of(self._row("book", form="article")).has_front_matter
+        assert not DocumentProfile.of(self._row("tech_article", form="prose")).has_front_matter
+
+    def test_only_book_skips_front_matter_among_stored_types(self) -> None:
+        stored = ["book", "tech_book", "tech_article", "paper", "conversation", "audio", "notes"]
+        skips = [ct for ct in stored if DocumentProfile.of(self._row(ct, "prose")).has_front_matter]
+        assert skips == ["book"]
+
+    def test_no_document_has_no_front_matter(self) -> None:
+        assert not DocumentProfile.of(None).has_front_matter

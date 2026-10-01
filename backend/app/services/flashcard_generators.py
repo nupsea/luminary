@@ -157,9 +157,9 @@ async def generate_technical(
 
     doc_result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
     doc = doc_result.scalar_one_or_none()
-    content_type = doc.content_type if doc else "unknown"
+    front_matter = DocumentProfile.of(doc).has_front_matter
 
-    chunks = await _fetch_chunks(document_id, scope, section_heading, session, content_type)
+    chunks = await _fetch_chunks(document_id, scope, section_heading, session, front_matter)
     if not chunks:
         return []
 
@@ -923,7 +923,7 @@ async def generate(
 
     doc_result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
     doc = doc_result.scalar_one_or_none()
-    content_type = doc.content_type if doc else "unknown"
+    profile = DocumentProfile.of(doc)
 
     # Whether this recording has more than one participant, which is what
     # separates a meeting from a talk when no profile decided it. Only asked for
@@ -967,7 +967,9 @@ async def generate(
         )
         first_chunk_id = first_chunk_result.scalar_one_or_none() or document_id
     else:
-        chunks = await _fetch_chunks(document_id, scope, section_heading, session, content_type)
+        chunks = await _fetch_chunks(
+            document_id, scope, section_heading, session, profile.has_front_matter
+        )
         if not chunks:
             return []
 
@@ -1028,7 +1030,7 @@ async def generate(
             resolved_section_heading = _resolve_section_heading(eligible_chunks[0], section_ctx)
 
     extra_instructions = ""
-    if content_type == "book":
+    if profile.has_front_matter:
         extra_instructions = _BOOK_CONTENT_GUIDELINE
         entity_names = await _get_entity_names_for_document(
             document_id, types=["PERSON", "PLACE"], limit=5
@@ -1044,9 +1046,7 @@ async def generate(
     # that adds nothing for media -- the excerpts below come from has_code
     # chunks, which a transcript has none of -- but it removes a fourth private
     # definition of "technical" rather than leaving it to drift.
-    is_tech = DocumentProfile.from_legacy(
-        content_type, doc.is_technical if doc else None
-    ).is_technical
+    is_tech = profile.is_technical
     has_context = context and context.strip()
     if is_tech and not has_context:
         code_chunks = [c for c in eligible_chunks if c.has_code]
