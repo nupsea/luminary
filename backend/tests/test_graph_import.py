@@ -1,7 +1,5 @@
 """The Kuzu-to-SQLite graph import: copies live rows, skips stale ones, never half-commits."""
 
-import hashlib
-
 import pytest
 from sqlalchemy import func, select
 
@@ -69,8 +67,14 @@ async def _state(memory_db, domain="concepts") -> GraphImportStateModel | None:
         return await s.get(GraphImportStateModel, domain)
 
 
-def _fingerprint(path) -> str:
-    return hashlib.sha256((path / "graph.kuzu").read_bytes()).hexdigest()
+def _contents(conn) -> list[int]:
+    """Row counts of every table the import reads. Read through the open connection: a
+    byte hash cannot be, because Windows refuses reads of a file Kuzu holds open."""
+    tables = ("Concept", "Document")
+    rels = ("CONCEPT_RELATED_TO", "CONCEPT_PREREQUISITE_OF", "EXTRACTED_FROM")
+    queries = [f"MATCH (n:{t}) RETURN count(n)" for t in tables]
+    queries += [f"MATCH ()-[r:{r}]->() RETURN count(r)" for r in rels]
+    return [conn.execute(q).get_next()[0] for q in queries]
 
 
 def _phase_state() -> str:
@@ -131,7 +135,7 @@ async def test_a_failure_mid_domain_commits_nothing_and_leaves_kuzu_untouched(
 ):
     data_dir, conn = kuzu
     await _seed_sqlite(memory_db)
-    before = _fingerprint(data_dir)
+    before = _contents(conn)
     real_count = GraphImportRepo.count
     calls = {"n": 0}
 
@@ -148,7 +152,7 @@ async def test_a_failure_mid_domain_commits_nothing_and_leaves_kuzu_untouched(
     assert await _counts(memory_db) == (0, 0)
     state = await _state(memory_db)
     assert state.status == "failed" and "disk full" in state.error
-    assert _fingerprint(data_dir) == before
+    assert _contents(conn) == before
 
     monkeypatch.setattr(GraphImportRepo, "count", real_count)
     await graph_import.run_graph_import(str(data_dir), lambda: conn)
