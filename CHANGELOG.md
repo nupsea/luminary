@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-02
+
+### Changed
+- **The knowledge graph moved from Kuzu into SQLite.** Each graph row is deleted with the document, note or concept it describes, so deleted documents no longer feed the Map or Ask (#204, #205, #65). An existing library is copied on first launch in about a second; `graph.kuzu` is only read, never changed. On the dev library the store went from 225 MB to 25 MB.
+- **`/search` no longer expands through the graph.** It changed no retrieval score on five datasets.
+
+### Fixed
+- **Ask said "not found" when the document contradicted the question's premise.** It now states the correction and cites the passage. Corrected on 4 of 7 test questions every run (master: 3 and 1); questions about novels still fail (#158, open).
+- **The chat graph lookup never matched a name** because entity names are stored lowercased. It now ignores case.
+- **Deleting a document left its summaries running** against the LLM. Delete now cancels them (#186).
+- **Wikipedia articles kept "[ edit ]" under every heading** in chunks and citations (#159).
+- **Text before a document's first heading was dropped**: a web article's lede, an arXiv paper's title page and abstract (#97). Applies to new ingests.
+- **Audio ingested before 0.7.5 showed "No content available" in the reader.** Its transcript is backfilled as sections on upgrade (#97).
+- **Ingest and reindex sampled different chunks for entities** (#63). The health panel now says how many chunks the entity count came from.
+- **A failed entity extraction erased a note's entity links** (#65).
+
 ## [0.14.5] - 2026-09-30
 
 ### Fixed
