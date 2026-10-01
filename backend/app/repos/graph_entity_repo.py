@@ -198,7 +198,8 @@ class GraphEntityRepo:
         return [row[0] for row in result]
 
     async def document_ids_for_name(self, name: str, *, partial: bool, limit: int) -> list[str]:
-        pattern = func.lower(name)
+        # Lowered in Python: SQLite's lower() folds ASCII only.
+        pattern = name.lower()
         condition = (
             func.instr(func.lower(Entity.name), pattern) > 0
             if partial
@@ -258,7 +259,7 @@ class GraphEntityRepo:
             select(target.name, Edge.weight, Edge.label)
             .join(source, source.id == Edge.source_id)
             .join(target, target.id == Edge.target_id)
-            .where(Edge.kind == kind, source.name == name)
+            .where(Edge.kind == kind, func.lower(source.name) == name.lower())
         )
         if document_ids is not None:
             stmt = stmt.where(Edge.document_id.in_(document_ids))

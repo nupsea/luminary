@@ -157,6 +157,25 @@ async def test_the_chat_graph_node_reads_only_live_documents_in_scope(memory_db,
     ]
 
 
+async def test_entity_lookups_by_name_ignore_case(memory_db, svc):
+    """NER stores names lowercased and questions name them capitalised: an exact match
+    gave the chat graph node no lines for any of 125 golden questions."""
+    from app.runtime.chat_nodes.graph import _graph_lines_for_entity
+
+    await add_graph(
+        memory_db,
+        "d1",
+        {"u": ("ulysses", "PERSON"), "p": ("penelope", "PERSON"), "o": ("ödipus", "PERSON")},
+        co_occurs=(("u", "p"),),
+    )
+
+    assert await _graph_lines_for_entity("Ulysses", None) == [
+        "Ulysses --co-occurs--> penelope (weight=1.0)"
+    ]
+    assert await svc.get_document_ids_for_entity("ULYSSES") == ["d1"]
+    assert await svc.get_document_ids_for_entity("Ödipus") == ["d1"]
+
+
 # Views
 
 
