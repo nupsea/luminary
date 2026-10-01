@@ -109,3 +109,17 @@ async def test_get_note_entities_endpoint(memory_db):
 
     assert resp.status_code == 200
     assert [(e["name"], e["edge_type"]) for e in resp.json()] == [("gradient", "WRITTEN_ABOUT")]
+
+
+async def test_a_failed_extraction_keeps_the_notes_entities_and_updates_its_tags(memory_db, note):
+    """#65: a GLiNER failure (model not installed, a crash) stored an empty entity
+    list over the note's links, so one failed save erased them."""
+    await add_graph(memory_db, "d1", {"e1": ("alpha", "CONCEPT"), "e2": ("beta", "CONCEPT")})
+    await _upsert(note, "alpha", names=("alpha",))
+
+    failing = MagicMock()
+    failing.extract.side_effect = RuntimeError("model not loaded")
+    with patch("app.services.ner.get_entity_extractor", return_value=failing):
+        await NoteGraphService().upsert_note_node(note, "alpha", None, ["beta"])
+
+    assert await _edges(memory_db, note) == [("e1", "written_about"), ("e2", "tag")]

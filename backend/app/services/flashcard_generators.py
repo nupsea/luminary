@@ -1525,12 +1525,8 @@ async def generate_from_graph(
     llm = _get_llm_service()
     graph = get_graph_service()
 
-    pairs_4 = await graph.get_related_entity_pairs_for_document(document_id, limit=k)
-    if pairs_4:
-        pairs: list[tuple[str, str, str, float]] = pairs_4
-    else:
-        co_pairs = await graph.get_co_occurring_pairs_for_document(document_id, limit=k)
-        pairs = [(a, b, "co-occurs", w) for a, b, w in co_pairs]
+    co_pairs = await graph.get_co_occurring_pairs_for_document(document_id, limit=k)
+    pairs = [(a, b, "co-occurs", w) for a, b, w in co_pairs]
 
     # The prompt shows names, not ids, and orders the model to write "the
     # relationship between 'X' and 'Y'". Handed the same name twice it must invent

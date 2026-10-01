@@ -143,7 +143,6 @@ function GlobalLoadingBar() {
       // Exclude slow background queries from showing the loading bar
       const key = query.queryKey[0] as string
       if (key === "chat-suggestions" || key === "chat-suggestions-cached") return false
-      if (key === "chat-explorations") return false
       return true
     },
   })

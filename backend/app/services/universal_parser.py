@@ -70,6 +70,10 @@ _MIN_AUTHORED_HEADINGS = 3
 _MARKER_MAX_CHARS = 90
 _MARKER_MAX_SENTENCE_WORDS = 4
 
+# Markdown images and link targets, read past when judging whether text is prose.
+_MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+
 
 def _drop_bodyless(sections: list[Section]) -> list[Section]:
     """Drop sections that carry a heading and no text.
@@ -485,6 +489,13 @@ class UniversalParser:
         # reason to fall back into it.
         if sig.doc_type == "chat":
             return self._segment_chat_grouped(text, matches)
+
+        # Text before the first heading is a web article's lede, and it was dropped (#97).
+        # Only prose is kept: a title line or a scraped nav bar is furniture. No heading (I-30).
+        preamble = text[: matches[0].start()].strip()
+        visible = _MD_IMAGE.sub("", _MD_LINK.sub(r"\1", preamble))
+        if any(line.strip() and not _is_marker(line) for line in visible.splitlines()):
+            sections.append(Section(heading="", level=1, text=preamble, page_start=0, page_end=0))
 
         for i, m in enumerate(matches):
             is_markdown = sig.id == "markdown_header"

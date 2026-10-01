@@ -23,6 +23,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel, LibrarySummaryModel, SummaryModel
 from app.services.document_deletion_service import DocumentDeletionService
+from app.services.library_summary import LibrarySummaryService
 from app.services.summarizer import SummarizationService, get_summarization_service
 from app.workflows.ingestion_nodes.finalize import _run_pregenerate, launch_followup
 
@@ -154,7 +155,10 @@ async def test_deleting_a_document_cancels_its_background_summaries(factory, bul
         patch("app.services.vector_store.get_lancedb_service", return_value=MagicMock()),
         patch.object(svc, "_build_section_summary_input", AsyncMock(return_value="Sections.")),
         patch.object(svc, "build_assembled_summary", AsyncMock(return_value=None)),
-        patch.object(svc, "refresh_library_summary", library_refresh),
+        patch(
+            "app.services.library_summary.LibrarySummaryService.refresh_library_summary",
+            library_refresh,
+        ),
         patch("app.routers.documents._schedule_library_summary_refresh"),
     ):
         task = launch_followup(doc_id, _run_pregenerate(doc_id))
@@ -196,7 +200,9 @@ async def test_library_input_ignores_summaries_of_deleted_documents(factory):
         )
         await session.commit()
 
-    assert await SummarizationService()._fetch_all_executive_summaries() == {live: "Live summary."}
+    assert await LibrarySummaryService()._fetch_all_executive_summaries() == {
+        live: "Live summary."
+    }
 
 
 @pytest.mark.real_library_summary
@@ -208,12 +214,12 @@ async def test_delete_drops_the_library_summary_and_an_inflight_refresh_is_not_k
         session.add(LibrarySummaryModel(id="old", mode="executive", content="Old overview"))
         await session.commit()
 
-    svc = SummarizationService()
+    svc = LibrarySummaryService()
     llm, started, release = _blocking_llm(stream=True)
     library_rows = select(func.count()).select_from(LibrarySummaryModel)
 
     with (
-        patch("app.services.summarizer.get_llm_service", return_value=llm),
+        patch("app.services.library_summary.get_llm_service", return_value=llm),
         patch("app.services.llm_routing.refusal", return_value=None),
     ):
         refresh = asyncio.create_task(svc.refresh_library_summary())
@@ -237,7 +243,9 @@ async def test_deleting_documents_schedules_a_library_summary_refresh(factory, b
 
     with (
         patch("app.services.vector_store.get_lancedb_service", return_value=MagicMock()),
-        patch("app.services.summarizer.SummarizationService.refresh_library_summary", _record),
+        patch(
+            "app.services.library_summary.LibrarySummaryService.refresh_library_summary", _record
+        ),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             if bulk:

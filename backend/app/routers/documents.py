@@ -107,6 +107,7 @@ from app.services.epub_service import (
     get_toc_async,
 )
 from app.services.ingestion_jobs import get_ingestion_jobs
+from app.services.library_summary import get_library_summary_service
 from app.services.llm_admission import paused_for_interaction
 from app.services.naming import normalize_tag_slug
 from app.services.notes_service import sync_document_tag_index
@@ -119,7 +120,7 @@ from app.services.remote_source import (
     UningestibleRemoteContent,
     fetch_remote_document,
 )
-from app.services.summarizer import PREGENERATE_MODES, get_summarization_service
+from app.services.summarizer import PREGENERATE_MODES
 from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
 from app.types import DocumentProfile
@@ -1745,7 +1746,10 @@ def _read_epub_image_sync(epub_path: str, clean_path: str) -> tuple[bytes, str] 
         return z.read(matched), mime
 
 
-@router.api_route("/{document_id}/asset/{asset_path:path}", methods=["GET", "HEAD"])
+@router.get("/{document_id}/asset/{asset_path:path}")
+# One route for both methods gave them one OpenAPI operation id, which the generated
+# client types declare twice.
+@router.head("/{document_id}/asset/{asset_path:path}", include_in_schema=False)
 async def get_document_asset(document_id: str, asset_path: str) -> Response:
     """Serve an embedded image from a document (its EPUB archive or extracted images)."""
     async with get_session_factory()() as session:
@@ -1788,7 +1792,7 @@ async def get_document_asset(document_id: str, asset_path: str) -> Response:
 
 def _schedule_library_summary_refresh() -> None:
     """Regenerate the library summary that deleting a document dropped (#140)."""
-    task = asyncio.create_task(get_summarization_service().refresh_library_summary())
+    task = asyncio.create_task(get_library_summary_service().refresh_library_summary())
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
@@ -2076,7 +2080,7 @@ async def get_document_diagnostics(document_id: str):
     All other counts are 0 if the store is unavailable or empty.
     """
     async with get_session_factory()() as session:
-        await get_or_404(session, DocumentModel, document_id, name="Document")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
 
         # Two counts share a session with the get_or_404 guard; FTS5 virtual table
         # requires raw SQL so both stay here rather than going through a repo.
@@ -2112,6 +2116,7 @@ async def get_document_diagnostics(document_id: str):
         chunk_count=chunk_count,
         fts_count=fts_count,
         entity_count=entity_count,
+        entity_chunks_scanned=doc.entity_chunks_scanned,
         edge_count=edge_count,
         vector_count=vector_count,
     )

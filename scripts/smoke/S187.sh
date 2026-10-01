@@ -60,12 +60,6 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# AC: GET /chat/explorations still works (not removed)
-check "GET /chat/explorations still returns 200" \
-  "$BASE/chat/explorations?document_id=smoke-doc-s187" \
-  200 \
-  "assert isinstance(d, list)"
-
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -22,7 +22,7 @@ from app.models import (
     SummaryModel,
 )
 from app.runtime.chat_nodes._shared import _background_tasks
-from app.services.summarizer import get_summarization_service
+from app.services.library_summary import get_library_summary_service
 from app.types import ChatState
 
 logger = logging.getLogger(__name__)
@@ -88,7 +88,7 @@ async def _fetch_library_executive_summary() -> str | None:
 async def _generate_library_summary_task() -> None:
     """Background coroutine: trigger executive library summary generation and storage."""
 
-    svc = get_summarization_service()
+    svc = get_library_summary_service()
     try:
         # background=True: nothing is waiting on this. Left interactive it would
         # take the serving slot ahead of the very question that fired it.

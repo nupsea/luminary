@@ -72,7 +72,11 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
     from app.services.graph import get_graph_service
     from app.services.ner import get_entity_extractor
     from app.services.vector_store import get_lancedb_service
-    from app.workflows.ingestion_nodes.entity_extract import build_document_graph
+    from app.workflows.ingestion_nodes.entity_extract import (
+        build_document_graph,
+        record_entity_coverage,
+        select_ner_chunks,
+    )
 
     metrics = {
         "chunks_updated": 0,
@@ -98,7 +102,9 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
 
         chunk_rows = (
             await session.execute(
-                select(ChunkModel.id, ChunkModel.text).where(ChunkModel.document_id == doc_id)
+                select(ChunkModel.id, ChunkModel.text, ChunkModel.has_code)
+                .where(ChunkModel.document_id == doc_id)
+                .order_by(ChunkModel.chunk_index)
             )
         ).all()
         if not chunk_rows:
@@ -106,7 +112,9 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
             return metrics
 
         chunk_dicts = [
-            {"id": row.id, "document_id": doc_id, "text": row.text} for row in chunk_rows
+            # has_code picks GLiNER's code threshold, as it does at ingest.
+            {"id": row.id, "document_id": doc_id, "text": row.text, "has_code": bool(row.has_code)}
+            for row in chunk_rows
         ]
 
         # Rebuilding starts from an empty pool so fresh (frequency-based) canonicals
@@ -119,8 +127,9 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
         # NER -- CPU bound, run in thread pool. Reuse the cached extractor.
         extractor = get_entity_extractor()
         loop = asyncio.get_event_loop()
+        ner_chunks = select_ner_chunks(chunk_dicts)
         entities = await loop.run_in_executor(
-            None, extractor.extract, chunk_dicts, content_type, is_technical
+            None, extractor.extract, ner_chunks, content_type, is_technical
         )
 
         canonical_triples = canonicalize_batch(
@@ -147,12 +156,13 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
                 doc_id,
                 canonical_entities,
                 alias_map,
-                chunk_dicts,
+                ner_chunks,
                 chunk_dicts,
                 content_type,
                 is_technical,
             )
             await graph.write_document_graph(doc_id, document_graph, replace=True)
+            await record_entity_coverage(doc_id, len(ner_chunks))
 
         per_chunk_counts: list[int] = []
         for chunk in chunk_dicts:

@@ -120,6 +120,8 @@ class DocumentDiagnostics(BaseModel):
     chunk_count: int
     fts_count: int
     entity_count: int
+    # Chunks the entities came from; fewer than chunk_count on a long document (#63).
+    entity_chunks_scanned: int | None = None
     edge_count: int
     vector_count: int
 
