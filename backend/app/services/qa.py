@@ -172,10 +172,19 @@ CITATION_RULE = (
     "the relevant sentence."
 )
 
+# A question can assume what its document contradicts ("Mercury's plan" when the plan is
+# Jove's). Saying "not found" then tells the user the document is silent; it is not (#158).
+PREMISE_RULE = (
+    "If the question assumes something the context contradicts, say so first, then answer "
+    "from what the context says and cite the passage that contradicts it. That is an "
+    f"answer, never {NOT_FOUND_SENTINEL}. "
+)
+
 
 QA_SYSTEM_PROMPT = (
     "You are a grounded knowledge assistant. "
     "Answer only using the provided context. "
+    f"{PREMISE_RULE}"
     f"If the answer is not present, respond exactly: {NOT_FOUND_SENTINEL}. "
     "Do not speculate. "
     "Write your answer as Markdown prose (use **bold**, bullet lists, and headings where helpful). "
@@ -234,6 +243,7 @@ QA_DIRECT_SYSTEM_PROMPT = (
 QA_FACTUAL_SYSTEM_PROMPT = (
     "You are a knowledgeable learning assistant. "
     "Prefer the provided context when answering. "
+    f"{PREMISE_RULE}"
     "If the answer is not in the provided context, answer from your general knowledge "
     "and begin that part of your answer with: 'This is not covered in your documents, but: '. "
     f"Only respond exactly: {NOT_FOUND_SENTINEL} if you have no knowledge of the topic whatsoever. "
@@ -641,6 +651,17 @@ def _drop_ungrounded_citations(citations: list[dict], grounding_texts: list[str]
 CONFIDENCE_LEVELS = frozenset({"high", "medium", "low"})
 
 
+_INLINE_MARKER_RE = re.compile(r"\[S(\d+)\]")
+
+
+def _inline_marker_citations(answer: str) -> list[dict]:
+    """Marker citations for the [S2]s an answer wrote in its prose and left out of
+    the JSON block; small models do this, and the answer then showed no source.
+    A marker still resolves only to a passage the model was given (I-33)."""
+    seen = dict.fromkeys(_INLINE_MARKER_RE.findall(answer))
+    return [{"source": f"S{n}"} for n in seen]
+
+
 def _split_response(full_text: str) -> tuple[str, list[dict], str]:
     """Extract (answer_text, citations, confidence) from the LLM response.
 
@@ -665,7 +686,7 @@ def _split_response(full_text: str) -> tuple[str, list[dict], str]:
         # Default confidence based on answer length: short/empty answers are low,
         # substantive answers without a JSON block default to medium.
         confidence = "medium" if len(answer) > 80 else "low"
-        return answer, [], confidence
+        return answer, _inline_marker_citations(answer), confidence
 
     # Parse the JSON block, tolerating truncation.
     parsed: dict = {}
@@ -729,4 +750,4 @@ def _split_response(full_text: str) -> tuple[str, list[dict], str]:
         # product's own placeholder being read as its measurement. Fall back to
         # the same length heuristic as the no-JSON path.
         confidence = "medium" if len(answer) > 80 else "low"
-    return answer, citations, confidence
+    return answer, citations or _inline_marker_citations(answer), confidence

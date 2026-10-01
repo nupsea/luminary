@@ -1719,3 +1719,18 @@ async def test_receipt_names_the_model_that_served_a_fallen_back_answer(test_db)
     receipt = json.loads(events[-1][len("data: ") :])["receipt"]
     assert receipt["model"] == "ollama/qwen3.5:4b"
     assert receipt["engine"] == "local"
+
+
+def test_markers_written_in_the_prose_are_citations_when_the_block_has_none():
+    """#158: qwen3.5:4b wrote "[S1]" in its answer and no JSON block, and the
+    answer reached the user with no source although it named one."""
+    from app.services.qa import _split_response
+
+    _, citations, _ = _split_response("It is always six o'clock [S1], and time stopped [S5][S1].")
+    assert citations == [{"source": "S1"}, {"source": "S5"}]
+
+    _, citations, _ = _split_response('Answer [S2].\n{"citations":[],"confidence":"high"}')
+    assert citations == [{"source": "S2"}]
+
+    _, citations, _ = _split_response('Answer [S2].\n{"citations":[{"source":"S3"}]}')
+    assert citations == [{"source": "S3"}]

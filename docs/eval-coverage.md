@@ -24,6 +24,7 @@ whatever retrieval returned.
 | Corpus routing | `make eval-routing` — route@1, route@5, unscoped HR@5 | book, paper, legal, play, study | baseline only, no floor |
 | Chat-graph routing | `make eval-chat-routing` — generation quality (citation support/coverage) through `/qa`, not `/search` | `golden/retrieval_and_memory_tutorial.jsonl`, 45 rows, one document | report-only, see below |
 | Refusal / honest decline | `make eval-refusal` — honest_rate (decline or clearly-labelled general knowledge vs. presenting a guess as sourced) | `golden/retrieval_and_memory_tutorial_unanswerable.jsonl`, 12 rows | yes, floor 0.70 (collapse detector) |
+| False premise | `make eval-false-premise` — correction_rate (the answer states what the document says instead and cites that passage) | `golden/false_premise.jsonl`, 7 hand-written rows over 6 documents | yes, floor 0.50, bracketed on qwen3.5:4b: 0.14-0.43 without the premise rule, 0.57 with it. The three novel rows fail either way (#158) |
 | Note search | `make eval-notes` — recall over the user's own notes | no committed golden, by design (see below) | baseline only, corpus-coupled |
 | Model output quality | `GET /evals/output-stats` — repair kinds, first-pass rate, shape deviations, card-gate rejections, attempts per generation | any run | recorded per eval run |
 | Model choice | `make eval-matrix MODELS=a,b` — the model-sensitive runners across candidates, structural tier only | whatever the chosen tasks use | `--assert-separation` gates the instrument, not a model |
