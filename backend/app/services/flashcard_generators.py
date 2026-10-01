@@ -837,7 +837,13 @@ async def _generate_concept_cards(
 
 
 async def _unit_cards(
-    llm: Any, text: str, want: int, used: set[str], model: str | None, document_id: str
+    llm: Any,
+    text: str,
+    want: int,
+    used: set[str],
+    model: str | None,
+    document_id: str,
+    title: str = "",
 ) -> list[dict]:
     """One call phrasing a card for each of *want* sentences code chose from *text*.
 
@@ -853,7 +859,9 @@ async def _unit_cards(
         return []
     used.update(chosen)
     listed = (f"{n}. {listed_sentence(u, speaker[u])}" for n, u in enumerate(chosen, 1))
-    prompt = flashcard_units_user_tmpl().format(text=text, sentences="\n".join(listed))
+    prompt = flashcard_units_user_tmpl().format(
+        title=title, text=text, sentences="\n".join(listed)
+    )
     raw = await llm.generate(
         prompt,
         system=FLASHCARD_UNITS_SYSTEM,
@@ -1082,7 +1090,13 @@ async def generate(
         nonlocal call_q, call_a, deduped
         if unit_first:
             parsed = await _unit_cards(
-                llm, combined_text, want, asked_units, model or _generation_model(), document_id
+                llm,
+                combined_text,
+                want,
+                asked_units,
+                model or _generation_model(),
+                document_id,
+                title=doc.title if doc else "",
             )
         else:
             batch_prompt = flashcard_user_tmpl().format(

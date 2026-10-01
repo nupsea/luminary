@@ -555,6 +555,9 @@ FLASHCARD_UNITS_SYSTEM = (
     "- Name the subject in the question: the character, thing or idea by its name as the "
     'passage gives it. Never "he", "she", "it", "they", "the narrator", "the author", '
     '"this system", "the text" or "the passage".\n'
+    "- The question must make sense to someone holding only the card and the title of the "
+    "work. When the subject is a role or a thing the passage introduced earlier, say whose or "
+    "which it is, from the passage or the title.\n"
     '- Ask "why" only when the sentence itself gives the reason. Otherwise ask what, who, '
     "which, when or how, about what the sentence states.\n"
     "- Do not ask about something the sentence does not say.\n"
@@ -565,7 +568,7 @@ FLASHCARD_UNITS_SYSTEM = (
 FLASHCARD_UNITS_USER_SPEC = PromptSpec(
     task="flashcards_units",
     contract=(
-        "Passage:\n{text}\n\nSentences:\n{sentences}\n\n"
+        'Passage from "{title}":\n{text}\n\nSentences:\n{sentences}\n\n'
         'Reply with JSON: {{"cards": [{{"id": 1, "question": "...", "answer": "..."}}, ...]}}'
     ),
     accommodations=(NO_FENCES,),

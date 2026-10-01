@@ -348,3 +348,13 @@ async def test_generate_takes_the_unit_path_when_it_is_on(test_db, unit_first):
 
     assert llm.generate.call_args.kwargs["system"].startswith("You write flashcards")
     assert [c.source_excerpt for c in cards] == [text.splitlines()[0]]
+
+
+async def test_the_unit_prompt_names_the_work_the_passage_comes_from():
+    """#160: the model wrote "the guest" and "the bodies" because it was never told
+    which work the passage came from; a card has to make sense on its own."""
+    llm = _llm([{"id": 1, "question": "Who filled the baskets?", "answer": "The swineherd."}])
+    await _unit_cards(
+        llm, "The swineherd filled the bread baskets.\n", 1, set(), None, "doc", title="The Odyssey"
+    )
+    assert 'Passage from "The Odyssey":' in llm.generate.await_args.args[0]
