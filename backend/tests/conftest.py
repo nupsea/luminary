@@ -441,7 +441,7 @@ def _no_real_library_summary_refresh(request):
     async def _noop(self) -> None:
         return
 
-    with patch("app.services.summarizer.SummarizationService.refresh_library_summary", _noop):
+    with patch("app.services.library_summary.LibrarySummaryService.refresh_library_summary", _noop):
         yield
 
 

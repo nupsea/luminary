@@ -23,7 +23,8 @@ from app.config import get_settings
 from app.model_registry import REGISTRY
 from app.services.flashcard import _CHUNK_CHAR_LIMIT
 from app.services.flashcard_prompts import _build_genre_system_prompt, flashcard_user_tmpl
-from app.services.summarizer import _CHARS_PER_TOKEN, _SUMMARY_RESERVE_TOKENS
+from app.services.summarizer import _SUMMARY_RESERVE_TOKENS
+from app.services.summary_assembly import CHARS_PER_TOKEN
 
 # Room for roughly ten cards. Generation is capped by requested count, not by the
 # window, so this is what the window has to leave free after the prompt.
@@ -33,7 +34,7 @@ _GENERATION_OUTPUT_TOKENS = 1_200
 def largest_prompt_tokens() -> int:
     """The biggest prompt any path can build, in tokens."""
     scaffold = len(_build_genre_system_prompt("technical")) + len(flashcard_user_tmpl())
-    return (_CHUNK_CHAR_LIMIT + scaffold) // _CHARS_PER_TOKEN
+    return (_CHUNK_CHAR_LIMIT + scaffold) // CHARS_PER_TOKEN
 
 
 def test_the_deployed_window_fits_the_largest_prompt_and_its_output():

@@ -14,13 +14,12 @@ from stubs import MockLLMService as _MockLLMService
 from app.main import app
 from app.models import ChunkModel, DocumentModel, SectionSummaryModel, SummaryModel
 from app.services.qa import QA_SYSTEM_PROMPT
-from app.services.summarizer import (
+from app.services.summarizer import SummarizationService, _input_token_budget
+from app.services.summary_prompts import (
     GROUNDING_PREFIX,
     LIBRARY_SYSTEM_PROMPTS,
     MODE_INSTRUCTIONS,
-    SummarizationService,
-    _build_system_prompt,
-    _input_token_budget,
+    build_system_prompt,
 )
 
 # Shared DB fixture
@@ -65,47 +64,47 @@ async def _insert_doc_and_chunks(
         await session.commit()
 
 
-# _build_system_prompt — mode-specific prompt construction
+# build_system_prompt — mode-specific prompt construction
 
 
 def test_one_sentence_prompt_contains_grounding():
-    prompt = _build_system_prompt("one_sentence")
+    prompt = build_system_prompt("one_sentence")
     assert GROUNDING_PREFIX in prompt
 
 
 def test_one_sentence_prompt_mentions_30_words():
-    prompt = _build_system_prompt("one_sentence")
+    prompt = build_system_prompt("one_sentence")
     assert "30 words" in prompt
 
 
 def test_executive_prompt_mentions_bullet_points():
-    prompt = _build_system_prompt("executive")
+    prompt = build_system_prompt("executive")
     assert "bullet" in prompt.lower()
 
 
 def test_detailed_prompt_mentions_heading():
-    prompt = _build_system_prompt("detailed")
+    prompt = build_system_prompt("detailed")
     assert "heading" in prompt.lower()
 
 
 def test_conversation_prompt_mentions_json():
-    prompt = _build_system_prompt("conversation")
+    prompt = build_system_prompt("conversation")
     assert "JSON" in prompt
 
 
 def test_all_modes_include_grounding_prefix():
     for mode in MODE_INSTRUCTIONS:
-        prompt = _build_system_prompt(mode)
+        prompt = build_system_prompt(mode)
         assert GROUNDING_PREFIX in prompt, f"mode={mode} missing grounding prefix"
 
 
 def test_executive_prompt_contains_markdown_instruction():
-    prompt = _build_system_prompt("executive")
+    prompt = build_system_prompt("executive")
     assert "Markdown" in prompt
 
 
 def test_detailed_prompt_contains_markdown_instruction():
-    prompt = _build_system_prompt("detailed")
+    prompt = build_system_prompt("detailed")
     assert "Markdown" in prompt
 
 

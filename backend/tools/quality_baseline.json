@@ -39,7 +39,6 @@
     "app/services/parser.py::_epub_html_to_markdown",
     "app/services/retriever.py::HybridRetriever.retrieve",
     "app/services/summarizer.py::SummarizationService.pregenerate",
-    "app/services/summarizer.py::SummarizationService.stream_library_summary",
     "app/services/summarizer.py::SummarizationService.stream_summary",
     "app/services/tech_book_chunker.py::chunk_mixed_content",
     "app/workflows/concept_nodes/persist.py::persist_concepts",
@@ -100,7 +99,6 @@
     "app/services/retriever.py::HybridRetriever.retrieve",
     "app/services/study_assembler.py::assemble",
     "app/services/summarizer.py::SummarizationService._build_input_text",
-    "app/services/summarizer.py::SummarizationService.build_assembled_summary",
     "app/services/tech_book_chunker.py::chunk_mixed_content",
     "app/services/tech_relation_extractor.py::extract_tech_relations",
     "app/services/universal_parser.py::UniversalParser._probe",
@@ -108,7 +106,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 233,
+  "complexity_over_10": 232,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
@@ -195,7 +193,6 @@
     "app/services/study_assembler.py": 10,
     "app/services/study_path_service.py": 8,
     "app/services/suggestion_service.py": 13,
-    "app/services/summarizer.py": 22,
     "app/services/tag_graph.py": 2,
     "app/services/tag_merge_service.py": 9,
     "app/services/tag_normalizer.py": 14,

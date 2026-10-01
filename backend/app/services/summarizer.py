@@ -11,78 +11,39 @@ To avoid re-running the LLM on every user request:
 - `pregenerate`: non-streaming version called during ingestion.  Generates and
   persists one_sentence + executive modes so they are ready when the user first
   opens a document.
+
+Prompts live in `summary_prompts`, pure assembly in `summary_assembly`, queries in
+`repos/summary_repo`, and the library-wide synthesis in `library_summary`.
 """
 
 import json
 import logging
-import re
-import uuid
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
-
-from sqlalchemy import DateTime, delete, exists, func, insert, literal, select
 
 from app.database import get_session_factory
 from app.exceptions import DependencyUnavailable
-from app.models import (
-    ChunkModel,
-    DocumentModel,
-    LibrarySummaryModel,
-    SectionSummaryModel,
-    SummaryModel,
-)
+from app.models import ChunkModel, SummaryModel
+from app.repos.summary_repo import SummaryRepo
 from app.services.llm import LLMAuthenticationError, get_llm_service
-from app.services.section_summarizer import FAST_PATH_MIN_UNITS, _is_metadata_section
+from app.services.section_summarizer import _is_metadata_section
+from app.services.summary_assembly import (
+    CHARS_PER_TOKEN,
+    MAP_BATCH_TOKENS,
+    assemble_summary,
+    chunk_into_batches,
+    section_summary_input,
+    split_for_detail,
+)
+from app.services.summary_prompts import MAP_SYSTEM_PROMPT, build_system_prompt
 from app.types import DocumentProfile
 
 logger = logging.getLogger(__name__)
-
-# Grounding prefix applied to every summarization prompt
-GROUNDING_PREFIX = "Answer using only information present in the provided text."
-
-_MARKDOWN_INSTRUCTION = (
-    "Format your response using Markdown. "
-    "Use ## headings, **bold**, bullet lists, and `code` spans where appropriate."
-)
-
-# Mode-specific instructions appended after the grounding prefix
-MODE_INSTRUCTIONS: dict[str, str] = {
-    "one_sentence": "Summarize in a single sentence of at most 30 words.",
-    "executive": (
-        "Identify the 3 to 5 most important ideas that run through the entire work. "
-        "Write each as a concise bullet point. "
-        "Do NOT list individual chapter or passage summaries — synthesise across them. "
-        "Ignore copyright notices, licensing terms, and distribution metadata. "
-        f"{_MARKDOWN_INSTRUCTION}"
-    ),
-    "detailed": (
-        "Summarize each section separately, preserving the heading structure. "
-        f"{_MARKDOWN_INSTRUCTION}"
-    ),
-    "conversation": (
-        'Output a JSON object with keys: "timeline" (list of strings), '
-        '"decisions" (list of strings), '
-        '"action_items" (list of objects with "owner" and "task" keys).'
-    ),
-    # A recorded talk has no decisions and no owners. Asking for them returns
-    # empty lists, which is why this mode was hidden from anything but a
-    # meeting rather than adapted (#104).
-    "conversation_talk": (
-        'Output a JSON object with keys: "timeline" (list of strings), '
-        '"points" (list of strings: the techniques, tools and claims covered), '
-        '"references" (list of strings: anything named that a listener would '
-        "look up afterwards)."
-    ),
-}
 
 # Tokens reserved inside the context window for the system prompt and the
 # generated summary. num_ctx bounds prompt AND generation combined, and Ollama
 # truncates the prompt from the FRONT — so an over-budget input silently drops
 # the system message and the model free-associates on a tail slice of the text.
 _SUMMARY_RESERVE_TOKENS = 2_000
-
-# Rough token estimate used throughout; matches the chunker's own heuristic.
-_CHARS_PER_TOKEN = 4
 
 
 def _summary_num_ctx(model: str | None = None) -> int:
@@ -106,17 +67,9 @@ def _input_token_budget() -> int:
 
 
 def _truncate_to_budget(text: str) -> str:
-    limit = _input_token_budget() * _CHARS_PER_TOKEN
+    limit = _input_token_budget() * CHARS_PER_TOKEN
     return text if len(text) <= limit else text[:limit]
 
-
-# Max tokens per map call — stays within the generation window with room for output
-_MAP_BATCH_TOKENS = 3_000
-
-# Floor on each document's contribution to the library synthesis, so a large
-# library degrades to shallower per-document coverage rather than dropping docs.
-_MIN_LIBRARY_WORDS_PER_DOC = 60
-_WORDS_PER_TOKEN = 0.75
 
 # Cap map-reduce at this many batches to bound total LLM call time.
 # Large documents are sampled evenly rather than exhaustively processed.
@@ -149,240 +102,24 @@ _PREGENERATE_MAX_TOKENS = 1_200
 # it.
 _ASSEMBLED_MODES = frozenset({"detailed"})
 
-# Slow path only, where no section summaries exist and `detailed` must be
-# generated. Per-section output is the one mode that splits without changing
-# meaning -- a synthesis would lose the cross-section view; this does not. Every
-# batch is summarised and none is dropped, so the bound is on how long one call
-# runs, never on how much of the document is covered.
-_DETAILED_BATCH_TOKENS = 1_500
 _DETAILED_BATCH_MAX_TOKENS = 1_000
 
-_METADATA_IGNORE = (
-    "Ignore any copyright notices, licensing terms, distribution metadata, "
-    "publisher boilerplate, or digitisation project information. "
-    "Focus only on the intellectual and narrative content of the works."
-)
 
-# System prompts for library-level synthesis
-LIBRARY_SYSTEM_PROMPTS: dict[str, str] = {
-    "one_sentence": (
-        f"Synthesize all documents in one sentence of at most 30 words. {_METADATA_IGNORE}"
-    ),
-    "executive": (
-        "List the 5-7 key themes across all documents as bullet points. "
-        "Focus on intellectual content, ideas, arguments, and narratives. "
-        f"Note connections between them. {_METADATA_IGNORE} {_MARKDOWN_INSTRUCTION}"
-    ),
-    "detailed": (
-        "Write a structured overview: main themes, key documents, "
-        f"and how they relate to each other. {_METADATA_IGNORE} {_MARKDOWN_INSTRUCTION}"
-    ),
-}
-
-
-# Publisher furniture: carries nothing a summary of the work should repeat.
-_BOILERPLATE_HEADINGS = frozenset(
-    {
-        "praise",
-        "praise for the book",
-        "acknowledgments",
-        "acknowledgements",
-        "how to contact us",
-        "conventions used in this book",
-        "table of contents",
-        "about the author",
-        "about the authors",
-        "colophon",
-        "dedication",
-        "copyright",
-        "index",
-        "using code examples",
-    }
-)
-_BOILERPLATE_PREFIXES = ("praise for", "conventions used", "how to contact", "about the author")
-
-# Authored prose, so the detailed summary keeps it; the key points skip it
-# because it describes the book rather than saying what the book says.
-_FRONT_MATTER_HEADINGS = frozenset(
-    {
-        "foreword",
-        "preface",
-        "prerequisites",
-        "what this book is about",
-        "who this book is for",
-        "who this book is not for",
-        "navigating this book",
-        "note",
-        "tip",
-        "warning",
-        "caution",
-        "important",
-    }
-)
-
-_RE_CHAPTER_HEADING = re.compile(
-    r"^(?:chapter|part|appendix)\s+(?:\d+|[ivxlc]+|[a-z])\b", re.IGNORECASE
-)
-_RE_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
-_TAKEAWAY_TARGET_CHARS = 180
-
-
-def _is_boilerplate_heading(heading: str) -> bool:
-    h = heading.strip().lower()
-    if not h:
-        return False
-    return h in _BOILERPLATE_HEADINGS or h.startswith(_BOILERPLATE_PREFIXES)
-
-
-def _is_minor_heading(heading: str) -> bool:
-    """Front matter, admonitions and figure captions: kept in full, not a key topic."""
-    h = heading.strip().lower()
-    return h in _FRONT_MATTER_HEADINGS or bool(re.match(r"^figure\s+\d+[-.]\d+", h))
-
-
-def _without_boilerplate(rows: list[SectionSummaryModel]) -> list[SectionSummaryModel]:
-    """Drop publisher furniture, and the letter dividers of an index.
-
-    A lone letter is an index divider only after an "Index" heading: elsewhere it
-    is a chapter numeral, and "I" opens The Adventures of Sherlock Holmes.
-    """
-    kept: list[SectionSummaryModel] = []
-    in_index = False
-    for r in rows:
-        heading = (r.heading or "").strip()
-        if heading.lower() == "index":
-            in_index = True
-        elif not (in_index and len(heading) == 1 and heading.isalpha()):
-            in_index = False
-        if in_index or _is_boilerplate_heading(heading):
-            continue
-        if not (r.content or "").strip() or _is_metadata_section(r.heading, r.content):
-            continue
-        kept.append(r)
-    return kept
-
-
-def _leading_sentences(content: str) -> str:
-    """The first whole sentences of a section summary, up to about two.
-
-    Cut only at a sentence boundary: a clipped sentence reads as a claim the
-    summary never made.
-    """
-    result: list[str] = []
-    total = 0
-    for raw in _RE_SENTENCE_END.split(content.strip()):
-        sentence = raw.strip()
-        if not sentence:
-            continue
-        result.append(sentence)
-        total += len(sentence)
-        if total >= _TAKEAWAY_TARGET_CHARS or len(result) >= 2:
-            break
-    return " ".join(result)
-
-
-def _split_for_detail(text: str, budget_tokens: int = _DETAILED_BATCH_TOKENS) -> list[str]:
-    """Split on blank lines into batches of at most `budget_tokens`.
-
-    Splits between paragraphs so a section is summarised as a whole. A single
-    paragraph over the budget is its own batch rather than being cut: the point
-    of batching is to bound one call, never to drop text.
-    """
-    batches: list[str] = []
-    current: list[str] = []
-    current_tokens = 0
-    for para in text.split("\n\n"):
-        if not para.strip():
-            continue
-        tokens = len(para) // _CHARS_PER_TOKEN
-        if current and current_tokens + tokens > budget_tokens:
-            batches.append("\n\n".join(current))
-            current = []
-            current_tokens = 0
-        current.append(para)
-        current_tokens += tokens
-    if current:
-        batches.append("\n\n".join(current))
-    return batches
-
-
-# What to say about each kind of document, appended to the mode instruction.
-# One instruction for all of them asked a conference talk for "character arcs"
-# and lost every tool it named (#105). Keyed on the facets, not content_type:
-# a manual and a novel are both "book".
-_FORM_GUIDANCE: dict[str, str] = {
-    "prose": (
-        "Focus on what the work argues or recounts, and name the people, places "
-        "and specific subjects it is about."
-    ),
-    "article": "Focus on the claim being made and the specific things it is about.",
-    "reference": (
-        "Name the specific rules, components, commands and parameters the work "
-        "defines. A reader uses this to decide what to look up, so a named thing "
-        "is worth more than a description of it."
-    ),
-    "paper": (
-        "Name what was measured, the method, the finding, and the limitation the "
-        "work states. Keep figures and named methods exactly as written."
-    ),
-    "dialogue": (
-        "Name the specific systems, tools and decisions discussed, and who owns "
-        "them. Anything that will go stale -- a version, a date, a number -- "
-        "carries its date."
-    ),
-    "entries": "Name the recurring subjects across entries rather than retelling each one.",
-    "script": "Focus on what happens and what the characters want.",
-    "source_code": "Name the functions, types and responsibilities the file defines.",
-}
-
-_NARRATIVE_GUIDANCE = (
-    "Focus on what happens, what the characters want, and what their choices "
-    "cost. Name the people and places that carry the story."
-)
-
-# The specific failure was abstraction: "configuration files" for `agents.md`.
-_TECHNICAL_GUIDANCE = (
-    "Preserve exact names: files, commands, libraries, parameters, metrics and "
-    "tools. Never replace a named thing with the category it belongs to."
-)
-
-
-def _kind_guidance(profile: "DocumentProfile | None") -> str:
-    """The sentence that tells the model what this kind of document is for."""
-    if profile is None:
-        return ""
-    if profile.form in ("prose", "article") and profile.register == "narrative":
-        parts = [_NARRATIVE_GUIDANCE]
-    else:
-        parts = [_FORM_GUIDANCE.get(profile.form, "")]
-    if profile.is_technical:
-        parts.append(_TECHNICAL_GUIDANCE)
-    return " ".join(p for p in parts if p)
-
-
-def _build_system_prompt(mode: str, profile: "DocumentProfile | None" = None) -> str:
-    """The grounding prefix, the mode instruction, and what this kind wants.
-
-    `conversation` asks for a JSON object; prose guidance would invite
-    commentary around it.
-    """
-    if mode == "conversation" and profile is not None and profile.is_technical:
-        mode = "conversation_talk"
-    prompt = f"{GROUNDING_PREFIX}\n\n{MODE_INSTRUCTIONS[mode]}"
-    if mode.startswith("conversation"):
-        return prompt
-    guidance = _kind_guidance(profile)
-    return f"{prompt} {guidance}" if guidance else prompt
+def llm_error_message(exc: Exception) -> str:
+    """What to tell the user when a summary's LLM call failed."""
+    if isinstance(exc, DependencyUnavailable):
+        return exc.detail
+    if isinstance(exc, ValueError):
+        return "LLM provider not configured. Add your API key in Settings."
+    if isinstance(exc, LLMAuthenticationError):
+        return "LLM API key is invalid. Check your key in Settings."
+    return "LLM service unavailable. If using Ollama, run: ollama serve"
 
 
 class SummarizationService:
     """Summarize a document in multiple granularity modes."""
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    async def _fetch_profile(self, document_id: str) -> "DocumentProfile | None":
+    async def _fetch_profile(self, document_id: str) -> DocumentProfile | None:
         """What kind of document this is, for the prompt to adapt to.
 
         None when the row carries no form, and never raises: adapting the prompt
@@ -390,13 +127,7 @@ class SummarizationService:
         """
         try:
             async with get_session_factory()() as session:
-                row = (
-                    await session.execute(
-                        select(
-                            DocumentModel.form, DocumentModel.domain, DocumentModel.register
-                        ).where(DocumentModel.id == document_id)
-                    )
-                ).first()
+                row = await SummaryRepo(session).facets(document_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "summary profile lookup failed, using the neutral prompt: %s",
@@ -408,72 +139,30 @@ class SummarizationService:
 
     async def _fetch_chunks(self, document_id: str) -> list[ChunkModel]:
         async with get_session_factory()() as session:
-            result = await session.execute(
-                select(ChunkModel)
-                .where(ChunkModel.document_id == document_id)
-                .order_by(ChunkModel.chunk_index)
-            )
-            return list(result.scalars().all())
+            return await SummaryRepo(session).chunks(document_id)
 
     async def _fetch_cached(self, document_id: str, mode: str) -> SummaryModel | None:
         """Return the most recent stored summary for this (document, mode), or None."""
         async with get_session_factory()() as session:
-            result = await session.execute(
-                select(SummaryModel)
-                .where(SummaryModel.document_id == document_id)
-                .where(SummaryModel.mode == mode)
-                .order_by(SummaryModel.created_at.desc())
-                .limit(1)
-            )
-            return result.scalar_one_or_none()
+            return await SummaryRepo(session).latest(document_id, mode)
 
     async def _store_summary(self, document_id: str, mode: str, content: str) -> str | None:
         """Store a summary, or nothing if the document was deleted while it was generated.
 
         Deleting a document cancels its background summaries, but a call already
-        returning can still land here, so the existence check and the insert are one
-        statement: a separate check could pass just before the delete commits.
-        Returns None when skipped.
+        returning can still land here. Returns None when skipped.
         """
-        summary_id = str(uuid.uuid4())
-        row = select(
-            literal(summary_id),
-            literal(document_id),
-            literal(mode),
-            literal(content),
-            literal(datetime.now(UTC), DateTime),
-        ).where(exists().where(DocumentModel.id == document_id))
         async with get_session_factory()() as session:
-            result = await session.execute(
-                insert(SummaryModel).from_select(
-                    ["id", "document_id", "mode", "content", "created_at"], row
-                )
+            summary_id = await SummaryRepo(session).insert_if_document_exists(
+                document_id, mode, content
             )
             await session.commit()
-        if not result.rowcount:
+        if summary_id is None:
             logger.info(
                 "summary not stored: document was deleted",
                 extra={"document_id": document_id, "mode": mode},
             )
-            return None
         return summary_id
-
-    def _chunk_into_batches(self, chunks: list[ChunkModel]) -> list[list[ChunkModel]]:
-        """Split chunks into token-capped batches for map-reduce."""
-        batches: list[list[ChunkModel]] = []
-        current: list[ChunkModel] = []
-        current_tokens = 0
-        for chunk in chunks:
-            t = chunk.token_count or len(chunk.text) // 4
-            if current and current_tokens + t > _MAP_BATCH_TOKENS:
-                batches.append(current)
-                current = []
-                current_tokens = 0
-            current.append(chunk)
-            current_tokens += t
-        if current:
-            batches.append(current)
-        return batches
 
     async def _build_input_text(
         self, document_id: str, chunks: list[ChunkModel], model: str | None
@@ -492,7 +181,7 @@ class SummarizationService:
         if filtered:
             chunks = filtered
 
-        total_tokens = sum(c.token_count or len(c.text) // _CHARS_PER_TOKEN for c in chunks)
+        total_tokens = sum(c.token_count or len(c.text) // CHARS_PER_TOKEN for c in chunks)
         if total_tokens <= _input_token_budget():
             return "\n\n".join(c.text for c in chunks)
 
@@ -512,13 +201,13 @@ class SummarizationService:
             section_groups.setdefault(key, []).append(chunk)
 
         if list(section_groups.keys()) == ["default"]:
-            batches = self._chunk_into_batches(chunks)
+            batches = chunk_into_batches(chunks)
         else:
             batches = []
             for group_chunks in section_groups.values():
-                gt = sum(c.token_count or len(c.text) // 4 for c in group_chunks)
-                if gt > _MAP_BATCH_TOKENS:
-                    batches.extend(self._chunk_into_batches(group_chunks))
+                gt = sum(c.token_count or len(c.text) // CHARS_PER_TOKEN for c in group_chunks)
+                if gt > MAP_BATCH_TOKENS:
+                    batches.extend(chunk_into_batches(group_chunks))
                 else:
                     batches.append(group_chunks)
 
@@ -536,13 +225,12 @@ class SummarizationService:
             )
 
         llm = get_llm_service()
-        section_system = f"{GROUNDING_PREFIX}\n\nSummarize this passage concisely in 2-3 sentences."
         section_summaries: list[str] = []
         for batch in batches:
             batch_text = "\n\n".join(c.text for c in batch)
             s = await llm.generate(
                 batch_text,
-                system=section_system,
+                system=MAP_SYSTEM_PROMPT,
                 model=model,
                 timeout=_MAP_CALL_TIMEOUT,
                 background=True,
@@ -563,7 +251,7 @@ class SummarizationService:
         return result
 
     async def _generate_detailed(
-        self, input_text: str, model: str | None, profile: "DocumentProfile | None" = None
+        self, input_text: str, model: str | None, profile: DocumentProfile | None = None
     ) -> str:
         """Generate the per-section summary as one bounded call per batch.
 
@@ -571,9 +259,9 @@ class SummarizationService:
         document order, so the whole input is covered by exactly one call each.
         """
         llm = get_llm_service()
-        system = _build_system_prompt("detailed", profile)
+        system = build_system_prompt("detailed", profile)
         parts: list[str] = []
-        for batch in _split_for_detail(input_text):
+        for batch in split_for_detail(input_text):
             text = await llm.generate(
                 batch,
                 system=system,
@@ -587,101 +275,16 @@ class SummarizationService:
         return "\n\n".join(p for p in parts if p)
 
     async def _build_section_summary_input(self, document_id: str) -> str | None:
-        """Return a markdown string built from section summaries, or None if too few units exist.
-
-        When >= FAST_PATH_MIN_UNITS section summary units are available, this string is
-        used as the direct input to all summarization modes (fast path), bypassing
-        chunk map-reduce.
-        """
+        """Section summaries as the fast-path input, or None if too few units exist."""
         async with get_session_factory()() as session:
-            result = await session.execute(
-                select(SectionSummaryModel)
-                .where(SectionSummaryModel.document_id == document_id)
-                .order_by(SectionSummaryModel.unit_index)
-            )
-            rows = list(result.scalars().all())
-
-        # Filter out metadata/legal section summary rows
-        qualifying = [row for row in rows if not _is_metadata_section(row.heading, row.content)]
-
-        if len(qualifying) < FAST_PATH_MIN_UNITS:
-            return None
-
-        parts = [f"## {row.heading}\n{row.content}" for row in qualifying]
-        return "\n\n".join(parts)
+            rows = await SummaryRepo(session).section_summaries(document_id)
+        return section_summary_input(rows)
 
     async def build_assembled_summary(self, document_id: str, mode: str) -> str | None:
-        """Assemble a summary from stored section summaries, without an LLM call.
-
-        detailed: every qualifying section summary in document order, whole,
-        grouped under its chapter. Only publisher boilerplate is left out.
-
-        executive: one entry per chapter, led by that chapter's opening
-        summary. Returns None when the document has no chapter headings, since
-        an extract of the first few sections would pass for key points of the
-        whole work; the caller then synthesises with the LLM.
-
-        No heading is invented (I-30): a section the source left unlabelled is
-        rendered without one.
-        """
+        """`mode` assembled from stored section summaries without an LLM call, or None."""
         async with get_session_factory()() as session:
-            result = await session.execute(
-                select(SectionSummaryModel)
-                .where(SectionSummaryModel.document_id == document_id)
-                .order_by(SectionSummaryModel.unit_index)
-            )
-            rows = list(result.scalars().all())
-
-        # Same floor as _build_section_summary_input, so the two never disagree
-        # about whether a document has usable section summaries.
-        rows = _without_boilerplate(rows)
-        if len(rows) < FAST_PATH_MIN_UNITS:
-            return None
-
-        # Rows before the first chapter heading stay as their own group so front
-        # matter and a preface are not lost from the detailed summary.
-        groups: list[tuple[str | None, list[SectionSummaryModel]]] = []
-        for r in rows:
-            heading = (r.heading or "").strip()
-            if _RE_CHAPTER_HEADING.match(heading):
-                groups.append((heading, [r]))
-            elif groups:
-                groups[-1][1].append(r)
-            else:
-                groups.append((None, [r]))
-        chapters = [(h, members) for h, members in groups if h is not None]
-
-        if mode == "detailed":
-            lines: list[str] = []
-            for chapter_heading, members in groups:
-                for i, r in enumerate(members):
-                    heading = (r.heading or "").strip()
-                    if chapter_heading is not None and i == 0:
-                        lines.append(f"## {heading}")
-                    elif heading:
-                        level = "###" if chapter_heading is not None else "##"
-                        lines.append(f"{level} {heading}")
-                    lines.append(r.content.strip())
-                    lines.append("")
-            return "\n".join(lines).strip()
-
-        if mode == "executive":
-            if not chapters:
-                return None
-            lines = ["### Key Takeaways by Chapter", ""]
-            for chapter_heading, members in chapters:
-                opening = members[0]
-                takeaway = _leading_sentences(opening.content)
-                topics = [
-                    (m.heading or "").strip()
-                    for m in members[1:]
-                    if (m.heading or "").strip() and not _is_minor_heading(m.heading)
-                ]
-                topics_suffix = f" *Topics: {', '.join(topics)}.*" if topics else ""
-                lines.append(f"- **{chapter_heading}**: {takeaway}{topics_suffix}")
-            return "\n".join(lines).strip()
-
-        return None
+            rows = await SummaryRepo(session).section_summaries(document_id)
+        return assemble_summary(rows, mode)
 
     # ------------------------------------------------------------------
     # Public API
@@ -790,7 +393,7 @@ class SummarizationService:
                     return
 
             llm = get_llm_service()
-            system = _build_system_prompt(mode, await self._fetch_profile(document_id))
+            system = build_system_prompt(mode, await self._fetch_profile(document_id))
             token_stream = await llm.generate(
                 _truncate_to_budget(input_text),
                 system=system,
@@ -822,15 +425,7 @@ class SummarizationService:
                 extra={"document_id": document_id, "mode": mode},
                 exc_info=exc,
             )
-            if isinstance(exc, DependencyUnavailable):
-                msg = exc.detail
-            elif isinstance(exc, ValueError):
-                msg = "LLM provider not configured. Add your API key in Settings."
-            elif isinstance(exc, LLMAuthenticationError):
-                msg = "LLM API key is invalid. Check your key in Settings."
-            else:
-                msg = "LLM service unavailable. If using Ollama, run: ollama serve"
-            err_evt = {"error": "llm_unavailable", "message": msg, "done": True}
+            err_evt = {"error": "llm_unavailable", "message": llm_error_message(exc), "done": True}
             yield f"data: {json.dumps(err_evt)}\n\n"
 
     async def generate_all_summaries(
@@ -946,7 +541,7 @@ class SummarizationService:
                     else:
                         text = await llm.generate(
                             _truncate_to_budget(input_text),
-                            system=_build_system_prompt(mode, profile),
+                            system=build_system_prompt(mode, profile),
                             model=model,
                             background=True,
                             num_ctx=_summary_num_ctx(model),
@@ -977,258 +572,9 @@ class SummarizationService:
     async def invalidate_section_reduce_cache(self, document_id: str) -> None:
         """Delete the '_section_reduce' summary row so pregenerate() recomputes it."""
         async with get_session_factory()() as session:
-            await session.execute(
-                delete(SummaryModel)
-                .where(SummaryModel.document_id == document_id)
-                .where(SummaryModel.mode == "_section_reduce")
-            )
+            await SummaryRepo(session).delete_mode(document_id, "_section_reduce")
             await session.commit()
         logger.info("_section_reduce cache invalidated", extra={"document_id": document_id})
-
-    # ------------------------------------------------------------------
-    # Library-level summary (cross-document synthesis)
-    # ------------------------------------------------------------------
-
-    async def _fetch_library_cached(self, mode: str) -> LibrarySummaryModel | None:
-        """Return the most recent LibrarySummaryModel for this mode, or None."""
-        async with get_session_factory()() as session:
-            result = await session.execute(
-                select(LibrarySummaryModel)
-                .where(LibrarySummaryModel.mode == mode)
-                .order_by(LibrarySummaryModel.created_at.desc())
-                .limit(1)
-            )
-            return result.scalar_one_or_none()
-
-    async def _store_library_summary(
-        self, mode: str, content: str, source_ids: list[str]
-    ) -> str | None:
-        """Store a library summary, or nothing if any source document was deleted meanwhile.
-
-        Deleting a document drops the cached library summary, so one generated
-        from it must not be written back afterwards. One statement for the same
-        reason as `_store_summary`. Returns None when skipped.
-        """
-        summary_id = str(uuid.uuid4())
-        wanted = set(source_ids)
-        live = (
-            select(func.count())
-            .select_from(DocumentModel)
-            .where(DocumentModel.id.in_(wanted))
-            .scalar_subquery()
-        )
-        row = select(
-            literal(summary_id),
-            literal(mode),
-            literal(content),
-            literal(datetime.now(UTC), DateTime),
-        ).where(live == len(wanted))
-        async with get_session_factory()() as session:
-            result = await session.execute(
-                insert(LibrarySummaryModel).from_select(
-                    ["id", "mode", "content", "created_at"], row
-                )
-            )
-            await session.commit()
-        if not result.rowcount:
-            logger.info("library summary not stored: a source document was deleted")
-            return None
-        return summary_id
-
-    async def _fetch_all_executive_summaries(self) -> dict[str, str]:
-        """Return best-available summary content keyed by document_id.
-
-        Priority: executive > detailed > one_sentence > conversation.
-        Documents with no summary of any kind are excluded.
-        """
-        _MODE_PRIORITY = {"executive": 0, "detailed": 1, "one_sentence": 2, "conversation": 3}
-        async with get_session_factory()() as session:
-            rows = await session.execute(
-                select(
-                    SummaryModel.document_id,
-                    SummaryModel.mode,
-                    SummaryModel.content,
-                    SummaryModel.created_at,
-                )
-                # A summary that outlived its document must not describe the library.
-                .join(DocumentModel, DocumentModel.id == SummaryModel.document_id)
-                .order_by(SummaryModel.created_at.desc())
-            )
-            # best[doc_id] = (priority, content)
-            best: dict[str, tuple[int, str]] = {}
-            for row in rows:
-                prio = _MODE_PRIORITY.get(row.mode, 99)
-                if row.document_id not in best or prio < best[row.document_id][0]:
-                    best[row.document_id] = (prio, row.content)
-        return {doc_id: content for doc_id, (_, content) in best.items()}
-
-    async def _get_cross_doc_entities(self, min_docs: int = 3, limit: int = 20) -> list[str]:
-        """Entity names found in `min_docs` or more documents; [] if the graph fails."""
-        try:
-            from app.services.graph import get_graph_service  # noqa: PLC0415
-
-            return await get_graph_service().get_cross_document_entities(
-                limit=limit, min_documents=min_docs, topics_only=False
-            )
-        except Exception:
-            logger.warning("_get_cross_doc_entities: graph query failed", exc_info=True)
-            return []
-
-    async def stream_library_summary(
-        self,
-        mode: str,
-        model: str | None,
-        force_refresh: bool = False,
-        background: bool = False,
-    ) -> AsyncGenerator[str]:
-        """Synthesize a holistic summary across all ingested documents.
-
-        Cache-first: if a LibrarySummaryModel for this mode already exists it is
-        streamed as a single token event.  On cache miss, fetches executive summaries
-        from all documents, queries the graph for cross-doc entities, builds input text,
-        and generates via LLM.
-
-        force_refresh=True skips the cache and regenerates.
-
-        Yields:
-            ``data: {"token": "..."}\\n\\n``  — one or more token events
-            ``data: {"done": true, ...}\\n\\n``  — final event with cached flag
-            ``data: {"error": "not_enough_summaries", ...}\\n\\n``  — when < 2 docs
-        """
-        try:
-            # Cache-first (skipped when force_refresh=True)
-            cached = None if force_refresh else await self._fetch_library_cached(mode)
-            if cached is not None:
-                logger.info("Serving cached library summary", extra={"mode": mode})
-                yield f"data: {json.dumps({'token': cached.content})}\n\n"
-                done_evt = {"done": True, "summary_id": cached.id, "cached": True}
-                yield f"data: {json.dumps(done_evt)}\n\n"
-                return
-
-            # Fetch executive summaries per document
-            exec_summaries = await self._fetch_all_executive_summaries()
-
-            if len(exec_summaries) == 0:
-                yield (
-                    'data: {"error": "not_enough_summaries", '
-                    '"message": "Ingest at least one document to generate a library overview.", '
-                    '"done": true}\n\n'
-                )
-                return
-
-            if len(exec_summaries) == 1:
-                # Single-document library: serve that document's executive summary directly
-                doc_id, content = next(iter(exec_summaries.items()))
-                summary_id = await self._store_library_summary(mode, content, [doc_id])
-                yield f"data: {json.dumps({'token': content})}\n\n"
-                yield f"data: {
-                    json.dumps({'done': True, 'summary_id': summary_id, 'cached': False})
-                }\n\n"
-                return
-
-            # Fetch document titles
-            doc_ids = list(exec_summaries.keys())
-            async with get_session_factory()() as session:
-                rows = await session.execute(
-                    select(DocumentModel.id, DocumentModel.title).where(
-                        DocumentModel.id.in_(doc_ids)
-                    )
-                )
-                titles = {row.id: row.title for row in rows}
-
-            # Build input text ordered by title.
-            # Per-document source priority:
-            #   1. _build_section_summary_input() — section summaries already have
-            #      metadata/legal sections filtered out; use this as the primary source.
-            #   2. Cached executive summary — fallback for pre-V2 docs without section
-            #      summaries.
-            # Cap each document's contribution so the TOTAL input stays inside the
-            # context window: a fixed per-document cap silently blows the budget once
-            # the library is large, and Ollama then truncates away the system prompt.
-            max_words_per_doc = max(
-                _MIN_LIBRARY_WORDS_PER_DOC,
-                int(_input_token_budget() * _WORDS_PER_TOKEN) // max(len(doc_ids), 1),
-            )
-            ordered = sorted(doc_ids, key=lambda did: titles.get(did, ""))
-            parts: list[str] = []
-            for did in ordered:
-                section_input = await self._build_section_summary_input(did)
-                raw_text = section_input or exec_summaries.get(did, "")
-                words = raw_text.split()
-                doc_text = (
-                    " ".join(words[:max_words_per_doc])
-                    if len(words) > max_words_per_doc
-                    else raw_text
-                )
-                parts.append(f"## {titles.get(did, did)}\n{doc_text}")
-
-            entity_names = await self._get_cross_doc_entities()
-            if entity_names:
-                parts.append(f"## Shared themes\n{', '.join(entity_names)}")
-
-            input_text = _truncate_to_budget("\n\n".join(parts))
-            system = LIBRARY_SYSTEM_PROMPTS.get(mode, LIBRARY_SYSTEM_PROMPTS["executive"])
-
-            llm = get_llm_service()
-            token_stream = await llm.generate(
-                input_text,
-                system=system,
-                model=model,
-                stream=True,
-                background=background,
-                num_ctx=_summary_num_ctx(model),
-            )
-
-            collected: list[str] = []
-            async for token in token_stream:
-                collected.append(token)
-                yield f"data: {json.dumps({'token': token})}\n\n"
-
-            summary_text = "".join(collected)
-            summary_id = await self._store_library_summary(mode, summary_text, doc_ids)
-            done_evt = {"done": True, "summary_id": summary_id, "cached": False}
-            yield f"data: {json.dumps(done_evt)}\n\n"
-
-        except Exception as exc:
-            logger.warning("stream_library_summary failed", exc_info=exc)
-            if isinstance(exc, ValueError):
-                msg = "LLM provider not configured. Add your API key in Settings."
-            elif isinstance(exc, LLMAuthenticationError):
-                msg = "LLM API key is invalid. Check your key in Settings."
-            else:
-                msg = "LLM service unavailable. If using Ollama, run: ollama serve"
-            err_evt = {"error": "llm_unavailable", "message": msg, "done": True}
-            yield f"data: {json.dumps(err_evt)}\n\n"
-
-    async def refresh_library_summary(self) -> None:
-        """Regenerate the library summary in place, keeping the old one readable.
-
-        This used to delete every row, which left the library with no summary at
-        all until something regenerated it -- and that something was the next
-        question. `summary_node` found nothing, fired the generation itself, and
-        then queued behind it on the one serving slot: measured 2026-08-17 at 54.5s
-        to first token against a 13.5s median for the same question. That Ask also
-        took the retrieval route rather than the summary route, so it differed in
-        kind and not only in latency.
-
-        Regenerating here puts the work in ingestion, where the admission gate can
-        defer it, and readers keep serving the previous summary until the
-        replacement is stored -- both readers order by `created_at`, so the new row
-        wins the moment it exists and never before. A summary one document out of
-        date is worth more than no summary at all.
-        """
-        from app.services.llm_routing import refusal  # noqa: PLC0415
-
-        if refusal("background") is not None:
-            logger.info("library summary refresh: not run, this host refuses the background model")
-            return
-        try:
-            async for _ in self.stream_library_summary(
-                mode="executive", model=None, force_refresh=True, background=True
-            ):
-                pass
-        except Exception as exc:
-            logger.warning("library summary refresh failed (non-fatal): %s", exc)
 
 
 _summarization_service: SummarizationService | None = None

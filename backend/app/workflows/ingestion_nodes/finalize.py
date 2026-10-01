@@ -31,6 +31,7 @@ from app.services.activity_service import ActivityService
 from app.services.document_tagger import enrich_document_tags
 from app.services.enrichment_worker import get_enrichment_worker
 from app.services.ingestion_jobs import get_ingestion_jobs
+from app.services.library_summary import get_library_summary_service
 from app.services.model_router import resolve
 from app.services.section_summarizer import (
     defer_section_summaries,
@@ -92,7 +93,7 @@ async def _run_pregenerate(doc_id: str) -> None:
     # a cancelled task (the document was deleted) must not start a library synthesis.
     # Refreshed here rather than left for the next question to trigger: that put a
     # whole library synthesis in front of an Ask that had to wait for it.
-    await svc.refresh_library_summary()
+    await get_library_summary_service().refresh_library_summary()
 
 
 async def _run_progressive_summarization(doc_id: str) -> None:

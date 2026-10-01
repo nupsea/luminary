@@ -83,7 +83,7 @@ async def test_library_summary_synthesizes_multiple_docs(test_db):
     mock_llm = MagicMock()
     mock_llm.generate = AsyncMock(return_value=_async_iter(["Theme A ", "Theme B"]))
 
-    with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
+    with patch("app.services.library_summary.get_llm_service", return_value=mock_llm):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post("/summarize/all", json={"mode": "executive", "model": None})
 
@@ -122,7 +122,7 @@ async def test_library_summary_cached_on_second_call(test_db):
     mock_llm = MagicMock()
     mock_llm.generate = AsyncMock(side_effect=_counting_gen)
 
-    with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
+    with patch("app.services.library_summary.get_llm_service", return_value=mock_llm):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             # First call — generates and stores
             resp1 = await ac.post("/summarize/all", json={"mode": "executive", "model": None})
@@ -152,7 +152,7 @@ async def test_library_summary_error_when_fewer_than_2_docs(test_db):
     mock_llm = MagicMock()
     mock_llm.generate = AsyncMock()  # should not be called
 
-    with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
+    with patch("app.services.library_summary.get_llm_service", return_value=mock_llm):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post("/summarize/all", json={"mode": "executive", "model": None})
 
@@ -201,9 +201,9 @@ async def test_library_summary_stays_readable_while_it_refreshes(test_db):
         )
         await session.commit()
 
-    from app.services.summarizer import get_summarization_service
+    from app.services.library_summary import get_library_summary_service
 
-    svc = get_summarization_service()
+    svc = get_library_summary_service()
     generating = asyncio.Event()
     may_finish = asyncio.Event()
 
@@ -215,7 +215,7 @@ async def test_library_summary_stays_readable_while_it_refreshes(test_db):
     mock_llm = MagicMock()
     mock_llm.generate = AsyncMock(return_value=_blocked_tokens())
 
-    with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
+    with patch("app.services.library_summary.get_llm_service", return_value=mock_llm):
         refresh = asyncio.create_task(svc.refresh_library_summary())
         await asyncio.wait_for(generating.wait(), timeout=5)
 

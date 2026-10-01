@@ -13,11 +13,11 @@ import pytest
 
 from app.config import get_settings
 from app.services.summarizer import (
-    _CHARS_PER_TOKEN,
     SummarizationService,
     _input_token_budget,
     _summary_num_ctx,
 )
+from app.services.summary_assembly import CHARS_PER_TOKEN
 
 
 class _RecordingLLM:
@@ -45,11 +45,11 @@ def test_num_ctx_is_the_one_local_window():
 
 
 @pytest.mark.asyncio
-async def test_stream_summary_passes_num_ctx_and_stays_in_budget(monkeypatch):
+async def test_stream_summary_passes_num_ctx_and_stays_in_budget(memory_db, monkeypatch):
     svc = SummarizationService()
     llm = _RecordingLLM()
 
-    oversized = "word " * (_input_token_budget() * _CHARS_PER_TOKEN)
+    oversized = "word " * (_input_token_budget() * CHARS_PER_TOKEN)
 
     async def _no_cache(*args, **kwargs):
         return None
@@ -72,7 +72,7 @@ async def test_stream_summary_passes_num_ctx_and_stays_in_budget(monkeypatch):
     assert call["num_ctx"] == _summary_num_ctx()
     assert call["system"], "system prompt must be sent"
 
-    prompt_tokens = len(call["prompt"]) // _CHARS_PER_TOKEN
+    prompt_tokens = len(call["prompt"]) // CHARS_PER_TOKEN
     assert prompt_tokens <= _input_token_budget()
 
 
