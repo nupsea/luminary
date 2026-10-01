@@ -59,6 +59,7 @@ from app.services.llm import (
     LLMServiceUnavailableError,
     get_llm_service,
 )
+from app.types import DocumentProfile
 
 # Re-exported for back-compat (tests + routers import these here).
 __all__ = [
@@ -278,7 +279,7 @@ async def _fetch_chunks(
     scope: Literal["full", "section"],
     section_heading: str | None,
     session: AsyncSession,
-    content_type: str = "unknown",
+    skip_front_matter: bool = False,
 ) -> list[ChunkModel]:
     """Return ordered chunks for the document, filtered by section when scope='section'.
 
@@ -286,7 +287,7 @@ async def _fetch_chunks(
     appeared tests nothing the document teaches. A section the reader chose is read as is.
     """
     chunks = await _fetch_document_chunks(
-        document_id, scope, section_heading, session, content_type
+        document_id, scope, section_heading, session, skip_front_matter
     )
     return await _drop_reference_lists(chunks, session) if scope == "full" else chunks
 
@@ -296,9 +297,9 @@ async def _fetch_document_chunks(
     scope: Literal["full", "section"],
     section_heading: str | None,
     session: AsyncSession,
-    content_type: str = "unknown",
+    skip_front_matter: bool = False,
 ) -> list[ChunkModel]:
-    """If scope='full' and content_type='book', skips preface/introduction sections
+    """If scope='full' and skip_front_matter, skips preface/introduction sections
     to avoid metadata-heavy flashcards.
     """
     if scope == "section" and section_heading:
@@ -319,7 +320,7 @@ async def _fetch_document_chunks(
             return list(result.scalars().all())
 
     # Full scope
-    if content_type == "book":
+    if skip_front_matter:
         # Identify sections to skip (preface, intro, etc.)
         skip_terms = [
             "preface",
@@ -366,7 +367,7 @@ async def _fetch_document_chunks(
 
     # If it's a book and we don't have sections (or skip logic didn't trigger),
     # skip the first 5% which is usually front matter/preface.
-    if content_type == "book" and all_chunks:
+    if skip_front_matter and all_chunks:
         # Check if first chunk has a section heading that was missed
         # If no sections at all, skip first 5%
         sections_count_result = await session.execute(
@@ -798,7 +799,7 @@ class FlashcardService(FlashcardSearchService):
         doc = (
             await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         ).scalar_one_or_none()
-        content_type = doc.content_type if doc else "unknown"
+        skip_front_matter = DocumentProfile.of(doc).has_front_matter
 
         if section_id:
             chunks = list(
@@ -818,7 +819,7 @@ class FlashcardService(FlashcardSearchService):
         else:
             # The same reader `generate` uses, so a book's skipped front matter
             # is not counted as material anyone can be questioned on.
-            chunks = await _fetch_chunks(document_id, "full", None, session, content_type)
+            chunks = await _fetch_chunks(document_id, "full", None, session, skip_front_matter)
             decks = list(
                 (
                     await session.execute(

@@ -36,6 +36,7 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "backend"):
 
 from evals.lib.environment import capture as capture_environment  # noqa: E402
 from evals.lib.retrieval_metrics import _extract_hint_norms, _norm  # noqa: E402
+from evals.lib.search import ranked_matches  # noqa: E402
 from evals.lib.scoring_history import append_history  # noqa: E402
 from evals.lib.store import store_results  # noqa: E402
 from evals.run_eval import (  # noqa: E402
@@ -66,18 +67,9 @@ def routing_search(client: httpx.Client, backend_url: str, q: str, limit: int = 
     except Exception as exc:
         print(f"  WARNING: /search failed: {exc}", file=sys.stderr)
         return []
-    # /search groups matches by document (first-appearance order), so a plain
-    # group-by-group flatten lets a top document's TAIL matches shadow another
-    # document's rank-2 chunk and understates route@5/HR@5. global_rank is the
-    # retriever's final ordering; sorting by score instead would invert FTS
-    # (negative BM25) and undo rrf diversification.
-    flat = [
-        (m.get("global_rank", float("inf")), g.get("document_id"), m.get("text", ""))
-        for g in body.get("results", [])
-        for m in g.get("matches", [])
-    ]
-    flat.sort(key=lambda t: t[0])
-    return [(doc, text) for _, doc, text in flat]
+    # A group-by-group flatten would let a top document's tail shadow another
+    # document's rank-2 chunk and understate route@5/HR@5.
+    return [(m["_doc_id"], m.get("text", "")) for m in ranked_matches(body)]
 
 
 def resolve_rows(token: str, backend_url: str, manifest: dict):

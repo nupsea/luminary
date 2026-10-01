@@ -32,7 +32,8 @@ from app.services.section_summarizer import (
     SectionSummarizerService,
     _is_metadata_section,
 )
-from app.services.summarizer import MODE_INSTRUCTIONS, SummarizationService
+from app.services.summarizer import SummarizationService
+from app.services.summary_prompts import MODE_INSTRUCTIONS
 
 # Shared fixture
 

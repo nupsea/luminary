@@ -27,6 +27,25 @@ def get_note_graph_service() -> "NoteGraphService":
     return _note_graph_service
 
 
+def _link_rows(entities: list[dict], tags: list[str], ids: dict[str, str]) -> list[dict]:
+    """The note's entity links: entities its text names, then entities its tags name."""
+    rows = [
+        {
+            "entity_id": ids[e["name"].lower()],
+            "kind": "written_about",
+            "confidence": float(e.get("score", 0.8)),
+        }
+        for e in entities
+        if e.get("name") and e["name"].lower() in ids
+    ]
+    rows += [
+        {"entity_id": ids[t.lower()], "kind": "tag", "confidence": 1.0, "tag": t}
+        for t in tags
+        if t and t.lower() in ids
+    ]
+    return rows
+
+
 class NoteGraphService:
     async def upsert_note_node(
         self, note_id: str, content: str, document_id: str | None, tags: list[str]
@@ -39,37 +58,29 @@ class NoteGraphService:
             entities = await asyncio.to_thread(
                 self._extract_entities, note_id, content, document_id
             )
+            # A failed extraction keeps the note's written_about links rather than erasing them.
+            kinds = ("tag",) if entities is None else ("written_about", "tag")
+            entities = entities or []
             async with get_session_factory()() as session:
                 repo = GraphNoteEntityRepo(session)
                 names = [e.get("name", "") for e in entities] + list(tags)
                 ids = await repo.resolve_names(names, document_id)
-                rows = [
-                    {
-                        "entity_id": ids[e["name"].lower()],
-                        "kind": "written_about",
-                        "confidence": float(e.get("score", 0.8)),
-                    }
-                    for e in entities
-                    if e.get("name") and e["name"].lower() in ids
-                ]
-                rows += [
-                    {"entity_id": ids[t.lower()], "kind": "tag", "confidence": 1.0, "tag": t}
-                    for t in tags
-                    if t and t.lower() in ids
-                ]
-                await repo.replace(note_id, rows)
+                await repo.replace(note_id, _link_rows(entities, tags, ids), kinds)
                 await session.commit()
         except Exception:
             logger.warning("upsert_note_node failed (non-fatal) for %s", note_id, exc_info=True)
 
-    def _extract_entities(self, note_id: str, content: str, document_id: str | None) -> list[dict]:
+    def _extract_entities(
+        self, note_id: str, content: str, document_id: str | None
+    ) -> list[dict] | None:
+        """The note's entities, or None when extraction failed."""
         try:
             extractor = _ner_module.get_entity_extractor()
             chunks = [{"id": note_id, "document_id": document_id or "", "text": content}]
             return extractor.extract(chunks, content_type="unknown")
         except Exception as exc:
             logger.warning("GLiNER extraction failed for note %s: %s", note_id, exc)
-            return []
+            return None
 
     async def get_entities_for_note(self, note_id: str) -> list[dict]:
         """[{name, type, confidence, edge_type}] for the note's entities."""

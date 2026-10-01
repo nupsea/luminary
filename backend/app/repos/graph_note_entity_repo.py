@@ -34,12 +34,19 @@ class GraphNoteEntityRepo:
             resolved.setdefault(name, entity_id)
         return resolved
 
-    async def replace(self, note_id: str, rows: list[dict[str, Any]]) -> None:
-        """Make `rows` the note's entity links. Nothing is stored for a deleted note.
+    async def replace(
+        self,
+        note_id: str,
+        rows: list[dict[str, Any]],
+        kinds: tuple[str, ...] = ("written_about", "tag"),
+    ) -> None:
+        """Make `rows` the note's links of `kinds`. Nothing is stored for a deleted note.
 
         Each row: entity_id, kind ('written_about' | 'tag'), confidence, tag.
         """
-        await self.session.execute(delete(NoteEntity).where(NoteEntity.note_id == note_id))
+        await self.session.execute(
+            delete(NoteEntity).where(NoteEntity.note_id == note_id, NoteEntity.kind.in_(kinds))
+        )
         if not rows or not await self.session.scalar(
             select(exists().where(NoteModel.id == note_id))
         ):

@@ -74,7 +74,7 @@ async def test_a_full_read_skips_the_bibliography(test_db, heading):
     _engine, factory, _tmp = test_db
     await _document(factory, [(PROSE, None), (ENTRIES, heading)])
     async with factory() as session:
-        chunks = await _fetch_chunks("d1", "full", None, session, "paper")
+        chunks = await _fetch_chunks("d1", "full", None, session)
     assert [c.id for c in chunks] == ["c0"]
 
 
@@ -82,7 +82,7 @@ async def test_a_document_that_is_only_a_bibliography_is_read_as_is(test_db):
     _engine, factory, _tmp = test_db
     await _document(factory, [(ENTRIES, None)])
     async with factory() as session:
-        chunks = await _fetch_chunks("d1", "full", None, session, "paper")
+        chunks = await _fetch_chunks("d1", "full", None, session)
     assert [c.id for c in chunks] == ["c0"]
 
 
@@ -90,5 +90,5 @@ async def test_a_chosen_references_section_is_read_as_is(test_db):
     _engine, factory, _tmp = test_db
     await _document(factory, [(PROSE, "Encoder"), (ENTRIES, "References")])
     async with factory() as session:
-        chunks = await _fetch_chunks("d1", "section", "References", session, "paper")
+        chunks = await _fetch_chunks("d1", "section", "References", session)
     assert [c.id for c in chunks] == ["c1"]

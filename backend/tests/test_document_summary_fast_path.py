@@ -34,6 +34,7 @@ from sqlalchemy import select
 import app.services.summarizer as summarizer
 from app.models import ChunkModel, DocumentModel, SectionModel, SectionSummaryModel, SummaryModel
 from app.services.summarizer import SummarizationService, _input_token_budget
+from app.services.summary_assembly import split_for_detail
 
 _MAP_TOKEN_THRESHOLD = _input_token_budget()
 _MAP_BATCH_TOKENS = 3_000
@@ -308,7 +309,7 @@ async def test_detailed_without_section_summaries_covers_every_batch(test_db):
     """
     svc = SummarizationService()
     text = "\n\n".join(f"## Section {i}\n{'word ' * 900}" for i in range(6))
-    batches = summarizer._split_for_detail(text)
+    batches = split_for_detail(text)
 
     assert len(batches) > 1, "a document this long must split into more than one call"
     assert "".join(batches).replace("\n", "") == text.replace("\n", ""), (
@@ -356,7 +357,7 @@ async def test_progressive_summarization_never_falls_back_to_map_reduce(test_db)
         patch("app.services.summarizer.get_llm_service", return_value=mock_llm),
         patch("app.services.section_summarizer.get_llm_service", return_value=mock_llm),
         patch(
-            "app.services.summarizer.SummarizationService.refresh_library_summary",
+            "app.services.library_summary.LibrarySummaryService.refresh_library_summary",
             new_callable=AsyncMock,
         ),
     ):

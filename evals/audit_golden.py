@@ -48,6 +48,8 @@ from run_eval import (  # noqa: PLC0415 -- intentional: same-dir module
     load_manifest,
 )
 
+from evals.lib.search import ranked_matches  # noqa: E402 -- after run_eval sets sys.path
+
 
 @dataclass
 class AuditRow:
@@ -104,16 +106,7 @@ def _search(
     except Exception:
         return [], 0
 
-    matches: list[dict] = []
-    for group in body.get("results", []):
-        for m in group.get("matches", []):
-            m_copy = dict(m)
-            m_copy["_doc_id"] = group.get("document_id")
-            matches.append(m_copy)
-    # global_rank restores the retriever's order across document groups; a
-    # score sort would invert FTS (negative BM25) and undo rrf diversification.
-    matches.sort(key=lambda m: m.get("global_rank", float("inf")))
-    return matches, status
+    return ranked_matches(body), status
 
 
 def audit_dataset(

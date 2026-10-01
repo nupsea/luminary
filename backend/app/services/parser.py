@@ -664,6 +664,37 @@ class DocumentParser:
             # sibling on that page must not repeat that prefix.
             page_cursor: dict[int, int] = {}
 
+            # Text before the first bookmark: a paper's title page and abstract,
+            # which arXiv bookmarks start after (#97). It has no heading (I-30).
+            first_page_idx = max(0, toc[0][2] - 1)
+            front: list[str] = []
+            front_page_blocks: list[int] = []
+            for pn in range(first_page_idx + 1):
+                if pn:
+                    front_page_blocks.append(len(front))
+                blocks = _page_blocks(pn)
+                if pn == first_page_idx:
+                    blocks = blocks[: _find_heading_block(blocks, toc[0][1], 0) or 0]
+                front.extend(blocks)
+            front_text = "\n\n".join(front).strip()
+            if front_text:
+                joined = "\n\n".join(front)
+                lead = len(joined) - len(joined.lstrip())
+                offsets = _block_start_offsets(front)
+                raw_parts.append(front_text)
+                sections.append(
+                    Section(
+                        heading="",
+                        level=1,
+                        text=front_text,
+                        page_start=1,
+                        page_end=first_page_idx + 1,
+                        page_breaks=[
+                            max(0, offsets[i] - lead) for i in front_page_blocks if i < len(offsets)
+                        ],
+                    )
+                )
+
             for i, (lv, ti, pg) in enumerate(toc):
                 # Up to the NEXT entry, whatever its level. Ending at the next
                 # same-or-higher level made a chapter span all its children and
