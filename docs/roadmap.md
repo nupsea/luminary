@@ -96,9 +96,9 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | — | 0.11.0 | The docked reader — **shipped** | | A passage captured in the reader resolves back to its locus for page, video and web; no modal opens from the reader |
 | — | 0.12.0 | The Brief — **parked** | | None; no rung waits on it |
 | I. Every host | 0.13.x | Every host is a first-class host — **0.13.9 released; exit gate open.** **Checkpoint A** | #24, #99, #110, #154, #155, #156 | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator; `make smoke` green on Windows and against the bundled macOS app |
-| II. Stability | 0.14.x | Gates you can believe — **0.14.3 released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
-| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #160, #161, #185, #186, #187, #188, #189, #191, #204, #205 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
-| III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement | #162, #195, #221, #222, #223 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
+| II. Stability | 0.14.x | Gates you can believe — **0.14.5 released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
+| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #161, #185, #186, #187, #188, #189, #191, #204, #205 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
+| III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement | #160, #162, #195, #221, #222, #223, #226, #227 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail | #48 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
 | | 0.18.0 | Your own server. **Checkpoint C** | | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key |
 | IV. Separation | 0.19.0 | Components separated for mobile | | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
@@ -162,7 +162,7 @@ resolves on Windows, `app.main` imports, and the policy answers there.
 **What the job does not claim is the rung.** It proves the dependency step resolves, the app
 imports, and the policy answers. `make ci` and `make smoke` green on Windows are this rung's exit
 gate, and widening the job to them is where the rest of the Windows work will show up — path
-handling, the Kuzu lock, and whatever the suite assumes about `/`.
+handling, the graph import's Kuzu lock on an upgraded library, and whatever the suite assumes about `/`.
 
 Keep one probe with a branch per platform. A second copy of the policy would eventually disagree
 with this one, and the copy a user meets is the one that has to be right.
@@ -321,8 +321,8 @@ What remains open:
 **A Kuzu lock cannot go stale is a POSIX statement.** `flock` is advisory and released by the kernel
 when the holder dies, which is why this repo forbids a lockfile or any lock-clearing logic. Windows
 locks are mandatory and a handle can outlive an abrupt termination, so the same relaunch raises
-`PermissionError: [WinError 32]`. The graph store moves into SQLite in 0.15.0 (below), which removes
-this lock rather than working around it.
+`PermissionError: [WinError 32]`. The graph moved into SQLite in 0.15.0 (below). Only the one-time
+import still opens `graph.kuzu`, read-only, and it defers to the next launch while the lock is held (I-24).
 
 **On a host that cannot run a local model, the chosen mode decides what runs, and the app says so.**
 Local, Hybrid and Cloud are one stored setting, asked once at first launch for every install path and
@@ -352,8 +352,8 @@ and `verify-citation` green. Not yet run:
 
 Defects that were written here have moved to the tracker: `eval-summary` scoring a stored summary
 (#154), the Windows proxy for model pulls (#155) and split GPU/CPU offload (#156) belong to this
-phase. The false-premise answer (#158), Wikipedia `[edit]` links (#159) and flashcard floors (#160)
-belong to 0.15.0; YouTube verification (#162) moved to 0.16.0. Three instrument defects listed here were fixed
+phase. The false-premise answer (#158) and Wikipedia `[edit]` links (#159) belong to 0.15.0; the flashcard
+floors (#160) and YouTube verification (#162) moved to 0.16.0. Three instrument defects listed here were fixed
 on `master` before the move: `eval-ingest` re-resolves a document by filename (#143), atomicity is
 structural (`is_atomic`), and a judge verdict outside its enum is excluded rather than crashing
 the run.
@@ -524,17 +524,23 @@ no-new-quarantine rule, and that is the signal to move it back up.
 
 ### 4. Stores that agree, output you can measure — 0.15.0
 
-A failed graph write is lost, and SQLite and Kuzu diverge with nothing reconciling them (#65). Entity
-ingest samples 2.4% of a long book, and reindex disagrees with ingest (#63). The md/epub/docx/txt paths
-are unmeasured, and audio ingested before 0.7.5 has no sections (#97). The parent-section duplication
-#97 also named is fixed.
+**Done:**
+- The graph moved into SQLite, so a note and its graph edges commit together (#65).
+- Ingest and reindex read the same entity sample, and the sample size is stored and shown (#63).
+- `run_ingest_eval.py --all-documents` measures the md, txt and epub paths (#97). The library has no docx.
+- Audio ingested before 0.7.5 is given sections at startup (#97).
+- Text before a document's first heading is kept (I-30).
+
+**Kept on purpose:** a long book's entities still come from an even 500-chunk sample. That sample
+finds 16–18% of what a full GLiNER scan finds, and a full scan costs about 0.08 s per chunk
+(PR #217).
 
 **What a user receives is measured before it is a default.** Two shipped behaviours change the answer
 with no quality number behind them: the slow-host context budget halves the passages, and note
 search's semantic arm is never scored on a query with no lexical overlap (#100). Suggested questions
 are generated from section summaries rather than text, so they presuppose framings the document never
 makes, and the ungrounded answer that follows renders like a grounded one (#66). The same bar covers
-Ask on a false premise (#158), web chunk hygiene (#159), the flashcard floors (#160) and flashcard quality:
+Ask on a false premise (#158), web chunk hygiene (#159) and flashcard quality:
 0.53 of delivered cards are good, and no checker applied after generation lifts that above 0.62 (#191).
 A prompt that asks for a reason only where the text states one, plus a check that rejects unnamed
 subjects, raised hand-graded good-among-delivered from 0.49 to 0.71 over two local runs (2026-09-29).
@@ -546,6 +552,14 @@ the difficulty choice, stores it on the card anyway, and gives no Bloom level
 analysis the sentence does not state, so it needs its own design and a graded run. The remaining misses
 are speakers the source mislabels (the Gita's chapter headings name the wrong speaker) and misread
 text.
+
+**The flashcard floors (#160) moved to 0.16.0, behind the instrument (#226).** Naming the work in
+the unit prompt did not move clarity beyond run-to-run noise. Over four runs on one library copy
+(judge `qwen2.5:14b-instruct`, 35 rows, 2026-10-02), clarity was 3.09 and 3.35 without the change
+and 3.27 and 3.26 with it. No run reached the 3.5 floor. Clarity is the only judged axis with no
+anchors (`evals/lib/flashcard_metrics.py`), and the judge leaves cards unjudged on factuality (#226).
+The floors stay where they are until the judge can resolve a change. The branch
+`fix/flashcard-clarity-160` is kept and not merged.
 
 **Query-time graph expansion is removed from `/search`; do not restore it.** It bought nothing:
 `run_eval.py --ablation`, 2026-09-21, dev library, GLiNER held resident and the arms confirmed to
@@ -570,8 +584,11 @@ and traversal already runs in Python (the learning path's BFS and topological so
 
 The port removes #65's drift, #185's event-loop blocking and the Windows lock by construction, and
 puts one store rather than two behind 0.17.0's library scope and snapshot. It does not fix what the
-graph holds: concept prerequisites, `PROMOTED_FROM` and entity `RELATED_TO` are empty (#161), and
-ingest samples 2.4% of a long book (#63).
+graph holds:
+- Entity `RELATED_TO` and `PROMOTED_FROM` had no writer. Their readers are removed, and the import
+  counts their rows rather than copying them (#161).
+- Prerequisite edges have no producer: the `prerequisites` job is registered but never enqueued. So
+  the "Where to start" panel and `/study/path` are always empty (#227, 0.16.0).
 
 The port keeps the path to a hosted version open: foreign keys with `ON DELETE CASCADE`, a
 `library_id` column from the first revision, portable SQLAlchemy only (no FTS, no SQLite-only
@@ -586,9 +603,22 @@ from before 0.15.0 is copied on first launch, domain by domain, in one verified 
 2026-10-01, the import took 0.83 s and `backend/tools/graph_parity.py` explained every Kuzu row it
 left out: 17,830 entities with no document, the 54,103 edges and 4,959 `SAME_CONCEPT` links that
 pointed at them, 2,603 self-pairs and 1,255 diagram nodes of deleted documents. Nothing in SQLite
-was absent from Kuzu. Open: #185's two-arm timeout run has not been done; graph writes are async
-SQLite now, but GLiNER extraction still runs inline (I-2). `kuzu` stays a dependency for the import
-until 1.0.0-rc, which deletes the import and tells users to delete `graph.kuzu`.
+was absent from Kuzu.
+
+**#185 is closed**, with no event-loop fix needed: the timeouts came from the upload e2e test sharing
+the `:memory:` connection (#219). A 24-run alternating A/B, v0.14.5 against master, showed no e2e
+timeout on either arm. GLiNER extraction itself still runs inline (I-2).
+
+**The upgrade test passed** on `master` at `6b246437`, 2026-10-02. The input was a copy of the dev
+library last opened at revision `f1a2b3c4d5e6`. Results:
+- Migrations reached head.
+- All three graph domains imported with the parity run's skip counts.
+- The 4 audio documents without sections went to 0.
+- The document, note and flashcard counts did not change.
+- `graph.kuzu` was byte-identical afterwards.
+
+`kuzu` stays a dependency for the import until 1.0.0-rc, which deletes the import and tells users to
+delete `graph.kuzu`.
 
 **Retiring `content_type` is not a mechanical refactor, so it moved to 0.16.0 (#223).** `form`,
 `domain` and `register` are written at ingest by `_persist_classification`, but chunking, the book
@@ -600,6 +630,16 @@ legacy columns, and the quality ratchet counts `content_type` references per fil
 
 YouTube ingest re-verification (#162) moved to 0.16.0: it needs traffic the development network does
 not allow. Then Checkpoint B: the app is stable enough that the next three rungs open it to the network.
+
+**Checkpoint B gates still to run** (table under "Checkpoint releases"). Each one is recorded here
+when it passes, or named in the release notes as not exercised:
+- [ ] Close or ship #66 and #100 with their measurements. #158 ships open and the release notes say so.
+- [ ] `make ci` on GitHub at the release commit; `make smoke` against the bundled macOS app.
+- [ ] `make smoke` against the bundled app on Windows; `desktop-installers.yml` green.
+- [ ] `make eval-all`, `eval-notes`, `eval-summary` and `eval-flashcards`, compared on one corpus fingerprint.
+- [ ] `make verify-dock`, `make verify-citation`, `make measure-ttft`.
+- [ ] The manual pass on a machine that has never seen Luminary, per platform.
+- [x] Upgrade from a 0.14.5 library (above).
 
 ### 5. Device auth and pairing — 0.16.0
 
@@ -810,8 +850,8 @@ lines with their own copies of manifest, search and history plumbing.
 
 - **Sync through storage the user controls** (iCloud Drive, OneDrive, Dropbox, Google Drive) —
   after 1.0; in 1.0 the phone syncs through the user's server. The live stores cannot be what syncs:
-  SQLite with WAL, LanceDB and Kuzu are all mid-write-sensitive, and a daemon copying a `-wal` or a
-  Kuzu directory mid-write produces a corrupt library on the other machine. What syncs is 0.17.0's
+  SQLite with WAL and LanceDB are both mid-write-sensitive, and a daemon copying a `-wal` or a
+  LanceDB directory mid-write produces a corrupt library on the other machine. What syncs is 0.17.0's
   snapshot format, with the live stores rebuilt from it. Two machines that both studied offline have
   divergent FSRS state, and last-writer-wins silently discards a review session.
 - **Hosted multi-tenant, the paid tier** — after 1.0. 0.17.0 builds the seams it needs; fairness
