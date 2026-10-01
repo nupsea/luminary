@@ -85,6 +85,9 @@ class DocumentModel(Base):
     is_favorite: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
+    # Chunks entity extraction read; below the chunk count on a sampled long document
+    # (#63). NULL: the graph predates the count.
+    entity_chunks_scanned: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 

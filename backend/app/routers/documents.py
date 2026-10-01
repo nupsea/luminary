@@ -2076,7 +2076,7 @@ async def get_document_diagnostics(document_id: str):
     All other counts are 0 if the store is unavailable or empty.
     """
     async with get_session_factory()() as session:
-        await get_or_404(session, DocumentModel, document_id, name="Document")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
 
         # Two counts share a session with the get_or_404 guard; FTS5 virtual table
         # requires raw SQL so both stay here rather than going through a repo.
@@ -2112,6 +2112,7 @@ async def get_document_diagnostics(document_id: str):
         chunk_count=chunk_count,
         fts_count=fts_count,
         entity_count=entity_count,
+        entity_chunks_scanned=doc.entity_chunks_scanned,
         edge_count=edge_count,
         vector_count=vector_count,
     )

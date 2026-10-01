@@ -48,7 +48,6 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_paper",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book",
     "app/workflows/ingestion_nodes/chunk.py::chunk_node",
-    "app/workflows/ingestion_nodes/entity_extract.py::entity_extract_node",
     "app/workflows/ingestion_nodes/finalize.py::enrichment_enqueue_node",
     "app/workflows/ingestion_nodes/parse.py::classify_node",
     "app/workflows/ingestion_nodes/transcribe.py::transcribe_node"

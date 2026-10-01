@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from typing import NamedTuple
 
 from fastapi import Depends
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
@@ -125,6 +125,13 @@ class DocumentRepo:
             select(func.count(DocumentModel.id)).where(DocumentModel.is_favorite.is_(True))
         )
         return result.scalar_one()
+
+    async def set_entity_chunks_scanned(self, document_id: str, scanned: int) -> None:
+        await self.session.execute(
+            update(DocumentModel)
+            .where(DocumentModel.id == document_id)
+            .values(entity_chunks_scanned=scanned)
+        )
 
     async def read_section_count(self, document_id: str) -> int:
         result = await self.session.execute(

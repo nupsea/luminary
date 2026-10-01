@@ -7722,6 +7722,8 @@ export interface components {
             fts_count: number;
             /** Entity Count */
             entity_count: number;
+            /** Entity Chunks Scanned */
+            entity_chunks_scanned?: number | null;
             /** Edge Count */
             edge_count: number;
             /** Vector Count */
