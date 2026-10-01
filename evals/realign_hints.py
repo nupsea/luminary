@@ -24,6 +24,8 @@ from run_eval import (  # noqa: PLC0415 -- intentional: same-dir module
     load_manifest,
 )
 
+from evals.lib.search import ranked_matches  # noqa: E402 -- after run_eval sets sys.path
+
 
 def search(backend_url: str, question: str, doc_id: str | None, limit: int = 5) -> list[dict]:
     params: dict[str, object] = {"q": question, "limit": limit}
@@ -36,16 +38,7 @@ def search(backend_url: str, question: str, doc_id: str | None, limit: int = 5) 
     except Exception as exc:
         print(f"  ERROR: /search failed: {exc}", file=sys.stderr)
         return []
-    matches: list[dict] = []
-    for group in body.get("results", []):
-        if doc_id and group.get("document_id") != doc_id:
-            continue
-        for m in group.get("matches", []):
-            matches.append(m)
-    # global_rank restores the retriever's order across document groups; a
-    # score sort would invert FTS (negative BM25) and undo rrf diversification.
-    matches.sort(key=lambda m: m.get("global_rank", float("inf")))
-    return matches[:limit]
+    return ranked_matches(body, doc_id)[:limit]
 
 
 def main() -> None:
