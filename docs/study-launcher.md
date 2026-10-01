@@ -97,7 +97,6 @@ type Scope =
 
 - **I-1** -- no shared `AsyncSession` across `asyncio.gather`.
 - **I-2** -- LanceDB calls wrapped in `to_thread` (concept-vector lookups for scope resolution).
-- **I-3** -- guard Kuzu `get_next()` with `has_next()` (route/neighbour queries).
 - **I-13** -- all generation via LiteLLM. **>=1 pytest** for the new endpoint.
 
 ## Done-bar

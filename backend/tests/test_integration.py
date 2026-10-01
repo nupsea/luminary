@@ -12,7 +12,7 @@ Heavy ML services are mocked:
 Real services used:
   - SQLite (in-memory, via async engine)
   - LanceDB (temp directory)
-  - Kuzu graph DB (temp directory)
+  - graph tables in the same SQLite database
   - FTS5 keyword index (part of SQLite)
   - Text splitting / parsing (pure Python)
 
@@ -65,7 +65,7 @@ class _MockEmbeddingService:
 
 @pytest.fixture
 async def integration_db(tmp_path, monkeypatch):
-    """Isolated environment: in-memory SQLite, temp LanceDB dir, temp Kuzu dir,
+    """Isolated environment: in-memory SQLite, temp LanceDB dir,
     mocked embedding service and entity extractor."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
@@ -226,7 +226,7 @@ async def test_ingest_fiction(integration_db, monkeypatch):
     # 3. At least 1 entity should be extracted into the knowledge graph
     from app.services.graph import get_graph_service
 
-    graph_data = get_graph_service().get_graph_for_document(doc_id)
+    graph_data = await get_graph_service().get_graph_for_document(doc_id)
     assert len(graph_data["nodes"]) >= 1, f"Expected ≥1 graph node, got {len(graph_data['nodes'])}"
 
 
@@ -256,7 +256,7 @@ async def test_ingest_technical(integration_db, monkeypatch):
     # 3. At least 1 entity should be extracted into the knowledge graph
     from app.services.graph import get_graph_service
 
-    graph_data = get_graph_service().get_graph_for_document(doc_id)
+    graph_data = await get_graph_service().get_graph_for_document(doc_id)
     assert len(graph_data["nodes"]) >= 1, f"Expected ≥1 graph node, got {len(graph_data['nodes'])}"
 
 

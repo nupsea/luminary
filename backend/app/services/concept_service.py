@@ -1,10 +1,8 @@
 """ConceptService: create and maintain Concepts -- the studyable atom.
 
-A Concept is distinct from a Kuzu Entity (a lexical NER mention). This service owns
-the lifecycle that bridges the two: promoting an Entity cluster into a Concept,
-proposing candidate concepts from non-document material, and keeping the four
-representations in sync (SQLite state, Kuzu topology, LanceDB centroid vector;
-the OKF projection is regenerated in Phase 5). See docs/concepts.md.
+A Concept is distinct from an Entity (a lexical NER mention). This service owns its
+lifecycle and keeps its representations in sync: the SQLite row and topology, the
+LanceDB centroid vector, and the OKF projection. See docs/concepts.md.
 
 Mastery is NOT computed here by text match (I-19) -- the assessment pipeline writes
 concepts.mastery; this service only persists what it is given via set_learning_state.
@@ -22,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ConceptModel
-from app.services.graph import get_graph_service
+from app.repos.graph_concept_repo import GraphConceptRepo
 from app.services.vector_store import get_lancedb_service
 
 logger = logging.getLogger(__name__)
@@ -60,9 +58,8 @@ class ConceptService:
         status: str = "proposed",
         evidence: list[dict] | None = None,
         document_ids: list[str] | None = None,
-        entity_ids: list[str] | None = None,
     ) -> ConceptModel:
-        """Create a Concept across SQLite + Kuzu + LanceDB.
+        """Create a Concept in SQLite (row and topology) and LanceDB (centroid).
 
         evidence items are {document_id, chunk_id, quote}. The LanceDB centroid is
         derived from the evidence chunk_ids (free; no new embedding calls). Flushes
@@ -77,7 +74,6 @@ class ConceptService:
 
         evidence = evidence or []
         document_ids = list(document_ids or [])
-        entity_ids = list(entity_ids or [])
 
         concept_id = uuid.uuid4().hex
         slug = await self._unique_slug(session, label)
@@ -93,17 +89,9 @@ class ConceptService:
         session.add(row)
         await session.flush()
 
-        # Kuzu topology (sync, lock-serialized). Guarded so a graph hiccup never
-        # blocks the SQLite source of truth.
-        try:
-            graph = get_graph_service()
-            graph.upsert_concept_node(concept_id, slug, label, kind, status)
-            for did in document_ids:
-                graph.add_extracted_from(concept_id, did)
-            for eid in entity_ids:
-                graph.add_promoted_from(concept_id, eid)
-        except Exception:
-            logger.warning("create_concept: Kuzu writes failed for %s", concept_id, exc_info=True)
+        graph = GraphConceptRepo(session)
+        for did in document_ids:
+            await graph.add_extracted_from(concept_id, did)
 
         await self.refresh_vector(concept_id, evidence)
         return row
@@ -142,22 +130,12 @@ class ConceptService:
         if row is None or row.status == "confirmed":
             return
         row.status = "confirmed"
-        try:
-            get_graph_service().upsert_concept_node(
-                row.id, row.slug, row.label, row.kind, "confirmed"
-            )
-        except Exception:
-            logger.debug("promote_status: Kuzu update failed for %s", concept_id, exc_info=True)
 
     async def delete_concept(self, session: AsyncSession, concept_id: str) -> None:
-        """Remove a concept from all three stores. The caller commits SQLite."""
+        """Remove a concept and its vector; its edges go by cascade. The caller commits."""
         row = await session.get(ConceptModel, concept_id)
         if row is not None:
             await session.delete(row)
-        try:
-            get_graph_service().delete_concept_node(concept_id)
-        except Exception:
-            logger.debug("delete_concept: Kuzu delete failed for %s", concept_id, exc_info=True)
         try:
             await asyncio.to_thread(get_lancedb_service().delete_concept_vector, concept_id)
         except Exception:
@@ -198,12 +176,6 @@ class ConceptService:
         if row is None:
             return None
         row.label = new_label
-        try:
-            get_graph_service().upsert_concept_node(
-                row.id, row.slug, new_label, row.kind, row.status
-            )
-        except Exception:
-            logger.debug("rename_concept: Kuzu update failed for %s", concept_id, exc_info=True)
         await self._record_override(
             session, kind="rename", target_key=row.slug, payload={"label": new_label}
         )
@@ -219,10 +191,6 @@ class ConceptService:
         if row is None:
             return None
         row.kind = kind
-        try:
-            get_graph_service().upsert_concept_node(row.id, row.slug, row.label, kind, row.status)
-        except Exception:
-            logger.debug("reclassify: Kuzu update failed for %s", concept_id, exc_info=True)
         await self._record_override(
             session, kind="reclassify", target_key=row.slug, payload={"kind": kind}
         )

@@ -1,9 +1,9 @@
-"""graph_node and its entity-extraction / Kuzu-query helpers.
+"""graph_node and its entity-extraction / graph-query helpers.
 
-intent='relational' path: extract entity names from the question, query
-Kuzu's CO_OCCURS + RELATED_TO edges, and run hybrid retrieval (same depth +
-rerank setting as search_node) as a grounding supplement. Falls through to
-search (intent='factual') on Kuzu failure or 0 results.
+intent='relational' path: extract entity names from the question, read the
+CO_OCCURS + RELATED_TO edges of entities with those names, and run hybrid
+retrieval (same depth + rerank setting as search_node) as a grounding supplement.
+Falls through to search (intent='factual') on a graph failure or 0 results.
 """
 
 import logging
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 _ENTITY_RE = re.compile(r'["\']([^"\']{2,})["\']')
 # A run of one or more capitalized words, e.g. "Inverted Index" or "Marie
 # Curie" -- not just its first token. Matching only the first word of a
-# multi-word proper noun sent Kuzu lookups for names that exist nowhere in
+# multi-word proper noun sent graph lookups for names that exist nowhere in
 # the graph (I-55).
 _CAPITALIZED_PHRASE_RE = re.compile(r"\b[A-Z][a-zA-Z]{2,}(?:\s+[A-Z][a-zA-Z]{2,})*\b")
 
@@ -89,47 +89,34 @@ def _extract_entities_from_question(question: str) -> list[str]:
     return entities
 
 
-def _query_kuzu_for_entity(conn, name: str) -> list[str]:
-    """Return formatted relationship strings for one entity from Kuzu."""
+async def _graph_lines_for_entity(name: str, document_ids: list[str] | None) -> list[str]:
+    """Relationship lines for entities called `name`, from documents in scope only (#205)."""
+    graph = _graph_module.get_graph_service()
     lines: list[str] = []
-    # CO_OCCURS edges
     try:
-        r = conn.execute(
-            "MATCH (e:Entity {name: $n})-[r:CO_OCCURS]->(b:Entity)"
-            " RETURN b.name, r.weight ORDER BY r.weight DESC LIMIT 10",
-            {"n": name},
-        )
-        while r.has_next():
-            row = r.get_next()
-            related_name, weight = row[0], row[1]
-            if related_name:
-                lines.append(f"{name} --co-occurs--> {related_name} (weight={weight:.1f})")
+        for related, weight, _ in await graph.get_entity_neighbours(
+            name, "CO_OCCURS", document_ids
+        ):
+            lines.append(f"{name} --co-occurs--> {related} (weight={weight:.1f})")
     except Exception:
         logger.warning("co-occurrence lookup failed for %s", name, exc_info=True)
-    # RELATED_TO edges
     try:
-        r = conn.execute(
-            "MATCH (e:Entity {name: $n})-[r:RELATED_TO]->(b:Entity)"
-            " RETURN b.name, r.relation_label LIMIT 10",
-            {"n": name},
-        )
-        while r.has_next():
-            row = r.get_next()
-            related_name, relation = row[0], row[1]
-            if related_name:
-                lines.append(f"{name} --{relation or 'related'}--> {related_name}")
+        for related, _, relation in await graph.get_entity_neighbours(
+            name, "RELATED_TO", document_ids
+        ):
+            lines.append(f"{name} --{relation or 'related'}--> {related}")
     except Exception:
         logger.warning("related-to lookup failed for %s", name, exc_info=True)
     return lines
 
 
 async def graph_node(state: ChatState) -> dict:
-    """Kuzu entity traversal for relational queries.
+    """Entity-graph lookup for relational queries.
 
-    Extracts entity names from the question, queries CO_OCCURS + RELATED_TO edges,
+    Extracts entity names from the question, reads CO_OCCURS + RELATED_TO edges,
     and runs hybrid retrieval (same depth + rerank setting as search_node) as a
     grounding supplement. Falls through to search_node (via intent='factual') on
-    Kuzu failure or 0 results.
+    a graph failure or 0 results.
     """
     question = state["question"]
     q = state.get("rewritten_question") or question
@@ -140,12 +127,8 @@ async def graph_node(state: ChatState) -> dict:
     entity_names = _extract_entities_from_question(question)
     graph_lines: list[str] = []
 
-    try:
-        conn = _graph_module.get_graph_service()._conn
-        for name in entity_names[:5]:  # cap at 5 entities
-            graph_lines.extend(_query_kuzu_for_entity(conn, name))
-    except Exception:
-        logger.warning("graph_node: Kuzu query failed", exc_info=True)
+    for name in entity_names[:5]:  # cap at 5 entities
+        graph_lines.extend(await _graph_lines_for_entity(name, effective_doc_ids))
 
     logger.info(
         "graph_node: extracted %d entities, got %d graph lines",

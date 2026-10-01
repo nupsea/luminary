@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from task_drain import dispose_engine
 
 import app.database as db_module
-import app.services.graph as graph_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
@@ -29,11 +28,8 @@ async def test_db(tmp_path, monkeypatch):
 
     orig_engine, orig_factory = db_module._engine, db_module._session_factory
     db_module._engine, db_module._session_factory = engine, factory
-    orig_graph = graph_module._graph_service
-    graph_module._graph_service = None
     yield factory
     db_module._engine, db_module._session_factory = orig_engine, orig_factory
-    graph_module._graph_service = orig_graph
     await dispose_engine(engine)
 
 
@@ -51,8 +47,6 @@ async def _seed_doc(factory):
         )
         s.add(CollectionModel(id="col1", name="DATA-ENG", color="#6366F1"))
         await s.commit()
-    graph_module._graph_service = None
-    graph_module.get_graph_service().upsert_document("d1", "Iceberg Book", "book")
 
 
 async def test_overview_aggregates_header_and_collections(test_db):

@@ -161,7 +161,7 @@ async def _get_entity_names_for_document(
     types: list[str] | None = None,
     limit: int = 5,
 ) -> list[str]:
-    """Query Kuzu for top entity names for a document, filtered by type.
+    """Top entity names for a document, filtered by type.
 
     Returns up to *limit* names. Non-fatal: returns [] on error.
     """
@@ -169,7 +169,7 @@ async def _get_entity_names_for_document(
         from app.services.graph import get_graph_service  # noqa: PLC0415
 
         graph_svc = get_graph_service()
-        by_type = await asyncio.to_thread(graph_svc.get_entities_by_type_for_document, document_id)
+        by_type = await graph_svc.get_entities_by_type_for_document(document_id)
         names: list[str] = []
         target_types = types or ["PERSON", "PLACE"]
         for t in target_types:

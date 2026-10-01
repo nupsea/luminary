@@ -31,8 +31,6 @@
     "app/services/flashcard_generators.py::generate_from_graph",
     "app/services/flashcard_generators.py::generate_from_notes",
     "app/services/flashcard_search.py::FlashcardSearchService.search",
-    "app/services/graph_prereq.py::KuzuPrereqRepo.get_learning_path",
-    "app/services/graph_view.py::KuzuViewRepo._get_note_nodes_for_entities",
     "app/services/image_enricher.py::ImageEnricherService.enrich",
     "app/services/image_extractor.py::image_extract_handler",
     "app/services/mastery_service.py::MasteryService.get_heatmap",
@@ -51,7 +49,6 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book",
     "app/workflows/ingestion_nodes/chunk.py::chunk_node",
     "app/workflows/ingestion_nodes/entity_extract.py::entity_extract_node",
-    "app/workflows/ingestion_nodes/entity_extract.py::write_entity_graph",
     "app/workflows/ingestion_nodes/finalize.py::enrichment_enqueue_node",
     "app/workflows/ingestion_nodes/parse.py::classify_node",
     "app/workflows/ingestion_nodes/transcribe.py::transcribe_node"
@@ -74,7 +71,6 @@
     "app/runtime/chat_nodes/confidence.py::augment_node",
     "app/runtime/chat_nodes/search.py::search_node",
     "app/runtime/chat_nodes/synthesize.py::synthesize_node",
-    "app/scripts/reindex_entities.py::reindex_document",
     "app/scripts/remeasure_domain.py::main",
     "app/services/book_parser.py::BookParser._segment_chapters",
     "app/services/concept_linker.py::ConceptLinkerService.link_for_document",
@@ -87,9 +83,6 @@
     "app/services/flashcard_generators.py::_passage_not_yet_used",
     "app/services/flashcard_generators.py::generate",
     "app/services/flashcard_search.py::FlashcardSearchService.search",
-    "app/services/graph_prereq.py::KuzuPrereqRepo.get_learning_path",
-    "app/services/graph_view.py::KuzuViewRepo._get_note_nodes_for_entities",
-    "app/services/graph_view.py::KuzuViewRepo.get_graph_for_documents",
     "app/services/html_to_markdown.py::MarkdownSerializer._block",
     "app/services/html_to_markdown.py::MarkdownSerializer._inline",
     "app/services/image_extractor.py::_cluster_drawings",
@@ -113,10 +106,9 @@
     "app/services/universal_parser.py::UniversalParser._probe",
     "app/services/universal_parser.py::UniversalParser._segment",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
-    "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book",
-    "app/workflows/ingestion_nodes/entity_extract.py::write_entity_graph"
+    "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 237,
+  "complexity_over_10": 233,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
@@ -215,7 +207,7 @@
     "app/workflows/ingestion_nodes/_shared.py": 4,
     "app/workflows/ingestion_nodes/chunk.py": 9,
     "app/workflows/ingestion_nodes/embed.py": 1,
-    "app/workflows/ingestion_nodes/entity_extract.py": 3,
+    "app/workflows/ingestion_nodes/entity_extract.py": 1,
     "app/workflows/ingestion_nodes/finalize.py": 3,
     "app/workflows/ingestion_nodes/transcribe.py": 1
   },

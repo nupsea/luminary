@@ -1812,7 +1812,6 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
             await svc.delete_sqlite_cascade(session, doc)
             await session.commit()
         await asyncio.to_thread(svc.delete_lancedb_vectors, document_id)
-        await asyncio.to_thread(svc.delete_kuzu_nodes, document_id)
         svc.delete_filesystem_assets(document_id)
         deleted.append(document_id)
     if deleted:
@@ -1940,7 +1939,6 @@ async def delete_document(document_id: str):
         await session.commit()  # cascade service took the session; commit completes the transaction
 
     await asyncio.to_thread(svc.delete_lancedb_vectors, document_id)
-    await asyncio.to_thread(svc.delete_kuzu_nodes, document_id)
     svc.delete_filesystem_assets(document_id)
     _schedule_library_summary_refresh()
     logger.info("Deleted document %s", document_id)
@@ -2033,7 +2031,6 @@ async def reparse_document(document_id: str, body: ReparseRequest) -> ReparseRes
         cleared = await svc.delete_derived_for_reparse(session, document_id)
         await session.commit()
     await asyncio.to_thread(svc.delete_lancedb_vectors, document_id)
-    await asyncio.to_thread(svc.delete_kuzu_nodes, document_id)
 
     get_ingestion_jobs().launch(
         document_id,
@@ -2103,10 +2100,9 @@ async def get_document_diagnostics(document_id: str):
     except Exception:
         vector_count = 0
 
-    # Kuzu entity and edge counts (0 if graph unavailable)
     try:
-        entity_count, edge_count = await asyncio.to_thread(
-            _graph_module.get_graph_service().count_for_document, document_id
+        entity_count, edge_count = await _graph_module.get_graph_service().count_for_document(
+            document_id
         )
     except Exception:
         entity_count = 0

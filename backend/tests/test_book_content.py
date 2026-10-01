@@ -39,19 +39,19 @@ class TestBookContentVerification:
     """Per-book content verification after full ingestion."""
 
     @pytest.mark.parametrize("book_name", [e["name"] for e in MANIFEST])
-    def test_known_entities_in_kuzu(self, book_name: str, all_books_ingested):
-        """Each book's known entities must appear in the Kuzu graph (case-insensitive substring)."""
+    async def test_known_entities_in_graph(self, book_name: str, all_books_ingested):
+        """Each book's known entities must appear in the graph (case-insensitive substring)."""
         doc_id = all_books_ingested[book_name]["doc_id"]
         book_entry = MANIFEST_BY_NAME[book_name]
 
         svc = get_graph_service()
-        graph_data = svc.get_graph_for_document(doc_id)
+        graph_data = await svc.get_graph_for_document(doc_id)
         node_names = {node["label"].lower() for node in graph_data["nodes"]}
 
         for entity in book_entry["known_entities"]:
             found = any(entity.lower() in name for name in node_names)
             assert found, (
-                f'Entity "{entity}" not found in Kuzu graph for {book_name}. '
+                f'Entity "{entity}" not found in the graph for {book_name}. '
                 f"Found nodes: {sorted(node_names)[:20]}"
             )
 
@@ -70,13 +70,13 @@ class TestBookContentVerification:
             )
 
     @pytest.mark.parametrize("book_name", [e["name"] for e in MANIFEST])
-    def test_co_occurrence_edges(self, book_name: str, all_books_ingested):
-        """Known entity pairs must have CO_OCCURS edges in the Kuzu graph."""
+    async def test_co_occurrence_edges(self, book_name: str, all_books_ingested):
+        """Known entity pairs must have CO_OCCURS edges in the graph."""
         doc_id = all_books_ingested[book_name]["doc_id"]
         book_entry = MANIFEST_BY_NAME[book_name]
 
         svc = get_graph_service()
-        graph_data = svc.get_graph_for_document(doc_id)
+        graph_data = await svc.get_graph_for_document(doc_id)
         nodes = graph_data["nodes"]
         edges = graph_data["edges"]
 

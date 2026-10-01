@@ -3,7 +3,12 @@ import time
 from pathlib import Path
 
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import StaticPool
 
@@ -144,3 +149,11 @@ def get_session_factory():
 async def get_db() -> AsyncSession:  # type: ignore[return]
     async with get_session_factory()() as session:
         yield session
+
+
+async def optimize_database(engine: AsyncEngine) -> None:
+    """Refresh the planner's statistics. Without them one graph read measured 53 ms, not 0.5 ms."""
+    if engine.dialect.name != "sqlite":
+        return
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql("PRAGMA optimize")

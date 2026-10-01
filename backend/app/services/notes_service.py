@@ -316,16 +316,12 @@ async def sync_note_sources(
 
 
 async def upsert_note_graph(
-    note_id: str,
-    content: str,
-    document_id: str | None,
-    tags: list[str],
-    source_document_ids: list[str] | None = None,
+    note_id: str, content: str, document_id: str | None, tags: list[str]
 ) -> None:
-    """Fire-and-forget: upsert Note node and edges in Kuzu graph."""
+    """Fire-and-forget: refresh the entities the note is about."""
     try:
         await _note_graph_module.get_note_graph_service().upsert_note_node(
-            note_id, content, document_id, tags, source_document_ids or []
+            note_id, content, document_id, tags
         )
         logger.debug("Note graph upserted note_id=%s", note_id)
     except Exception as exc:

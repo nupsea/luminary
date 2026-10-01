@@ -1060,32 +1060,16 @@ class SummarizationService:
                     best[row.document_id] = (prio, row.content)
         return {doc_id: content for doc_id, (_, content) in best.items()}
 
-    def _get_cross_doc_entities(self, min_docs: int = 3, limit: int = 20) -> list[str]:
-        """Query Kuzu for entity names appearing in min_docs or more documents.
-
-        Returns an empty list if Kuzu is unavailable or no entities qualify.
-        """
+    async def _get_cross_doc_entities(self, min_docs: int = 3, limit: int = 20) -> list[str]:
+        """Entity names found in `min_docs` or more documents; [] if the graph fails."""
         try:
             from app.services.graph import get_graph_service  # noqa: PLC0415
 
-            conn = get_graph_service()._conn
-            result = conn.execute(
-                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document)"
-                " WITH e.name AS name, COUNT(DISTINCT d.id) AS doc_count"
-                " WHERE doc_count >= $min"
-                " RETURN name"
-                " ORDER BY doc_count DESC"
-                " LIMIT $lim",
-                {"min": min_docs, "lim": limit},
+            return await get_graph_service().get_cross_document_entities(
+                limit=limit, min_documents=min_docs, topics_only=False
             )
-            names: list[str] = []
-            while result.has_next():
-                row = result.get_next()
-                if row[0]:
-                    names.append(row[0])
-            return names
         except Exception:
-            logger.warning("_get_cross_doc_entities: Kuzu query failed", exc_info=True)
+            logger.warning("_get_cross_doc_entities: graph query failed", exc_info=True)
             return []
 
     async def stream_library_summary(
@@ -1099,7 +1083,7 @@ class SummarizationService:
 
         Cache-first: if a LibrarySummaryModel for this mode already exists it is
         streamed as a single token event.  On cache miss, fetches executive summaries
-        from all documents, queries Kuzu for cross-doc entities, builds input text,
+        from all documents, queries the graph for cross-doc entities, builds input text,
         and generates via LLM.
 
         force_refresh=True skips the cache and regenerates.
@@ -1176,8 +1160,7 @@ class SummarizationService:
                 )
                 parts.append(f"## {titles.get(did, did)}\n{doc_text}")
 
-            # Cross-doc entities from Kuzu (non-fatal)
-            entity_names = self._get_cross_doc_entities()
+            entity_names = await self._get_cross_doc_entities()
             if entity_names:
                 parts.append(f"## Shared themes\n{', '.join(entity_names)}")
 

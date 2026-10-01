@@ -1,7 +1,7 @@
 """comparative_node and its decomposition + per-side resolution helpers.
 
 intent='comparative' path: ask the LLM to extract N subjects + topic,
-resolve each subject to its document set (Kuzu entity match -> title
+resolve each subject to its document set (graph entity match -> title
 match), retrieve topic-focused chunks per side in parallel with the same
 rerank setting search_node uses, then round-robin interleave so no side
 dominates the context window. Falls back to unfiltered retrieval if
@@ -74,8 +74,8 @@ async def _resolve_side_to_docs(side_name: str, scope_doc_ids: list[str] | None)
     """Resolve a comparison side (author, character, work title) to document IDs.
 
     Resolution order (results are unioned):
-      1. Kuzu exact entity match  — Entity.name == side_name (case-insensitive)
-      2. Kuzu partial entity match — Entity.name contains side_name
+      1. Graph exact entity match  — entity name == side_name (case-insensitive)
+      2. Graph partial entity match — entity name contains side_name
       3. SQLite document title match — title contains side_name
 
     An entity that appears in multiple documents (e.g. an author across several
@@ -86,32 +86,14 @@ async def _resolve_side_to_docs(side_name: str, scope_doc_ids: list[str] | None)
     """
     doc_ids: set[str] = set()
 
-    # Kuzu entity → document lookup
     try:
-        conn = _graph_module.get_graph_service()._conn
-        r = conn.execute(
-            "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document)"
-            " WHERE lower(e.name) = lower($name)"
-            " RETURN DISTINCT d.id",
-            {"name": side_name},
+        doc_ids.update(
+            await _graph_module.get_graph_service().get_document_ids_for_entity(side_name)
         )
-        while r.has_next():
-            row = r.get_next()
-            if row[0]:
-                doc_ids.add(row[0])
-        if not doc_ids:
-            r = conn.execute(
-                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document)"
-                " WHERE contains(lower(e.name), lower($name))"
-                " RETURN DISTINCT d.id LIMIT 20",
-                {"name": side_name},
-            )
-            while r.has_next():
-                row = r.get_next()
-                if row[0]:
-                    doc_ids.add(row[0])
     except Exception:
-        logger.warning("_resolve_side_to_docs: Kuzu lookup failed for %r", side_name, exc_info=True)
+        logger.warning(
+            "_resolve_side_to_docs: graph lookup failed for %r", side_name, exc_info=True
+        )
 
     # Document title search — catches cases where the side name appears in a title
     try:

@@ -1,4 +1,4 @@
-"""I-2: sync Kuzu/LanceDB calls must not run on the event loop.
+"""I-2: sync store calls (LanceDB, the legacy Kuzu import) must not run on the event loop.
 
 The server runs a single worker, so one unwrapped traversal stalls every
 concurrent request -- a 2ms /tags/graph measured 8.5s behind an all-library
@@ -30,7 +30,7 @@ NOT_IO = {
 }
 
 # Pre-existing debt. May only shrink.
-BASELINE = 43
+BASELINE = 6
 
 
 def _sync_store_calls(path: Path) -> list[str]:

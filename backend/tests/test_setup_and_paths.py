@@ -73,7 +73,15 @@ def test_status_starts_unready_and_reports_usable_once_db_is_up():
 
 def test_status_reaches_ready_and_counts_skipped_as_satisfied():
     status = StartupStatus()
-    for key in ("db", "ollama_server", "chat_model", "vision_model", "embedder", "ner"):
+    for key in (
+        "db",
+        "graph_import",
+        "ollama_server",
+        "chat_model",
+        "vision_model",
+        "embedder",
+        "ner",
+    ):
         status.set_state(key, "ready")
     status.set_state("reranker", "skipped", "Reranking is turned off")
 
@@ -110,7 +118,7 @@ def test_uninstalled_chat_model_is_missing_not_failed():
     """A fresh install has no chat model. Reporting that as a failure put a
     warning icon and a raw litellm traceback in front of a working install."""
     status = StartupStatus()
-    for key in ("db", "embedder", "ollama_server", "reranker"):
+    for key in ("db", "graph_import", "embedder", "ollama_server", "reranker"):
         status.set_state(key, "ready")
     status.set_state("ner", "skipped")
     status.set_state("chat_model", "missing", "llama3.2")

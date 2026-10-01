@@ -1,6 +1,6 @@
-"""Tests for S58 — query rewriting via Kuzu entity lookup.
+"""Tests for S58 — query rewriting via graph entity lookup.
 
-All tests mock both the Kuzu graph service and the LLM service so no model
+All tests mock both the graph service and the LLM service so no model
 downloads or live databases are required.
 """
 
@@ -13,8 +13,8 @@ from app.services.qa import _maybe_rewrite_query
 # Helper
 
 
-def _make_graph_service(entity_names: list[str]) -> MagicMock:
-    svc = MagicMock()
+def _make_graph_service(entity_names: list[str]) -> AsyncMock:
+    svc = AsyncMock()
     svc.get_entities_for_documents.return_value = entity_names
     return svc
 
@@ -30,7 +30,7 @@ def _make_llm_service(rewritten: str) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_no_rewrite_when_no_vague_refs():
-    """Question without vague pronouns: zero LLM calls, zero Kuzu queries."""
+    """Question without vague pronouns: zero LLM calls, zero graph queries."""
     question = "What is osmosis?"
     mock_graph = _make_graph_service(["Alice", "Bob"])
     mock_llm = _make_llm_service("irrelevant")
@@ -89,8 +89,8 @@ async def test_skip_rewrite_for_all_scope():
 
 
 @pytest.mark.asyncio
-async def test_skip_rewrite_when_kuzu_empty():
-    """No entities found in Kuzu: original question returned."""
+async def test_skip_rewrite_when_graph_empty():
+    """No entities in the graph: original question returned."""
     question = "What did they decide?"
     mock_graph = _make_graph_service([])  # empty entity list
     mock_llm = _make_llm_service("irrelevant")

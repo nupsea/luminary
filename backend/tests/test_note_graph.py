@@ -1,253 +1,111 @@
-"""Tests for S163: Notes as Kuzu graph nodes.
+"""The entities a note is about (S163), stored in `graph_note_entities`.
 
-Uses a real in-memory Kuzu instance (tmp_path) so Cypher queries are verified
-without mocking the graph layer. GLiNER is mocked to return controlled entity lists.
+GLiNER is mocked to return controlled entity lists.
 """
 
-import asyncio
-import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete, select
 
-from app.services.graph import KuzuService
+from app.main import app
+from app.models import GraphNoteEntityModel, NoteModel
 from app.services.note_graph import NoteGraphService
-
-# Fixtures
-
-
-@pytest.fixture()
-def kuzu_service(tmp_path):
-    """Real KuzuService backed by a temp directory -- reset per test."""
-    return KuzuService(str(tmp_path))
+from tests.graph_seed import add_graph, add_note
 
 
-@pytest.fixture()
-def note_graph_svc(kuzu_service):
-    """NoteGraphService patched to use the test KuzuService instance."""
-    svc = NoteGraphService()
-    # Patch get_graph_service used inside note_graph.py methods
-    with patch("app.services.note_graph.get_note_graph_service", return_value=svc):
-        with patch("app.services.graph.get_graph_service", return_value=kuzu_service):
-            yield svc, kuzu_service
-
-
-def _seed_entity(ks: KuzuService, name: str, etype: str = "CONCEPT") -> str:
-    """Insert an Entity node and return its id."""
-    entity_id = str(uuid.uuid4())
-    ks._conn.execute(
-        "CREATE (:Entity {id: $id, name: $name, type: $type, frequency: 1, aliases: ''})",
-        {"id": entity_id, "name": name, "type": etype},
-    )
-    return entity_id
-
-
-def _seed_document(ks: KuzuService, doc_id: str | None = None) -> str:
-    """Insert a Document node and return its id."""
-    doc_id = doc_id or str(uuid.uuid4())
-    ks._conn.execute(
-        "CREATE (:Document {id: $id, title: 'Test Doc', content_type: 'book'})",
-        {"id": doc_id},
-    )
-    return doc_id
-
-
-def _mock_extractor(entity_name: str, score: float = 0.9):
-    """Return a mock EntityExtractor that yields one entity."""
+def _extractor(*names: str, score: float = 0.9):
     mock = MagicMock()
     mock.extract.return_value = [
-        {"name": entity_name, "type": "CONCEPT", "score": score, "chunk_id": "c1"}
+        {"name": n, "type": "CONCEPT", "score": score, "chunk_id": "c1"} for n in names
     ]
     return mock
 
 
-def _run(coro):
-    return asyncio.run(coro)
+async def _upsert(note_id, content, document_id=None, tags=(), names=()):
+    with patch("app.services.ner.get_entity_extractor", return_value=_extractor(*names)):
+        await NoteGraphService().upsert_note_node(note_id, content, document_id, list(tags))
 
 
-# Test: upsert_note_node -- WRITTEN_ABOUT edge for known entity
-
-
-def test_written_about_edge_created_for_known_entity(note_graph_svc, tmp_path):
-    svc, ks = note_graph_svc
-    entity_id = _seed_entity(ks, "gradient descent", "CONCEPT")
-    note_id = str(uuid.uuid4())
-
-    mock_ext = _mock_extractor("gradient descent")
-    with (
-        patch("app.services.graph.get_graph_service", return_value=ks),
-        patch("app.services.ner.get_entity_extractor", return_value=mock_ext),
-    ):
-        _run(svc.upsert_note_node(note_id, "Notes on gradient descent optimization.", None, []))
-
-    result = ks._conn.execute(
-        "MATCH (n:Note {id: $nid})-[r:WRITTEN_ABOUT]->(e:Entity {id: $eid}) RETURN r.confidence",
-        {"nid": note_id, "eid": entity_id},
-    )
-    assert result.has_next(), "WRITTEN_ABOUT edge should exist"
-    row = result.get_next()
-    assert isinstance(row[0], float)
-
-
-def test_absent_entity_skipped_without_exception(note_graph_svc):
-    svc, ks = note_graph_svc
-    # No Entity nodes seeded -- extractor returns a name that does not exist in Kuzu
-    note_id = str(uuid.uuid4())
-
-    mock_ext = _mock_extractor("nonexistent entity xyz")
-    with (
-        patch("app.services.graph.get_graph_service", return_value=ks),
-        patch("app.services.ner.get_entity_extractor", return_value=mock_ext),
-    ):
-        # Should not raise
-        _run(
-            svc.upsert_note_node(
-                note_id, "Some content mentioning nonexistent entity xyz.", None, []
+async def _edges(memory_db, note_id: str) -> list[tuple[str, str]]:
+    async with memory_db.factory() as s:
+        rows = await s.execute(
+            select(GraphNoteEntityModel.entity_id, GraphNoteEntityModel.kind).where(
+                GraphNoteEntityModel.note_id == note_id
             )
         )
-
-    # Note node should still have been created
-    result = ks._conn.execute("MATCH (n:Note {id: $id}) RETURN n.id", {"id": note_id})
-    assert result.has_next(), "Note node should be created even when entity is absent"
+        return sorted(tuple(r) for r in rows)
 
 
-# Test: DERIVED_FROM edge when note has document_id and Document node exists
+@pytest.fixture
+async def note(memory_db):
+    await add_note(memory_db, "n1", "placeholder")
+    return "n1"
 
 
-def test_derived_from_edge_created(note_graph_svc):
-    svc, ks = note_graph_svc
-    doc_id = _seed_document(ks)
-    note_id = str(uuid.uuid4())
+async def test_written_about_edge_for_a_known_entity(memory_db, note):
+    await add_graph(memory_db, "d1", {"e1": ("gradient descent", "CONCEPT")})
+    await _upsert(note, "Notes on gradient descent.", names=("gradient descent",))
 
-    with (
-        patch("app.services.graph.get_graph_service", return_value=ks),
-        patch("app.services.ner.get_entity_extractor", return_value=_mock_extractor("")),
-    ):
-        _run(svc.upsert_note_node(note_id, "A note with a source doc.", doc_id, []))
-
-    result = ks._conn.execute(
-        "MATCH (n:Note {id: $nid})-[:DERIVED_FROM]->(d:Document {id: $did}) RETURN n.id",
-        {"nid": note_id, "did": doc_id},
-    )
-    assert result.has_next(), "DERIVED_FROM edge should exist when Document node present"
+    assert await _edges(memory_db, note) == [("e1", "written_about")]
+    [entity] = await NoteGraphService().get_entities_for_note(note)
+    assert entity["edge_type"] == "WRITTEN_ABOUT"
+    assert entity["confidence"] == pytest.approx(0.9)
 
 
-def test_derived_from_edge_skipped_when_doc_absent(note_graph_svc):
-    svc, ks = note_graph_svc
-    note_id = str(uuid.uuid4())
-    fake_doc_id = str(uuid.uuid4())  # Document NOT in Kuzu
-
-    with (
-        patch("app.services.graph.get_graph_service", return_value=ks),
-        patch("app.services.ner.get_entity_extractor", return_value=_mock_extractor("")),
-    ):
-        _run(svc.upsert_note_node(note_id, "Note without matching doc.", fake_doc_id, []))
-
-    result = ks._conn.execute(
-        "MATCH (n:Note {id: $id})-[:DERIVED_FROM]->() RETURN n.id", {"id": note_id}
-    )
-    assert not result.has_next(), "No DERIVED_FROM edge when Document node absent"
+async def test_an_unknown_entity_is_skipped(memory_db, note):
+    await _upsert(note, "Mentions nonexistent entity xyz.", names=("nonexistent entity xyz",))
+    assert await _edges(memory_db, note) == []
 
 
-# Test: TAG_IS_CONCEPT edge when tag matches Entity.name (case-insensitive)
+async def test_a_tag_matching_an_entity_name_ignoring_case_links_it(memory_db, note):
+    await add_graph(memory_db, "d1", {"e1": ("Neural Networks", "CONCEPT")})
+    await _upsert(note, "Content.", tags=("neural networks",))
+    assert await _edges(memory_db, note) == [("e1", "tag")]
 
 
-def test_tag_is_concept_edge_created(note_graph_svc):
-    svc, ks = note_graph_svc
-    entity_id = _seed_entity(ks, "Neural Networks", "CONCEPT")
-    note_id = str(uuid.uuid4())
-
-    with (
-        patch("app.services.graph.get_graph_service", return_value=ks),
-        patch("app.services.ner.get_entity_extractor", return_value=_mock_extractor("")),
-    ):
-        _run(svc.upsert_note_node(note_id, "Content.", None, ["neural networks"]))
-
-    result = ks._conn.execute(
-        "MATCH (n:Note {id: $nid})-[r:TAG_IS_CONCEPT]->(e:Entity {id: $eid}) RETURN r.tag",
-        {"nid": note_id, "eid": entity_id},
-    )
-    assert result.has_next(), "TAG_IS_CONCEPT edge should exist for matching tag"
+async def test_the_notes_own_document_wins_a_shared_name(memory_db, note):
+    await add_graph(memory_db, "d1", {"e1": ("attention", "CONCEPT")})
+    await add_graph(memory_db, "d2", {"e2": ("attention", "CONCEPT")})
+    await _upsert(note, "On attention.", document_id="d2", names=("attention",))
+    assert await _edges(memory_db, note) == [("e2", "written_about")]
 
 
-# Test: delete_note_node removes Note; get_entities_for_note returns []
+async def test_a_resave_replaces_the_notes_edges(memory_db, note):
+    await add_graph(memory_db, "d1", {"e1": ("alpha", "CONCEPT"), "e2": ("beta", "CONCEPT")})
+    await _upsert(note, "alpha", names=("alpha",))
+    await _upsert(note, "beta", names=("beta",))
+    assert await _edges(memory_db, note) == [("e2", "written_about")]
 
 
-def test_delete_note_node_and_verify_entities_empty(note_graph_svc):
-    svc, ks = note_graph_svc
-    entity_id = _seed_entity(ks, "backpropagation")
-    note_id = str(uuid.uuid4())
+async def test_a_deleted_note_leaves_no_edges(memory_db, note):
+    """#65: deleted notes kept their graph nodes in Kuzu; the edge now cascades."""
+    await add_graph(memory_db, "d1", {"e1": ("backpropagation", "CONCEPT")})
+    await _upsert(note, "Backpropagation is key.", names=("backpropagation",))
+    assert await _edges(memory_db, note) == [("e1", "written_about")]
 
-    mock_ext = _mock_extractor("backpropagation")
-    with (
-        patch("app.services.graph.get_graph_service", return_value=ks),
-        patch("app.services.ner.get_entity_extractor", return_value=mock_ext),
-    ):
-        _run(svc.upsert_note_node(note_id, "Backpropagation is key.", None, []))
+    async with memory_db.factory() as s:
+        await s.execute(delete(NoteModel).where(NoteModel.id == note))
+        await s.commit()
 
-    # Verify edge was created
-    result = ks._conn.execute(
-        "MATCH (n:Note {id: $nid})-[:WRITTEN_ABOUT]->(e:Entity {id: $eid}) RETURN n.id",
-        {"nid": note_id, "eid": entity_id},
-    )
-    assert result.has_next(), "Edge should exist before delete"
-
-    with patch("app.services.graph.get_graph_service", return_value=ks):
-        _run(svc.delete_note_node(note_id))
-
-    # Note node should be gone
-    node_result = ks._conn.execute("MATCH (n:Note {id: $id}) RETURN n.id", {"id": note_id})
-    assert not node_result.has_next(), "Note node should be deleted"
-
-    # get_entities_for_note should return []
-    with patch("app.services.graph.get_graph_service", return_value=ks):
-        entities = _run(svc.get_entities_for_note(note_id))
-    assert entities == [], "get_entities_for_note should return [] for deleted note"
+    assert await _edges(memory_db, note) == []
+    assert await NoteGraphService().get_entities_for_note(note) == []
 
 
-# Test: get_notes_for_entity returns correct note_id
+async def test_edges_for_a_note_deleted_before_extraction_finished_are_not_stored(memory_db):
+    """The upsert runs after the save returns, so the note can be gone by then (#65)."""
+    await add_graph(memory_db, "d1", {"e1": ("backpropagation", "CONCEPT")})
+    await _upsert("never-saved", "Backpropagation.", names=("backpropagation",))
+    assert await _edges(memory_db, "never-saved") == []
 
 
-def test_get_notes_for_entity(note_graph_svc):
-    svc, ks = note_graph_svc
-    _seed_entity(ks, "Attention Mechanism", "CONCEPT")
-    note_id = str(uuid.uuid4())
+async def test_get_note_entities_endpoint(memory_db):
+    await add_graph(memory_db, "d1", {"e1": ("gradient", "CONCEPT")})
+    await add_note(memory_db, "n1", "On gradients", "e1")
 
-    mock_ext = _mock_extractor("Attention Mechanism", 0.95)
-    with (
-        patch("app.services.graph.get_graph_service", return_value=ks),
-        patch("app.services.ner.get_entity_extractor", return_value=mock_ext),
-    ):
-        _run(svc.upsert_note_node(note_id, "Attention mechanism in transformers.", None, []))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/notes/n1/entities")
 
-    with patch("app.services.graph.get_graph_service", return_value=ks):
-        note_ids = _run(svc.get_notes_for_entity("attention mechanism"))
-    assert note_id in note_ids
-
-
-# Test: GET /notes/{note_id}/entities endpoint returns correct shape
-
-
-def test_get_note_entities_endpoint(tmp_path):
-    """GET /notes/{note_id}/entities returns a JSON list with name/type/confidence/edge_type."""
-    from fastapi.testclient import TestClient
-
-    from app.main import app
-
-    with TestClient(app) as client:
-        # Create a note to get a valid note_id
-        resp = client.post("/notes", json={"content": "Test entity endpoint note."})
-        assert resp.status_code == 201
-        note_id = resp.json()["id"]
-
-        # Endpoint should return 200 with a list (possibly empty since GLiNER not running)
-        resp = client.get(f"/notes/{note_id}/entities")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert isinstance(data, list)
-        # Each item must have required fields if present
-        for item in data:
-            assert "name" in item
-            assert "type" in item
-            assert "confidence" in item
-            assert "edge_type" in item
+    assert resp.status_code == 200
+    assert [(e["name"], e["edge_type"]) for e in resp.json()] == [("gradient", "WRITTEN_ABOUT")]

@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -249,10 +250,10 @@ class FlashcardModel(Base):
 class ConceptModel(Base):
     """The studyable atom -- the SQLite source of truth for a Concept's hot state.
 
-    Distinct from a Kuzu Entity (a lexical NER mention). A Concept carries persistent
+    Distinct from a graph entity (a lexical NER mention). A Concept carries persistent
     learning state and trust provenance and is the routing unit for sessions/goals/gaps.
-    Topology lives in Kuzu; the derived vector lives in LanceDB; the OKF file is a
-    projection. See docs/concepts.md.
+    Topology lives in `graph_concept_edges`; the derived vector lives in LanceDB; the OKF
+    file is a projection. See docs/concepts.md.
     """
 
     __tablename__ = "concepts"
@@ -1057,6 +1058,223 @@ class ClusterSuggestionModel(Base):
     confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class GraphConceptEdgeModel(Base):
+    """A concept-to-concept edge. The concepts rows are the nodes; deleting one drops its edges."""
+
+    __tablename__ = "graph_concept_edges"
+    __table_args__ = (
+        UniqueConstraint("kind", "source_id", "target_id", name="uq_graph_concept_edge"),
+        CheckConstraint("kind IN ('related', 'prerequisite')", name="ck_graph_concept_edge_kind"),
+        Index("ix_graph_concept_edges_target", "kind", "target_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    source_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), nullable=False
+    )
+    target_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), nullable=False
+    )
+    weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # proposed | confirmed
+    status: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 0.17.0's library scope; unread until then.
+    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class GraphConceptDocumentModel(Base):
+    """A document a concept was extracted from."""
+
+    __tablename__ = "graph_concept_documents"
+    __table_args__ = (Index("ix_graph_concept_documents_document", "document_id"),)
+
+    concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), primary_key=True
+    )
+    document_id: Mapped[str] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
+    )
+    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class GraphEntityModel(Base):
+    """An entity extracted from one document; ids are document-scoped, so it goes with it."""
+
+    __tablename__ = "graph_entities"
+    __table_args__ = (
+        Index("ix_graph_entities_document_type", "document_id", "type"),
+        Index("ix_graph_entities_name", "name"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    type: Mapped[str] = mapped_column(String, nullable=False)
+    # Both grow by one per extracted mention; they diverge on re-extraction, and the
+    # readers use them for different things (node size vs. ranking), so both are kept.
+    frequency: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    mention_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    aliases: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class GraphEntityEdgeModel(Base):
+    """A directed entity-to-entity edge within one document; `kind` names the relation."""
+
+    __tablename__ = "graph_entity_edges"
+    __table_args__ = (
+        UniqueConstraint("kind", "source_id", "target_id", name="uq_graph_entity_edge"),
+        Index("ix_graph_entity_edges_document", "document_id", "kind"),
+        Index("ix_graph_entity_edges_source", "source_id", "kind"),
+        Index("ix_graph_entity_edges_target", "target_id", "kind"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # The relation names the graph API sends: CO_OCCURS, PREREQUISITE_OF, CALLS,
+    # IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON, VERSION_OF, RELATED_TO.
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    source_id: Mapped[str] = mapped_column(
+        String, ForeignKey("graph_entities.id", ondelete="CASCADE"), nullable=False
+    )
+    target_id: Mapped[str] = mapped_column(
+        String, ForeignKey("graph_entities.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[str] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source_section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # RELATED_TO's relation, e.g. "part of".
+    label: Mapped[str | None] = mapped_column(String, nullable=True)
+    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class GraphEntityLinkModel(Base):
+    """Two entities from different documents judged to be the same concept."""
+
+    __tablename__ = "graph_entity_links"
+    __table_args__ = (
+        UniqueConstraint("source_id", "target_id", name="uq_graph_entity_link"),
+        Index("ix_graph_entity_links_target", "target_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_id: Mapped[str] = mapped_column(
+        String, ForeignKey("graph_entities.id", ondelete="CASCADE"), nullable=False
+    )
+    target_id: Mapped[str] = mapped_column(
+        String, ForeignKey("graph_entities.id", ondelete="CASCADE"), nullable=False
+    )
+    source_document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    target_document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    contradiction: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    contradiction_note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # "a" | "b" | ""
+    prefer_source: Mapped[str] = mapped_column(String, nullable=False, default="")
+    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class GraphDiagramNodeModel(Base):
+    """A component, actor or step read from a diagram image."""
+
+    __tablename__ = "graph_diagram_nodes"
+    __table_args__ = (Index("ix_graph_diagram_nodes_document_type", "document_id", "node_type"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    node_type: Mapped[str] = mapped_column(String, nullable=False)
+    source_image_id: Mapped[str] = mapped_column(String, nullable=False, default="")
+    frequency: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class GraphDiagramEdgeModel(Base):
+    """An arrow between two diagram nodes. `label` holds the arrow's text, if any."""
+
+    __tablename__ = "graph_diagram_edges"
+    __table_args__ = (
+        UniqueConstraint("kind", "source_id", "target_id", name="uq_graph_diagram_edge"),
+        Index("ix_graph_diagram_edges_document", "document_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # CONNECTS_TO | STORES_IN | SENDS_TO | HAS_FIELD | REFERENCES_DM | LEADS_TO
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    source_id: Mapped[str] = mapped_column(
+        String, ForeignKey("graph_diagram_nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    target_id: Mapped[str] = mapped_column(
+        String, ForeignKey("graph_diagram_nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[str] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    label: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class GraphDiagramDepictionModel(Base):
+    """A diagram node that depicts a known entity."""
+
+    __tablename__ = "graph_diagram_depictions"
+    __table_args__ = (Index("ix_graph_diagram_depictions_entity", "entity_id"),)
+
+    node_id: Mapped[str] = mapped_column(
+        String, ForeignKey("graph_diagram_nodes.id", ondelete="CASCADE"), primary_key=True
+    )
+    entity_id: Mapped[str] = mapped_column(
+        String, ForeignKey("graph_entities.id", ondelete="CASCADE"), primary_key=True
+    )
+    document_id: Mapped[str] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class GraphNoteEntityModel(Base):
+    """An entity a note is about: named in its text, or matched by one of its tags."""
+
+    __tablename__ = "graph_note_entities"
+    __table_args__ = (
+        CheckConstraint("kind IN ('written_about', 'tag')", name="ck_graph_note_entity_kind"),
+        Index("ix_graph_note_entities_entity", "entity_id"),
+    )
+
+    note_id: Mapped[str] = mapped_column(
+        String, ForeignKey("notes.id", ondelete="CASCADE"), primary_key=True
+    )
+    entity_id: Mapped[str] = mapped_column(
+        String, ForeignKey("graph_entities.id", ondelete="CASCADE"), primary_key=True
+    )
+    kind: Mapped[str] = mapped_column(String, primary_key=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    tag: Mapped[str | None] = mapped_column(String, nullable=True)
+    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class GraphImportStateModel(Base):
+    """Progress of the one-time Kuzu-to-SQLite graph import, one row per domain."""
+
+    __tablename__ = "graph_import_state"
+
+    domain: Mapped[str] = mapped_column(String, primary_key=True)
+    # done | failed | deferred
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    attempted_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    imported_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    skipped_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class NoteLinkModel(Base):

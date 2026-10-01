@@ -1,9 +1,9 @@
-"""DiagramExtractorService: extract typed Kuzu nodes and edges from diagram descriptions.
+"""DiagramExtractorService: extract typed graph nodes and edges from diagram descriptions.
 
 Job type 'diagram_extract' runs after 'image_analyze' completes.
 Reads ImageModel rows where image_type is a qualifying diagram type and description
 is not null, calls the default LLM to extract JSON (nodes + edges), then writes
-DiagramNode rows and diagram edges to Kuzu.
+diagram nodes and edges to the graph tables.
 
 After extraction, attempts name-match linkage: each extracted node name is compared
 case-insensitively against existing LIBRARY/TECHNOLOGY Entity names for the same
@@ -120,12 +120,12 @@ def _parse_llm_response(raw: str) -> dict:
 
 
 class DiagramExtractorService:
-    """Extracts diagram nodes and edges from image descriptions and writes them to Kuzu."""
+    """Extracts diagram nodes and edges from image descriptions and writes them to the graph."""
 
     async def extract(self, document_id: str) -> int:
         """Process all ImageModel rows with qualifying image_type and non-null description.
 
-        Returns count of images for which Kuzu nodes were successfully written.
+        Returns count of images for which graph nodes were successfully written.
         Skips images with description=null (image_analyze has not yet run for them).
         Idempotent: DiagramNode id = f"{image_id}:{node_name.lower()}" so re-runs
         do not create duplicate nodes.
@@ -158,7 +158,7 @@ class DiagramExtractorService:
         semaphore = get_enrichment_llm_semaphore()
 
         async def _extract_one(img) -> bool:  # noqa: ANN001
-            """Extract one diagram and write it to Kuzu. Returns True if written."""
+            """Extract one diagram and write it to the graph. Returns True if written."""
             try:
                 prompt = _build_prompt(img.image_type, img.description or "")
             except KeyError:
@@ -208,7 +208,7 @@ class DiagramExtractorService:
 
             # Never awaits, so concurrent callers cannot interleave one write.
             try:
-                await self._write_to_kuzu(
+                await self._write_to_graph(
                     document_id=document_id,
                     image_id=img.id,
                     image_type=img.image_type,
@@ -217,7 +217,7 @@ class DiagramExtractorService:
                 )
             except Exception as exc:
                 logger.warning(
-                    "diagram_extractor: Kuzu write failed for image_id=%s: %s", img.id, exc
+                    "diagram_extractor: graph write failed for image_id=%s: %s", img.id, exc
                 )
                 return False
 
@@ -253,7 +253,7 @@ class DiagramExtractorService:
         )
         return processed
 
-    async def _write_to_kuzu(
+    async def _write_to_graph(
         self,
         document_id: str,
         image_id: str,
@@ -261,18 +261,17 @@ class DiagramExtractorService:
         nodes: list[dict],
         edges: list[dict],
     ) -> None:
-        """Write extracted diagram nodes and edges to Kuzu.
+        """Write extracted diagram nodes and edges to the graph.
 
         Node dict shape: {"name": str, "node_type": str}
         Edge dict shape: {"from": str, "to": str, "edge_type": str, ...properties}
 
         Runs name-match linkage after writing nodes (DEPICTS edges to Entity).
-        Pure Kuzu calls; no SQLite or LanceDB I/O.
         """
 
         graph = _graph_module.get_graph_service()
 
-        # Build node_id map: name -> kuzu_id (for edge lookup)
+        # Build node_id map: name -> node id (for edge lookup)
         name_to_id: dict[str, str] = {}
         for node in nodes:
             name = node.get("name", "")
@@ -282,7 +281,7 @@ class DiagramExtractorService:
             # Deterministic ID: image_id + normalized name
             node_id = f"{image_id}:{name.lower()}"
             name_to_id[name] = node_id
-            graph.upsert_diagram_node(
+            await graph.upsert_diagram_node(
                 node_id=node_id,
                 name=name,
                 node_type=node_type,
@@ -312,7 +311,7 @@ class DiagramExtractorService:
                 if k not in ("from", "to", "edge_type") and v is not None
             }
             try:
-                graph.add_diagram_edge(
+                await graph.add_diagram_edge(
                     from_id=from_id,
                     to_id=to_id,
                     edge_type=edge_type,
@@ -330,10 +329,10 @@ class DiagramExtractorService:
 
         # Name-match linkage: attempt to link each diagram node to an existing Entity
         for name, node_id in name_to_id.items():
-            entity_id = graph.match_entity_by_name(name, document_id)
+            entity_id = await graph.match_entity_by_name(name, document_id)
             if entity_id is not None:
                 try:
-                    graph.add_depicts_edge(node_id, entity_id, document_id)
+                    await graph.add_depicts_edge(node_id, entity_id, document_id)
                     logger.debug("diagram_extractor: DEPICTS %r -> entity %r", name, entity_id)
                 except Exception as exc:
                     logger.debug("diagram_extractor: DEPICTS edge failed for %r: %s", name, exc)

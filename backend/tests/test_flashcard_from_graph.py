@@ -68,20 +68,20 @@ def _make_scored_chunk(chunk_id: str, doc_id: str) -> ScoredChunk:
 class _GraphWithPairs:
     """Returns one RELATED_TO pair for any document."""
 
-    def get_related_entity_pairs_for_document(self, doc_id: str, limit: int = 5):
+    async def get_related_entity_pairs_for_document(self, doc_id: str, limit: int = 5):
         return [("Time Traveller", "Weena", "rescues", 0.9)]
 
-    def get_co_occurring_pairs_for_document(self, doc_id: str, limit: int = 5):
+    async def get_co_occurring_pairs_for_document(self, doc_id: str, limit: int = 5):
         return []
 
 
 class _GraphWithCoOccurs:
     """No RELATED_TO pairs; returns one CO_OCCURS pair instead."""
 
-    def get_related_entity_pairs_for_document(self, doc_id: str, limit: int = 5):
+    async def get_related_entity_pairs_for_document(self, doc_id: str, limit: int = 5):
         return []
 
-    def get_co_occurring_pairs_for_document(self, doc_id: str, limit: int = 5):
+    async def get_co_occurring_pairs_for_document(self, doc_id: str, limit: int = 5):
         return [("Eloi", "Morlock", 12)]
 
 
@@ -89,20 +89,20 @@ class _GraphWithSelfPair:
     """The top co-occurrence is an entity with itself -- the real shape of
     the_odyssey, where ('ulysses', 'ulysses') outweighs every genuine pair."""
 
-    def get_related_entity_pairs_for_document(self, doc_id: str, limit: int = 5):
+    async def get_related_entity_pairs_for_document(self, doc_id: str, limit: int = 5):
         return []
 
-    def get_co_occurring_pairs_for_document(self, doc_id: str, limit: int = 5):
+    async def get_co_occurring_pairs_for_document(self, doc_id: str, limit: int = 5):
         return [("Ulysses", "ulysses ", 62)]
 
 
 class _GraphEmpty:
     """Returns no pairs at all."""
 
-    def get_related_entity_pairs_for_document(self, doc_id: str, limit: int = 5):
+    async def get_related_entity_pairs_for_document(self, doc_id: str, limit: int = 5):
         return []
 
-    def get_co_occurring_pairs_for_document(self, doc_id: str, limit: int = 5):
+    async def get_co_occurring_pairs_for_document(self, doc_id: str, limit: int = 5):
         return []
 
 

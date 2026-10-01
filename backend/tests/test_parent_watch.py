@@ -1,6 +1,6 @@
 """The desktop shell's death switch.
 
-A backend that outlives its shell keeps Kuzu's exclusive lock and blocks the
+A backend that outlives its shell keeps the port and the library and blocks the
 user's next launch, so this has to arm when asked -- and stay out of the way
 for `make dev`, tests and CLI use, where there is no shell at all.
 """

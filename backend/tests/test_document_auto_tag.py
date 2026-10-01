@@ -21,6 +21,15 @@ def test_db(memory_db):
     return memory_db.engine, memory_db.factory
 
 
+def _entity_tags(names: list[str]):
+    """A stand-in for `_fetch_entity_tags` that returns `names`."""
+
+    async def fetch(*_a, **_kw):
+        return names
+
+    return fetch
+
+
 def _make_doc(doc_id: str, title: str = "A book about cells") -> DocumentModel:
     return DocumentModel(
         id=doc_id,
@@ -171,7 +180,7 @@ async def test_entity_reinforcement_off_when_flag_false(test_db, monkeypatch):
 
     calls: list[str] = []
 
-    def _spy(*a, **kw):
+    async def _spy(*a, **kw):
         calls.append("hit")
         return ["should-not-leak"]
 
@@ -210,7 +219,7 @@ async def test_entity_reinforcement_appends_when_enabled(test_db, monkeypatch):
     monkeypatch.setattr(
         _doc_tagger_module,
         "_fetch_entity_tags",
-        lambda _doc, _min_mentions, **_kw: ["Alan Turing", "python", "Cambridge"],
+        _entity_tags(["Alan Turing", "python", "Cambridge"]),
     )
 
     # Flip the setting on for this test (mirrors the default but explicit).
@@ -248,7 +257,7 @@ async def test_entity_path_runs_with_no_llm_suggestions(test_db, monkeypatch):
     monkeypatch.setattr(
         _doc_tagger_module,
         "_fetch_entity_tags",
-        lambda _doc, _min, **_kw: ["Turing", "Bletchley Park"],
+        _entity_tags(["Turing", "Bletchley Park"]),
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -283,7 +292,7 @@ async def test_provenance_distinguishes_llm_from_entity(test_db, monkeypatch):
     monkeypatch.setattr(
         _doc_tagger_module, "get_document_tagger", lambda: _FakeTagger([["python"]])
     )
-    monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", lambda _d, _m, **_kw: ["Turing"])
+    monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", _entity_tags(["Turing"]))
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         await c.post(f"/documents/{doc_id}/retag")
@@ -357,31 +366,33 @@ async def test_entity_quality_gate_drops_noise(test_db, monkeypatch):
     monkeypatch.setattr(
         _doc_tagger_module,
         "_fetch_entity_tags",
-        lambda _d, _m, **_kw: [
-            # Real concept tags (survive)
-            "Apache Iceberg",
-            "data-lakehouse",
-            "Delta Lake",
-            # Stoplist hits (rejected)
-            "bob",
-            "alice",
-            "users",
-            "user1",
-            "admin-user",
-            "friend",
-            "viewer",
-            "member",
-            "thought",
-            "dream",
-            # NER artifacts -- normalizer + min-length reject
-            "r-.-name",
-            "ne-.-role",
-            "person's-name",
-            # URL/template noise -- normalizer strips, min-length keeps short ones out
-            "s3:/...",  # -> 's3', passes min-length 2, but useful enough that we let it through
-            # All-digit slug (port number lookalike) -> rejected
-            "9083",
-        ],
+        _entity_tags(
+            [
+                # Real concept tags (survive)
+                "Apache Iceberg",
+                "data-lakehouse",
+                "Delta Lake",
+                # Stoplist hits (rejected)
+                "bob",
+                "alice",
+                "users",
+                "user1",
+                "admin-user",
+                "friend",
+                "viewer",
+                "member",
+                "thought",
+                "dream",
+                # NER artifacts -- normalizer + min-length reject
+                "r-.-name",
+                "ne-.-role",
+                "person's-name",
+                # URL/template noise -- normalizer strips, min-length keeps short ones out
+                "s3:/...",  # -> 's3', passes min-length 2, but useful enough that we let it through
+                # All-digit slug (port number lookalike) -> rejected
+                "9083",
+            ]
+        ),
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -441,7 +452,7 @@ async def test_llm_path_is_not_filtered_by_stoplist(test_db, monkeypatch):
         "get_document_tagger",
         lambda: _FakeTagger([["user-experience", "machine-learning"]]),
     )
-    monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", lambda _d, _m, **_kw: [])
+    monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", _entity_tags([]))
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         await c.post(f"/documents/{doc_id}/retag")
@@ -472,7 +483,7 @@ async def test_prune_auto_endpoint_removes_only_failing_entity_tags(test_db, mon
         "get_document_tagger",
         lambda: _FakeTagger([["python"]]),
     )
-    monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", lambda _d, _m, **_kw: [])
+    monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", _entity_tags([]))
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         # Manual write first so 'users' has manual provenance via db_init backfill,
@@ -548,7 +559,7 @@ async def test_prune_sweeps_failing_llm_tag(test_db, monkeypatch):
         "get_document_tagger",
         lambda: _FakeTagger([["dream"]]),
     )
-    monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", lambda _d, _m, **_kw: [])
+    monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", _entity_tags([]))
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         await c.post(f"/documents/{doc_id}/retag")
@@ -580,7 +591,7 @@ async def test_tech_book_excludes_person_and_place(test_db, monkeypatch):
     monkeypatch.setattr(_doc_tagger_module, "get_document_tagger", lambda: _FakeTagger([[]]))
     captured: dict = {}
 
-    def _spy(doc_id, min_mentions, allowed_types=("CONCEPT",), limit=None):
+    async def _spy(doc_id, min_mentions, allowed_types=("CONCEPT",), limit=None):
         captured["allowed_types"] = allowed_types
         return []
 
@@ -606,7 +617,7 @@ async def test_narrative_book_includes_person_and_place(test_db, monkeypatch):
     monkeypatch.setattr(_doc_tagger_module, "get_document_tagger", lambda: _FakeTagger([[]]))
     captured: dict = {}
 
-    def _spy(doc_id, min_mentions, allowed_types=("CONCEPT",), limit=None):
+    async def _spy(doc_id, min_mentions, allowed_types=("CONCEPT",), limit=None):
         captured["allowed_types"] = allowed_types
         return []
 
@@ -655,7 +666,7 @@ async def test_prune_drops_entity_tags_no_longer_in_graph(test_db, monkeypatch):
 
     # Today's graph rules would only return 'data-lakehouse' (CONCEPT) for a
     # tech_book; 'raghu-ramakrishnan' (PERSON) is now excluded.
-    def _fresh_graph(doc_id, min_mentions, allowed_types=("CONCEPT",), limit=None):
+    async def _fresh_graph(doc_id, min_mentions, allowed_types=("CONCEPT",), limit=None):
         # The prune passes allowed_types based on content_type; honour it.
         if allowed_types == ("CONCEPT",):
             return ["data-lakehouse"]
@@ -721,7 +732,7 @@ async def test_prune_auto_is_idempotent(test_db, monkeypatch):
         await s.commit()
 
     monkeypatch.setattr(_doc_tagger_module, "get_document_tagger", lambda: _FakeTagger([[]]))
-    monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", lambda _d, _m, **_kw: ["bob"])
+    monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", _entity_tags(["bob"]))
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         # Force-bypass the runtime gate so we can seed a row that the prune
@@ -731,7 +742,7 @@ async def test_prune_auto_is_idempotent(test_db, monkeypatch):
         # Reset to real gate for the prune itself.
         monkeypatch.undo()
         monkeypatch.setattr(_doc_tagger_module, "get_document_tagger", lambda: _FakeTagger([[]]))
-        monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", lambda _d, _m, **_kw: [])
+        monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", _entity_tags([]))
 
         r1 = await c.post("/documents/tags/prune-auto")
         r2 = await c.post("/documents/tags/prune-auto")

@@ -1,4 +1,4 @@
-"""Entity disambiguation: canonical name normalisation before Kuzu upsert.
+"""Entity disambiguation: canonical name normalisation before the graph write.
 
 Collapses surface-form variants of one entity into a single canonical name,
 keeping the original surface form as an alias.
@@ -322,7 +322,7 @@ def canonicalize_batch(
             pipeline, one per mention (names are already lowercase).  Mention
             multiplicity is what makes frequency-based canonical naming work.
         existing_by_type: Dict mapping entity_type -> list of canonical names
-            already stored in the Kuzu graph for this document.  A batch name
+            already stored in the graph for this document.  A batch name
             that matches a stored canonical adopts it, so re-processing a
             document never splits an existing node.
 

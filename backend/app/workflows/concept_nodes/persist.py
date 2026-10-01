@@ -1,7 +1,7 @@
 """persist_concepts node -- write the flat concept layer to the stores (NW5).
 
-Wipes the old concept layer, then persists concepts (level 2) as ConceptModel rows, Kuzu
-Concept nodes + lateral RELATED_TO edges, and LanceDB centroid vectors. Identity is a STABLE
+Wipes the old concept layer, then persists concepts (level 2) as ConceptModel rows,
+lateral `graph_concept_edges`, and LanceDB centroid vectors. Identity is a STABLE
 lineage-signature slug (hash of
 member entities), not the volatile label -- so re-runs keep the same identity and user
 overrides re-apply (docs/concepts.md §6). Concept→chunk lineage is stashed in
@@ -11,7 +11,6 @@ evidence_json for downstream generation/mastery. No-ops on a dry run.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import logging
 import uuid
@@ -20,7 +19,7 @@ from sqlalchemy import delete, select, update
 
 from app.database import get_session_factory
 from app.models import ConceptModel, FlashcardModel
-from app.services.graph import get_graph_service
+from app.repos.graph_concept_repo import GraphConceptRepo
 from app.services.vector_store import get_lancedb_service
 from app.workflows.concept_nodes._shared import (
     LEVEL_CONCEPT,
@@ -49,11 +48,11 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
 
     concepts = h["concepts"]
     entity_chunks = state.get("entity_chunks", {})
-    graph = get_graph_service()
     lance = get_lancedb_service()
 
     factory = get_session_factory()
     async with factory() as session:
+        graph = GraphConceptRepo(session)
         # --- detach cards from the about-to-be-deleted concepts. They KEEP concept_slug, the
         # durable binding we re-map below, so the learner's record survives the rebuild. ---
         await session.execute(
@@ -63,7 +62,6 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
         )
         await session.execute(delete(ConceptModel))
         await session.commit()
-        graph.delete_all_concepts()
         await asyncio.to_thread(lance.clear_concept_vectors)
 
         used: set[str] = set()
@@ -112,12 +110,8 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
             slug_to_id[slug] = cid
             for ch in chunk_ids:
                 chunk_to_concept.setdefault(ch, cid)
-            try:
-                graph.upsert_concept_node(cid, slug, label, "concept", status)
-                for did in node.get("document_ids", []):
-                    graph.add_extracted_from(cid, did)
-            except Exception:
-                logger.warning("persist: Kuzu concept write failed for %s", slug, exc_info=True)
+            for did in node.get("document_ids", []):
+                await graph.add_extracted_from(cid, did)
             if node.get("centroid"):
                 await asyncio.to_thread(lance.upsert_concept_vector, cid, node["centroid"])
             return cid
@@ -126,8 +120,7 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
 
         # lateral RELATED_TO concept edges
         for a, b, w in state.get("lateral_edges", []):
-            with contextlib.suppress(Exception):
-                graph.add_concept_relation(concept_ids[a], concept_ids[b], float(w), "proposed")
+            await graph.add_relation(concept_ids[a], concept_ids[b], weight=float(w))
 
         # --- re-map cards to the rebuilt concepts by STABLE slug, then re-derive mastery, so a
         # rebuild keeps the learner's record instead of orphaning it. ---

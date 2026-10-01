@@ -18,7 +18,7 @@ Graph flow:
 
 Strategy nodes:
     summary_node     — intent='summary': fetch executive summary from DB
-    graph_node       — intent='relational': Kuzu entity traversal + hybrid retrieval
+    graph_node       — intent='relational': entity-graph lookup + hybrid retrieval
     comparative_node — intent='comparative': dual retrieval with interleaving
     search_node      — intent='factual'|'exploratory': hybrid retrieval + section augmentation
 """
@@ -49,7 +49,6 @@ from app.runtime.chat_nodes.direct import (
 )
 from app.runtime.chat_nodes.graph import (
     _extract_entities_from_question,  # noqa: F401  re-exported for back-compat
-    _query_kuzu_for_entity,  # noqa: F401  re-exported for back-compat
     graph_node,  # noqa: F401  re-exported for back-compat
 )
 from app.runtime.chat_nodes.notes import (
@@ -275,9 +274,9 @@ async def classify_node(state: ChatState) -> dict:
         source,
     )
 
-    # Query rewriting via Kuzu entities — non-fatal
+    # Query rewriting via graph entities — non-fatal
     # Supply last user turn from history as prior_context so vague follow-ups
-    # like "Are there no similarities?" can be grounded without a Kuzu lookup.
+    # like "Are there no similarities?" can be grounded without a graph lookup.
     effective_doc_ids = doc_ids if scope == "single" else None
     history = state.get("conversation_history") or []
     prior_context: str | None = None

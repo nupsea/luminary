@@ -25,7 +25,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 logger = logging.getLogger(__name__)
 
 # A loopback file or JSON response starts within milliseconds; an event loop
-# blocked by an unwrapped Kuzu or embedding call (I-2) holds it for seconds.
+# blocked by an unwrapped LanceDB or embedding call (I-2) holds it for seconds.
 SLOW_FIRST_BYTE_MS = 1000.0
 
 

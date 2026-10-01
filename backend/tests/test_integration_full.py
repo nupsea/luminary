@@ -43,7 +43,7 @@ FIXTURES_FULL_DIR = Path(__file__).parent / "fixtures" / "full"
 pytestmark = pytest.mark.slow
 
 
-# Isolated fixture: real SQLite file, real LanceDB, real Kuzu, real ML services
+# Isolated fixture: real SQLite file, real LanceDB, real ML services
 
 
 @pytest.fixture
@@ -53,7 +53,6 @@ async def full_integration_db(tmp_path, monkeypatch):
     Uses:
     - Real SQLite file in tmp_path (not in-memory)
     - Real LanceDB in tmp_path
-    - Real Kuzu in tmp_path
     - Real EmbeddingService (BAAI/bge-m3) — model cached in tmp_path
     - Real EntityExtractor (GLiNER) — model cached in tmp_path
 
@@ -77,7 +76,7 @@ async def full_integration_db(tmp_path, monkeypatch):
     db_module._engine = engine
     db_module._session_factory = factory
 
-    # Reset LanceDB, Kuzu, and retriever singletons so they re-create against tmp_path.
+    # Reset LanceDB, graph, and retriever singletons so they re-create against tmp_path.
     # Do NOT reset the embedding/NER singletons — let them use real services.
     orig_lancedb = vs_module._lancedb_service
     orig_graph = graph_module._graph_service
@@ -195,7 +194,7 @@ async def test_full_ingest_fiction(full_integration_db, monkeypatch):
     # 3. At least 10 entities should be in the knowledge graph (real GLiNER)
     from app.services.graph import get_graph_service
 
-    graph_data = get_graph_service().get_graph_for_document(doc_id)
+    graph_data = await get_graph_service().get_graph_for_document(doc_id)
     entity_count = len(graph_data["nodes"])
     assert entity_count >= 10, f"Expected >=10 graph nodes from GLiNER, got {entity_count}"
 
@@ -247,7 +246,7 @@ async def test_full_ingest_technical(full_integration_db, monkeypatch):
     # 3. At least 15 entities should be in the knowledge graph (real GLiNER)
     from app.services.graph import get_graph_service
 
-    graph_data = get_graph_service().get_graph_for_document(doc_id)
+    graph_data = await get_graph_service().get_graph_for_document(doc_id)
     entity_count = len(graph_data["nodes"])
     assert entity_count >= 15, f"Expected >=15 graph nodes from GLiNER, got {entity_count}"
 

@@ -578,7 +578,17 @@ The port keeps the path to a hosted version open: foreign keys with `ON DELETE C
 upsert), all of it in `repos/`. Postgres or one database per tenant then takes the graph with the
 rest of the schema. Graph queries are not what a server scales on; inference and extraction are.
 
-Retiring `/search` expansion removes one reader before the port.
+**Built:** every graph domain is in SQLite behind the unchanged `GraphService` facade
+(`backend/app/services/graph.py`, repos in `backend/app/repos/graph_*_repo.py`), and each graph row
+cascades from the row it describes (I-63). `/search` no longer expands through the graph. A library
+from before 0.15.0 is copied on first launch, domain by domain, in one verified transaction each;
+`graph.kuzu` is only read (`backend/app/services/graph_import.py`). On a copy of the dev library,
+2026-10-01, the import took 0.83 s and `backend/tools/graph_parity.py` explained every Kuzu row it
+left out: 17,830 entities with no document, the 54,103 edges and 4,959 `SAME_CONCEPT` links that
+pointed at them, 2,603 self-pairs and 1,255 diagram nodes of deleted documents. Nothing in SQLite
+was absent from Kuzu. Open: #185's two-arm timeout run has not been done; graph writes are async
+SQLite now, but GLiNER extraction still runs inline (I-2). `kuzu` stays a dependency for the import
+until 1.0.0-rc, which deletes the import and tells users to delete `graph.kuzu`.
 
 **The last of the document-model work belongs here.** `form`, `domain` and `register` are written at
 ingest by `_persist_classification`, and `DocumentProfile` owns the policy. What remains is retiring

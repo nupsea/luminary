@@ -6,12 +6,11 @@ the deterministic canonical entity tail via build_entity_tail(), and writes it
 back to chunks.entities_text. Then re-embeds the (text + entity tail) for
 LanceDB and rebuilds the chunks_fts row using the concatenated text.
 
-With --rebuild-graph, the document's Kuzu subgraph (Entity nodes and their
-edges) is deleted and rewritten from the fresh canonicalization via the same
-write_entity_graph used by ingestion. Use after a disambiguator change so the
-Map reflects the new canonical names; without it, existing Kuzu canonicals are
-reused as the stability pool and stale merges persist. Requires the Kuzu lock
-(stop the backend first).
+With --rebuild-graph, the document's entities and their edges are replaced, in one
+transaction, from the fresh canonicalization via the same build_document_graph used
+by ingestion. Use after a disambiguator change so the Map reflects the new canonical
+names; without it, the stored canonicals are reused as the stability pool and stale
+merges persist.
 
 Idempotent: every run overwrites entities_text and replaces the LanceDB / FTS5
 row, never appends. Safe to run repeatedly.
@@ -24,7 +23,7 @@ CLI:
 Per I-1: uses a single AsyncSession (no asyncio.gather with shared session).
 Per I-2: every LanceDB upsert wrapped in asyncio.to_thread.
 Per I-4: chunks_fts row deletion uses rowid-based DELETE (always reliable).
-Per I-16: GLiNER + Kuzu are local; no external API calls.
+Per I-16: GLiNER is local; no external API calls.
 """
 
 from __future__ import annotations
@@ -73,7 +72,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
     from app.services.graph import get_graph_service
     from app.services.ner import get_entity_extractor
     from app.services.vector_store import get_lancedb_service
-    from app.workflows.ingestion_nodes.entity_extract import write_entity_graph
+    from app.workflows.ingestion_nodes.entity_extract import build_document_graph
 
     metrics = {
         "chunks_updated": 0,
@@ -110,28 +109,12 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
             {"id": row.id, "document_id": doc_id, "text": row.text} for row in chunk_rows
         ]
 
-        # Acquire the graph connection BEFORE the expensive NER pass so a
-        # lock held by another process fails fast instead of after minutes of
-        # inference. Deletion still happens after NER so a mid-inference
-        # crash never leaves the document's subgraph emptied.
-        #
-        # Pool of stored canonicals: rebuilding starts from an empty pool so
-        # fresh (frequency-based) canonicals win; otherwise reuse the stored
-        # names for stability. If Kuzu is locked by another process, fall
-        # back to empty existing_by_type -- the canonicalizer still
-        # converges within the batch.
-        existing_by_type: dict[str, list[str]] = {}
-        graph = None
-        if rebuild_graph:
-            graph = get_graph_service()
-        else:
-            try:
-                existing_by_type = get_graph_service().get_entities_by_type_for_document(doc_id)
-            except Exception as exc:  # pragma: no cover -- defensive concurrency guard
-                logger.warning(
-                    "reindex_entities: Kuzu unavailable, using empty canonical pool",
-                    extra={"doc_id": doc_id, "error": repr(exc)},
-                )
+        # Rebuilding starts from an empty pool so fresh (frequency-based) canonicals
+        # win; otherwise reuse the stored names for stability.
+        graph = get_graph_service()
+        existing_by_type: dict[str, list[str]] = (
+            {} if rebuild_graph else await graph.get_entities_by_type_for_document(doc_id)
+        )
 
         # NER -- CPU bound, run in thread pool. Reuse the cached extractor.
         extractor = get_entity_extractor()
@@ -140,14 +123,6 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
             None, extractor.extract, chunk_dicts, content_type, is_technical
         )
 
-        if rebuild_graph and graph is not None:
-            removed = graph.delete_entities_for_document(doc_id)
-            graph.upsert_document(doc_id, doc_row.title or "", content_type)
-            logger.info(
-                "rebuild-graph: removed %d stale entities",
-                removed,
-                extra={"doc_id": doc_id},
-            )
         canonical_triples = canonicalize_batch(
             [(ent["name"], ent["type"]) for ent in entities],
             existing_by_type,
@@ -167,9 +142,8 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
                 {**ent, "id": canonical_id, "name": canonical, "type": canonical_type}
             )
 
-        if rebuild_graph and graph is not None:
-            write_entity_graph(
-                graph,
+        if rebuild_graph:
+            document_graph = build_document_graph(
                 doc_id,
                 canonical_entities,
                 alias_map,
@@ -178,6 +152,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
                 content_type,
                 is_technical,
             )
+            await graph.write_document_graph(doc_id, document_graph, replace=True)
 
         per_chunk_counts: list[int] = []
         for chunk in chunk_dicts:
@@ -290,10 +265,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--rebuild-graph",
         action="store_true",
-        help=(
-            "Delete and rewrite the document's Kuzu entity subgraph from the "
-            "fresh canonicalization (requires the Kuzu lock -- stop the backend)"
-        ),
+        help=("Replace the document's entities and their edges with the fresh canonicalization"),
     )
     args = parser.parse_args(argv)
     return asyncio.run(_run(args))

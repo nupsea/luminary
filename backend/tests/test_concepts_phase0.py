@@ -1,7 +1,7 @@
 """Phase 0 Concept foundation: schema, concept_service, scope_resolver.
 
 Covers the studyable-atom primitive (docs/concepts.md): a Concept persisted across
-SQLite (state) + Kuzu (topology) + LanceDB (derived centroid), scope resolution,
+SQLite (state and topology) + LanceDB (derived centroid), scope resolution,
 and mastery recompute (I-19).
 """
 
@@ -13,9 +13,9 @@ import app.database as db_module
 import app.services.graph as graph_module
 from app.database import make_engine
 from app.db_init import create_all_tables
-from app.models import ConceptModel, FlashcardModel
+from app.models import ConceptModel, DocumentModel, FlashcardModel
+from app.repos.graph_concept_repo import GraphConceptRepo
 from app.services.concept_service import get_concept_service
-from app.services.graph import get_graph_service
 from app.services.scope_resolver import resolve_daily, resolve_scope
 from app.services.vector_store import get_lancedb_service
 
@@ -32,7 +32,7 @@ async def test_db(tmp_path, monkeypatch):
 
     orig_engine, orig_factory = db_module._engine, db_module._session_factory
     db_module._engine, db_module._session_factory = engine, factory
-    # fresh Kuzu under tmp_path (singleton is otherwise suite-wide)
+    # fresh graph service (singleton is otherwise suite-wide)
     orig_graph = graph_module._graph_service
     graph_module._graph_service = None
     yield engine, factory
@@ -66,11 +66,13 @@ async def test_create_concept_spans_three_stores_and_resolves(test_db):
             }
         ]
     )
-    g = get_graph_service()
-    g.upsert_document(_D1, "Doc", "book")
-    g.upsert_entity("e1", "Iceberg", "concept")
     svc = get_concept_service()
     async with factory() as s:
+        s.add(
+            DocumentModel(
+                id=_D1, title="Doc", format="txt", content_type="book", file_path="/x/doc.txt"
+            )
+        )
         c = await svc.create_concept(
             s,
             label="Iceberg Manifests",
@@ -78,15 +80,14 @@ async def test_create_concept_spans_three_stores_and_resolves(test_db):
             status="proposed",
             evidence=[{"document_id": _D1, "chunk_id": _CH1, "quote": "an iceberg"}],
             document_ids=[_D1],
-            entity_ids=["e1"],
         )
         await svc.set_learning_state(s, c.id, mastery=42.0, stability=5.0)
         await s.commit()
         cid, slug = c.id, c.slug
 
     assert slug == "iceberg-manifests"
-    # Kuzu topology
-    assert g.get_concept_ids_for_documents([_D1]) == [cid]
+    async with factory() as s:
+        assert await GraphConceptRepo(s).concept_ids_for_documents([_D1]) == [cid]
     # LanceDB derived centroid
     assert get_lancedb_service().search_concepts([2.0] * 384, k=3)[0]["concept_id"] == cid
     # SQLite state + scope resolution

@@ -10,7 +10,7 @@ Usage in test files::
 
 The fixture:
   - Verifies each book file exists and meets word_count_min from manifest.json.
-  - Creates ONE shared SQLite file, LanceDB dir, and Kuzu dir in a session temp dir.
+  - Creates ONE shared SQLite file and LanceDB dir in a session temp dir.
   - Ingests all 3 books with real ML (BAAI/bge-m3 + GLiNER); LiteLLM mocked to 'book'.
   - Records elapsed_seconds per book; asserts <= ingest_time_budget_seconds.
   - Asserts each document reaches stage='complete'.
@@ -22,7 +22,7 @@ temporary event loop. After asyncio.run() returns, event-loop-bound singletons
 (_engine, _session_factory) are reset to None so that subsequent async tests
 create fresh connections via the module singleton pattern against the same
 DATA_DIR (which remains set for the duration of the session fixture).
-LanceDB and Kuzu singletons are synchronous so they can be reused directly.
+The LanceDB singleton is synchronous so it can be reused directly.
 """
 
 import asyncio
@@ -214,7 +214,7 @@ def all_books_ingested(tmp_path_factory):
         # SQLAlchemy's async engine (_engine, _session_factory) is bound to that
         # dead loop, so reset them to None.  Tests will create fresh connections
         # that point to the same DATA_DIR database file.
-        # LanceDB and Kuzu singletons are synchronous and remain valid.
+        # The LanceDB singleton is synchronous and remains valid.
         db_module._engine = None  # type: ignore[assignment]
         db_module._session_factory = None  # type: ignore[assignment]
 

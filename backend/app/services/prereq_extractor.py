@@ -2,7 +2,7 @@
 
 Registered as enrichment job_type='prerequisites'.
 Reads SectionSummaryModel rows for a document, calls LLM per section,
-writes PREREQUISITE_OF edges to Kuzu via add_prerequisite_with_section().
+writes PREREQUISITE_OF edges via add_prerequisite_with_section().
 Sets SectionModel.difficulty_estimate = prerequisite chain depth.
 """
 
@@ -81,7 +81,7 @@ def _parse_prereqs(raw_text: str) -> list[dict]:
 
 
 class PrereqExtractorService:
-    """Extract prerequisite relationships from section summaries and write to Kuzu."""
+    """Extract prerequisite relationships from section summaries and write them to the graph."""
 
     async def extract(self, section_content: str, section_id: str, document_id: str) -> list[dict]:
         """Call the LLM to extract prerequisite pairs from a section summary.
@@ -150,8 +150,8 @@ class PrereqExtractorService:
                 confidence = pair["confidence"]
 
                 # Resolve concept names to Entity IDs
-                requires_id = graph_svc.match_entity_by_name(requires_name, document_id)
-                required_by_id = graph_svc.match_entity_by_name(required_by_name, document_id)
+                requires_id = await graph_svc.match_entity_by_name(requires_name, document_id)
+                required_by_id = await graph_svc.match_entity_by_name(required_by_name, document_id)
 
                 if requires_id is None or required_by_id is None:
                     logger.debug(
@@ -163,7 +163,7 @@ class PrereqExtractorService:
                     )
                     continue
 
-                graph_svc.add_prerequisite_with_section(
+                await graph_svc.add_prerequisite_with_section(
                     dependent_id=required_by_id,
                     prerequisite_id=requires_id,
                     document_id=document_id,
@@ -197,7 +197,7 @@ class PrereqExtractorService:
         appearing in that section's extracted prerequisite pairs.
         """
         graph_svc = get_graph_service()
-        edges = graph_svc.get_prerequisite_edges_for_document(document_id)
+        edges = await graph_svc.get_prerequisite_edges_for_document(document_id)
         if not edges:
             return
 

@@ -2,8 +2,8 @@
 
 Uses asyncio.gather to fire 5 simultaneous POST /documents/ingest requests and
 asserts that all documents eventually reach stage='complete' or stage='error'
-(never stuck in an intermediate stage), and that no Kuzu RuntimeError lock
-exception propagates to HTTP clients.
+(never stuck in an intermediate stage), and that no store error propagates to
+HTTP clients.
 
 Marked @pytest.mark.slow — excluded from make test (fast CI path).
 Run explicitly with:
@@ -107,7 +107,7 @@ async def test_five_concurrent_uploads_all_reach_terminal_stage(concurrent_db):
 
     Asserts:
     - All HTTP ingest responses return 200 with a document_id
-    - No Kuzu RuntimeError (lock exception) propagates as HTTP 500 to clients
+    - No store error propagates as HTTP 500 to clients
     - All documents eventually reach stage='complete' or stage='error' within 30s
       (never stuck in 'parsing', 'chunking', 'embedding', etc.)
     """
@@ -131,7 +131,7 @@ async def test_five_concurrent_uploads_all_reach_terminal_stage(concurrent_db):
 
         responses = await asyncio.gather(*[ingest_one(fp) for fp in doc_files])
 
-        # All must return 200 — no Kuzu lock RuntimeError should surface as 500
+        # All must return 200 — no store error should surface as 500
         for resp in responses:
             assert resp.status_code == 200, f"Ingest returned {resp.status_code}: {resp.text[:200]}"
             body = resp.json()

@@ -17,9 +17,9 @@ Follow `Types → Config → Repo → Service → Runtime → API`. Never import
 1. **Schema** — `backend/app/schemas/<domain>.py`. Pydantic request/response models. Zero I/O,
    no imports from other layers.
 
-2. **Repo** — `backend/app/repos/`. Data access only: SQLAlchemy queries, LanceDB, Kuzu Cypher.
+2. **Repo** — `backend/app/repos/`. Data access only: SQLAlchemy queries, LanceDB.
    No business logic. Use `repos/_helpers.get_or_404`, which raises `NotFound`.
-   - Wrap every synchronous LanceDB and Kuzu call in `asyncio.to_thread` (I-2). One worker
+   - Wrap every synchronous LanceDB call in `asyncio.to_thread` (I-2). One worker
      serves every request, so a blocking call stalls the entire app, not just this route.
    - Never share an `AsyncSession` across `asyncio.gather` tasks (I-1).
 

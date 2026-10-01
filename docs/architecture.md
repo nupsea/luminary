@@ -15,7 +15,7 @@ Types --> Config --> Repo --> Service --> Runtime --> API
 
 - **Types** (`schemas/`, `types.py`, `exceptions.py`, Pydantic models, enums): zero I/O, zero imports from other layers
 - **Config** (`config.py`): singleton `Settings` via `@lru_cache`, reads `.env`
-- **Repo**: SQLAlchemy async queries, LanceDB ops, Kuzu Cypher. Reads/writes only.
+- **Repo**: SQLAlchemy async queries, LanceDB ops. Reads/writes only.
 - **Service**: business logic, orchestrates repos + ML models, implements domain rules
 - **Runtime** (`runtime/`, `workflows/`): LangGraph state machines, background workers, lifespan hooks
 - **API** (`routers/`): thin FastAPI handlers -- validate input (Pydantic), call service, return response
@@ -38,7 +38,7 @@ a missing entry silently exempts a whole layer rather than failing loudly.
 | Embeddings | BAAI/bge-small-en-v1.5 via SentenceTransformer (384-dim) |
 | Vector DB | LanceDB (embedded, Apache Arrow) |
 | Keyword search | SQLite FTS5 (BM25) |
-| Graph DB | Kuzu (embedded, Cypher, Apache 2.0) |
+| Graph | SQLite tables (`graph_*`), traversal in Python |
 | Retrieval | RRF = vector + keyword + graph fusion |
 | NER | GLiNER (zero-shot, custom types) |
 | LLM routing | LiteLLM (Ollama local + cloud providers) |
@@ -55,13 +55,14 @@ a missing entry silently exempts a whole layer rather than failing loudly.
 - **SQLite** (`~/.luminary/luminary.db`): all structured metadata -- documents, chunks, sections, summaries, flashcards, notes, Q&A history, and **concepts** (hot learning state: mastery, FSRS stability, origin, status, evidence refs). Schema is Alembic-versioned and migrated to head on boot (I-23)
 - **LanceDB**: dense embeddings for chunks and notes (both bge-small, 384-dim, one shared space) and **concepts** (384-dim centroid of evidence chunks, in the same space -- derived, for similarity/linking/dedup, never retrieval-primary)
 - **SQLite FTS5**: `chunks_fts` and `notes_fts` virtual tables for BM25 keyword search
-- **Kuzu**: knowledge graph -- Entity, Document, Note, **Concept** nodes + 20+ relationship types. `Concept` is the studyable atom (topology: edges/routes/prereqs, `PROMOTED_FROM` an Entity cluster); `Entity` remains the raw NER layer beneath it.
+- **SQLite graph tables** (`graph_*`, repos in `app/repos/graph_*_repo.py`, facade `services/graph.py`): concept topology; entities, the edges between them and cross-document `SAME_CONCEPT` links; diagram nodes and edges; the entities each note is about. Every row hangs off a document, note, concept or entity by a cascading foreign key (I-63). `Entity` is the raw NER layer beneath concepts.
+- **`graph.kuzu`** (libraries from before 0.15.0): read once, read-only, by the startup import (`services/graph_import.py`), which records its progress per domain in `graph_import_state`. Nothing else opens it, and it is never modified or deleted.
 
 ## Knowledge layer (the Concept primitive)
 
-A **Concept** is the single studyable atom -- distinct from a Kuzu `Entity` (a lexical NER
+A **Concept** is the single studyable atom -- distinct from a graph `Entity` (a lexical NER
 mention). Concepts carry mastery and are the routing unit for sessions and study. Source of truth =
-SQLite (state) + Kuzu (topology); derived projections = LanceDB vector + OKF Markdown files. Before
+SQLite (state and topology); derived projections = LanceDB vector + OKF Markdown files. Before
 any concept/mastery/graph/study work, read:
 
 - `docs/concepts.md` -- the Concept primitive (the canonical "what is a concept").

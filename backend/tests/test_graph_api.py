@@ -33,7 +33,7 @@ pytestmark = pytest.mark.slow
 
 @pytest.fixture
 async def graph_api_db(tmp_path, monkeypatch):
-    """Isolated environment with real SQLite, LanceDB, Kuzu, and ML services."""
+    """Isolated environment with real SQLite, LanceDB, and ML services."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
     from app.config import get_settings

@@ -31,6 +31,7 @@ State = Literal[
 # rather than the artifact.
 _PHASES: tuple[tuple[str, str, bool], ...] = (
     ("db", "Preparing your library", True),
+    ("graph_import", "Moving your knowledge graph", False),
     ("embedder", "Learning to read your documents", True),
     ("ollama_server", "Starting the local engine", False),
     ("chat_model", "Chat and flashcard model", False),

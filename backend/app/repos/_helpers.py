@@ -7,6 +7,7 @@ but raises `NotFound`, which main.py maps to a 404 response.
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import NotFound
@@ -44,3 +45,13 @@ def require_or_404[T](obj: T | None, name: str) -> T:
     if obj is None:
         raise NotFound(f"{name} not found")
     return obj
+
+
+def upsert_insert(session: AsyncSession, model: type):
+    """An INSERT that supports `on_conflict_do_update` / `on_conflict_do_nothing`.
+
+    SQLite and PostgreSQL share that API but not the import, so the dialect is read
+    from the session's bind; repos stay portable to a server database.
+    """
+    dialect = session.get_bind().dialect.name
+    return (postgresql.insert if dialect == "postgresql" else sqlite.insert)(model)

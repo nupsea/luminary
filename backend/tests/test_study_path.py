@@ -86,57 +86,26 @@ def test_should_skip_custom_threshold():
 # Integration test: get_study_path skip logic (AC3)
 
 
-async def test_study_path_skip_stable_concept(tmp_path, monkeypatch):
+async def test_study_path_skip_stable_concept(memory_db):
     """AC3: concept with avg_stability >= 14 days gets skip=True, reason='avg_stability=Xd'.
 
-    Sets up:
-    - Kuzu with PREREQUISITE_OF edge: decorators -> closures
-    - SQLite with FlashcardModel for 'closures' (fsrs_stability=20.0, reps=1)
-    - Calls StudyPathService.get_study_path(doc_id, 'decorators', session)
-    - Asserts path item for 'closures' has skip=True
+    PREREQUISITE_OF decorators -> closures, and a flashcard for 'closures' with
+    fsrs_stability=20.0: the 'closures' path item is skipped.
     """
-    import os
+    from tests.graph_seed import add_documents, add_graph
 
-    import app.database as db_module
-    import app.services.graph as graph_module
-
-    os.environ["DATA_DIR"] = str(tmp_path)
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    graph_module._graph_service = None
-
-    from app.database import make_engine
-
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-
-    sm = async_sessionmaker(engine, expire_on_commit=False)
-    db_module._engine = engine
-    db_module._session_factory = sm
-
-    from app.db_init import create_all_tables
-
-    await create_all_tables(engine)
-
+    sm = memory_db.factory
     doc_id = str(uuid.uuid4())
     chunk_id = str(uuid.uuid4())
-
-    # Seed graph
-    from app.services.graph import get_graph_service
-
-    gv = get_graph_service()
-    gv.upsert_document(doc_id, "Python Tutorial", "tech_book")
-
     closures_id = str(uuid.uuid4())
     decorators_id = str(uuid.uuid4())
-    gv.upsert_entity(closures_id, "closures", "CONCEPT")
-    gv.upsert_entity(decorators_id, "decorators", "CONCEPT")
-    gv.add_mention(closures_id, doc_id)
-    gv.add_mention(decorators_id, doc_id)
-
-    # decorators requires closures
-    gv.add_prerequisite(decorators_id, closures_id, doc_id, confidence=0.9)
+    await add_documents(memory_db, doc_id)
+    await add_graph(
+        memory_db,
+        doc_id,
+        {closures_id: ("closures", "CONCEPT"), decorators_id: ("decorators", "CONCEPT")},
+        edges=(("PREREQUISITE_OF", decorators_id, closures_id, {"confidence": 0.9}),),
+    )
 
     # Seed chunk and flashcard for 'closures'
 

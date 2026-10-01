@@ -185,20 +185,9 @@ class MasteryService:
         all_doc_ids = list(document_ids)
         cluster_concept = concept_name
         try:
-            graph = get_graph_service()
-            clusters = graph.get_concept_clusters()
+            clusters = await get_graph_service().get_concept_clusters()
             for cluster in clusters:
-                names = []
-                for eid in cluster["entity_ids"]:
-                    row = graph._conn.execute(
-                        "MATCH (e:Entity {id: $eid}) RETURN e.name",
-                        {"eid": eid},
-                    )
-                    if row.has_next():
-                        name = row.get_next()[0]
-                        if name:
-                            names.append(name)
-                if concept_name.lower() in [n.lower() for n in names if n]:
+                if concept_name.lower() in [n.lower() for n in cluster["entity_names"]]:
                     all_doc_ids = list(set(all_doc_ids + cluster["document_ids"]))
                     # Use the canonical name from the cluster (longest form)
                     cluster_concept = cluster["concept_name"] or concept_name
@@ -232,7 +221,7 @@ class MasteryService:
         document_ids: list[str],
         session: AsyncSession,
     ) -> list[ConceptMastery]:
-        """Return ConceptMastery for all Kuzu entities in the given documents.
+        """Return ConceptMastery for all graph entities in the given documents.
 
         Sorted by mastery ascending (weakest first). Capped at _MAX_CONCEPTS.
         """
@@ -244,32 +233,15 @@ class MasteryService:
 
         all_concepts: set[str] = set()
         for doc_id in document_ids:
-            by_type = graph.get_entities_by_type_for_document(doc_id)
+            by_type = await graph.get_entities_by_type_for_document(doc_id)
             for names in by_type.values():
                 all_concepts.update(names)
 
         # Deduplicate via SAME_CONCEPT clusters: keep canonical name per cluster
-        clusters = graph.get_concept_clusters()
-        cluster_members: set[str] = set()
         canonical_map: dict[str, str] = {}  # member -> canonical
-        for cluster in clusters:
-            canonical = cluster["concept_name"]
-            try:
-                members = []
-                for eid in cluster["entity_ids"]:
-                    row = graph._conn.execute(
-                        "MATCH (e:Entity {id: $eid}) RETURN e.name", {"eid": eid}
-                    )
-                    if row.has_next():
-                        name = row.get_next()[0]
-                        if name:
-                            members.append(name)
-            except Exception:
-                logger.warning("cluster member lookup failed", exc_info=True)
-                members = []
-            for m in members:
-                cluster_members.add(m)
-                canonical_map[m] = canonical
+        for cluster in await graph.get_concept_clusters():
+            for member in cluster["entity_names"]:
+                canonical_map[member] = cluster["concept_name"]
 
         deduplicated: set[str] = set()
         for c in all_concepts:
@@ -318,10 +290,8 @@ class MasteryService:
                 cells=[],
             )
 
-        # Fetch top concepts for this document from Kuzu
         try:
-            graph = get_graph_service()
-            by_type = graph.get_entities_by_type_for_document(document_id)
+            by_type = await get_graph_service().get_entities_by_type_for_document(document_id)
         except Exception:
             logger.warning("entity-by-type lookup failed for %s", document_id, exc_info=True)
             by_type = {}

@@ -7,8 +7,8 @@
 (b) test_summary_node_falls_through_when_no_summary:
     No summary in DB → summary_node sets intent='factual'.
 
-(c) test_graph_node_falls_through_on_kuzu_error:
-    Mock KuzuService to raise exception → no exception propagates,
+(c) test_graph_node_falls_through_on_graph_error:
+    Mock the graph service to raise → no exception propagates,
     intent overridden to 'factual'.
 
 (d) test_search_node_augments_chunks_with_section_summaries:
@@ -157,14 +157,14 @@ async def test_summary_node_falls_through_when_no_summary(test_db):
     assert "section_context" not in result or result.get("section_context") is None
 
 
-# (c) test_graph_node_falls_through_on_kuzu_error
+# (c) test_graph_node_falls_through_on_graph_error
 
 
 @pytest.mark.asyncio
-async def test_graph_node_falls_through_on_kuzu_error(test_db):
-    """Kuzu raises → graph_node does not propagate, sets intent='factual'."""
+async def test_graph_node_falls_through_on_graph_error(test_db):
+    """The graph raises → graph_node does not propagate, sets intent='factual'."""
     mock_service = MagicMock()
-    mock_service._conn.execute.side_effect = RuntimeError("Kuzu offline")
+    mock_service.get_entity_neighbours = AsyncMock(side_effect=RuntimeError("graph offline"))
 
     with patch("app.services.graph.get_graph_service", return_value=mock_service):
         state = _make_state(
@@ -183,7 +183,7 @@ def test_extract_entities_from_question_merges_capitalized_phrase():
     """A multi-word proper noun is one entity, not its first word alone.
 
     "What is Inverted Index and how does it differ..." used to extract just
-    "Inverted", which matched no real Kuzu node and let a spurious partial
+    "Inverted", which matched no real graph entity and let a spurious partial
     match through where a real multi-word entity would have found nothing and
     correctly fallen through to search (I-55).
     """
@@ -238,14 +238,11 @@ async def test_graph_node_passes_rerank_toggle_and_search_depth(test_db):
     mock_retriever = MagicMock()
     mock_retriever.retrieve = AsyncMock(return_value=[mock_chunk])
 
-    # One entity ("Something") -> _query_kuzu_for_entity issues exactly two
-    # Kuzu queries (CO_OCCURS, then RELATED_TO). The CO_OCCURS query yields one
-    # row, RELATED_TO yields none: has_next() is called True, False, False.
+    async def _neighbours(name, kind, document_ids, limit=10):
+        return [("Related Entity", 1.0, "")] if kind == "CO_OCCURS" else []
+
     mock_service = MagicMock()
-    mock_result = MagicMock()
-    mock_result.has_next.side_effect = [True, False, False]
-    mock_result.get_next.return_value = ["Related Entity", 1.0]
-    mock_service._conn.execute.return_value = mock_result
+    mock_service.get_entity_neighbours = AsyncMock(side_effect=_neighbours)
 
     with (
         patch("app.services.graph.get_graph_service", return_value=mock_service),
@@ -268,7 +265,6 @@ async def test_graph_node_passes_rerank_toggle_and_search_depth(test_db):
         async with factory() as session:
             await set_rerank_enabled(session, False)
 
-        mock_result.has_next.side_effect = [True, False, False]
         await graph_node(state)
         assert mock_retriever.retrieve.call_args.kwargs["rerank"] is False
 

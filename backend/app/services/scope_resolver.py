@@ -7,7 +7,7 @@ to their already-linked concepts here; minting unmapped cards / candidate concep
 from free material is wired by the Study Launcher work in later phases.
 
 Returns concept ids only -- the assembler (Phase 1) interleaves due cards and
-generated questions on top. Honors I-3 (Kuzu has_next guards live in the graph repo).
+generated questions on top.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import CollectionMemberModel, ConceptModel, FlashcardModel
-from app.services.graph import get_graph_service
+from app.repos.graph_concept_repo import GraphConceptRepo
 
 logger = logging.getLogger(__name__)
 
@@ -63,14 +63,14 @@ async def resolve_concept(session: AsyncSession, concept_id: str) -> list[str]:
     node = await session.get(ConceptModel, concept_id)
     if node is None:
         return []
-    neighbors = get_graph_service().get_concept_neighbors(concept_id, limit=8)
+    neighbors = await GraphConceptRepo(session).neighbors(concept_id, limit=8)
     ranked = await _weakest_first(session, [n for n in neighbors if n != concept_id])
     return [concept_id, *ranked[:2]]
 
 
 async def resolve_doc(session: AsyncSession, document_id: str) -> list[str]:
     """Concepts extracted from a single document, weakest first."""
-    ids = get_graph_service().get_concept_ids_for_documents([document_id])
+    ids = await GraphConceptRepo(session).concept_ids_for_documents([document_id])
     return await _weakest_first(session, ids)
 
 
@@ -95,7 +95,7 @@ async def resolve_collection(session: AsyncSession, collection_id: str) -> list[
     doc_ids = await _collection_document_ids(session, collection_id)
     if not doc_ids:
         return []
-    ids = get_graph_service().get_concept_ids_for_documents(doc_ids)
+    ids = await GraphConceptRepo(session).concept_ids_for_documents(doc_ids)
     return await _weakest_first(session, ids)
 
 
