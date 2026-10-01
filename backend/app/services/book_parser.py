@@ -604,6 +604,7 @@ class BookParser:
             lines = body_chunk.splitlines()
             subtitle = ""
             body_offset = 0
+            # TODO(#229): a scraped page's nav line ("Prev Part I. Context") passes as a subtitle.
             for li, line in enumerate(lines[:3]):
                 stripped = line.strip()
                 if stripped:
