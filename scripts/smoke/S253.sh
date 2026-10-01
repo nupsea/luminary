@@ -40,7 +40,7 @@ if [ "$CONFIGURED" = "False" ]; then
         -d '{"url": "https://learning.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/"}')
     check "POST /documents/ingest-url routes O'Reilly URL (no session -> 401)" "401" "$INGEST_URL_CODE"
 else
-    echo "SKIP: ingest-url O'Reilly routing (a session is stored; would ingest a real book)"
+    smoke_partial_skip "ingest-url O'Reilly routing: a session is stored; would ingest a real book"
 fi
 
 if [ "$FAIL" -ne 0 ]; then

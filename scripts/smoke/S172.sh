@@ -113,7 +113,7 @@ else:
     print('  OK: 0 note nodes (none with entity edges in this document -- valid empty state)')
 "
 else
-  echo "3. No documents found -- skipping document-scoped tests (OK for fresh install)"
+  smoke_partial_skip "document-scoped graph checks: the library has no document"
 fi
 
 # 4. Test note node structure by creating a note and verifying graph endpoint stability

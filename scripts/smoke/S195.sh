@@ -71,7 +71,7 @@ for i in items:
 " 2>/dev/null || true)
 
 if [ -z "$SUGGESTION_ID" ]; then
-  echo "  SKIP: no suggestion with id (template fallback has empty ids)"
+  smoke_partial_skip "POST /chat/suggestions/{id}/asked: no suggestion with an id (template fallback)"
 else
   STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/chat/suggestions/$SUGGESTION_ID/asked")
   if [ "$STATUS" = "204" ]; then

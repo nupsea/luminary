@@ -45,7 +45,7 @@ print('shape ok: deck=%s source_type=%s card_count=%d' % (d['deck'], d['source_t
 ")
   echo "  OK: $FIRST_DECK"
 else
-  echo "2. No decks yet -- shape check skipped"
+  smoke_partial_skip "deck shape check: no decks yet"
 fi
 
 # 3. Get a collection_id from GET /collections/tree
