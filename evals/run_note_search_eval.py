@@ -28,6 +28,11 @@ Metrics, reported separately because they move independently:
                   too high and the arm goes silent while every other number here
                   stays green, because the keyword arm alone still answers a
                   self-query.
+  paraphrase_recall_5  the note is in the top 5 for a query a local model wrote
+                  about it sharing no word stem with it (--paraphrase). The case
+                  the semantic arm exists for: no keyword can find these, so this
+                  is the one recall number the keyword arm cannot hold up.
+                  Report-only; compare against your own earlier run.
   noise_rejection fraction of deliberately alien queries returning nothing.
                   Before the floor existed, `limit(k)` had no distance bound, so
                   in a library smaller than k EVERY query returned the k nearest
@@ -37,6 +42,7 @@ Metrics, reported separately because they move independently:
 from __future__ import annotations
 
 import argparse
+import os
 import random
 import re
 import sqlite3
@@ -119,6 +125,57 @@ def _distinctive_phrase(content: str, words_wanted: int = 6) -> str | None:
     return " ".join(words[start : start + words_wanted])
 
 
+def _stems(text: str) -> set[str]:
+    """Content-word stems, cut to five letters: stricter than the FTS tokenizer,
+    which matches whole words only, so "vanish" for "vanishes" also counts."""
+    return {
+        w.lower()[:5]
+        for w in re.findall(r"[A-Za-z][A-Za-z'-]+", text)
+        if w.lower() not in _STOP and len(w) >= 3
+    }
+
+
+def _shared_words(query: str | None, content: str) -> list[str]:
+    """The query's words whose stem the note also has."""
+    if not query:
+        return []
+    note = _stems(content)
+    return sorted({w for w in re.findall(r"[A-Za-z][A-Za-z'-]+", query) if _stems(w) & note})
+
+
+_PARAPHRASE_SYSTEM = (
+    "You write the search query a person would type to find one of their own notes "
+    "again, months later, having forgotten its wording. Reply with the query only: "
+    "3 to 8 words, no quotes. Do not use any word that appears in the note, nor any "
+    "form of one; describe what it is about in other words."
+)
+
+
+def _paraphrase(content: str, model: str, avoid: list[str] | None = None) -> str | None:
+    """A query about the note in other words, or None if the model gave none."""
+    base = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+    prompt = content[:2000]
+    if avoid:
+        prompt += "\n\nThese words, and any form of them, are not allowed: " + ", ".join(avoid)
+    resp = httpx.post(
+        f"{base}/api/chat",
+        json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": _PARAPHRASE_SYSTEM},
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+            "think": False,
+            "options": {"temperature": 0, "seed": 42},
+        },
+        timeout=300.0,
+    )
+    resp.raise_for_status()
+    text = resp.json()["message"]["content"].strip().strip('"').splitlines()
+    return text[0].strip() if text and text[0].strip() else None
+
+
 def _search(backend_url: str, query: str, k: int) -> list[dict]:
     resp = httpx.get(
         f"{backend_url}/notes/search", params={"q": query, "k": k}, timeout=120.0
@@ -133,6 +190,11 @@ def main() -> None:
     parser.add_argument("--db", default=str(REPO_ROOT / ".luminary" / "luminary.db"))
     parser.add_argument("--sample", type=int, default=40)
     parser.add_argument("--assert-thresholds", action="store_true")
+    parser.add_argument(
+        "--paraphrase",
+        metavar="MODEL",
+        help="also score recall on queries this Ollama model writes with no shared word stem",
+    )
     args = parser.parse_args()
 
     db_path = Path(args.db)
@@ -188,6 +250,30 @@ def main() -> None:
         print("ERROR: no note yielded a usable query; nothing measured.", file=sys.stderr)
         sys.exit(2)
 
+    para_hit1 = para_hit5 = para_scored = para_overlap = 0
+    if args.paraphrase:
+        for note_id, content in rows:
+            query = _paraphrase(content, args.paraphrase)
+            shared = _shared_words(query, content)
+            if shared:
+                # One retry naming the words; the structural check below still decides.
+                query = _paraphrase(content, args.paraphrase, avoid=shared)
+            if query is None or _shared_words(query, content):
+                para_overlap += 1
+                continue
+            para_scored += 1
+            ids = [r["note_id"] for r in _search(args.backend_url, query, 5)]
+            para_hit1 += bool(ids) and ids[0] == note_id
+            para_hit5 += note_id in ids
+        # Requested but not computable fails (I-32); 10 is the same floor as above.
+        if para_scored < 10:
+            print(
+                f"ERROR: only {para_scored} paraphrases shared no stem with their note "
+                f"({para_overlap} rejected); paraphrase recall was not measured.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
     rejected = sum(1 for q in NOISE_QUERIES if not _search(args.backend_url, q, 10))
 
     metrics = {
@@ -200,6 +286,14 @@ def main() -> None:
         "result_slots": slots,
         "library_notes": total_notes,
     }
+    if args.paraphrase:
+        metrics |= {
+            "paraphrase_recall_1": para_hit1 / para_scored,
+            "paraphrase_recall_5": para_hit5 / para_scored,
+            "paraphrase_scored": para_scored,
+            "paraphrase_rejected_overlap": para_overlap,
+            "paraphrase_model": args.paraphrase,
+        }
 
     violations: list[str] = []
     for key, floor in FLOORS.items():
@@ -222,6 +316,13 @@ def main() -> None:
             mark = ""
         print(f"  {key:<18} {metrics[key]:.4f}{mark}")
     print(f"  {'self_recall_5':<18} is not gated -- it saturates; read it only when it drops")
+    if args.paraphrase:
+        for key in ("paraphrase_recall_1", "paraphrase_recall_5"):
+            print(f"  {key:<20} {metrics[key]:.4f}   (report-only)")
+        print(
+            f"  {para_scored} paraphrases scored, {para_overlap} rejected for sharing a stem "
+            f"({args.paraphrase})"
+        )
     print(f"{'-' * 58}")
     print(f"  scored {scored} notes / {slots} result slots, library has {total_notes} notes")
     print(f"{'=' * 58}\n")
