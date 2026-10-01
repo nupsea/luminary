@@ -82,7 +82,7 @@ export interface paths {
         put?: never;
         /**
          * Transcribe Audio
-         * @description Transcribe an audio recording into text using faster-whisper.
+         * @description Transcribe a dictated recording; ``language`` is an ISO 639-1 hint.
          */
         post: operations["transcribe_audio_audio_transcribe_post"];
         delete?: never;
@@ -136,6 +136,23 @@ export interface paths {
         put?: never;
         /** Suggest Description */
         post: operations["suggest_description_blog_suggest_description_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/blog/refine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refine Note */
+        post: operations["refine_note_blog_refine_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -915,26 +932,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/chat/explorations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Explorations
-         * @description Return up to 5 proactive exploration suggestions from Kuzu RELATED_TO entity pairs.
-         */
-        get: operations["get_explorations_chat_explorations_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/chat/sessions": {
         parameters: {
             query?: never;
@@ -1114,7 +1111,7 @@ export interface paths {
         put?: never;
         /**
          * Ingest Url
-         * @description Ingest a YouTube URL (yt-dlp), a linked PDF, or a web article (Trafilatura).
+         * @description Ingest a YouTube URL, an O'Reilly book, a linked PDF, or a web article.
          */
         post: operations["ingest_url_documents_ingest_url_post"];
         delete?: never;
@@ -1309,7 +1306,8 @@ export interface paths {
          * Get Document Cover
          * @description Serve or generate on-demand the cover / preview image for a document.
          *
-         *     - For PDF / EPUB: renders page 0 via PyMuPDF (fitz) if not already cached.
+         *     - For EPUB: extracts the embedded cover image from the archive.
+         *     - For PDF: renders page 0 via PyMuPDF (fitz) if not already cached.
          *     - If images exist (e.g. from article extraction), serves the first diagram/figure.
          *     - Returns 404 if no image can be produced for this document.
          */
@@ -1390,6 +1388,30 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/documents/{document_id}/asset/{asset_path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Document Asset
+         * @description Serve an embedded image from a document (its EPUB archive or extracted images).
+         */
+        get: operations["get_document_asset_documents__document_id__asset__asset_path__head"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        /**
+         * Get Document Asset
+         * @description Serve an embedded image from a document (its EPUB archive or extracted images).
+         */
+        head: operations["get_document_asset_documents__document_id__asset__asset_path__head"];
         patch?: never;
         trace?: never;
     };
@@ -2813,10 +2835,7 @@ export interface paths {
         };
         /**
          * Get Entity Pairs
-         * @description Return top entity pairs for a document from Kuzu (for preview before generation).
-         *
-         *     Uses RELATED_TO edges ordered by confidence descending; falls back to CO_OCCURS
-         *     when no RELATED_TO edges exist.
+         * @description Return a document's top co-occurring entity pairs, to preview before generation.
          */
         get: operations["get_entity_pairs_flashcards_entity_pairs_get"];
         put?: never;
@@ -2838,7 +2857,7 @@ export interface paths {
         put?: never;
         /**
          * Generate Flashcards From Graph
-         * @description Generate relationship-framing flashcards from Kuzu entity pairs. HTTP 201.
+         * @description Generate relationship-framing flashcards from graph entity pairs. HTTP 201.
          */
         post: operations["generate_flashcards_from_graph_flashcards_generate_from_graph_post"];
         delete?: never;
@@ -3851,7 +3870,7 @@ export interface paths {
         };
         /**
          * Get Note Entities
-         * @description Return entities linked to a note via WRITTEN_ABOUT or TAG_IS_CONCEPT Kuzu edges.
+         * @description Return the entities a note is about: named in its text, or matched by a tag.
          */
         get: operations["get_note_entities_notes__note_id__entities_get"];
         put?: never;
@@ -4134,7 +4153,7 @@ export interface paths {
          * Create Note Link
          * @description Create a typed link from note_id to req.target_note_id.
          *
-         *     Fires an async Kuzu edge upsert. Returns 404 if source or target note missing.
+         *     Returns 404 if source or target note missing.
          *     Returns 409 if the (source, target, link_type) triple already exists.
          */
         post: operations["create_note_link_notes__note_id__links_post"];
@@ -4158,7 +4177,7 @@ export interface paths {
          * Delete Note Link
          * @description Delete a typed link from note_id to target_note_id.
          *
-         *     Fires an async Kuzu edge delete. Returns 404 if link not found.
+         *     Returns 404 if link not found.
          */
         delete: operations["delete_note_link_notes__note_id__links__target_note_id__delete"];
         options?: never;
@@ -4242,6 +4261,90 @@ export interface paths {
          *     response reports how many notes were queued.
          */
         post: operations["backfill_descriptions_notes_descriptions_backfill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oreilly/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Oreilly Status
+         * @description Check whether O'Reilly subscription cookies are configured and active.
+         */
+        get: operations["get_oreilly_status_oreilly_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oreilly/cookies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Oreilly Cookies
+         * @description Validate and save O'Reilly subscription cookies.
+         */
+        post: operations["set_oreilly_cookies_oreilly_cookies_post"];
+        /**
+         * Remove Oreilly Cookies
+         * @description Remove stored O'Reilly cookies.
+         */
+        delete: operations["remove_oreilly_cookies_oreilly_cookies_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oreilly/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Oreilly Book
+         * @description Preview metadata and chapter list for an O'Reilly book without ingesting.
+         */
+        post: operations["preview_oreilly_book_oreilly_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oreilly/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Oreilly Book
+         * @description Download an O'Reilly book as an EPUB and ingest with local LLM processing.
+         */
+        post: operations["ingest_oreilly_book_oreilly_ingest_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4925,11 +5028,38 @@ export interface paths {
         };
         /**
          * Environment Report Endpoint
-         * @description The environment block for a bug report, scrubbed of the account name.
+         * @description A bug report for the user to review: environment, the problem, the log tail.
+         *
+         *     Every field is redacted here, before the user sees it, because it may come from a
+         *     work computer.
          */
         get: operations["environment_report_endpoint_setup_report_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/setup/report/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Report
+         * @description Save the redacted report as a text file and open it in the user's own editor.
+         *
+         *     The user reads it there and sends it however they like; nothing leaves the machine
+         *     from here. `opened` is false where no editor could be started, and `text` is then
+         *     shown in the page instead.
+         */
+        post: operations["open_report_setup_report_open_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5313,6 +5443,8 @@ export interface paths {
         /**
          * Delete Session
          * @description Delete a study session and all associated review events and teachback results.
+         *
+         *     ``if_unused`` deletes only a session with no attempt in it, and is a no-op otherwise.
          */
         delete: operations["delete_session_study_sessions__session_id__delete"];
         options?: never;
@@ -6595,6 +6727,11 @@ export interface components {
             existing_slugs: string[];
             /** Url Base */
             url_base: string;
+            /**
+             * Available Projects
+             * @default []
+             */
+            available_projects: string[];
         };
         /** BlogDraftRequest */
         BlogDraftRequest: {
@@ -6612,6 +6749,20 @@ export interface components {
             updated_date?: string | null;
             /** Hero Image */
             hero_image?: string | null;
+            /** Project */
+            project?: string | null;
+            /** Series */
+            series?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+            /**
+             * Featured
+             * @default false
+             */
+            featured: boolean;
         };
         /** BlogDraftResponse */
         BlogDraftResponse: {
@@ -6633,6 +6784,20 @@ export interface components {
             assets: components["schemas"]["BlogAssetItem"][];
             /** Collision */
             collision: boolean;
+            /** Project */
+            project?: string | null;
+            /** Series */
+            series?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+            /**
+             * Featured
+             * @default false
+             */
+            featured: boolean;
         };
         /**
          * BlogDraftSummary
@@ -6674,6 +6839,20 @@ export interface components {
             updated_date?: string | null;
             /** Hero Image */
             hero_image?: string | null;
+            /** Project */
+            project?: string | null;
+            /** Series */
+            series?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+            /**
+             * Featured
+             * @default false
+             */
+            featured: boolean;
             /** Markdown */
             markdown: string;
             /**
@@ -6701,6 +6880,20 @@ export interface components {
             pub_date: string;
             /** Updated Date */
             updated_date?: string | null;
+            /** Project */
+            project?: string | null;
+            /** Series */
+            series?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+            /**
+             * Featured
+             * @default false
+             */
+            featured: boolean;
             /** Url */
             url: string;
             /** Hero Image */
@@ -6720,6 +6913,20 @@ export interface components {
             pub_date: string;
             /** Updated Date */
             updated_date?: string | null;
+            /** Project */
+            project?: string | null;
+            /** Series */
+            series?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+            /**
+             * Featured
+             * @default false
+             */
+            featured: boolean;
             /** Url */
             url: string;
         };
@@ -6735,6 +6942,20 @@ export interface components {
             updated_date?: string | null;
             /** Hero Image */
             hero_image?: string | null;
+            /** Project */
+            project?: string | null;
+            /** Series */
+            series?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+            /**
+             * Featured
+             * @default false
+             */
+            featured: boolean;
             /** Body */
             body: string;
         };
@@ -6756,6 +6977,20 @@ export interface components {
             updated_date?: string | null;
             /** Hero Image */
             hero_image?: string | null;
+            /** Project */
+            project?: string | null;
+            /** Series */
+            series?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+            /**
+             * Featured
+             * @default false
+             */
+            featured: boolean;
             /** Markdown */
             markdown: string;
             /**
@@ -6829,6 +7064,8 @@ export interface components {
         Body_transcribe_audio_audio_transcribe_post: {
             /** File */
             file: string;
+            /** Language */
+            language?: string | null;
         };
         /** Body_upload_note_image_images_notes_post */
         Body_upload_note_image_images_notes_post: {
@@ -7426,8 +7663,11 @@ export interface components {
             /** Content Type */
             content_type: string;
             facets?: components["schemas"]["DocumentFacets"] | null;
-            /** Is Favorite */
-            is_favorite?: boolean;
+            /**
+             * Is Favorite
+             * @default false
+             */
+            is_favorite: boolean;
             /** Structure Type */
             structure_type?: string | null;
             /** Extraction Report */
@@ -7524,6 +7764,11 @@ export interface components {
             };
             /** Total */
             total: number;
+            /**
+             * Favorite Count
+             * @default 0
+             */
+            favorite_count: number;
         };
         /** DocumentGroup */
         DocumentGroup: {
@@ -7596,6 +7841,11 @@ export interface components {
             objective_progress_pct?: number | null;
             /** Mastery Pct */
             mastery_pct?: number | null;
+            /**
+             * Is Favorite
+             * @default false
+             */
+            is_favorite: boolean;
             /**
              * Collections
              * @default []
@@ -8094,13 +8344,6 @@ export interface components {
              * @enum {string}
              */
             mode: "plain" | "eli5" | "analogy" | "formal";
-        };
-        /** ExplorationSuggestion */
-        ExplorationSuggestion: {
-            /** Text */
-            text: string;
-            /** Entity Names */
-            entity_names: string[];
         };
         /**
          * FactualityAuditRequest
@@ -8814,6 +9057,11 @@ export interface components {
             tags: components["schemas"]["app__schemas__notes__TagInfo"][];
             /** Total Notes */
             total_notes: number;
+            /**
+             * Favorites Count
+             * @default 0
+             */
+            favorites_count: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -8892,6 +9140,8 @@ export interface components {
             document_id: string;
             /** Chunk Id */
             chunk_id: string | null;
+            /** Section Id */
+            section_id?: string | null;
             /** Page */
             page: number;
             /** Path */
@@ -9456,6 +9706,11 @@ export interface components {
              * @default []
              */
             source_document_ids: string[];
+            /**
+             * Is Favorite
+             * @default false
+             */
+            is_favorite: boolean;
         };
         /** NoteEntityItem */
         NoteEntityItem: {
@@ -9593,6 +9848,11 @@ export interface components {
             /** Description */
             description?: string | null;
             /**
+             * Is Favorite
+             * @default false
+             */
+            is_favorite: boolean;
+            /**
              * Created At
              * Format: date-time
              */
@@ -9653,6 +9913,8 @@ export interface components {
             source_document_ids?: string[] | null;
             /** Title */
             title?: string | null;
+            /** Is Favorite */
+            is_favorite?: boolean | null;
         };
         /** NotesTimelinePoint */
         NotesTimelinePoint: {
@@ -9678,6 +9940,35 @@ export interface components {
         OllamaPullRequest: {
             /** Model */
             model: string;
+        };
+        /** OreillyCookieRequest */
+        OreillyCookieRequest: {
+            /**
+             * Cookies
+             * @description Cookie input: raw JSON, parsed JSON array/object, or Cookie header
+             */
+            cookies: unknown;
+        };
+        /** OreillyIngestRequest */
+        OreillyIngestRequest: {
+            /**
+             * Url
+             * @description O'Reilly book URL, view URL, or ISBN/identifier
+             */
+            url: string;
+            /**
+             * Selected Chapters
+             * @description Optional chapter indices to ingest (for chapter-by-chapter study)
+             */
+            selected_chapters?: number[] | null;
+        };
+        /** OreillyPreviewRequest */
+        OreillyPreviewRequest: {
+            /**
+             * Url
+             * @description O'Reilly book URL, view URL, or ISBN/identifier
+             */
+            url: string;
         };
         /**
          * OutputStatsResponse
@@ -9708,6 +9999,8 @@ export interface components {
             tags?: string[] | null;
             /** Content Type */
             content_type?: ("book" | "conversation" | "notes" | "paper" | "audio" | "video" | "epub" | "kindle_clippings" | "tech_book" | "tech_article" | "technical") | null;
+            /** Is Favorite */
+            is_favorite?: boolean | null;
         };
         /** PatchTagsRequest */
         PatchTagsRequest: {
@@ -9725,6 +10018,19 @@ export interface components {
              * @default false
              */
             configured: boolean;
+        };
+        /** ProblemReportRequest */
+        ProblemReportRequest: {
+            /**
+             * Problem
+             * @default
+             */
+            problem: string;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
         };
         /** ProgressResponse */
         ProgressResponse: {
@@ -9941,6 +10247,20 @@ export interface components {
             job_id: string;
             /** Queued */
             queued: boolean;
+        };
+        /** RefineNoteRequest */
+        RefineNoteRequest: {
+            /** Note Id */
+            note_id: string;
+            /** Instruction */
+            instruction?: string | null;
+            /** Model */
+            model?: string | null;
+        };
+        /** RefineNoteResponse */
+        RefineNoteResponse: {
+            /** Refined Content */
+            refined_content: string;
         };
         /** RegenStatus */
         RegenStatus: {
@@ -11677,6 +11997,39 @@ export interface operations {
             };
         };
     };
+    refine_note_blog_refine_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefineNoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefineNoteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     publish_blog_publish_post: {
         parameters: {
             query?: {
@@ -13051,38 +13404,6 @@ export interface operations {
             };
         };
     };
-    get_explorations_chat_explorations_get: {
-        parameters: {
-            query: {
-                /** @description Document ID to derive entity-pair suggestions for */
-                document_id: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ExplorationSuggestion"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_sessions_chat_sessions_get: {
         parameters: {
             query?: {
@@ -13294,6 +13615,8 @@ export interface operations {
                 tag?: string | null;
                 /** @description Restrict to documents in this collection */
                 collection_id?: string | null;
+                /** @description Filter by favorite status */
+                favorite?: boolean | null;
                 sort?: "newest" | "oldest" | "alphabetical" | "most-studied" | "last_accessed" | "weakest-first";
                 page?: number;
                 page_size?: number;
@@ -13906,6 +14229,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EpubChapterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_asset_documents__document_id__asset__asset_path__head: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+                asset_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_asset_documents__document_id__asset__asset_path__head: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+                asset_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -17605,6 +17992,8 @@ export interface operations {
                 group?: string | null;
                 tag?: string | null;
                 collection_id?: string | null;
+                /** @description Filter by favorite status */
+                favorite?: boolean | null;
                 page?: number;
                 /** @description Omit for the full list (the historical behaviour every caller relies on). Declared because FastAPI drops unknown query params silently, so a caller that passed page_size used to believe it had paginated when it had not. */
                 page_size?: number | null;
@@ -18442,6 +18831,155 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DescriptionBackfillResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_oreilly_status_oreilly_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    set_oreilly_cookies_oreilly_cookies_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OreillyCookieRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_oreilly_cookies_oreilly_cookies_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+        };
+    };
+    preview_oreilly_book_oreilly_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OreillyPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_oreilly_book_oreilly_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OreillyIngestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -19435,7 +19973,10 @@ export interface operations {
     };
     environment_report_endpoint_setup_report_get: {
         parameters: {
-            query?: never;
+            query?: {
+                problem?: string;
+                detail?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -19451,6 +19992,50 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_report_setup_report_open_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProblemReportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -19974,7 +20559,9 @@ export interface operations {
     };
     delete_session_study_sessions__session_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                if_unused?: boolean;
+            };
             header?: never;
             path: {
                 session_id: string;

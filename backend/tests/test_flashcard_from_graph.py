@@ -66,20 +66,14 @@ def _make_scored_chunk(chunk_id: str, doc_id: str) -> ScoredChunk:
 
 
 class _GraphWithPairs:
-    """Returns one RELATED_TO pair for any document."""
-
-    async def get_related_entity_pairs_for_document(self, doc_id: str, limit: int = 5):
-        return [("Time Traveller", "Weena", "rescues", 0.9)]
+    """Returns one co-occurring pair for any document."""
 
     async def get_co_occurring_pairs_for_document(self, doc_id: str, limit: int = 5):
-        return []
+        return [("Time Traveller", "Weena", 3.0)]
 
 
 class _GraphWithCoOccurs:
-    """No RELATED_TO pairs; returns one CO_OCCURS pair instead."""
-
-    async def get_related_entity_pairs_for_document(self, doc_id: str, limit: int = 5):
-        return []
+    """Returns one CO_OCCURS pair at a raw count weight."""
 
     async def get_co_occurring_pairs_for_document(self, doc_id: str, limit: int = 5):
         return [("Eloi", "Morlock", 12)]
@@ -89,18 +83,12 @@ class _GraphWithSelfPair:
     """The top co-occurrence is an entity with itself -- the real shape of
     the_odyssey, where ('ulysses', 'ulysses') outweighs every genuine pair."""
 
-    async def get_related_entity_pairs_for_document(self, doc_id: str, limit: int = 5):
-        return []
-
     async def get_co_occurring_pairs_for_document(self, doc_id: str, limit: int = 5):
         return [("Ulysses", "ulysses ", 62)]
 
 
 class _GraphEmpty:
     """Returns no pairs at all."""
-
-    async def get_related_entity_pairs_for_document(self, doc_id: str, limit: int = 5):
-        return []
 
     async def get_co_occurring_pairs_for_document(self, doc_id: str, limit: int = 5):
         return []
@@ -120,7 +108,7 @@ class _Retriever:
 
 
 async def test_generate_from_graph_creates_cards_for_related_pair(test_db):
-    """generate_from_graph() creates cards with source='graph' for RELATED_TO pairs."""
+    """generate_from_graph() creates cards with source='graph' for co-occurring pairs."""
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
     chunk_id = str(uuid.uuid4())
@@ -178,41 +166,6 @@ async def test_generate_from_graph_returns_empty_when_no_pairs(test_db):
 
     assert cards == []
     assert mock_llm.call_count == 0
-
-
-async def test_generate_from_graph_uses_co_occurs_fallback(test_db):
-    """generate_from_graph() falls back to CO_OCCURS edges when RELATED_TO is empty."""
-    _, factory, _ = test_db
-    doc_id = str(uuid.uuid4())
-    chunk_id = str(uuid.uuid4())
-
-    async with factory() as session:
-        session.add(_make_doc(doc_id))
-        session.add(_make_chunk(chunk_id, doc_id=doc_id))
-        await session.commit()
-
-    llm_json = json.dumps(
-        [
-            {
-                "question": "What connects Eloi and Morlock?",
-                "answer": "They co-exist in the far future.",
-                "source_excerpt": "met Weena in the future",
-            }
-        ]
-    )
-    mock_llm = _MockLLMService(response=llm_json)
-
-    with (
-        patch("app.services.flashcard.get_llm_service", return_value=mock_llm),
-        patch("app.services.graph.get_graph_service", return_value=_GraphWithCoOccurs()),
-        patch("app.services.retriever.get_retriever", return_value=_Retriever(chunk_id, doc_id)),
-    ):
-        svc = FlashcardService()
-        async with factory() as session:
-            cards = await svc.generate_from_graph(document_id=doc_id, k=5, session=session)
-
-    assert len(cards) == 1
-    assert cards[0].source == "graph"
 
 
 # API endpoint tests
@@ -276,7 +229,7 @@ async def test_get_entity_pairs_returns_200_with_pairs_key(test_db):
     assert len(pairs) == 1
     assert pairs[0]["name_a"] == "Time Traveller"
     assert pairs[0]["name_b"] == "Weena"
-    assert pairs[0]["relation_label"] == "rescues"
+    assert pairs[0]["relation_label"] == "co-occurs"
     assert 0.0 <= pairs[0]["confidence"] <= 1.0
 
 

@@ -1,7 +1,7 @@
 """graph_node and its entity-extraction / graph-query helpers.
 
 intent='relational' path: extract entity names from the question, read the
-CO_OCCURS + RELATED_TO edges of entities with those names, and run hybrid
+CO_OCCURS edges of entities with those names, and run hybrid
 retrieval (same depth + rerank setting as search_node) as a grounding supplement.
 Falls through to search (intent='factual') on a graph failure or 0 results.
 """
@@ -100,20 +100,13 @@ async def _graph_lines_for_entity(name: str, document_ids: list[str] | None) -> 
             lines.append(f"{name} --co-occurs--> {related} (weight={weight:.1f})")
     except Exception:
         logger.warning("co-occurrence lookup failed for %s", name, exc_info=True)
-    try:
-        for related, _, relation in await graph.get_entity_neighbours(
-            name, "RELATED_TO", document_ids
-        ):
-            lines.append(f"{name} --{relation or 'related'}--> {related}")
-    except Exception:
-        logger.warning("related-to lookup failed for %s", name, exc_info=True)
     return lines
 
 
 async def graph_node(state: ChatState) -> dict:
     """Entity-graph lookup for relational queries.
 
-    Extracts entity names from the question, reads CO_OCCURS + RELATED_TO edges,
+    Extracts entity names from the question, reads CO_OCCURS edges,
     and runs hybrid retrieval (same depth + rerank setting as search_node) as a
     grounding supplement. Falls through to search_node (via intent='factual') on
     a graph failure or 0 results.

@@ -393,35 +393,21 @@ async def generate_from_gaps(
 
 @router.get("/entity-pairs", response_model=EntityPairsResponse)
 async def get_entity_pairs(document_id: str) -> EntityPairsResponse:
-    """Return top entity pairs for a document (for preview before generation).
-
-    Uses RELATED_TO edges ordered by confidence descending; falls back to CO_OCCURS
-    when no RELATED_TO edges exist.
-    """
-
+    """Return a document's top co-occurring entity pairs, to preview before generation."""
     graph = _graph_module.get_graph_service()
-    raw_pairs = await graph.get_related_entity_pairs_for_document(document_id, limit=10)
-
-    if not raw_pairs:
-        co_pairs = await graph.get_co_occurring_pairs_for_document(document_id, limit=10)
-        # CO_OCCURS weight is a raw co-occurrence count (1.0, 2.0, …), not a probability.
-        # Normalise to [0.0, 1.0] so the frontend percentage display is meaningful.
-        max_weight = max((w for _, _, w in co_pairs), default=1.0) or 1.0
-        previews = [
-            EntityPairPreview(
-                name_a=a,
-                name_b=b,
-                relation_label="co-occurs",
-                confidence=round(w / max_weight, 4),
-            )
-            for a, b, w in co_pairs
-        ]
-    else:
-        previews = [
-            EntityPairPreview(name_a=a, name_b=b, relation_label=label, confidence=conf)
-            for a, b, label, conf in raw_pairs
-        ]
-
+    co_pairs = await graph.get_co_occurring_pairs_for_document(document_id, limit=10)
+    # CO_OCCURS weight is a raw co-occurrence count (1.0, 2.0, …), not a probability.
+    # Normalise to [0.0, 1.0] so the frontend percentage display is meaningful.
+    max_weight = max((w for _, _, w in co_pairs), default=1.0) or 1.0
+    previews = [
+        EntityPairPreview(
+            name_a=a,
+            name_b=b,
+            relation_label="co-occurs",
+            confidence=round(w / max_weight, 4),
+        )
+        for a, b, w in co_pairs
+    ]
     return EntityPairsResponse(pairs=previews)
 
 

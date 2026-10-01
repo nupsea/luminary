@@ -1137,7 +1137,7 @@ class GraphEntityEdgeModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     # The relation names the graph API sends: CO_OCCURS, PREREQUISITE_OF, CALLS,
-    # IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON, VERSION_OF, RELATED_TO.
+    # IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON, VERSION_OF.
     kind: Mapped[str] = mapped_column(String, nullable=False)
     source_id: Mapped[str] = mapped_column(
         String, ForeignKey("graph_entities.id", ondelete="CASCADE"), nullable=False
@@ -1151,7 +1151,7 @@ class GraphEntityEdgeModel(Base):
     weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     source_section_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    # RELATED_TO's relation, e.g. "part of".
+    # Optional relation text; only legacy RELATED_TO rows from the Kuzu import carry one.
     label: Mapped[str | None] = mapped_column(String, nullable=True)
     library_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
