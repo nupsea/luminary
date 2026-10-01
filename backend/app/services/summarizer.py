@@ -430,9 +430,10 @@ class SummarizationService:
     async def _store_summary(self, document_id: str, mode: str, content: str) -> str | None:
         """Store a summary, or nothing if the document was deleted while it was generated.
 
-        Summarisation runs as a background task that deleting the document does not
-        cancel, so the existence check and the insert are one statement: a separate
-        check could pass just before the delete commits. Returns None when skipped.
+        Deleting a document cancels its background summaries, but a call already
+        returning can still land here, so the existence check and the insert are one
+        statement: a separate check could pass just before the delete commits.
+        Returns None when skipped.
         """
         summary_id = str(uuid.uuid4())
         row = select(
@@ -952,7 +953,8 @@ class SummarizationService:
                             max_tokens=_PREGENERATE_MAX_TOKENS,
                         )
                     assert isinstance(text, str)  # noqa: S101
-                    await self._store_summary(document_id, mode, text)
+                    if await self._store_summary(document_id, mode, text) is None:
+                        return
                     logger.info(
                         "pregenerate: stored mode=%s",
                         mode,
