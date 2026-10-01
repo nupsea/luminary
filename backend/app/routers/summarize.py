@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.database import get_session_factory
 from app.models import DocumentModel, SectionSummaryModel, SummaryModel
 from app.repos._helpers import get_or_404
+from app.services.library_summary import get_library_summary_service
 from app.services.summarizer import get_summarization_service
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,7 @@ async def summarize_library(req: LibrarySummarizeRequest) -> StreamingResponse:
     Cache-first: if a library summary is stored for this mode it is streamed from
     the database.  Regenerated after any new document is ingested.
     """
-    svc = get_summarization_service()
+    svc = get_library_summary_service()
     return StreamingResponse(
         svc.stream_library_summary(req.mode, req.model, force_refresh=req.force_refresh),
         media_type="text/event-stream",

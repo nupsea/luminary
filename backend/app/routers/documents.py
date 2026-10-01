@@ -107,6 +107,7 @@ from app.services.epub_service import (
     get_toc_async,
 )
 from app.services.ingestion_jobs import get_ingestion_jobs
+from app.services.library_summary import get_library_summary_service
 from app.services.llm_admission import paused_for_interaction
 from app.services.naming import normalize_tag_slug
 from app.services.notes_service import sync_document_tag_index
@@ -119,7 +120,7 @@ from app.services.remote_source import (
     UningestibleRemoteContent,
     fetch_remote_document,
 )
-from app.services.summarizer import PREGENERATE_MODES, get_summarization_service
+from app.services.summarizer import PREGENERATE_MODES
 from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
 from app.types import DocumentProfile
@@ -1791,7 +1792,7 @@ async def get_document_asset(document_id: str, asset_path: str) -> Response:
 
 def _schedule_library_summary_refresh() -> None:
     """Regenerate the library summary that deleting a document dropped (#140)."""
-    task = asyncio.create_task(get_summarization_service().refresh_library_summary())
+    task = asyncio.create_task(get_library_summary_service().refresh_library_summary())
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
