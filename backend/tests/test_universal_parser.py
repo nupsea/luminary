@@ -409,3 +409,27 @@ def test_plain_text_fallback_invents_no_heading(tmp_path):
     assert parsed.sections, "the fallback produced no sections"
     for s in parsed.sections:
         assert s.heading == "", f"invented heading {s.heading!r}"
+
+
+def test_the_text_before_the_first_heading_is_kept_without_a_heading(tmp_path):
+    """#97: a web article's lede sits above its first `##`, and it never reached a section."""
+    f = tmp_path / "article.md"
+    f.write_text(
+        "Reporting is where a clinical decision becomes the clinical record.\n\n"
+        + "".join(f"## Part {n}\n\nBody of part {n}.\n\n" for n in range(1, 4))
+    )
+    doc = up.parse(f, "md")
+    assert doc is not None
+    assert doc.sections[0].heading == ""
+    assert doc.sections[0].text.startswith("Reporting is where a clinical decision")
+    assert [s.heading for s in doc.sections[1:]] == ["Part 1", "Part 2", "Part 3"]
+
+
+def test_a_title_line_or_nav_bar_before_the_first_heading_is_not_kept(tmp_path):
+    f = tmp_path / "nav.md"
+    f.write_text(
+        "[Home](../)\n\n[Our Team](../team)\n\n![](img/logo.png)\n\nCompany News\n\n"
+        + "".join(f"## Part {n}\n\nBody of part {n}.\n\n" for n in range(1, 4))
+    )
+    doc = up.parse(f, "md")
+    assert [s.heading for s in doc.sections] == ["Part 1", "Part 2", "Part 3"]

@@ -172,3 +172,25 @@ def test_same_page_siblings_are_attributed_to_their_own_heading(tmp_path):
         assert own_token in section.text, f"{heading} lost its own prose: {section.text!r}"
         for other in other_tokens:
             assert other not in section.text, f"{heading} absorbed {other}: {section.text!r}"
+
+
+def test_text_before_the_first_bookmark_is_kept_without_a_heading(tmp_path):
+    """An arXiv paper's bookmarks start at its Introduction, and the title page and
+    abstract before it were stored nowhere (#97; the Attention paper kept 0.848 of
+    its distinct words, 0.909 with this)."""
+    path = _pdf_with_blocks(
+        tmp_path / "paper.pdf",
+        [
+            ["PAPERTITLE and its authors", "ABSTRACTBODY the paper's summary.", "Introduction",
+             "INTROBODY the first section."],
+            ["BACKGROUNDBODY the second section."],
+        ],
+        [[1, "Introduction", 1], [1, "Background", 2]],
+    )
+    sections = DocumentParser().parse(path, "pdf").sections
+    front = sections[0]
+    assert front.heading == ""
+    assert "PAPERTITLE" in front.text and "ABSTRACTBODY" in front.text
+    assert "INTROBODY" not in front.text
+    for token in ("PAPERTITLE", "ABSTRACTBODY", "INTROBODY", "BACKGROUNDBODY"):
+        assert sum(token in s.text for s in sections) == 1, token
