@@ -97,7 +97,7 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | — | 0.12.0 | The Brief — **parked** | | None; no rung waits on it |
 | I. Every host | 0.13.x | Every host is a first-class host — **0.13.9 released; exit gate open.** **Checkpoint A** | #24, #99, #110, #154, #155, #156 | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator; `make smoke` green on Windows and against the bundled macOS app |
 | II. Stability | 0.14.x | Gates you can believe — **0.14.3 released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
-| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #160, #161, #162, #185, #186, #187, #188, #189, #191, #195 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
+| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #66, #158, #159, #160, #161, #162, #185, #186, #187, #188, #189, #191, #195, #204, #205 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
 | III. Cloud readiness | 0.16.0 | Device auth and pairing | | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail | #48 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
 | | 0.18.0 | Your own server. **Checkpoint C** | | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key |
@@ -321,9 +321,8 @@ What remains open:
 **A Kuzu lock cannot go stale is a POSIX statement.** `flock` is advisory and released by the kernel
 when the holder dies, which is why this repo forbids a lockfile or any lock-clearing logic. Windows
 locks are mandatory and a handle can outlive an abrupt termination, so the same relaunch raises
-`PermissionError: [WinError 32]`. Do not port the graph store on that argument alone — 2,583 lines
-and 163 Cypher statements across 26 node and edge types. The retrieval arm is now measured (0.15.0,
-below): it contributes nothing, so the port-or-delete question is about the store's other readers.
+`PermissionError: [WinError 32]`. The graph store moves into SQLite in 0.15.0 (below), which removes
+this lock rather than working around it.
 
 **On a host that cannot run a local model, the chosen mode decides what runs, and the app says so.**
 Local, Hybrid and Cloud are one stored setting, asked once at first launch for every install path and
@@ -548,26 +547,38 @@ a graded run before it is honoured. The remaining misses
 are speakers the source mislabels (the Gita's chapter headings name the wrong speaker) and misread
 text.
 
-**Query-time graph expansion buys no retrieval quality.** `run_eval.py --ablation`, 2026-09-21, dev
-library, GLiNER held resident and the arms confirmed to diverge before and after each dataset. On the
-shipped funnel (rrf+rerank), HR@5 is identical with and without expansion on all five sets (book 40,
-paper 40, legal/play/study 60 rows), and MRR moves by at most 0.003 in both directions, which is less
-than one question. Unreranked, no set moves by more than one question in either direction. Measured:
-the `_graph_expand` alias tokens on `/search`. Not measured: the chat `graph` node, which routes
-relationship questions to Kuzu and not to `/search`.
+**Query-time graph expansion is removed from `/search`; do not restore it.** It bought nothing:
+`run_eval.py --ablation`, 2026-09-21, dev library, GLiNER held resident and the arms confirmed to
+diverge. On the shipped funnel (rrf+rerank), HR@5 was identical with and without expansion on all
+five sets (book 40, paper 40, legal/play/study 60 rows), and MRR moved by at most 0.003 either way,
+less than one question. It also ran only while GLiNER was resident, three minutes after launch or an
+ingest. Not measured: the chat `graph` node, which reads the graph directly.
 
-**Expansion is also dormant in the shipped app.** `_graph_expand` skips when GLiNER is not loaded
-(`retriever_strategies.py`). Only startup warmup and ingestion load it, and the reaper releases it
-after `NER_IDLE_RELEASE_SECONDS=180`. A user's search therefore expands only in the three minutes
-after launch or an ingest. Given the ablation, the fix is to remove expansion from `/search`, not to
-keep GLiNER resident for it.
+**The graph moves from Kuzu into SQLite tables; the graph features stay.** Decided 2026-10-01. Kuzu
+is used as an edge store: every Cypher statement is a one-hop pattern, with no variable-length path,
+and traversal already runs in Python (the learning path's BFS and topological sort,
+`graph_prereq.py`). What decides it is integrity, not speed. Measured on the dev library, 2026-10-01:
 
-**The Kuzu port-or-delete decision is made here.** 28 modules read the graph store: the chat `graph`
-node, graph flashcards, concepts, mastery, study paths and prerequisite extraction among them.
-Retiring expansion removes one reader. The decision for the rest weighs what those features deliver
-against #65, #161 (`RELATED_TO` empty library-wide, and self-pairs left by pre-0.11.0 ingests), and the
-Windows lock (0.13.x above). It also settles 0.17.0's scope, because whatever store survives needs a
-library scope.
+| | Kuzu today | Same data in SQLite |
+|---|---|---|
+| Size (27.7k nodes, 97.5k edges; `CO_OCCURS` is 82%) | 225 MB | 24.7 MB |
+| Read queries the app runs (Map, chat graph node, suggestions, concepts) | 0.6–11.7 ms | 0.2–9.7 ms, once `ANALYZE` has run (one query took 53 ms without it) |
+| Writing 7,000 edges, one transaction | 1.81 s | 0.033 s |
+| `CO_OCCURS` edges of deleted documents (#204) | 40,977 of 79,770 | impossible with `ON DELETE CASCADE` |
+| Chat graph node's top-10 co-occurrences from deleted documents (#205) | 64% | — |
+| Notes: deleted but still a node / never given one (#65) | 74 / 29 | one transaction with the note row |
+
+The port removes #65's drift, #185's event-loop blocking and the Windows lock by construction, and
+puts one store rather than two behind 0.17.0's library scope and snapshot. It does not fix what the
+graph holds: concept prerequisites, `PROMOTED_FROM` and entity `RELATED_TO` are empty (#161), and
+ingest samples 2.4% of a long book (#63).
+
+The port keeps the path to a hosted version open: foreign keys with `ON DELETE CASCADE`, a
+`library_id` column from the first revision, portable SQLAlchemy only (no FTS, no SQLite-only
+upsert), all of it in `repos/`. Postgres or one database per tenant then takes the graph with the
+rest of the schema. Graph queries are not what a server scales on; inference and extraction are.
+
+Retiring `/search` expansion removes one reader before the port.
 
 **The last of the document-model work belongs here.** `form`, `domain` and `register` are written at
 ingest by `_persist_classification`, and `DocumentProfile` owns the policy. What remains is retiring
@@ -602,7 +613,7 @@ Today `models.py` has no owner, tenant or library column, data sits under one gl
 
 | Seam | What it means |
 |---|---|
-| A library scope on every query | `library_id` on user-owned tables, the LanceDB tables and the graph store (or its 0.15.0 replacement). The migration is additive with a backfill: DDL and backfill in separate revisions (I-23) |
+| A library scope on every query | `library_id` on user-owned tables, the LanceDB tables and the graph tables (in SQLite from 0.15.0). The migration is additive with a backfill: DDL and backfill in separate revisions (I-23) |
 | A request context | `principal` and `library` flow from the auth middleware through services to repos. No repo reads global state to find its data |
 | One path resolver | Direct `DATA_DIR` joins go through a resolver that takes the library, so each tenant gets its own root, or later an object store |
 | Per-library settings | `get_settings()` splits into process configuration and per-library or per-user preferences (`llm_mode`, keys, model picks). API keys move to storage scoped to the principal |

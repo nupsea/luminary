@@ -392,11 +392,7 @@ class Settings(BaseSettings):
     PDF_VECTOR_FIGURES: bool = True
     GLINER_ENABLED: bool = True  # Set to false on memory-constrained machines (avoids OOM)
     # The entity model, and the second-largest thing Luminary loads (1126MB).
-    # Turning it off is not the memory lever it looks like: `graph_expand` in
-    # retriever_strategies skips query expansion whenever this model is not
-    # resident, so an unloaded entity model silently changes retrieval rather
-    # than only freeing memory. A smaller model that stays resident is therefore
-    # worth more than a large one that does not.
+    # Only ingest and note entity extraction read it; no query path does.
     #
     # The default is `gliner_multi-v2.1` fine-tuned onto a synthetic PII dataset
     # and six languages, while ENTITY_TYPES in ner.py asks for PERSON,

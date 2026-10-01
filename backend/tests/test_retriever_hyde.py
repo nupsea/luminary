@@ -83,7 +83,6 @@ async def test_retrieve_with_hyde_passes_augmented_query_to_searches():
             document_ids=["doc-1"],
             k=5,
             hyde=True,
-            graph_expand=False,
         )
 
     assert vec_mock.call_count == 1
@@ -108,7 +107,7 @@ async def test_retrieve_without_hyde_uses_original_query():
         patch.object(retriever, "keyword_search", new=AsyncMock(return_value=[_make_chunk("c2")])),
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
-        await retriever.retrieve("What happened?", document_ids=["doc-1"], k=5, graph_expand=False)
+        await retriever.retrieve("What happened?", document_ids=["doc-1"], k=5)
 
     mock_llm.generate.assert_not_called()
     assert vec_mock.call_args[0][0] == "What happened?"
@@ -133,7 +132,6 @@ async def test_retrieve_with_hyde_falls_back_when_llm_fails():
             document_ids=["doc-1"],
             k=5,
             hyde=True,
-            graph_expand=False,
         )
 
     assert vec_mock.call_args[0][0] == "What happened?"

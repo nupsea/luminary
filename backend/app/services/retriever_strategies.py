@@ -1,12 +1,11 @@
 """Retrieval strategy implementations.
 
-Covers: HyDE, graph expansion, reranking, diversity, context expansion.
+Covers: HyDE, reranking, diversity, context expansion.
 
 These are the swappable strategy functions used by HybridRetriever in retriever.py.
 Kept separate so retriever.py stays focused on the orchestration logic.
 """
 
-import asyncio
 import logging
 from collections import defaultdict
 from typing import Any
@@ -14,11 +13,8 @@ from typing import Any
 from sqlalchemy import bindparam, text
 
 from app.database import get_session_factory
-from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services import llm as _llm_module  # indirect: get_llm_service is patched
 from app.services import model_prefetch
-from app.services import ner as _ner_module  # indirect: get_entity_extractor is patched
-from app.services.entity_disambiguator import find_canonical
 from app.services.fts_query import (  # noqa: F401  re-exported for retriever.py
     sanitize_fts_query as _sanitize_fts_query,
 )
@@ -63,17 +59,6 @@ _HYDE_SYSTEM = (
 # cloud, which pinning a model would also have skipped along with the API key
 # and the offline reroute.
 _HYDE_TIMEOUT_S = 20.0
-
-# Graph-augmented deterministic query expansion. Detect entities in the
-# query via GLiNER, resolve to canonical labels via EntityDisambiguator, then
-# fetch alias surface forms from the Kuzu Entity.aliases column. The expanded
-# query bridges the question/answer vocabulary gap deterministically (no LLM
-# in the query path -> no hallucination, no run-to-run variance, I-16 clean).
-# Pairs with index-time entity injection so both sides speak the same
-# canonical-entity vocabulary.
-_GRAPH_EXPAND_TYPES = {"PERSON", "ORGANIZATION", "PLACE", "CONCEPT"}
-_GRAPH_EXPAND_MAX_ALIASES_PER_ENTITY = 5
-_GRAPH_EXPAND_MAX_TOKENS = 30
 
 
 def _round_robin(
@@ -331,111 +316,3 @@ async def _hyde_expand(query: str, timeout: float = _HYDE_TIMEOUT_S) -> str:
     except Exception as exc:
         logger.warning("hyde_expand failed, falling back to original query: %s", exc)
     return query
-
-
-async def _graph_expand(query: str) -> str:
-    """Expand *query* with canonical entity labels and aliases from the graph.
-
-    Detects entities in the query via GLiNER, resolves them to canonical
-    surface forms via :func:`find_canonical`, and fetches up to
-    :data:`_GRAPH_EXPAND_MAX_ALIASES_PER_ENTITY` aliases per entity from the
-    Kuzu ``Entity.aliases`` column. The total appended tokens are capped at
-    :data:`_GRAPH_EXPAND_MAX_TOKENS` to bound BM25 dilution.
-
-    Fails soft -- returns *query* unchanged when GLiNER finds no entities,
-    when Kuzu is unreachable, or when any error occurs in the pipeline. No
-    LLM is called and no external API is touched (I-16 clean).
-    """
-    try:
-        # lazy imports to avoid retriever <-> services circular chains.
-
-        extractor = _ner_module.get_entity_extractor()
-        if extractor._model is None:
-            logger.info("graph_expand: GLiNER model not loaded yet; skipping expansion")
-            return query
-
-        # Direct sync call -- single short query, GLiNER inference takes ~30ms
-        # warm. Wrapping in asyncio.to_thread here causes ThreadPoolExecutor /
-        # LanceDB BackgroundLoop contention in pytest that surfaces as an
-        # IO Spill error during prior ingestion steps.
-        entities = extractor.extract(
-            [{"id": "q", "document_id": "q", "text": query}],
-            "general",
-        )
-        # Filter to query-relevant types and dedupe by canonical label.
-        canonical_seen: set[str] = set()
-        canonical_entities: list[tuple[str, str]] = []
-        for ent in entities:
-            etype = ent.get("type", "")
-            ename = (ent.get("name") or "").strip()
-            if etype not in _GRAPH_EXPAND_TYPES or not ename:
-                continue
-            canonical = find_canonical(ename, etype, []).lower()
-            if canonical in canonical_seen:
-                continue
-            canonical_seen.add(canonical)
-            canonical_entities.append((canonical, etype))
-
-        if not canonical_entities:
-            logger.debug("graph_expand: no entities detected; passthrough")
-            return query
-
-        graph = _graph_module.get_graph_service()
-        existing_query_tokens = {t.lower() for t in query.split()}
-        expansion_tokens: list[str] = []
-
-        def _lookup_aliases(name: str) -> str:
-            with graph._lock:
-                result = graph._conn.execute(
-                    "MATCH (e:Entity) WHERE toLower(e.name) = $name RETURN e.aliases LIMIT 1",
-                    {"name": name},
-                )
-                if not result.has_next():
-                    return ""
-                row = result.get_next()
-                return (row[0] or "") if row else ""
-
-        for canonical, _etype in canonical_entities:
-            for tok in canonical.split():
-                tok_lc = tok.lower()
-                if tok_lc and tok_lc not in existing_query_tokens:
-                    expansion_tokens.append(tok)
-                    existing_query_tokens.add(tok_lc)
-
-            try:
-                # Kuzu is synchronous and not thread-safe; offload to a
-                # worker thread so the event loop is not blocked.
-                aliases_str = await asyncio.to_thread(_lookup_aliases, canonical)
-            except Exception as exc:
-                logger.warning(
-                    "graph_expand: kuzu lookup failed for %r, skipping: %s",
-                    canonical,
-                    exc,
-                )
-                continue
-
-            if not aliases_str:
-                continue
-
-            alias_forms = [a.strip() for a in aliases_str.split("|") if a.strip()]
-            for alias in alias_forms[:_GRAPH_EXPAND_MAX_ALIASES_PER_ENTITY]:
-                for tok in alias.split():
-                    tok_lc = tok.lower()
-                    if tok_lc and tok_lc not in existing_query_tokens:
-                        expansion_tokens.append(tok)
-                        existing_query_tokens.add(tok_lc)
-
-        if not expansion_tokens:
-            return query
-
-        capped = expansion_tokens[:_GRAPH_EXPAND_MAX_TOKENS]
-        logger.info(
-            "graph_expand: entities_detected=%d aliases_added=%d expanded_query_tokens=%d",
-            len(canonical_entities),
-            len(expansion_tokens),
-            len(capped),
-        )
-        return f"{query} {' '.join(capped)}"
-    except Exception as exc:
-        logger.warning("graph_expand failed, falling back to original query: %s", exc)
-        return query
