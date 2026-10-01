@@ -13,6 +13,13 @@ from app.services.enrichment_worker import EnrichmentQueueWorker
 from app.services.llm import LLMAPIConnectionError
 
 
+async def _drain(worker: EnrichmentQueueWorker) -> None:
+    """Wait for the dispatched document runners to finish. A fixed sleep was shorter
+    than a loaded Windows runner needed, and the job was still running."""
+    if worker._doc_tasks:
+        await asyncio.wait_for(asyncio.gather(*worker._doc_tasks), timeout=30)
+
+
 @pytest.mark.asyncio
 async def test_worker_transitions_job_to_done(test_db):
     """A pending job should transition to done after the handler runs."""
@@ -52,8 +59,7 @@ async def test_worker_transitions_job_to_done(test_db):
     worker = EnrichmentQueueWorker(poll_interval_s=0.1)
     worker.register("test_type", test_handler)
     await worker._dispatch_pending()
-    # Wait for doc task to complete
-    await asyncio.sleep(0.3)
+    await _drain(worker)
     await worker.stop()
 
     async with factory() as session:
@@ -104,7 +110,7 @@ async def test_worker_failed_job_sets_error_message(test_db):
     worker = EnrichmentQueueWorker(poll_interval_s=0.1)
     worker.register("fail_type", failing_handler)
     await worker._dispatch_pending()
-    await asyncio.sleep(0.3)
+    await _drain(worker)
     await worker.stop()
 
     async with factory() as session:
@@ -166,7 +172,7 @@ async def test_worker_retries_transient_llm_unavailable_then_succeeds(test_db, m
     worker = EnrichmentQueueWorker(poll_interval_s=0.1)
     worker.register("flaky", flaky_handler)
     await worker._dispatch_pending()
-    await asyncio.sleep(0.5)
+    await _drain(worker)
     await worker.stop()
 
     async with factory() as session:
@@ -197,7 +203,7 @@ async def test_worker_exhausts_backoff_then_fails(test_db, monkeypatch):
     worker = EnrichmentQueueWorker(poll_interval_s=0.1)
     worker.register("down", always_down)
     await worker._dispatch_pending()
-    await asyncio.sleep(0.5)
+    await _drain(worker)
     await worker.stop()
 
     async with factory() as session:
@@ -240,7 +246,7 @@ async def test_an_uninstalled_model_skips_the_job_rather_than_failing_it(test_db
     worker = EnrichmentQueueWorker(poll_interval_s=0.1)
     worker.register("vision", needs_vision)
     await worker._dispatch_pending()
-    await asyncio.sleep(0.5)
+    await _drain(worker)
     await worker.stop()
 
     async with factory() as session:
@@ -269,7 +275,7 @@ async def test_a_missing_model_outside_the_catalogue_still_names_itself(test_db,
     worker = EnrichmentQueueWorker(poll_interval_s=0.1)
     worker.register("exotic", needs_exotic)
     await worker._dispatch_pending()
-    await asyncio.sleep(0.5)
+    await _drain(worker)
     await worker.stop()
 
     async with factory() as session:
@@ -376,7 +382,7 @@ async def test_worker_skips_already_active_document(test_db):
     # Simulate doc already active
     worker._active_doc_ids.add(doc_id)
     await worker._dispatch_pending()
-    await asyncio.sleep(0.2)
+    await _drain(worker)
     await worker.stop()
 
     # Handler should not have been called since doc was already active

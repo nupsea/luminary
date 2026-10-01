@@ -1745,7 +1745,10 @@ def _read_epub_image_sync(epub_path: str, clean_path: str) -> tuple[bytes, str] 
         return z.read(matched), mime
 
 
-@router.api_route("/{document_id}/asset/{asset_path:path}", methods=["GET", "HEAD"])
+@router.get("/{document_id}/asset/{asset_path:path}")
+# One route for both methods gave them one OpenAPI operation id, which the generated
+# client types declare twice.
+@router.head("/{document_id}/asset/{asset_path:path}", include_in_schema=False)
 async def get_document_asset(document_id: str, asset_path: str) -> Response:
     """Serve an embedded image from a document (its EPUB archive or extracted images)."""
     async with get_session_factory()() as session:
@@ -2076,7 +2079,7 @@ async def get_document_diagnostics(document_id: str):
     All other counts are 0 if the store is unavailable or empty.
     """
     async with get_session_factory()() as session:
-        await get_or_404(session, DocumentModel, document_id, name="Document")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
 
         # Two counts share a session with the get_or_404 guard; FTS5 virtual table
         # requires raw SQL so both stay here rather than going through a repo.
@@ -2112,6 +2115,7 @@ async def get_document_diagnostics(document_id: str):
         chunk_count=chunk_count,
         fts_count=fts_count,
         entity_count=entity_count,
+        entity_chunks_scanned=doc.entity_chunks_scanned,
         edge_count=edge_count,
         vector_count=vector_count,
     )

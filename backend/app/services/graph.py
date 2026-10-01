@@ -315,16 +315,6 @@ class GraphService:
                 await repo.edge_count(document_id, "CO_OCCURS"),
             )
 
-    async def get_related_entity_pairs_for_document(
-        self, document_id: str, limit: int = 5
-    ) -> list[tuple[str, str, str, float]]:
-        """(name a, name b, relation, confidence) for RELATED_TO edges, most confident first."""
-        async with _session() as session:
-            rows = await GraphEntityRepo(session).named_edges(
-                document_id, "RELATED_TO", limit=limit
-            )
-        return [(a, b, e.label or "", float(e.confidence or 0.0)) for a, b, _, _, e in rows]
-
     async def get_co_occurring_pairs_for_document(
         self, document_id: str, limit: int = 5
     ) -> list[tuple[str, str, float]]:

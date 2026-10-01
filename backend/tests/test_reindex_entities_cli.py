@@ -100,3 +100,57 @@ async def test_reindex_writes_entity_tail_fts_and_vectors(factory):
     assert tails["c1"] in fts, "the FTS row carries the entity tail"
     rows = [r for call in lancedb.upsert_chunks.call_args_list for r in call.args[0]]
     assert {r["chunk_id"] for r in rows} == {"c1", "c2"}
+
+
+def test_a_long_document_is_sampled_across_its_length(monkeypatch):
+    from app.workflows.ingestion_nodes import entity_extract
+
+    monkeypatch.setattr(entity_extract, "NER_CHUNK_LIMIT", 4)
+    chunks = [{"id": f"c{i}"} for i in range(13)]
+    assert entity_extract.select_ner_chunks(chunks[:4]) == chunks[:4]
+    sample = [c["id"] for c in entity_extract.select_ner_chunks(chunks)]
+    assert sample == ["c0", "c3", "c6", "c9"]
+
+
+@pytest.mark.asyncio
+async def test_reindex_reads_the_sample_ingest_reads_and_records_it(factory, monkeypatch):
+    """#63: reindex scanned every chunk while ingest scanned a sample, so the two
+    built different graphs for one document."""
+    from app.workflows.ingestion_nodes import entity_extract
+
+    monkeypatch.setattr(entity_extract, "NER_CHUNK_LIMIT", 4)
+    async with factory() as s:
+        s.add(
+            DocumentModel(
+                id="d1",
+                title="t",
+                format="txt",
+                content_type="book",
+                word_count=8,
+                page_count=0,
+                file_path="x.txt",
+                stage="complete",
+                tags=[],
+            )
+        )
+        for i in reversed(range(13)):
+            s.add(ChunkModel(id=f"c{i}", document_id="d1", text=f"text {i}", chunk_index=i))
+        await s.commit()
+
+    extractor = MagicMock()
+    extractor.extract.return_value = []
+    embedder = MagicMock()
+    embedder.encode.side_effect = lambda texts: [[0.0] * 4 for _ in texts]
+    with (
+        patch("app.services.ner.get_entity_extractor", return_value=extractor),
+        patch("app.services.embedder.get_embedding_service", return_value=embedder),
+        patch("app.services.vector_store.get_lancedb_service", return_value=MagicMock()),
+    ):
+        args = argparse.Namespace(all=False, document_id="d1", rebuild_graph=True)
+        assert await _run(args) == 0
+
+    scanned = [c["id"] for c in extractor.extract.call_args.args[0]]
+    assert scanned == ["c0", "c3", "c6", "c9"]
+    async with factory() as s:
+        doc = await s.get(DocumentModel, "d1")
+    assert doc.entity_chunks_scanned == 4

@@ -17,15 +17,24 @@ interface IngestionHealthPanelProps {
 interface MetricCardProps {
   label: string
   value: number
+  note?: string
 }
 
-function MetricCard({ label, value }: MetricCardProps) {
+function MetricCard({ label, value, note }: MetricCardProps) {
   return (
     <div className="rounded-md border border-border bg-background p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="text-xl font-semibold text-foreground">{value}</p>
+      {note && <p className="text-xs text-muted-foreground">{note}</p>}
     </div>
   )
+}
+
+// Entities come from a sample of a long document's chunks; say so beside the count.
+function entityCoverageNote(data: DiagnosticsResponse): string | undefined {
+  const scanned = data.entity_chunks_scanned
+  if (scanned == null || scanned >= data.chunk_count) return undefined
+  return `from ${scanned.toLocaleString()} of ${data.chunk_count.toLocaleString()} chunks`
 }
 
 function healthBadge(data: DiagnosticsResponse): React.ReactElement {
@@ -106,7 +115,11 @@ export function IngestionHealthPanel({ documentId, stage }: IngestionHealthPanel
         <MetricCard label="Chunks" value={data.chunk_count} />
         <MetricCard label="Keyword Index" value={data.fts_count} />
         <MetricCard label="Vectors" value={data.vector_count} />
-        <MetricCard label="Entities" value={data.entity_count} />
+        <MetricCard
+          label="Entities"
+          value={data.entity_count}
+          note={entityCoverageNote(data)}
+        />
         <MetricCard label="Co-occurrences" value={data.edge_count} />
       </div>
       <div>{healthBadge(data)}</div>

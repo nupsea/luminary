@@ -26,11 +26,6 @@ class SuggestionResponse(BaseModel):
     suggestions: list[SuggestionItem]
 
 
-class ExplorationSuggestion(BaseModel):
-    text: str
-    entity_names: list[str]
-
-
 # Template-based suggestion generation (fallback, no LLM)
 
 
@@ -409,22 +404,3 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
 
     templates = _doc_templates(doc, entities, headings)
     return SuggestionResponse(suggestions=_template_to_items(templates))
-
-
-@router.get("/explorations", response_model=list[ExplorationSuggestion])
-async def get_explorations(
-    document_id: str = Query(..., description="Document ID to derive entity-pair suggestions for"),
-) -> list[ExplorationSuggestion]:
-    """Return up to 5 proactive exploration suggestions from RELATED_TO entity pairs."""
-    pairs = await get_graph_service().get_related_entity_pairs_for_document(document_id, limit=5)
-    suggestions: list[ExplorationSuggestion] = []
-    for name_a, name_b, label, _conf in pairs:
-        display_a = name_a.title()
-        display_b = name_b.title()
-        if label:
-            text = f"What is the {label} between {display_a} and {display_b}?"
-        else:
-            text = f"How is {display_a} related to {display_b}?"
-        suggestions.append(ExplorationSuggestion(text=text, entity_names=[name_a, name_b]))
-    logger.debug("explorations: doc=%s returned %d suggestions", document_id, len(suggestions))
-    return suggestions

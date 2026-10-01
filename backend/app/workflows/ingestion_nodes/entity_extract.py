@@ -27,6 +27,7 @@ from app.config import get_settings as _get_settings
 from app.database import get_session_factory
 from app.exceptions import ModelNotDownloaded
 from app.models import ChunkModel
+from app.repos.document_repo import DocumentRepo
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services import ner as _ner_module  # indirect: get_entity_extractor is patched
 from app.services.code_parser import CodeParser
@@ -46,6 +47,24 @@ from app.workflows.ingestion_nodes._shared import (
 )
 
 logger = logging.getLogger(__name__)
+
+# A cap on GLiNER time for long documents. Ingest and reindex both read
+# select_ner_chunks, so either builds the same graph (#63).
+NER_CHUNK_LIMIT = 500
+
+
+def select_ner_chunks(chunks: list[dict]) -> list[dict]:
+    """The chunks entity extraction reads: all of them, or NER_CHUNK_LIMIT spread evenly."""
+    if len(chunks) <= NER_CHUNK_LIMIT:
+        return chunks
+    step = len(chunks) // NER_CHUNK_LIMIT
+    return chunks[::step][:NER_CHUNK_LIMIT]
+
+
+async def record_entity_coverage(doc_id: str, chunks_scanned: int) -> None:
+    async with get_session_factory()() as session:
+        await DocumentRepo(session).set_entity_chunks_scanned(doc_id, chunks_scanned)
+        await session.commit()
 
 
 def _build_call_graph(chunks: list[dict], graph: DocumentGraph, doc_id: str) -> None:
@@ -195,21 +214,14 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 return {**state, "status": "complete"}
 
             extractor = _ner_module.get_entity_extractor()
-            # Cap NER at 500 chunks — sufficient for graph coverage, avoids multi-hour
-            # runs on large documents (e.g. 2000+ chunk books).
-            # Sample evenly across the document to get representative entities.
-            NER_CHUNK_LIMIT = 500
-            if len(chunks) > NER_CHUNK_LIMIT:
-                step = len(chunks) // NER_CHUNK_LIMIT
-                ner_chunks = chunks[::step][:NER_CHUNK_LIMIT]
+            ner_chunks = select_ner_chunks(chunks)
+            if len(ner_chunks) < len(chunks):
                 logger.info(
                     "NER sampling %d of %d chunks",
                     len(ner_chunks),
                     len(chunks),
                     extra={"doc_id": doc_id},
                 )
-            else:
-                ner_chunks = chunks
             # CPU-bound — run in thread pool to keep event loop free for status polls.
             # Timeout guards against GLiNER hanging on pathological chunk text.
             loop = _asyncio.get_event_loop()
@@ -275,6 +287,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 is_technical,
             )
             await graph.write_document_graph(doc_id, document_graph)
+            await record_entity_coverage(doc_id, len(ner_chunks))
         except ModelNotDownloaded:
             # Optional, installed from Settings; the document is complete without it.
             logger.info(

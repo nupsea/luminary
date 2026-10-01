@@ -338,3 +338,7 @@ async def test_document_asset_endpoint_serves_epub_images(test_db, tmp_path):
         # Missing asset returns 404
         resp3 = await client.get(f"/documents/{doc_id}/asset/nonexistent.png")
         assert resp3.status_code == 404
+
+        # HEAD is served too, outside the OpenAPI schema.
+        head = await client.head(f"/documents/{doc_id}/asset/rag_arch.png")
+        assert head.status_code == 200
