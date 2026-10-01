@@ -33,6 +33,9 @@ LENGTH_EXEMPT = {"app/db_init.py::create_all_tables"}
 SQL_RE = re.compile(r"\bselect\(|session\.execute\(")
 # A quarantine marker, or a test that behaves differently on the CI runner.
 UNSTABLE_RE = re.compile(r"pytest\.mark\.unstable\b|GITHUB_ACTIONS")
+# The legacy document kind being retired; new policy reads DocumentProfile.of.
+CONTENT_TYPE_RE = re.compile(r"\bcontent_type\b")
+_PER_FILE = ("sql_outside_repos", "unstable_tests", "content_type_refs")
 
 
 def _rel(path: Path) -> str:
@@ -108,6 +111,7 @@ def measure() -> dict:
         "maintainability_below_a": sorted(maintainability_below_a()),
         "sql_outside_repos": _count_per_file(APP, SQL_RE, skip="app/repos/"),
         "unstable_tests": _count_per_file(TESTS, UNSTABLE_RE),
+        "content_type_refs": _count_per_file(APP, CONTENT_TYPE_RE),
     }
 
 
@@ -123,7 +127,7 @@ def compare(base: dict, now: dict) -> tuple[list[str], list[str]]:
         worse.append(f"complexity_over_10: {was} -> {is_}")
     elif is_ < was:
         better.append(f"complexity_over_10: {was} -> {is_}")
-    for key in ("sql_outside_repos", "unstable_tests"):
+    for key in _PER_FILE:
         for path in sorted(set(base[key]) | set(now[key])):
             was, is_ = base[key].get(path, 0), now[key].get(path, 0)
             if is_ > was:
@@ -139,7 +143,7 @@ def prune(base: dict, now: dict) -> dict:
     for key in ("long_functions", "complex_functions", "maintainability_below_a"):
         out[key] = sorted(set(base[key]) & set(now[key]))
     out["complexity_over_10"] = min(base["complexity_over_10"], now["complexity_over_10"])
-    for key in ("sql_outside_repos", "unstable_tests"):
+    for key in _PER_FILE:
         current = now[key]
         out[key] = {p: min(n, current[p]) for p, n in base[key].items() if current.get(p)}
     return out

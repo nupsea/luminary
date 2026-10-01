@@ -11,6 +11,7 @@ def _baseline(**overrides):
         "maintainability_below_a": ["app/a.py"],
         "sql_outside_repos": {"app/routers/x.py": 3},
         "unstable_tests": {"tests/test_x.py": 1},
+        "content_type_refs": {"app/services/z.py": 2},
     }
     base.update(overrides)
     return base
@@ -62,3 +63,9 @@ def test_prune_shrinks_and_never_adds():
     # The new offenders are still regressions against the pruned baseline.
     worse, _ = compare(pruned, now)
     assert len(worse) == 3
+
+
+def test_a_new_content_type_reader_fails():
+    now = _baseline(content_type_refs={"app/services/z.py": 2, "app/services/new.py": 1})
+    worse, _ = compare(_baseline(), now)
+    assert worse == ["content_type_refs: app/services/new.py 0 -> 1"]
