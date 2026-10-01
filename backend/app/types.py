@@ -133,6 +133,11 @@ class DocumentProfile:
         return self.form in _EXPANDING_FORMS
 
     @property
+    def has_front_matter(self) -> bool:
+        """Whether a preface and front pages precede the work, for cards to skip."""
+        return self.form == "prose"
+
+    @property
     def tag_entity_types(self) -> tuple[str, ...]:
         if self.form in _NARRATIVE_FORMS:
             return ("PERSON", "PLACE", "CONCEPT")
@@ -202,6 +207,18 @@ class DocumentProfile:
             # A plain `book` may be a novel or a deep-learning textbook.
             domain = None
         return cls(form=form, domain=domain, register=register)
+
+    @classmethod
+    def of(cls, doc: Any) -> "DocumentProfile":
+        """The profile policy reads for a stored document (None: nothing known).
+
+        Built from the legacy columns: stored `form` disagrees with them on about
+        one document in five, so reading it would change chunking and prompts.
+        Readers come through here so that switch is one measured edit.
+        """
+        if doc is None:
+            return cls.from_legacy(None)
+        return cls.from_legacy(doc.content_type, doc.is_technical)
 
 
 @dataclass

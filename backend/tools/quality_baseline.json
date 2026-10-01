@@ -108,7 +108,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 233,
+  "complexity_over_10": 232,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
@@ -211,5 +211,40 @@
     "app/workflows/ingestion_nodes/finalize.py": 3,
     "app/workflows/ingestion_nodes/transcribe.py": 1
   },
-  "unstable_tests": {}
+  "unstable_tests": {},
+  "content_type_refs": {
+    "app/models.py": 4,
+    "app/repos/document_repo.py": 3,
+    "app/routers/audio.py": 1,
+    "app/routers/chat_meta.py": 10,
+    "app/routers/collections.py": 6,
+    "app/routers/documents.py": 50,
+    "app/routers/images.py": 6,
+    "app/routers/search.py": 8,
+    "app/runtime/chat_nodes/search.py": 2,
+    "app/schemas/documents.py": 4,
+    "app/scripts/reindex_entities.py": 7,
+    "app/scripts/remeasure_domain.py": 6,
+    "app/services/article_extractor.py": 2,
+    "app/services/content_classifier.py": 1,
+    "app/services/document_tagger.py": 8,
+    "app/services/flashcard_generators.py": 1,
+    "app/services/flashcard_prompts.py": 8,
+    "app/services/ner.py": 6,
+    "app/services/note_graph.py": 1,
+    "app/services/query_understanding.py": 1,
+    "app/services/retriever_strategies.py": 4,
+    "app/services/summarizer.py": 1,
+    "app/services/vector_store.py": 1,
+    "app/telemetry.py": 3,
+    "app/types.py": 10,
+    "app/workflows/ingestion.py": 5,
+    "app/workflows/ingestion_nodes/_shared.py": 7,
+    "app/workflows/ingestion_nodes/chunk.py": 18,
+    "app/workflows/ingestion_nodes/embed.py": 4,
+    "app/workflows/ingestion_nodes/entity_extract.py": 7,
+    "app/workflows/ingestion_nodes/parse.py": 30,
+    "app/workflows/ingestion_nodes/transcribe.py": 8,
+    "app/workflows/oreilly_ingestion.py": 1
+  }
 }
