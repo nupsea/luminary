@@ -1,0 +1,7 @@
+{
+  "name": "false_premise",
+  "generated_at": "2026-10-01T12:00:00+00:00",
+  "generator_model": "hand-authored (Claude Opus 5.5) -- not model-generated",
+  "row_provenance": "hand",
+  "row_provenance_note": "Each question presupposes something its document contradicts, and the correcting passage is in the document (#158). A good answer corrects the premise from that passage and cites it; a bare not_found reads as the document not covering the topic. `correction` lists terms only the correcting passage supplies (\"Jove\" for the Odyssey row): an answer that names one and cites a passage containing one corrected the premise. Scored by run_false_premise_eval.py."
+}

@@ -15,6 +15,7 @@ from app.services.background import task_registry
 from app.services.qa import (
     CITATION_RULE,
     NOT_FOUND_SENTINEL,
+    PREMISE_RULE,
     QA_FACTUAL_SYSTEM_PROMPT,
     QA_SYSTEM_PROMPT,
 )
@@ -54,6 +55,7 @@ _RELATIONAL_SYSTEM = (
     "You are a knowledge assistant. Answer using the knowledge graph connections "
     "and the supporting passages provided. Name the entities clearly. "
     "Use Markdown to show relationships between entities. "
+    f"{PREMISE_RULE}"
     f"If the answer is not present, respond exactly: {NOT_FOUND_SENTINEL}. "
     "Do not speculate. "
     "Write your answer as Markdown prose. "
@@ -65,6 +67,7 @@ _RELATIONAL_SYSTEM = (
 _COMPARATIVE_SYSTEM = (
     "You are a knowledge assistant. Compare the two subjects using the provided passages. "
     "Structure your answer as: **Subject A:** ... **Subject B:** ... "
+    f"{PREMISE_RULE}"
     f"If the answer is not present, respond exactly: {NOT_FOUND_SENTINEL}. "
     "Do not speculate. "
     "Write your answer as Markdown prose. "
