@@ -105,7 +105,6 @@
     "app/services/parser.py::DocumentParser._parse_pdf",
     "app/services/parser.py::_epub_html_to_markdown",
     "app/services/retriever.py::HybridRetriever.retrieve",
-    "app/services/retriever_strategies.py::_graph_expand",
     "app/services/study_assembler.py::assemble",
     "app/services/summarizer.py::SummarizationService._build_input_text",
     "app/services/summarizer.py::SummarizationService.build_assembled_summary",
@@ -117,7 +116,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book",
     "app/workflows/ingestion_nodes/entity_extract.py::write_entity_graph"
   ],
-  "complexity_over_10": 238,
+  "complexity_over_10": 237,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",

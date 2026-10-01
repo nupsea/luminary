@@ -4660,11 +4660,6 @@ export interface paths {
          *     hypothetical answer and uses ``"<q> <answer>"`` for retrieval. Slower
          *     by one LLM call (~1s) but bridges question/answer phrasing divergence.
          *
-         *     When ``graph_expand`` is true (default), entities detected in the query
-         *     are resolved to canonical labels via Kuzu's alias graph and appended to
-         *     the query. Deterministic and local-first per I-16; pairs with
-         *     index-time entity injection.
-         *
          *     When ``rerank`` is true, the top-N RRF candidates (``rerank_depth``,
          *     default from ``RERANK_DEPTH`` settings) are re-scored by a cross-encoder
          *     and the top-``limit`` returned; candidates scoring below
@@ -19071,7 +19066,6 @@ export interface operations {
                 spell_correct?: boolean | null;
                 date_from?: string;
                 date_to?: string;
-                graph_expand?: boolean;
                 expand_context?: boolean;
                 strategy?: string;
             };

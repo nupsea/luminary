@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 """Compare two GLiNER models on this corpus before changing `NER_MODEL`.
 
-The entity model cannot simply be swapped for a smaller one, because
-`graph_expand` in `retriever_strategies` skips query expansion whenever the
-model is not resident -- so the choice is not "large model or no model", it is
-which model is small enough to stay loaded. That only pays off if a smaller
-model extracts comparable entities.
+A smaller entity model only pays off if it extracts comparable entities.
 
 What this measures, and what it does not:
 

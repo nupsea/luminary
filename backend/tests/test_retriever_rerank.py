@@ -152,7 +152,7 @@ async def test_retrieve_with_rerank_invokes_reranker_and_returns_top_k():
         # blend=0 isolates the pure cross-encoder ordering (the default blends
         # with RRF); this asserts the CE reordering mechanics deterministically.
         results = await retriever.retrieve(
-            "q", document_ids=["doc-1"], k=5, rerank=True, rerank_blend=0.0, graph_expand=False
+            "q", document_ids=["doc-1"], k=5, rerank=True, rerank_blend=0.0
         )
 
     # Reranker should have been called once with the full RRF pool (50 chunks).
@@ -185,7 +185,7 @@ async def test_retrieve_rerank_blend_guards_confident_rrf_hit():
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
         results = await retriever.retrieve(
-            "q", document_ids=["doc-1"], k=5, rerank=True, rerank_blend=0.7, graph_expand=False
+            "q", document_ids=["doc-1"], k=5, rerank=True, rerank_blend=0.7
         )
 
     assert results[0].chunk_id == "c0"
@@ -223,9 +223,7 @@ async def test_retrieve_rerank_depth_controls_pool():
         patch("app.services.retriever._get_reranker", return_value=mock_reranker),
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
-        await retriever.retrieve(
-            "q", document_ids=["doc-1"], k=5, rerank=True, rerank_depth=30, graph_expand=False
-        )
+        await retriever.retrieve("q", document_ids=["doc-1"], k=5, rerank=True, rerank_depth=30)
 
     args, _kwargs = mock_reranker.score.call_args
     assert len(args[1]) == 30
@@ -246,9 +244,7 @@ async def test_retrieve_rerank_depth_is_capped():
         patch("app.services.retriever._get_reranker", return_value=mock_reranker),
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
-        await retriever.retrieve(
-            "q", document_ids=["doc-1"], k=5, rerank=True, rerank_depth=9999, graph_expand=False
-        )
+        await retriever.retrieve("q", document_ids=["doc-1"], k=5, rerank=True, rerank_depth=9999)
 
     args, _kwargs = mock_reranker.score.call_args
     assert len(args[1]) == 200
@@ -278,7 +274,6 @@ async def test_retrieve_rerank_threshold_flows_to_results():
             k=5,
             rerank=True,
             rerank_threshold=0.0,
-            graph_expand=False,
         )
 
     assert len(results) == 2
@@ -298,7 +293,7 @@ async def test_retrieve_without_rerank_pool_respects_k():
         patch.object(retriever, "keyword_search", new=AsyncMock(return_value=pool)) as mock_kw,
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
-        results = await retriever.retrieve("q", document_ids=["doc-1"], k=200, graph_expand=False)
+        results = await retriever.retrieve("q", document_ids=["doc-1"], k=200)
 
     assert mock_vec.call_args[0][2] == 200
     assert mock_kw.call_args.kwargs["k"] == 200
@@ -317,9 +312,7 @@ async def test_retrieve_expand_context_false_skips_expansion():
         patch.object(retriever, "keyword_search", new=AsyncMock(return_value=pool)),
         patch("app.services.retriever._expand_context", new=mock_expand),
     ):
-        results = await retriever.retrieve(
-            "q", document_ids=["doc-1"], k=5, graph_expand=False, expand_context=False
-        )
+        results = await retriever.retrieve("q", document_ids=["doc-1"], k=5, expand_context=False)
 
     mock_expand.assert_not_called()
     assert len(results) == 5
@@ -340,7 +333,7 @@ async def test_retrieve_without_rerank_does_not_invoke_reranker():
         patch("app.services.retriever._get_reranker", return_value=mock_reranker),
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
-        await retriever.retrieve("q", document_ids=["doc-1"], k=5, graph_expand=False)
+        await retriever.retrieve("q", document_ids=["doc-1"], k=5)
 
     mock_reranker.score.assert_not_called()
 
@@ -361,9 +354,7 @@ async def test_retrieve_with_rerank_falls_back_when_reranker_fails():
         patch("app.services.retriever._get_reranker", return_value=mock_reranker),
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
-        results = await retriever.retrieve(
-            "q", document_ids=["doc-1"], k=5, rerank=True, graph_expand=False
-        )
+        results = await retriever.retrieve("q", document_ids=["doc-1"], k=5, rerank=True)
 
     # Fallback to RRF top-5 -- no exception propagated.
     assert len(results) == 5
@@ -389,7 +380,6 @@ async def test_a_single_leg_strategy_honours_rerank(strategy):
     with (
         patch.object(retriever, "vector_search", return_value=pool),
         patch.object(retriever, "keyword_search", new=AsyncMock(return_value=pool)),
-        patch("app.services.retriever._graph_expand", new=AsyncMock(side_effect=lambda q: q)),
         patch("app.services.retriever._get_reranker", return_value=mock_reranker),
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
@@ -399,7 +389,6 @@ async def test_a_single_leg_strategy_honours_rerank(strategy):
             k=5,
             rerank=True,
             rerank_blend=0.0,
-            graph_expand=False,
             strategy=strategy,
         )
 
@@ -422,8 +411,6 @@ async def test_a_single_leg_strategy_expands_context_like_the_fused_one():
         patch.object(retriever, "keyword_search", new=AsyncMock(return_value=pool)),
         patch("app.services.retriever._expand_context", new=expand),
     ):
-        await retriever.retrieve(
-            "q", document_ids=["doc-1"], k=5, graph_expand=False, strategy="fts"
-        )
+        await retriever.retrieve("q", document_ids=["doc-1"], k=5, strategy="fts")
 
     expand.assert_awaited_once()

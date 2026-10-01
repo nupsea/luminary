@@ -548,19 +548,12 @@ a graded run before it is honoured. The remaining misses
 are speakers the source mislabels (the Gita's chapter headings name the wrong speaker) and misread
 text.
 
-**Query-time graph expansion buys no retrieval quality.** `run_eval.py --ablation`, 2026-09-21, dev
-library, GLiNER held resident and the arms confirmed to diverge before and after each dataset. On the
-shipped funnel (rrf+rerank), HR@5 is identical with and without expansion on all five sets (book 40,
-paper 40, legal/play/study 60 rows), and MRR moves by at most 0.003 in both directions, which is less
-than one question. Unreranked, no set moves by more than one question in either direction. Measured:
-the `_graph_expand` alias tokens on `/search`. Not measured: the chat `graph` node, which routes
-relationship questions to Kuzu and not to `/search`.
-
-**Expansion is also dormant in the shipped app.** `_graph_expand` skips when GLiNER is not loaded
-(`retriever_strategies.py`). Only startup warmup and ingestion load it, and the reaper releases it
-after `NER_IDLE_RELEASE_SECONDS=180`. A user's search therefore expands only in the three minutes
-after launch or an ingest. Given the ablation, the fix is to remove expansion from `/search`, not to
-keep GLiNER resident for it.
+**Query-time graph expansion is removed from `/search`; do not restore it.** It bought nothing:
+`run_eval.py --ablation`, 2026-09-21, dev library, GLiNER held resident and the arms confirmed to
+diverge. On the shipped funnel (rrf+rerank), HR@5 was identical with and without expansion on all
+five sets (book 40, paper 40, legal/play/study 60 rows), and MRR moved by at most 0.003 either way,
+less than one question. It also ran only while GLiNER was resident, three minutes after launch or an
+ingest. Not measured: the chat `graph` node, which reads the graph directly.
 
 **The Kuzu port-or-delete decision is made here.** 28 modules read the graph store: the chat `graph`
 node, graph flashcards, concepts, mastery, study paths and prerequisite extraction among them.
