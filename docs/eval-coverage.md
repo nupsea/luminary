@@ -295,9 +295,21 @@ only when it drops.
 and the semantic arm stops contributing while every other metric here stays green — the keyword
 arm alone still answers a self-query. That failure is invisible without this number.
 
-**Still not measured:** paraphrase recall. Nothing here scores a query that shares no words with
-the note it should find, which is the case the semantic arm exists for; the floor is bracketed by
-two measured cases (0.5004 drop, 0.7516 keep) but that justifies a threshold, not a quality bar.
+**Paraphrase recall** (`make eval-notes-paraphrase`) scores the case the semantic arm exists for:
+a query sharing no word stem with its note. A local model writes it, with up to three attempts that
+each ban the words the last one shared; a reply in another script, or one cut at the token cap, is
+a failed attempt. Report-only.
+
+| metric | measured 2026-10-02 |
+|---|---|
+| `paraphrase_recall_1` | 0.6429 (9 of 14) |
+| `paraphrase_recall_5` | 0.7857 (11 of 14) |
+
+Measured on a 106-note library copy, all 63 notes over 200 characters, writer
+`qwen2.5:14b-instruct`, backend at `7bccc6e6`; two runs identical. **Only 14 of 63 notes yield a
+stem-free query**: on a long note almost every word a query could use is already in it. The scored notes
+have a median of ~420 characters against 1,237 for all 63, so the number says nothing about long
+notes, and one note moves it by 0.07.
 
 **Check the stage before attributing a change.** A retrieval regression can come from ingestion;
 a generation regression can come from retrieval. `eval-ingest` first, then `eval`, then
