@@ -221,6 +221,7 @@ async def lifespan(app: FastAPI):
     _worker.register("image_analyze", image_analyze_handler)
     _worker.register("diagram_extract", diagram_extract_handler)
     _worker.register("web_refs", web_refs_handler)
+    # TODO(#227): nothing enqueues this job, so no prerequisite edge is ever written.
     _worker.register("prerequisites", prereq_extract_handler)
     _worker.register("concept_link", concept_link_handler)
     await _worker.start()

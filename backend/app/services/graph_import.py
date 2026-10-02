@@ -5,6 +5,9 @@ each table must equal the rows planned, and imported plus skipped must equal wha
 A failure rolls back and is retried at the next launch. `graph.kuzu` is only ever read, so
 an import can be repeated and an older build still finds its graph. Rows that belonged to
 deleted documents, notes or concepts are skipped and counted by reason (#204, #65).
+
+TODO(1.0.0-rc): delete this module, graph_import_read.py, graph_connection.py and the `kuzu`
+dependency; the release notes then tell users to delete `graph.kuzu`.
 """
 
 from __future__ import annotations

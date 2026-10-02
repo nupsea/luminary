@@ -19,6 +19,7 @@ dependencies = [
     "gliner>=0.2.25",
     "httpx>=0.28.1",
     "keyring>=25.7.0",
+    # TODO(1.0.0-rc): only the graph import reads Kuzu; remove with graph_import*.py and graph_connection.py.
     "kuzu>=0.11.3",
     "lancedb>=0.29.2",
     "langchain-core>=1.2.15",

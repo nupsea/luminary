@@ -84,11 +84,12 @@ same magnitude as the entity-model difference measured on `paper`, so that diffe
 indistinguishable from a library-state change.
 
 **The coupling is real but not universal, and the mechanism is not established.** Adding three
-documents and ~4,870 chunks afterwards moved `book` and `paper` by exactly zero. Two candidate
-mechanisms are in the code and neither has been isolated: `bm25(chunks_fts)` scores over the
-whole FTS table with the `document_id` filter applied to matched rows (`retriever.py:225`), so
-term statistics are corpus-wide; and graph expansion reads an entity graph that every ingest
-rewrites. Do not repeat either as the cause without an experiment that separates them.
+documents and ~4,870 chunks afterwards moved `book` and `paper` by exactly zero. The candidate
+mechanism left in the code has not been isolated: `bm25(chunks_fts)` scores over the whole FTS
+table with the `document_id` filter applied to matched rows (`retriever.py`, `_fts_match`),
+so term statistics are corpus-wide. The other candidate, graph expansion, left `/search` in 0.15.0,
+so a coupling measured since then cannot be blamed on it. Do not repeat BM25 as the cause without
+an experiment that isolates it.
 
 The operational rule does not depend on knowing which: **an A/B is only valid if the corpus did
 not change between the arms, and if it did, re-run the baseline arm rather than comparing
