@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Not fixed in this release
 - **A suggested question can get an answer that cites nothing (#66).** The candidate fix also left real answers uncited, so it moved to 0.16.0.
-- **A practice card can ask which example the book used instead of what it teaches.** A footnote number fuses two sentences into the one picked for a card; fixed first in 0.16.0.
+- **A practice card can ask which example the book used instead of what it teaches.** A footnote number fuses two sentences into the one picked for a card; fixed in 0.15.1 (#230).
 
 ### Upgrading
 - **This release migrates the database.** The graph tables are added and filled from `graph.kuzu` on first launch; an older version cannot open the library afterwards.
