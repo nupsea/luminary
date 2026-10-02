@@ -150,6 +150,11 @@ _PARAPHRASE_SYSTEM = (
     "form of one; describe what it is about in other words."
 )
 
+# At temperature 0 a reply can repeat one word until the context fills, past any
+# timeout. 8 words is ~16 tokens; a capped reply is rejected, never searched.
+_PARAPHRASE_MAX_TOKENS = 64
+_PARAPHRASE_ATTEMPTS = 3
+
 
 def _paraphrase(content: str, model: str, avoid: list[str] | None = None) -> str | None:
     """A query about the note in other words, or None if the model gave none."""
@@ -167,13 +172,32 @@ def _paraphrase(content: str, model: str, avoid: list[str] | None = None) -> str
             ],
             "stream": False,
             "think": False,
-            "options": {"temperature": 0, "seed": 42},
+            "options": {"temperature": 0, "seed": 42, "num_predict": _PARAPHRASE_MAX_TOKENS},
         },
         timeout=300.0,
     )
     resp.raise_for_status()
-    text = resp.json()["message"]["content"].strip().strip('"').splitlines()
+    body = resp.json()
+    if body.get("done_reason") == "length":
+        return None  # a reply cut at the cap is a loop, not a query
+    text = body["message"]["content"].strip().strip('"').splitlines()
     return text[0].strip() if text and text[0].strip() else None
+
+
+def _stem_free_paraphrase(content: str, model: str) -> str | None:
+    """A paraphrase sharing no stem with the note, or None after the last attempt.
+
+    Each retry bans every word the earlier attempts shared; the stem check decides.
+    """
+    avoid: set[str] = set()
+    for _ in range(_PARAPHRASE_ATTEMPTS):
+        query = _paraphrase(content, model, avoid=sorted(avoid) or None)
+        shared = _shared_words(query, content)
+        # A reply in another script is a failed attempt: the stem check cannot read it.
+        if query and query.isascii() and not shared:
+            return query
+        avoid.update(shared)
+    return None
 
 
 def _search(backend_url: str, query: str, k: int) -> list[dict]:
@@ -221,6 +245,7 @@ def main() -> None:
         sys.exit(2)
 
     random.Random(42).shuffle(rows)  # noqa: S311 -- sampling, not cryptography
+    eligible = rows
     rows = rows[: args.sample]
 
     hit1 = hit5 = 0
@@ -250,16 +275,14 @@ def main() -> None:
         print("ERROR: no note yielded a usable query; nothing measured.", file=sys.stderr)
         sys.exit(2)
 
-    para_hit1 = para_hit5 = para_scored = para_overlap = 0
+    para_hit1 = para_hit5 = para_scored = para_rejected = 0
     if args.paraphrase:
-        for note_id, content in rows:
-            query = _paraphrase(content, args.paraphrase)
-            shared = _shared_words(query, content)
-            if shared:
-                # One retry naming the words; the structural check below still decides.
-                query = _paraphrase(content, args.paraphrase, avoid=shared)
-            if query is None or _shared_words(query, content):
-                para_overlap += 1
+        # Every eligible note, not the sample: on a long note most queries share a
+        # stem, so 40 notes yielded 7 to 12 scorable queries (2026-10-02).
+        for note_id, content in eligible:
+            query = _stem_free_paraphrase(content, args.paraphrase)
+            if query is None:
+                para_rejected += 1
                 continue
             para_scored += 1
             ids = [r["note_id"] for r in _search(args.backend_url, query, 5)]
@@ -269,7 +292,7 @@ def main() -> None:
         if para_scored < 10:
             print(
                 f"ERROR: only {para_scored} paraphrases shared no stem with their note "
-                f"({para_overlap} rejected); paraphrase recall was not measured.",
+                f"({para_rejected} rejected); paraphrase recall was not measured.",
                 file=sys.stderr,
             )
             sys.exit(2)
@@ -291,7 +314,7 @@ def main() -> None:
             "paraphrase_recall_1": para_hit1 / para_scored,
             "paraphrase_recall_5": para_hit5 / para_scored,
             "paraphrase_scored": para_scored,
-            "paraphrase_rejected_overlap": para_overlap,
+            "paraphrase_rejected": para_rejected,
             "paraphrase_model": args.paraphrase,
         }
 
@@ -320,7 +343,8 @@ def main() -> None:
         for key in ("paraphrase_recall_1", "paraphrase_recall_5"):
             print(f"  {key:<20} {metrics[key]:.4f}   (report-only)")
         print(
-            f"  {para_scored} paraphrases scored, {para_overlap} rejected for sharing a stem "
+            f"  {para_scored} of {len(eligible)} notes scored; {para_rejected} had no "
+            f"stem-free paraphrase in {_PARAPHRASE_ATTEMPTS} attempts "
             f"({args.paraphrase})"
         )
     print(f"{'-' * 58}")
