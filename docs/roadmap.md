@@ -98,7 +98,7 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | I. Every host | 0.13.x | Every host is a first-class host — **0.13.9 released; exit gate open.** **Checkpoint A** | #24, #99, #110, #154, #155, #156 | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator; `make smoke` green on Windows and against the bundled macOS app |
 | II. Stability | 0.14.x | Gates you can believe — **0.14.5 released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
 | | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #158, #159, #161, #185, #186, #187, #188, #189, #191, #204, #205 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
-| III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement | #66, #160, #162, #195, #221, #222, #223, #226, #227, #229 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
+| III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement; chapter practice | #66, #160, #162, #195, #221, #222, #223, #226, #227, #229 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail | #48 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
 | | 0.18.0 | Your own server. **Checkpoint C** | | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key |
 | IV. Separation | 0.19.0 | Components separated for mobile | | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
@@ -660,6 +660,26 @@ pins loopback against DNS rebinding, and that pin may only widen when authentica
 
 A token resolves to a principal. 0.17.0 hangs the request context off that principal, so the token
 shape is decided with the tenant seam in view, not retrofitted to it.
+
+**Chapter practice: questions written at ingestion, offered at each chapter's end.** Practice today
+starts from a button and writes its cards on demand. In 0.16.0 an enrichment job writes about five
+cards per top-level section after a document is readable, in reading order, and skips on a host
+`llm_routing.refusal` refuses. They sit with their chapter **outside the review schedule**: a card
+enters FSRS only once its chapter is practised, so ingesting a 30-chapter book never adds 150 due
+cards. The reader offers "Practice this chapter" when the reader moves past a chapter's last section
+(Practice, Later, Don't ask for this book); Practice opens the existing dock (flashcards or
+teach-back) on that chapter, and finishing returns to the reading position. Study shows each book's
+chapters with their card counts, and "Random from this book" draws across chapters, weighted toward
+the unpractised. A document with no headings gets fixed page windows labelled by page range, never
+invented chapter titles.
+
+The card-quality fix comes first, or the job writes the defect into every chapter of every book: the
+unit splitter fuses a sentence with the next one across a footnote marker (`model.2 For`,
+`flashcard_units.py` `_SENT_END`), length selection then picks the fused unit, and the unit prompt
+lacks the shipped prompt's rule against asking which example the text used
+(`flashcard_prompts.py` `FLASHCARD_UNITS_SYSTEM`). Seen on *AI Engineering*, 2026-10-02: "What is
+an example of a model breaking the phrase ... into nine tokens?" answered "GPT-4". The gate is a
+blind graded run over the #191 documents that is no worse than 0.84 and 0.88 good-among-delivered.
 
 ### 6. An architecture that can take tenants — 0.17.0
 
