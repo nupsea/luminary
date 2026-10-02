@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/search` no longer expands through the graph.** It changed no retrieval score on five datasets.
 
 ### Fixed
-- **Ask said "not found" when the document contradicted the question's premise.** It now states the correction and cites the passage. Corrected on 4 of 7 test questions every run (master: 3 and 1); questions about novels still fail (#158, open).
+- **Ask said "not found" when the document contradicted the question's premise.** It now states the correction and cites the passage (#158, open). Novels still fail, and the rate is unstable: 4 of 7 on four runs when it merged, 2 and 3 of 7 on 2026-10-02, the same on the build before this release.
 - **The chat graph lookup never matched a name** because entity names are stored lowercased. It now ignores case.
 - **Deleting a document left its summaries running** against the LLM. Delete now cancels them (#186).
 - **Wikipedia articles kept "[ edit ]" under every heading** in chunks and citations (#159).
@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Audio ingested before 0.7.5 showed "No content available" in the reader.** Its transcript is backfilled as sections on upgrade (#97).
 - **Ingest and reindex sampled different chunks for entities** (#63). The health panel now says how many chunks the entity count came from.
 - **A failed entity extraction erased a note's entity links** (#65).
+
+### Added
+- **The note search eval scores queries that share no word with their note** (`make eval-notes-paraphrase`, #100). Recall@1 0.64 and @5 0.79 on the 14 of 63 notes a local model could rephrase without overlap; long notes are not covered.
+
+### Not fixed in this release
+- **A suggested question can get an answer that cites nothing (#66).** The candidate fix also left real answers uncited, so it moved to 0.16.0.
+- **A practice card can ask which example the book used instead of what it teaches.** A footnote number fuses two sentences into the one picked for a card; fixed first in 0.16.0.
+
+### Upgrading
+- **This release migrates the database.** The graph tables are added and filled from `graph.kuzu` on first launch; an older version cannot open the library afterwards.
 
 ## [0.14.5] - 2026-09-30
 
