@@ -245,6 +245,78 @@ def test_no_proxy_configured_changes_nothing(monkeypatch):
     assert _pin(monkeypatch, {}, {}, {}) == {}
 
 
+def _pac(monkeypatch, url, env_proxies=None):
+    """A Windows proxy set only by a setup script (#155): Python and Ollama read neither."""
+    import urllib.request
+
+    from app import proxy_env
+
+    monkeypatch.setattr(proxy_env, "_windows_pac_url", lambda: url)
+    monkeypatch.setattr(urllib.request, "getproxies_environment", lambda: dict(env_proxies or {}))
+
+
+@pytest.mark.parametrize(
+    ("url", "env_proxies", "expected"),
+    [
+        ("http://wpad.corp/proxy.pac", {}, True),
+        ("http://wpad.corp/proxy.pac", {"https": "http://proxy.corp:8080"}, False),
+        ("", {}, False),
+    ],
+)
+def test_a_setup_script_is_the_only_proxy_only_when_no_manual_one_is_set(
+    monkeypatch, url, env_proxies, expected
+):
+    from app import proxy_env
+
+    _pac(monkeypatch, url, env_proxies)
+    assert proxy_env.pac_only() is expected
+
+
+def test_a_network_failure_behind_a_setup_script_names_the_setting(monkeypatch):
+    _pac(monkeypatch, "http://wpad.corp/proxy.pac")
+    for text in ("i/o timeout", "no such host", "max retries exceeded: EOF", "connection refused"):
+        assert network_errors.explain(text) == network_errors.PAC_ONLY
+    assert "Manual proxy setup" in network_errors.PAC_ONLY
+    # A certificate refusal comes from a proxy that answered: the script was read.
+    assert network_errors.explain("x509: certificate signed by unknown authority") != (
+        network_errors.PAC_ONLY
+    )
+    assert network_errors.explain("model not found") is None
+
+
+def test_a_manual_proxy_keeps_the_usual_sentence(monkeypatch):
+    _pac(monkeypatch, "http://wpad.corp/proxy.pac", {"https": "http://proxy.corp:8080"})
+    assert network_errors.explain("i/o timeout") == network_errors._SENTENCES["timeout"]
+
+
+def test_a_pull_that_stalls_behind_a_setup_script_names_the_setting(monkeypatch):
+    _pac(monkeypatch, "http://wpad.corp/proxy.pac")
+    event = components._stalled({"a": 5 * 1024 * 1024}, {"a": 50 * 1024 * 1024})
+    assert event["stalled"] is True
+    assert event["detail"].startswith("The download stopped at 5 MB of 50 MB.")
+    assert event["detail"].endswith(network_errors.PAC_ONLY)
+
+
+def test_a_failed_pull_behind_a_setup_script_names_the_setting(monkeypatch):
+    _pac(monkeypatch, "http://wpad.corp/proxy.pac")
+
+    def _handler(request):
+        body = b'{"status":"pulling manifest"}\n{"error":"dial tcp: i/o timeout"}\n'
+        return httpx.Response(200, content=body)
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        components.httpx,
+        "AsyncClient",
+        lambda **k: real(transport=httpx.MockTransport(_handler), **k),
+    )
+
+    async def _run():
+        return [e async for e in components.install_ollama_model("qwen3.5:4b")]
+
+    assert asyncio.run(_run())[-1]["detail"] == network_errors.PAC_ONLY
+
+
 def test_a_scanning_proxy_has_time_to_release_a_large_model():
     """Behind a proxy that holds the whole file before sending any of it, the 1.1GB
     entity model failed at the hub's 10s read timeout and installed at 300s (61s)."""
