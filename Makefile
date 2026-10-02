@@ -11,6 +11,9 @@ BACKEND_URL ?= http://localhost:7820
 # is recorded per run; `make eval-models` prints both before anything runs.
 EVAL_TEXT_MODEL ?= ollama/qwen2.5:14b-instruct
 
+# eval-false-premise measures the answering model; its floor was set on the shipped default.
+FALSE_PREMISE_MODEL ?= ollama/qwen3.5:4b
+
 LUMINARY_PORT ?= 7820
 
 models:  ## what the current model configuration costs on this machine
@@ -571,7 +574,7 @@ eval-chat-routing:
 # evals/golden/retrieval_and_memory_tutorial_unanswerable.meta.json.
 eval-false-premise:
 	@echo "False-premise eval: questions whose document contradicts their premise (#158)..."
-	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_false_premise_eval.py --backend-url $(BACKEND_URL) --model $(EVAL_TEXT_MODEL) --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_false_premise_eval.py --backend-url $(BACKEND_URL) --model $(FALSE_PREMISE_MODEL) --assert-thresholds
 
 eval-refusal:
 	@echo "Refusal eval: questions with no answer in the document (asserted floor is a collapse detector)..."
