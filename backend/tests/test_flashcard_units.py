@@ -38,6 +38,26 @@ def test_the_excerpt_separator_never_joins_a_sentence():
     assert split_units(text) == ["The first excerpt ends here.", "The second excerpt starts here."]
 
 
+def test_a_footnote_marker_still_ends_a_sentence():
+    # Fused, the two read as one long sentence that length selection then picked (AI Engineering).
+    text = (
+        "A token can be a part of a word, depending on the model.2 For example, GPT-4 breaks "
+        "the phrase into nine tokens.13 Tokens are counted."
+    )
+    assert split_units(text) == [
+        "A token can be a part of a word, depending on the model.2",
+        "For example, GPT-4 breaks the phrase into nine tokens.13",
+        "Tokens are counted.",
+    ]
+
+
+@pytest.mark.parametrize(
+    "text", ["Use GPT-3.5 Turbo for this.", "See section 4.2 The results follow."]
+)
+def test_a_decimal_is_not_a_footnote(text):
+    assert split_units(text) == [text]
+
+
 def test_a_section_label_stays_with_its_own_paragraph():
     text = "The last sentence of chunk one.\n\n[Book XII]\nUlysses was tied to the mast."
     units = split_units(text)

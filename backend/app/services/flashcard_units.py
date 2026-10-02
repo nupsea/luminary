@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import re
 
-_SENT_END = re.compile(r"(?<=[.!?\"'”’)\]])\s+(?=[\"'“‘(\[]?[A-Z0-9])")
+# A footnote number after a word's full stop ("the model.2 For") still ends the sentence; a
+# digit before the dot ("GPT-3.5 Turbo") does not.
+_SENT_END = re.compile(
+    r"(?:(?<=[.!?\"'”’)\]])|(?<=[a-z”’)][.!?]\d)|(?<=[a-z”’)][.!?]\d\d))"
+    r"\s+(?=[\"'“‘(\[]?[A-Z0-9])"
+)
 _CODE_LINE = re.compile(
     r"^\s*(def|class|import|from|return|if|elif|else|for|while|try|except|with)\b.*:\s*$"
     r"|^\s*(import|return)\b|\s[-+*/]?=\s|==|=>|->|;\s*$|[{}]\s*$|\)\s*:?\s*$|^\s*@\w"
