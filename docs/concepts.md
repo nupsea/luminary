@@ -234,7 +234,7 @@ pathological on bge-small). The **number of concepts is an outcome of the data, 
 a 75k-edge hairball). The sun/medoid of a cluster = its most-central member.
 
 > **Flat layer (2026-06-24).** The upper hierarchy tiers were removed -- nothing read them.
-> `build_hierarchy` now emits a single concept level + RELATED_TO edges; `label_levels` labels
+> `build_hierarchy` now emits a single concept level + `related` edges; `label_levels` labels
 > concepts by their sun (no LLM);
 > `persist` writes level-2 concepts with no parent chain. A `verify`/dedup node (merge near-duplicates
 > by centroid; under-claim over mislabel) still lands before persist.
