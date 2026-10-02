@@ -224,8 +224,15 @@ def listed_sentence(unit: str, speaker: str | None) -> str:
     return f"{speaker} says: {body}" if speaker else body
 
 
+# A sentence that opens with its example illustrates the sentence before it; asked on its own,
+# the card tests the illustration ("GPT-4 breaks the phrase into nine tokens") (#230).
+_EXAMPLE_OPENER = re.compile(
+    r"^\W*(?:(?:for example|for instance|as an example)\b|e\.g\.)", re.IGNORECASE
+)
+
+
 def _learnable_words(unit: str) -> int:
-    if _CITATION.search(unit):
+    if _CITATION.search(unit) or _EXAMPLE_OPENER.match(unit):
         return 0
     body = _FURNITURE_SPAN.sub(" ", unit)
     alpha = sum(c.isalpha() for c in body) / max(1, len(body))

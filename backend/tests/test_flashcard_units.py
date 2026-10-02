@@ -58,6 +58,14 @@ def test_a_decimal_is_not_a_footnote(text):
     assert split_units(text) == [text]
 
 
+def test_a_sentence_that_opens_with_its_example_is_never_chosen():
+    claim = "A token can be a character, a word, or a part of a word, depending on the model."
+    example = "For example, GPT-4 breaks the phrase I can't wait to build AI apps into nine tokens."
+    assert choose_units([claim, example], 1) == [claim]
+    assert choose_units([example], 1) == []
+    assert choose_units(["E.g. a vowel and a consonant make up this syllable."], 1) == []
+
+
 def test_a_section_label_stays_with_its_own_paragraph():
     text = "The last sentence of chunk one.\n\n[Book XII]\nUlysses was tied to the mast."
     units = split_units(text)
