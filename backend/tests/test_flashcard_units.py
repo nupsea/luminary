@@ -64,6 +64,9 @@ def test_a_sentence_that_opens_with_its_example_is_never_chosen():
     assert choose_units([claim, example], 1) == [claim]
     assert choose_units([example], 1) == []
     assert choose_units(["E.g. a vowel and a consonant make up this syllable."], 1) == []
+    # A chunk's section label in front does not hide the opener.
+    labelled = "[Debugging] For example, Linux started out as a program to explore a chip."
+    assert choose_units([labelled], 1) == []
 
 
 def test_a_section_label_stays_with_its_own_paragraph():

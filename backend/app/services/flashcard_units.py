@@ -232,7 +232,7 @@ _EXAMPLE_OPENER = re.compile(
 
 
 def _learnable_words(unit: str) -> int:
-    if _CITATION.search(unit) or _EXAMPLE_OPENER.match(unit):
+    if _CITATION.search(unit) or _EXAMPLE_OPENER.match(_LEADING_LABEL.sub("", unit, count=1)):
         return 0
     body = _FURNITURE_SPAN.sub(" ", unit)
     alpha = sum(c.isalpha() for c in body) / max(1, len(body))
