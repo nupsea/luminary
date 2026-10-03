@@ -71,7 +71,12 @@ Off Apple Silicon the default text model is `qwen3.5:4b` on every host, whatever
 Any other model is the user's pick in Settings (`configured_chat_override`), never the app's. RAM
 alone chose `qwen2.5:14b-instruct` on a 64GB Windows machine with no card, and answers took 2-4
 minutes. On Apple Silicon `model_registry.recommended_assignment` still upgrades to 14B where it and
-a reader fit in half of unified memory. `install.sh` and `install.ps1` pull the same default;
+a reader fit in half of unified memory.
+
+**The chat model is the user's choice.** Where more than one model fits (`CHAT_CHOICES`), the setup
+screen, the model banner and Settings list each with its download size and trade-off, mark the
+default as recommended, and download only the one picked; it is then pinned as
+`local_chat_model`. A fresh 52 GB Mac otherwise downloaded 14B unasked. `install.sh` and `install.ps1` pull the same default;
 `test_installer_models.py` fails on drift.
 
 ## Supported hosts

@@ -60,6 +60,20 @@ export interface Component {
   /** Luminary's suggestion for this computer. The user decides. */
   recommended: boolean
   advice: string
+  /** False for a tool Luminary cannot fetch; `advice` says how to add it. */
+  installable: boolean
+  /** The chat model only: every model this computer can hold, with its trade-off. */
+  choices?: ChatModelChoice[]
+}
+
+export interface ChatModelChoice {
+  model: string
+  size_bytes: number
+  reads_figures: boolean
+  recommended: boolean
+  selected: boolean
+  installed: boolean
+  trade_off: string
 }
 
 export interface Capability {
@@ -167,4 +181,22 @@ export function formatBytes(bytes: number): string {
   const gb = bytes / 1024 ** 3
   if (gb >= 1) return `${gb.toFixed(gb >= 10 ? 0 : 1)} GB`
   return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`
+}
+
+/**
+ * Install one component and throw if the stream reports a failure.
+ *
+ * `installComponent` throws only on an HTTP error; a failure arrives as an event and the
+ * stream still ends cleanly, so a caller that switches a model afterwards must check.
+ */
+export async function installOrThrow(
+  id: string,
+  onProgress: (event: InstallProgress) => void,
+): Promise<void> {
+  let failure: string | null = null
+  await installComponent(id, (event) => {
+    if (event.state === "failed") failure = event.detail ?? "Install failed"
+    else onProgress(event)
+  })
+  if (failure) throw new Error(failure)
 }

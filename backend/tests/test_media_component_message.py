@@ -47,7 +47,7 @@ def test_a_container_says_why_installing_on_the_host_will_not_work(in_container)
 def test_a_host_install_gets_its_own_platform_command(on_a_host, monkeypatch, platform, command):
     """Windows was in neither platform the message named, so a Windows user was
     shown brew and apt and left to work it out."""
-    monkeypatch.setattr("app.routers.documents.sys.platform", platform)
+    monkeypatch.setattr("app.services.components.sys.platform", platform)
     message = _media_missing_message(["ffmpeg"])
     assert command in message
     assert "WITH_MEDIA" not in message

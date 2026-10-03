@@ -38,13 +38,15 @@ import httpx
 from app import proxy_env
 from app.config import get_settings
 from app.model_registry import (
+    CHAT_CHOICES,
     REGISTRY,
     default_chat_model,
     default_vision_model,
+    fits_host,
     profile_for,
 )
 from app.paths import engine_source_path
-from app.services import model_prefetch, network_errors
+from app.services import model_prefetch, network_errors, storage_errors
 from app.services.component_download import install_archive_subset
 
 logger = logging.getLogger(__name__)
@@ -149,15 +151,19 @@ def catalogue() -> tuple[Component, ...]:
     model knobs in a fixture was still asserting against a catalogue built
     before the pin.
     """
+    from app.services.settings_service import get_local_chat_model  # noqa: PLC0415
+
+    # The model the user chose, else the default: the download must be the model that runs.
+    chat = get_local_chat_model()
     entries = (
         Component(
             id="chat_model",
             label="Chat model",
             description="Answers questions and generates flashcards, entirely on this machine.",
             kind="ollama_model",
-            ref=_registry_tag(default_chat_model()),
-            size_bytes=_registry_size(default_chat_model(), 2 * _GB),
-            licence=_registry_licence(default_chat_model()),
+            ref=_registry_tag(chat),
+            size_bytes=_registry_size(chat, 2 * _GB),
+            licence=_registry_licence(chat),
             default=True,
             enables=("Ask", "Flashcard generation", "Summaries"),
         ),
@@ -460,6 +466,35 @@ def _probe_catalogue() -> tuple[list, dict[str, bool]]:
     return comps, local
 
 
+def _ollama_installed(tag: str, installed_models: set[str]) -> bool:
+    # Ollama reports tags as "name:tag"; a bare ref means ":latest".
+    return tag in installed_models or f"{tag}:latest" in installed_models
+
+
+def chat_model_choices(installed_models: set[str], ram_gb: int | None = None) -> list[dict]:
+    """Each chat model this host can hold, with what choosing it costs."""
+    from app.services.settings_service import get_local_chat_model  # noqa: PLC0415
+
+    recommended, selected = default_chat_model(), get_local_chat_model()
+    out = []
+    for model_id, trade_off in CHAT_CHOICES.items():
+        profile = profile_for(model_id)
+        if profile is None or not fits_host(profile, ram_gb):
+            continue
+        out.append(
+            {
+                "model": model_id,
+                "size_bytes": profile.resident_bytes,
+                "reads_figures": profile.multimodal,
+                "recommended": model_id == recommended,
+                "selected": model_id == selected,
+                "installed": _ollama_installed(_registry_tag(model_id), installed_models),
+                "trade_off": trade_off,
+            }
+        )
+    return out
+
+
 async def component_status() -> list[dict]:
     installed_models = await _installed_ollama_models()
     # Off the loop (I-2): the Whisper weights probe imports faster_whisper, which
@@ -470,11 +505,12 @@ async def component_status() -> list[dict]:
     out = []
     for comp in comps:
         if comp.kind == "ollama_model":
-            # Ollama reports tags as "name:tag"; a bare ref means ":latest".
-            ref = comp.ref if ":" in comp.ref else f"{comp.ref}:latest"
-            installed = ref in installed_models or comp.ref in installed_models
+            installed = _ollama_installed(comp.ref, installed_models)
         else:
             installed = local_installed[comp.id]
+        extra = {}
+        if comp.id == "chat_model" and host.local_models:
+            extra["choices"] = chat_model_choices(installed_models, host.ram_gb)
 
         out.append(
             {
@@ -488,7 +524,10 @@ async def component_status() -> list[dict]:
                 "default": comp.default,
                 "enables": list(comp.enables),
                 "installed": installed,
+                # A tool has no automatic installer; `advice` says how to add it.
+                "installable": comp.kind != "tool",
                 **_advice(comp, host),
+                **extra,
             }
         )
     return out
@@ -560,7 +599,28 @@ def _advice(comp: Component, host: _Host) -> dict:
             "recommended": True,
             "advice": "Recommended: this computer has an NVIDIA graphics card.",
         }
+    if comp.kind == "tool":
+        return {"offered": True, "recommended": False, "advice": tool_install_advice(comp.ref)}
     return {"offered": True, "recommended": False, "advice": ""}
+
+
+def ffmpeg_install_command() -> str:
+    """The install command for the platform actually running this."""
+    if sys.platform == "win32":
+        return "winget install Gyan.FFmpeg"
+    if sys.platform == "darwin":
+        return "brew install ffmpeg"
+    return "apt install ffmpeg"
+
+
+def tool_install_advice(name: str) -> str:
+    """How to add a tool Luminary cannot install (ffmpeg is the only one)."""
+    if running_in_container():
+        return f"Rebuild the image with `WITH_MEDIA=1` to include {name}."
+    return (
+        f"Install it with `{ffmpeg_install_command()}`, or place the `{name}` binary in "
+        f"{tool_bin_dir()}. Then check again."
+    )
 
 
 async def capabilities() -> dict:
@@ -659,7 +719,8 @@ async def install_ollama_model(model: str) -> AsyncIterator[dict]:
 
                 if error := event.get("error"):
                     logger.warning("pull of %s failed: %s", model, error)
-                    yield {"state": "failed", "detail": network_errors.explain(error) or error}
+                    detail = storage_errors.explain(error) or network_errors.explain(error)
+                    yield {"state": "failed", "detail": detail or error}
                     return
 
                 completed = int(event.get("completed") or 0)
@@ -881,13 +942,7 @@ async def install_component(component_id: str) -> AsyncIterator[dict]:
 
     # Tools have no automated source yet: a build has to be chosen deliberately
     # because the licence travels with it. Report rather than guess.
-    yield {
-        "state": "failed",
-        "detail": (
-            f"{comp.label} has no automatic installer yet. "
-            f"Place the `{comp.ref}` binary in {tool_bin_dir()} to enable it."
-        ),
-    }
+    yield {"state": "failed", "detail": tool_install_advice(comp.ref)}
 
 
 async def remove_component(component_id: str) -> None:
