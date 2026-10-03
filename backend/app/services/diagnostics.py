@@ -12,6 +12,7 @@ import asyncio
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -26,6 +27,7 @@ from app.database import get_session_factory
 from app.models import CollectionModel, DocumentModel
 from app.paths import app_version, is_packaged
 from app.services.settings_service import get_local_chat_model, get_vision_model
+from app.services.storage_errors import folder_problem
 
 # Reports can come from a work computer, so anything naming a person, an organisation or a
 # place is removed before the user sees it. The key shapes match the desktop shell's report.rs.
@@ -234,6 +236,21 @@ async def _ollama() -> list[str]:
     return lines
 
 
+def _storage() -> str:
+    """Whether this account can write the library and model folders, and the free space."""
+    data_dir = Path(get_settings().DATA_DIR).expanduser()
+    parts = []
+    for label, folder in (("library", data_dir), ("models", data_dir / "ollama" / "models")):
+        if folder.exists():
+            parts.append(f"{label} {folder_problem(folder) or 'writable'}")
+    try:
+        free_gb = shutil.disk_usage(data_dir).free / 1024**3
+        parts.append(f"{free_gb:.0f} GB free")
+    except OSError:
+        pass
+    return ", ".join(parts) or "unavailable"
+
+
 async def environment_report() -> str:
     """A paste-ready block for an issue. Every line is one a maintainer uses."""
     settings = get_settings()
@@ -247,6 +264,7 @@ async def environment_report() -> str:
         f"mode      {settings.LUMINARY_MODE}",
         f"chat      {get_local_chat_model()}",
         f"vision    {get_vision_model()}",
+        f"storage   {_storage()}",
     ]
     lines += await _ollama()
     return _scrub("\n".join(lines))

@@ -25,6 +25,7 @@ function component(id: string, label: string, over: Partial<Component> = {}): Co
     offered: true,
     recommended: false,
     advice: "",
+    installable: true,
     ...over,
   }
 }
@@ -47,7 +48,7 @@ const components = [
   component("reranker", "Answer ranking", { recommended: true, advice: "Recommended for every computer." }),
 ]
 
-function render(node: React.ReactNode) {
+function render(node: React.ReactNode, shown = components, shownPhases = phases) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const status: StartupStatus = {
     status: "degraded",
@@ -58,11 +59,11 @@ function render(node: React.ReactNode) {
     missing: ["ner", "reranker"],
     offline: false,
     elapsed_seconds: 1,
-    phases,
+    phases: shownPhases,
     version: "0.13.4",
   }
   qc.setQueryData(["setup", "status"], status)
-  qc.setQueryData(["setup", "components"], components)
+  qc.setQueryData(["setup", "components"], shown)
   return renderToStaticMarkup(<QueryClientProvider client={qc}>{node}</QueryClientProvider>)
 }
 
@@ -85,6 +86,49 @@ describe("SetupGate", () => {
     expect(html).toContain("Recommended for every computer.")
     expect(html).toContain("Install answer ranking")
     expect(html).toContain("Install concept extraction")
+  })
+})
+
+describe("SetupGate on a computer that can hold more than one chat model", () => {
+  const choice = (model: string, recommended: boolean) => ({
+    model,
+    size_bytes: 3_000_000_000,
+    reads_figures: !recommended,
+    recommended,
+    selected: recommended,
+    installed: false,
+    trade_off: `${model} trade-off`,
+  })
+  const chat = component("chat_model", "Chat model", {
+    kind: "ollama_model",
+    recommended: true,
+    choices: [choice("ollama/qwen2.5:14b-instruct", true), choice("ollama/qwen3.5:4b", false)],
+  })
+  const missingChat = [
+    phase("db", "Preparing your library", "ready", "", true),
+    phase("chat_model", "Chat and flashcard model", "missing", "qwen2.5:14b-instruct"),
+  ]
+
+  it("offers every model with its trade-off and lets the user pick, never one fixed download", () => {
+    const html = render(<SetupGate>app</SetupGate>, [chat], missingChat)
+    expect(html).toContain("qwen2.5:14b-instruct trade-off")
+    expect(html).toContain("qwen3.5:4b trade-off")
+    expect(count(html, "Recommended for this computer")).toBe(1)
+    expect(count(html, "Install and use")).toBe(2)
+    expect(html).not.toContain("Install chat model")
+  })
+})
+
+describe("a tool Luminary cannot install", () => {
+  it("offers a re-check instead of an install button that can only fail", () => {
+    const ffmpeg = component("ffmpeg", "Audio and video support", {
+      kind: "tool",
+      installable: false,
+      advice: "Install it with `brew install ffmpeg`.",
+    })
+    const html = render(<ModelSuggestions />, [{ ...ffmpeg, recommended: true }])
+    expect(html).toContain("Check again")
+    expect(html).not.toContain("Install audio and video support")
   })
 })
 

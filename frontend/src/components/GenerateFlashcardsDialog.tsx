@@ -8,7 +8,7 @@
  *
  * Scope: user selects EITHER a tag, specific notes, or a collection.
  * Generate button is disabled until a valid scope is chosen.
- * 503 Ollama error is shown as 'Ollama is unavailable. Start it with: ollama serve'.
+ * A 503 without a server message is shown as LOCAL_MODEL_DOWN.
  */
 
 import { Search, X, Loader2, CheckSquare, Square, CreditCard, Tag as TagIcon, Folder } from "lucide-react"
@@ -27,6 +27,7 @@ import { ApiError, apiGet, apiPost } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import type { components } from "@/types/api"
+import { LOCAL_MODEL_DOWN } from "@/lib/engineModes"
 
 interface NoteStub {
   id: string
@@ -91,7 +92,7 @@ function asGenerationError(err: unknown, fallback: string): never {
       if (e instanceof Error && !e.message.startsWith("Unexpected")) throw e
     }
     if (err.status === 503) {
-      throw new Error("Ollama is unavailable. Start it with: ollama serve")
+      throw new Error(LOCAL_MODEL_DOWN)
     }
     throw new Error(`HTTP ${err.status}`)
   }

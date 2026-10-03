@@ -813,7 +813,7 @@ async def test_s103_ollama_offline_sse_type_error(test_db):
     assert len(data_lines) == 1, f"Expected 1 error event, got: {data_lines}"
     payload = json.loads(data_lines[0][len("data: ") :])
     assert payload.get("type") == "error", f"Expected type='error', got: {payload}"
-    assert "LLM unreachable" in payload.get("message", ""), payload
+    assert payload.get("reason") == "server_down", payload
     assert payload.get("done") is True
 
 
@@ -858,7 +858,7 @@ async def test_s103_api_connection_error_sse_type_error(test_db):
     assert len(data_lines) == 1
     payload = json.loads(data_lines[0][len("data: ") :])
     assert payload.get("type") == "error"
-    assert "LLM unreachable" in payload.get("message", "")
+    assert payload.get("reason") == "server_down", payload
     assert payload.get("done") is True
 
 

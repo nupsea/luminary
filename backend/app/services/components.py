@@ -37,14 +37,18 @@ import httpx
 
 from app import proxy_env
 from app.config import get_settings
+from app.database import get_session_factory
 from app.model_registry import (
+    CHAT_CHOICES,
     REGISTRY,
+    TEXT_PREFERENCE,
     default_chat_model,
     default_vision_model,
+    fits_host,
     profile_for,
 )
 from app.paths import engine_source_path
-from app.services import model_prefetch, network_errors
+from app.services import model_prefetch, network_errors, storage_errors
 from app.services.component_download import install_archive_subset
 
 logger = logging.getLogger(__name__)
@@ -149,15 +153,19 @@ def catalogue() -> tuple[Component, ...]:
     model knobs in a fixture was still asserting against a catalogue built
     before the pin.
     """
+    from app.services.settings_service import get_local_chat_model  # noqa: PLC0415
+
+    # The model the user chose, else the default: the download must be the model that runs.
+    chat = get_local_chat_model()
     entries = (
         Component(
             id="chat_model",
             label="Chat model",
             description="Answers questions and generates flashcards, entirely on this machine.",
             kind="ollama_model",
-            ref=_registry_tag(default_chat_model()),
-            size_bytes=_registry_size(default_chat_model(), 2 * _GB),
-            licence=_registry_licence(default_chat_model()),
+            ref=_registry_tag(chat),
+            size_bytes=_registry_size(chat, 2 * _GB),
+            licence=_registry_licence(chat),
             default=True,
             enables=("Ask", "Flashcard generation", "Summaries"),
         ),
@@ -411,20 +419,31 @@ def resolve_tool(name: str) -> str | None:
     environment, so the app-managed directory is searched first and the standard
     install prefixes are searched last.
     """
-    candidate = tool_bin_dir() / name
-    if candidate.is_file():
-        return str(candidate)
+    names = (name, f"{name}.exe") if sys.platform == "win32" else (name,)
+    for file_name in names:
+        candidate = tool_bin_dir() / file_name
+        if candidate.is_file():
+            return str(candidate)
     found = shutil.which(name)
     if found:
         return found
-    for directory in _WELL_KNOWN_TOOL_DIRS:
-        candidate = Path(directory) / name
-        # Executable, not merely present: a name that cannot be run is not a
-        # find, and reporting one turns a clear "not installed" into a failure
-        # at the point of use.
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
+    for directory in _well_known_tool_dirs():
+        for file_name in names:
+            candidate = Path(directory) / file_name
+            # Executable, not merely present: a name that cannot be run is not a
+            # find, and reporting one turns a clear "not installed" into a failure
+            # at the point of use.
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
     return None
+
+
+def _well_known_tool_dirs() -> tuple[str, ...]:
+    # winget links its packages here and adds it to PATH only for processes started
+    # after the install, so a running Luminary would otherwise not see ffmpeg.
+    if sys.platform == "win32" and (local := os.environ.get("LOCALAPPDATA")):
+        return (str(Path(local) / "Microsoft" / "WinGet" / "Links"), *_WELL_KNOWN_TOOL_DIRS)
+    return _WELL_KNOWN_TOOL_DIRS
 
 
 async def _installed_ollama_models() -> set[str]:
@@ -460,6 +479,35 @@ def _probe_catalogue() -> tuple[list, dict[str, bool]]:
     return comps, local
 
 
+def _ollama_installed(tag: str, installed_models: set[str]) -> bool:
+    # Ollama reports tags as "name:tag"; a bare ref means ":latest".
+    return tag in installed_models or f"{tag}:latest" in installed_models
+
+
+def chat_model_choices(installed_models: set[str], ram_gb: int | None = None) -> list[dict]:
+    """Each chat model this host can hold, with what choosing it costs."""
+    from app.services.settings_service import get_local_chat_model  # noqa: PLC0415
+
+    recommended, selected = default_chat_model(), get_local_chat_model()
+    out = []
+    for model_id, trade_off in CHAT_CHOICES.items():
+        profile = profile_for(model_id)
+        if profile is None or not fits_host(profile, ram_gb):
+            continue
+        out.append(
+            {
+                "model": model_id,
+                "size_bytes": profile.resident_bytes,
+                "reads_figures": profile.multimodal,
+                "recommended": model_id == recommended,
+                "selected": model_id == selected,
+                "installed": _ollama_installed(_registry_tag(model_id), installed_models),
+                "trade_off": trade_off,
+            }
+        )
+    return out
+
+
 async def component_status() -> list[dict]:
     installed_models = await _installed_ollama_models()
     # Off the loop (I-2): the Whisper weights probe imports faster_whisper, which
@@ -470,11 +518,12 @@ async def component_status() -> list[dict]:
     out = []
     for comp in comps:
         if comp.kind == "ollama_model":
-            # Ollama reports tags as "name:tag"; a bare ref means ":latest".
-            ref = comp.ref if ":" in comp.ref else f"{comp.ref}:latest"
-            installed = ref in installed_models or comp.ref in installed_models
+            installed = _ollama_installed(comp.ref, installed_models)
         else:
             installed = local_installed[comp.id]
+        extra = {}
+        if comp.id == "chat_model" and host.local_models:
+            extra["choices"] = chat_model_choices(installed_models, host.ram_gb)
 
         out.append(
             {
@@ -488,7 +537,10 @@ async def component_status() -> list[dict]:
                 "default": comp.default,
                 "enables": list(comp.enables),
                 "installed": installed,
+                # A tool has no automatic installer; `advice` says how to add it.
+                "installable": comp.kind != "tool",
                 **_advice(comp, host),
+                **extra,
             }
         )
     return out
@@ -560,7 +612,28 @@ def _advice(comp: Component, host: _Host) -> dict:
             "recommended": True,
             "advice": "Recommended: this computer has an NVIDIA graphics card.",
         }
+    if comp.kind == "tool":
+        return {"offered": True, "recommended": False, "advice": tool_install_advice(comp.ref)}
     return {"offered": True, "recommended": False, "advice": ""}
+
+
+def ffmpeg_install_command() -> str:
+    """The install command for the platform actually running this."""
+    if sys.platform == "win32":
+        return "winget install Gyan.FFmpeg"
+    if sys.platform == "darwin":
+        return "brew install ffmpeg"
+    return "apt install ffmpeg"
+
+
+def tool_install_advice(name: str) -> str:
+    """How to add a tool Luminary cannot install (ffmpeg is the only one)."""
+    if running_in_container():
+        return f"Rebuild the image with `WITH_MEDIA=1` to include {name}."
+    return (
+        f"Install it with `{ffmpeg_install_command()}`, or place the `{name}` binary in "
+        f"{tool_bin_dir()}. Then check again."
+    )
 
 
 async def capabilities() -> dict:
@@ -608,6 +681,11 @@ _LOCAL_PHASES = ("verifying", "writing", "removing")
 
 def _mb(n: int) -> str:
     return f"{n / _MB:,.0f} MB"
+
+
+def _explain_pull_error(error: str) -> str:
+    """Steps for the user where a refused write or the network explains *error*."""
+    return storage_errors.explain(error) or network_errors.explain(error) or error
 
 
 async def install_ollama_model(model: str) -> AsyncIterator[dict]:
@@ -659,7 +737,7 @@ async def install_ollama_model(model: str) -> AsyncIterator[dict]:
 
                 if error := event.get("error"):
                     logger.warning("pull of %s failed: %s", model, error)
-                    yield {"state": "failed", "detail": network_errors.explain(error) or error}
+                    yield {"state": "failed", "detail": _explain_pull_error(error)}
                     return
 
                 completed = int(event.get("completed") or 0)
@@ -697,7 +775,47 @@ async def install_ollama_model(model: str) -> AsyncIterator[dict]:
         }
         return
 
+    await after_model_install(model)
     yield {"state": "ready", "detail": model}
+
+
+async def after_model_install(model: str) -> None:
+    """Use a just-installed model where chat had none, and load it if it is the chat model.
+
+    Every install path runs this -- the setup screen, Settings' Pull and a model choice --
+    so none of them leaves the model unused until the user selects it.
+    """
+    await adopt_installed_chat_model()
+    if _registry_tag(_current_chat_model()) == model:
+        from app.services.warmup import warm_chat_model  # noqa: PLC0415
+
+        warm_chat_model()
+
+
+def _current_chat_model() -> str:
+    from app.services.settings_service import get_local_chat_model  # noqa: PLC0415
+
+    return get_local_chat_model()
+
+
+async def adopt_installed_chat_model() -> str | None:
+    """Point chat at the best installed model when the current one is not installed.
+
+    Otherwise Auto keeps naming a default nobody downloaded. Returns the model adopted.
+    """
+    from app.services import settings_service  # noqa: PLC0415
+
+    installed = await _installed_ollama_models()
+    current = settings_service.get_local_chat_model()
+    if not installed or _ollama_installed(_registry_tag(current), installed):
+        return None
+    for model_id in dict.fromkeys((*CHAT_CHOICES, *TEXT_PREFERENCE)):
+        if _ollama_installed(_registry_tag(model_id), installed):
+            async with get_session_factory()() as session:
+                await settings_service.update_llm_settings(session, local_chat_model=model_id)
+            logger.info("chat model %s is not installed; now using %s", current, model_id)
+            return model_id
+    return None
 
 
 def _stalled(done: dict[str, int], totals: dict[str, int]) -> dict:
@@ -858,10 +976,6 @@ async def install_component(component_id: str) -> AsyncIterator[dict]:
     if comp.kind == "ollama_model":
         async for event in install_ollama_model(comp.ref):
             yield event
-            if comp.id == "chat_model" and event["state"] == "ready":
-                from app.services.warmup import warm_chat_model  # noqa: PLC0415
-
-                warm_chat_model()
         return
 
     if comp.kind == "hf_model":
@@ -881,13 +995,7 @@ async def install_component(component_id: str) -> AsyncIterator[dict]:
 
     # Tools have no automated source yet: a build has to be chosen deliberately
     # because the licence travels with it. Report rather than guess.
-    yield {
-        "state": "failed",
-        "detail": (
-            f"{comp.label} has no automatic installer yet. "
-            f"Place the `{comp.ref}` binary in {tool_bin_dir()} to enable it."
-        ),
-    }
+    yield {"state": "failed", "detail": tool_install_advice(comp.ref)}
 
 
 async def remove_component(component_id: str) -> None:

@@ -4,7 +4,6 @@ import logging
 import mimetypes
 import re
 import shutil
-import sys
 import tempfile
 import uuid
 import zipfile
@@ -81,7 +80,12 @@ from app.services import network_errors
 from app.services import youtube_downloader as _yt_module
 from app.services.activity_service import ActivityService
 from app.services.article_extractor import get_article_extractor
-from app.services.components import capabilities, get_component, running_in_container
+from app.services.components import (
+    capabilities,
+    ffmpeg_install_command,
+    get_component,
+    running_in_container,
+)
 from app.services.content_classifier import classify_content
 from app.services.document_deletion_service import get_document_deletion_service
 from app.services.document_search import get_document_search_service
@@ -601,15 +605,6 @@ def _all_withheld_for_licence(component_ids: list[str]) -> bool:
     )
 
 
-def _ffmpeg_install_hint() -> str:
-    """The install command for the platform actually running this."""
-    if sys.platform == "win32":
-        return "winget install Gyan.FFmpeg"
-    if sys.platform == "darwin":
-        return "brew install ffmpeg"
-    return "apt install ffmpeg"
-
-
 def _media_missing_message(required: list[str]) -> str:
     """One sentence naming everything missing, and what to do about each kind."""
     fetchable, manual = _installable(required)
@@ -648,7 +643,7 @@ def _media_missing_message(required: list[str]) -> str:
             # so a Windows user was shown brew and apt and left to guess.
             parts.append(
                 f"{names} is found automatically once installed on this machine "
-                f"(for example `{_ffmpeg_install_hint()}`)."
+                f"(for example `{ffmpeg_install_command()}`)."
             )
     return " ".join(parts)
 

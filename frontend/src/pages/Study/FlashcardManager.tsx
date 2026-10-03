@@ -265,7 +265,7 @@ export function FlashcardManager({
     onError: (err: Error) => {
       const msg =
         err instanceof GenerateError && err.status === 503
-          ? "Ollama is unavailable. Start it with: ollama serve"
+          ? err.message
           : "Failed to regenerate cards"
       toast.error(msg)
     },
@@ -279,7 +279,7 @@ export function FlashcardManager({
     },
     onError: (err: Error) => {
       const msg = err instanceof GenerateError && err.status === 503
-        ? "Ollama is unavailable. Start it with: ollama serve"
+        ? err.message
         : "Failed to generate cards"
       toast.error(msg)
     },
@@ -293,7 +293,7 @@ export function FlashcardManager({
     },
     onError: (err: Error) => {
       const msg = err instanceof GenerateError && err.status === 503
-        ? "Ollama is unavailable. Start it with: ollama serve"
+        ? err.message
         : "Failed to generate technical cards"
       toast.error(msg)
     },
@@ -312,7 +312,7 @@ export function FlashcardManager({
     },
     onError: (err: Error) => {
       const msg = err instanceof GenerateError && err.status === 503
-        ? "Ollama is unavailable. Start it with: ollama serve"
+        ? err.message
         : "Failed to generate graph flashcards"
       toast.error(msg)
     },
@@ -327,7 +327,7 @@ export function FlashcardManager({
     },
     onError: (err: Error) => {
       const msg = err instanceof GenerateError && err.status === 503
-        ? "Ollama is unavailable. Start it with: ollama serve"
+        ? err.message
         : "Failed to generate cloze flashcards"
       toast.error(msg)
     },

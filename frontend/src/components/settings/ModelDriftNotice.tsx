@@ -11,7 +11,7 @@ import { useState } from "react"
 import { AlertTriangle, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
-import { installComponent, type InstallProgress } from "@/lib/setupApi"
+import { installOrThrow, type InstallProgress } from "@/lib/setupApi"
 import { cn } from "@/lib/utils"
 
 export interface ModelDrift {
@@ -55,22 +55,13 @@ export function ModelDriftNotice({ narrowedDefaults, availableLocalModels, onSav
     setProgress(null)
     try {
       if (!availableLocalModels.includes(drift.resolved)) {
-        let failure: string | null = null
-        await installComponent(`model:${bare(drift.resolved)}`, (event: InstallProgress) => {
-          if (event.state === "failed") {
-            failure = event.detail ?? "Install failed"
-            return
-          }
+        await installOrThrow(`model:${bare(drift.resolved)}`, (event: InstallProgress) => {
           if (event.total_bytes) {
             setProgress(`${(((event.completed_bytes ?? 0) / event.total_bytes) * 100).toFixed(0)}%`)
           } else if (event.detail) {
             setProgress(event.detail)
           }
         })
-        // The stream can end "successfully" after a mid-stream failure event
-        // -- installComponent only throws on an HTTP-level error -- so the
-        // pin must not flip unless the last thing seen was a real failure.
-        if (failure) throw new Error(failure)
       }
       await onSave({ [ROLE_FIELD[role]]: drift.resolved })
       toast.success(`Now using ${bare(drift.resolved)} for the ${ROLE_LABEL[role]}`)

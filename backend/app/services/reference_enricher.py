@@ -294,7 +294,7 @@ class ReferenceEnricherService:
         try:
             refs = await _extract_references(summary.content)
         except LLMUnavailableError as exc:
-            raise DependencyUnavailable(get_llm_error_message()) from exc
+            raise DependencyUnavailable(get_llm_error_message(exc)) from exc
 
         refs = dedupe_by_url(refs)
         if not refs:

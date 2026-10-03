@@ -96,6 +96,11 @@ class StartupStatus:
     def has_phase(self, key: str) -> bool:
         return key in self._phases
 
+    def state_of(self, key: str) -> State | None:
+        with self._lock:
+            phase = self._phases.get(key)
+            return phase.state if phase is not None else None
+
     def set_state(self, key: str, state: State, detail: str = "") -> None:
         with self._lock:
             phase = self._phases.get(key)

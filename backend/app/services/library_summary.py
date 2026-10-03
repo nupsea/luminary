@@ -7,7 +7,8 @@ from collections.abc import AsyncGenerator
 from app.database import get_session_factory
 from app.models import LibrarySummaryModel
 from app.repos.summary_repo import SummaryRepo
-from app.services.llm import LLMAuthenticationError, get_llm_service
+from app.services.llm import get_llm_service
+from app.services.llm_errors import describe as describe_llm_failure
 from app.services.summarizer import _input_token_budget, _summary_num_ctx, _truncate_to_budget
 from app.services.summary_assembly import section_summary_input
 from app.services.summary_prompts import LIBRARY_SYSTEM_PROMPTS
@@ -165,13 +166,8 @@ class LibrarySummaryService:
 
         except Exception as exc:
             logger.warning("stream_library_summary failed", exc_info=exc)
-            if isinstance(exc, ValueError):
-                msg = "LLM provider not configured. Add your API key in Settings."
-            elif isinstance(exc, LLMAuthenticationError):
-                msg = "LLM API key is invalid. Check your key in Settings."
-            else:
-                msg = "LLM service unavailable. If using Ollama, run: ollama serve"
-            err_evt = {"error": "llm_unavailable", "message": msg, "done": True}
+            reason, msg = describe_llm_failure(exc)
+            err_evt = {"error": "llm_unavailable", "reason": reason, "message": msg, "done": True}
             yield f"data: {json.dumps(err_evt)}\n\n"
 
     async def refresh_library_summary(self) -> None:

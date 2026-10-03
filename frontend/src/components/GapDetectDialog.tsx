@@ -10,7 +10,7 @@
  *   Advanced mode: user manually searches and selects notes.
  *
  * States: loading (skeleton), error (amber), empty (placeholder).
- * 503 shown as 'Ollama is unavailable. Start it with: ollama serve'.
+ * A 503 without a server message is shown as LOCAL_MODEL_DOWN.
  */
 
 import { Search, X, Loader2, CheckSquare, Square, ChevronDown, ChevronUp } from "lucide-react"
@@ -26,6 +26,7 @@ import {
 
 import { ApiError, apiGet, apiPost } from "@/lib/apiClient"
 import type { components } from "@/types/api"
+import { LOCAL_MODEL_DOWN } from "@/lib/engineModes"
 
 // Local-only: 2-field picker subset.
 interface DocumentItem {
@@ -108,7 +109,7 @@ async function runGapDetect(
         }
       }
       if (err.status === 503) {
-        throw new Error("Ollama is unavailable. Start it with: ollama serve")
+        throw new Error(LOCAL_MODEL_DOWN)
       }
       throw new Error(`HTTP ${err.status}`)
     }

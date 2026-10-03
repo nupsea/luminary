@@ -250,6 +250,7 @@ fn boot(app: AppHandle, sup: Arc<Supervisor>) {
     // Contract: verify_installed.sh reads this line to find the backend.
     logging::write("shell", &format!("backend: {url}"));
     if let Some(window) = app.get_webview_window("main") {
+        watch_backend(app.clone(), sup.clone(), window.url().ok());
         // Navigating to the backend's own origin keeps the SPA and the API
         // same-origin, so neither CORS nor TrustedHostMiddleware needs relaxing.
         grant_spa_render(&app, port);
@@ -257,6 +258,36 @@ fn boot(app: AppHandle, sup: Arc<Supervisor>) {
             let _ = window.navigate(parsed);
         }
     }
+}
+
+/// Bring the user back to the startup screen, with Try again, if the backend dies.
+///
+/// A child no longer tracked was stopped by `shutdown` (quit or retry), not a crash.
+fn watch_backend(app: AppHandle, sup: Arc<Supervisor>, splash: Option<tauri::Url>) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(1));
+        if !sup.is_tracked("backend") {
+            return;
+        }
+        let Some(status) = sup.exited("backend") else {
+            continue;
+        };
+        let detail = format!(
+            "backend exited with {} after startup\n\n{}",
+            luminary_host::describe_exit(status),
+            sup.tail("backend").join("\n")
+        );
+        if let (Some(window), Some(url)) = (app.get_webview_window("main"), splash) {
+            let _ = window.navigate(url);
+        }
+        fail(
+            &app,
+            "backend",
+            "Luminary's engine stopped. Your library is safe: press Try again to restart it.",
+            &detail,
+        );
+        return;
+    });
 }
 
 /// Let the SPA -- and only the SPA -- ask for a page to be rendered.
