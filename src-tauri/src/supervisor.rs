@@ -150,6 +150,13 @@ impl Supervisor {
         }
     }
 
+    /// Whether the named child is still in the set; `shutdown` empties it.
+    pub fn is_tracked(&self, name: &str) -> bool {
+        self.children
+            .lock()
+            .is_ok_and(|children| children.iter().any(|c| c.name == name))
+    }
+
     /// Has the named child exited? `None` means it is still running.
     pub fn exited(&self, name: &str) -> Option<ExitStatus> {
         let mut children = self.children.lock().ok()?;
@@ -891,4 +898,40 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dead_backend_is_reported_until_shutdown_forgets_it() {
+        use std::os::unix::process::CommandExt;
+
+        let sup = Supervisor::new();
+        let mut child = Command::new("sh")
+            .args(["-c", "exit 3"])
+            .process_group(0)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let tree = luminary_host::adopt(&child);
+        let tail = stream_output(&mut child, "backend");
+        sup.track(Tracked {
+            name: "backend",
+            child,
+            tree,
+            exe: PathBuf::from("sh"),
+            tail,
+            stop: None,
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while sup.exited("backend").is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(sup.is_tracked("backend"));
+        assert_eq!(sup.exited("backend").and_then(|s| s.code()), Some(3));
+
+        sup.shutdown();
+        assert!(!sup.is_tracked("backend"), "a stopped app must not read as a crash");
+    }
+
 }
