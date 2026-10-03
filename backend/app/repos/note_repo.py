@@ -76,9 +76,7 @@ class NoteRepo:
         )
         return result.scalar_one()
 
-    async def list_recent(
-        self, limit: int = 8
-    ) -> list[tuple[str, str, str | None]]:
+    async def list_recent(self, limit: int = 8) -> list[tuple[str, str, str | None]]:
         result = await self.session.execute(
             select(NoteModel.id, NoteModel.content, NoteModel.title)
             .where(NoteModel.archived.is_(False))

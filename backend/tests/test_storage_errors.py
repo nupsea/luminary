@@ -24,7 +24,8 @@ def test_a_writable_folder_refused_on_macos_names_full_disk_access(tmp_path, mon
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
-def test_a_read_only_folder_names_the_finder_fix(tmp_path):
+def test_a_read_only_folder_names_the_finder_fix(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage_errors.sys, "platform", "darwin")
     locked = tmp_path / "models"
     locked.mkdir()
     locked.chmod(0o500)
@@ -47,3 +48,17 @@ def test_another_owner_is_named(tmp_path, monkeypatch):
 
 def test_a_writable_folder_has_no_problem(tmp_path):
     assert storage_errors.folder_problem(tmp_path / "not-yet-created") is None
+
+
+def test_a_windows_refusal_is_recognised_and_names_controlled_folder_access(monkeypatch):
+    monkeypatch.setattr(storage_errors.sys, "platform", "win32")
+    text = storage_errors.explain(
+        "mkdir C:\\Users\\a\\AppData\\Local\\ollama\\models\\manifests: Access is denied."
+    )
+    assert text is not None and "Controlled folder access" in text
+
+
+def test_a_linux_refusal_names_the_mandatory_access_controls(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage_errors.sys, "platform", "linux")
+    text = storage_errors.explain(_MESSAGE.format(tmp_path / "manifests"))
+    assert text is not None and "SELinux" in text and "Full Disk Access" not in text

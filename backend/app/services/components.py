@@ -417,20 +417,31 @@ def resolve_tool(name: str) -> str | None:
     environment, so the app-managed directory is searched first and the standard
     install prefixes are searched last.
     """
-    candidate = tool_bin_dir() / name
-    if candidate.is_file():
-        return str(candidate)
+    names = (name, f"{name}.exe") if sys.platform == "win32" else (name,)
+    for file_name in names:
+        candidate = tool_bin_dir() / file_name
+        if candidate.is_file():
+            return str(candidate)
     found = shutil.which(name)
     if found:
         return found
-    for directory in _WELL_KNOWN_TOOL_DIRS:
-        candidate = Path(directory) / name
-        # Executable, not merely present: a name that cannot be run is not a
-        # find, and reporting one turns a clear "not installed" into a failure
-        # at the point of use.
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
+    for directory in _well_known_tool_dirs():
+        for file_name in names:
+            candidate = Path(directory) / file_name
+            # Executable, not merely present: a name that cannot be run is not a
+            # find, and reporting one turns a clear "not installed" into a failure
+            # at the point of use.
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
     return None
+
+
+def _well_known_tool_dirs() -> tuple[str, ...]:
+    # winget links its packages here and adds it to PATH only for processes started
+    # after the install, so a running Luminary would otherwise not see ffmpeg.
+    if sys.platform == "win32" and (local := os.environ.get("LOCALAPPDATA")):
+        return (str(Path(local) / "Microsoft" / "WinGet" / "Links"),)
+    return _WELL_KNOWN_TOOL_DIRS
 
 
 async def _installed_ollama_models() -> set[str]:

@@ -11,9 +11,10 @@ import stat
 import sys
 from pathlib import Path
 
+# Go's wording on each platform: macOS and Linux name errno, Windows says "Access is denied."
 _REFUSED = re.compile(
-    r"(?:mkdir|open|rename|remove|create)\s+(/.+?):\s+"
-    r"(?:operation not permitted|permission denied)",
+    r"(?:mkdir|open|rename|remove|create)\s+(/.+?|[A-Za-z]:\\.+?):\s+"
+    r"(?:operation not permitted|permission denied|access is denied)",
     re.IGNORECASE,
 )
 
@@ -46,6 +47,14 @@ def folder_problem(path: Path) -> str | None:
     return None
 
 
+def _permission_fix() -> str:
+    if sys.platform == "darwin":
+        return "In Finder, choose Get Info on it, give your account Read & Write and clear Locked."
+    if sys.platform == "win32":
+        return "In File Explorer, open its Properties > Security and give your account Modify."
+    return "Give your account write access to it (for example `chown -R $USER` on the folder)."
+
+
 def explain(text: str) -> str | None:
     """A sentence with the steps for a refused write in *text*, or None if there is none."""
     match = _REFUSED.search(text)
@@ -55,10 +64,7 @@ def explain(text: str) -> str | None:
     folder = _existing(path.parent) or path.parent
     problem = folder_problem(path.parent)
     if problem is not None:
-        return (
-            f"Luminary cannot save into {folder}: {problem}. In Finder, choose Get Info on "
-            "that folder, give your account Read & Write and clear Locked, then try again."
-        )
+        return f"Luminary cannot save into {folder}: {problem}. {_permission_fix()} Then try again."
     if sys.platform == "darwin":
         return (
             f"macOS refused to let Luminary save into {folder}, although the folder allows it. "
@@ -66,8 +72,15 @@ def explain(text: str) -> str | None:
             "System Settings > Privacy & Security > Full Disk Access, turn on Luminary, "
             "reopen it and try again."
         )
+    if sys.platform == "win32":
+        return (
+            f"Windows refused to let Luminary save into {folder}, although the folder allows "
+            "it. Restart Luminary and try again. If it is refused again, open Windows "
+            "Security > Virus & threat protection > Ransomware protection > Controlled folder "
+            "access, allow Luminary and ollama through it, and try again."
+        )
     return (
         f"The system refused to let Luminary save into {folder}, although the folder allows "
-        "it. Restart Luminary and try again. If it is refused again, check for security "
-        "software that controls which programs may write files."
+        "it. Restart Luminary and try again. If it is refused again, check whether SELinux, "
+        "AppArmor or security software restricts which programs may write there."
     )

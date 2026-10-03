@@ -21,10 +21,9 @@ import logging
 from collections.abc import AsyncGenerator
 
 from app.database import get_session_factory
-from app.exceptions import DependencyUnavailable
 from app.models import ChunkModel, SummaryModel
 from app.repos.summary_repo import SummaryRepo
-from app.services.llm import LLMAuthenticationError, get_llm_service
+from app.services.llm import get_llm_service
 from app.services.section_summarizer import _is_metadata_section
 from app.services.summary_assembly import (
     CHARS_PER_TOKEN,
@@ -107,13 +106,9 @@ _DETAILED_BATCH_MAX_TOKENS = 1_000
 
 def llm_error_message(exc: Exception) -> str:
     """What to tell the user when a summary's LLM call failed."""
-    if isinstance(exc, DependencyUnavailable):
-        return exc.detail
-    if isinstance(exc, ValueError):
-        return "LLM provider not configured. Add your API key in Settings."
-    if isinstance(exc, LLMAuthenticationError):
-        return "LLM API key is invalid. Check your key in Settings."
-    return "LLM service unavailable. If using Ollama, run: ollama serve"
+    from app.services.llm_errors import describe  # noqa: PLC0415
+
+    return describe(exc)[1]
 
 
 class SummarizationService:

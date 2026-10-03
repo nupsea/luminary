@@ -61,6 +61,10 @@ export function engineMode(id: string | undefined): EngineModeDef {
   return ENGINE_MODES.find((m) => m.id === id) ?? ENGINE_MODES[0]
 }
 
+/** Shown only when a failed model call carried no message of its own. */
+export const LOCAL_MODEL_DOWN =
+  "The local model is not answering. Quit Luminary and reopen it, then try again."
+
 /**
  * The text shown when a model call fails: the server's message, which names the
  * actual situation, never a client-side guess from the mode.

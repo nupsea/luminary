@@ -663,7 +663,7 @@ async def generate_note_flashcards(
     except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
-            detail=get_llm_error_message(),
+            detail=get_llm_error_message(exc),
         ) from exc
 
     logger.info("Generated %d note flashcards tag=%s", len(cards), req.tag)
@@ -990,7 +990,7 @@ async def gap_detect(
     except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
-            detail=get_llm_error_message(),
+            detail=get_llm_error_message(exc),
         ) from exc
 
     logger.info(
