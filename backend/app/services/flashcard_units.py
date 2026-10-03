@@ -7,6 +7,7 @@ unable to choose what is worth asking on its own (#191). Pure module: no I/O, no
 from __future__ import annotations
 
 import re
+import unicodedata
 
 # A footnote number after a word's full stop ("the model.2 For") still ends the sentence; a
 # digit before the dot ("GPT-3.5 Turbo") does not.
@@ -129,10 +130,10 @@ _STOP = frozenset(
         "us",
     )
 )
-# Share of an answer's content words its best sentence must carry. Brackets, on the hand-graded
-# #191 unit cards: 0.29 "The passage does not explicitly state what these bounds are" (bad),
-# 0.33 "The database rejects them rather than merely filtering out reads" (good).
-MIN_ANSWER_COVERAGE = 0.3
+# Share of an answer's content words its best sentence must carry. Below half, 91% of 22
+# blind-graded #230 cards were bad: 0.47 "The passage states that any other expression on the left
+# side results in a syntax error" (bad), 0.50 "for so he shall not sin!" (good).
+MIN_ANSWER_COVERAGE = 0.5
 
 
 def _is_prose(line: str) -> bool:
@@ -222,6 +223,29 @@ def listed_sentence(unit: str, speaker: str | None) -> str:
     """How a chosen unit is shown to the model: section label cut, speaker named."""
     body = _LEADING_LABEL.sub("", unit, count=1) or unit
     return f"{speaker} says: {body}" if speaker else body
+
+
+_NAME = re.compile(r"\b[A-Z][\w'’-]+")
+_POSSESSIVE = re.compile(r"['’]s?$")
+# Capitalised for grammar, not because they name anything.
+_NOT_NAMES = frozenset(("I", "According"))
+
+
+def names_not_in(question: str, text: str) -> list[str]:
+    """Capitalised words of *question*, after its first, that *text* never contains.
+
+    A card naming someone its sentence's surroundings never mention guessed who acted: "King
+    Polonius", "Arachne" for Penelope's maid, "Hawthorne" for Ishmael (#230).
+    """
+    question = unicodedata.normalize("NFKC", question)
+    scope = unicodedata.normalize("NFKC", text).lower()
+    return [
+        word
+        for m in _NAME.finditer(question)
+        if m.start() > 0
+        and (word := _POSSESSIVE.sub("", m.group())) not in _NOT_NAMES
+        and word.lower() not in scope
+    ]
 
 
 # A sentence that opens with its example illustrates the sentence before it; asked on its own,

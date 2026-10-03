@@ -15,6 +15,7 @@ from app.services.flashcard_units import (
     best_unit,
     choose_units,
     listed_sentence,
+    names_not_in,
     split_speeches,
     split_units,
 )
@@ -183,6 +184,45 @@ def test_an_answer_no_sentence_carries_falls_below_the_floor():
     assert coverage < MIN_ANSWER_COVERAGE
 
 
+def test_the_coverage_floor_sits_between_its_two_graded_cases():
+    unit = (
+        "Any other expression on the left side is a syntax error (we will see exceptions to this "
+        "rule later)."
+    )
+    bad = (
+        "The passage states that any other expression on the left side results in a syntax error "
+        "rather than giving a reason for allowing it elsewhere."
+    )
+    assert best_unit(bad, [unit])[1] < MIN_ANSWER_COVERAGE
+    verse = (
+        "Therefore, arise, thou Son of Kunti! brace Thine arm for conflict, nerve thy heart to "
+        "meet-- As things alike to thee--pleasure or pain, Profit or ruin, victory or defeat: So "
+        "minded, gird thee to the fight, for so Thou shalt not sin!"
+    )
+    assert best_unit("for so he shall not sin!", [verse])[1] >= MIN_ANSWER_COVERAGE
+
+
+PLAY_SCENE = (
+    "HAMLET. Let the bloat King tempt you again to bed, Pinch wanton on your cheek. "
+    "QUEEN. What shall I do? Laertes' Effect"
+)
+
+
+@pytest.mark.parametrize(
+    ("question", "unshown"),
+    [
+        ("What plan does King Polonius propose?", ["Polonius"]),
+        ("What does Hamlet tell the Queen to let the King do?", []),
+        ("What did Hamlet's speech ask of the Queen?", []),
+        ("What is Laertes' role?", []),
+        ("Who first stated the Law of Eﬀect?", ["Law"]),
+        ("Polonius asks what of the Queen?", []),
+    ],
+)
+def test_a_name_the_passage_never_gives_is_found(question, unshown):
+    assert names_not_in(question, PLAY_SCENE) == unshown
+
+
 @pytest.mark.parametrize(
     "question",
     [
@@ -284,6 +324,26 @@ async def test_unit_cards_drop_a_pasted_sentence_and_an_unsupported_answer():
     moved = {k: after[k] - before.get(k, 0) for k in after}
     assert moved["card_reject_not_a_question"] == 1
     assert moved["card_reject_ungrounded"] == 1
+
+
+async def test_unit_cards_drop_a_question_naming_someone_the_passage_does_not():
+    text = "One of her maids who knew what she was doing told us, and we caught her at work.\n"
+    llm = _llm(
+        [
+            {
+                "id": 1,
+                "question": "Who told Telemachus that Arachne was undoing her work?",
+                "answer": "One of her maids who knew what she was doing.",
+            },
+            {
+                "id": 1,
+                "question": "Who told the suitors she was undoing her work?",
+                "answer": "One of her maids who knew what she was doing.",
+            },
+        ]
+    )
+    cards = await _unit_cards(llm, text, 1, set(), None, "doc")
+    assert [c["question"] for c in cards] == ["Who told the suitors she was undoing her work?"]
 
 
 async def test_a_speech_is_listed_with_its_speaker_and_quoted_verbatim():
