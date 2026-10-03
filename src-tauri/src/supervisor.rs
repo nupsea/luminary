@@ -931,7 +931,9 @@ mod tests {
         assert_eq!(sup.exited("backend").and_then(|s| s.code()), Some(3));
 
         sup.shutdown();
-        assert!(!sup.is_tracked("backend"), "a stopped app must not read as a crash");
+        assert!(
+            !sup.is_tracked("backend"),
+            "a stopped app must not read as a crash"
+        );
     }
-
 }
