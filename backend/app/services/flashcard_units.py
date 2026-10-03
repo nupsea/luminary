@@ -130,9 +130,8 @@ _STOP = frozenset(
         "us",
     )
 )
-# Share of an answer's content words its best sentence must carry. Below half, 91% of 22
-# blind-graded #230 cards were bad: 0.47 "The passage states that any other expression on the left
-# side results in a syntax error" (bad), 0.50 "for so he shall not sin!" (good).
+# Share of an answer's content words its best sentence must carry; below it the answer was written
+# from elsewhere. Bracketed by test_the_coverage_floor_sits_between_its_two_graded_cases.
 MIN_ANSWER_COVERAGE = 0.5
 
 
@@ -234,8 +233,8 @@ _NOT_NAMES = frozenset(("I", "According"))
 def names_not_in(question: str, text: str) -> list[str]:
     """Capitalised words of *question*, after its first, that *text* never contains.
 
-    A card naming someone its sentence's surroundings never mention guessed who acted: "King
-    Polonius", "Arachne" for Penelope's maid, "Hawthorne" for Ishmael (#230).
+    A card naming someone the passage never mentions guessed who acted ("Arachne" for Penelope's
+    maid). A wrong name the passage does mention passes.
     """
     question = unicodedata.normalize("NFKC", question)
     scope = unicodedata.normalize("NFKC", text).lower()
