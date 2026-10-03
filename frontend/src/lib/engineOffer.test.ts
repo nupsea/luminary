@@ -45,6 +45,10 @@ describe("engineOfferCopy", () => {
       expect(engineOfferCopy(supported).title).toBe("Answers are being written on this machine")
     }
   })
+
+  it("recommends Hybrid for Ask and Practice where local models run", () => {
+    expect(engineOfferCopy(true).body).toMatch(/Hybrid is the one we recommend for Ask and Practice/)
+  })
 })
 
 describe("PROVIDER_SETUP", () => {

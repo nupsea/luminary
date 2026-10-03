@@ -43,6 +43,12 @@ describe("ENGINE_MODES", () => {
     expect(engineMode("hybrid").sends).not.toContain("documents")
   })
 
+  it("recommends Hybrid, and only Hybrid, for Ask and Practice", () => {
+    const recommended = ENGINE_MODES.filter((m) => m.recommendation)
+    expect(recommended.map((m) => m.id)).toEqual(["hybrid"])
+    expect(engineMode("hybrid").recommendation).toMatch(/Ask and Practice/)
+  })
+
   it("falls back to Local for a value it does not know", () => {
     expect(engineMode(undefined).id).toBe("private")
   })

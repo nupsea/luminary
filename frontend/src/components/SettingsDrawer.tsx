@@ -420,6 +420,9 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
                     className="sr-only"
                   />
                   <span className="text-sm font-semibold text-foreground">{mode.label}</span>
+                  {mode.recommendation && (
+                    <p className="text-[11px] font-medium text-primary">{mode.recommendation}</p>
+                  )}
                   <p className="text-xs text-muted-foreground">{mode.summary}</p>
                 </label>
               ))}

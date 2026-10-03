@@ -73,6 +73,8 @@ DOC_TITLES = {
 }
 NOTE_BODIES = {
     "S106 smoke note": "S106",
+    "Backpropagation is an algorithm for computing gradients in neural networks.": "S171",
+    "Gradient Descent is an optimization method that follows the negative gradient to minimize loss.": "S171",
     "S172 smoke test note: backpropagation gradient descent neural network.": "S172",
     "Smoke test note for collection health": "S173",
     "Test note for S201 smoke": "S201",

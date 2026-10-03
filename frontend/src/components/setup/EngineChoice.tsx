@@ -110,6 +110,9 @@ export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
                 <Icon size={15} className="text-muted-foreground" />
                 {mode.label}
               </span>
+              {mode.recommendation && (
+                <span className="text-[11px] font-medium text-primary">{mode.recommendation}</span>
+              )}
               <span className="text-xs text-muted-foreground">
                 {mode.summary}
                 {mode.id === "private" && !hostRefusesLocal && probe !== null

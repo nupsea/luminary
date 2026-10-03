@@ -6,8 +6,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-03
+
+### Changed
+- **The knowledge graph moved from Kuzu into SQLite.** Each graph row is deleted with the document, note or concept it describes, so deleted documents no longer feed the Map or Ask (#204, #205, #65). An existing library is copied on first launch in about a second; `graph.kuzu` is only read, never changed. On the dev library the store went from 225 MB to 25 MB.
+- **`/search` no longer expands through the graph.** It changed no retrieval score on five datasets.
+- **Settings and the first-run question recommend Hybrid for Ask and Practice.** The local model stays the default; Hybrid sends only the question and its retrieved passages to your provider.
+
 ### Fixed
-- **Practice cards asked which example the book used, or named the wrong person.** Sentences that open with an example are no longer carded, and a card is dropped if it names someone the passage never mentions or if its answer barely uses its sentence. Blind-graded good cards rose from 0.65 to 0.70 over two runs.
+- **Ask said "not found" when the document contradicted the question's premise.** It now states the correction and cites the passage (#158, open). Novels still fail, and the rate is unstable: 4 of 7 on four runs when it merged, 2 and 3 of 7 on 2026-10-02, the same on the build before this release.
+- **The chat graph lookup never matched a name** because entity names are stored lowercased. It now ignores case.
+- **Deleting a document left its summaries running** against the LLM. Delete now cancels them (#186).
+- **Wikipedia articles kept "[ edit ]" under every heading** in chunks and citations (#159).
+- **Text before a document's first heading was dropped**: a web article's lede, an arXiv paper's title page and abstract (#97). Applies to new ingests.
+- **Audio ingested before 0.7.5 showed "No content available" in the reader.** Its transcript is backfilled as sections on upgrade (#97).
+- **Ingest and reindex sampled different chunks for entities** (#63). The health panel now says how many chunks the entity count came from.
+- **A failed entity extraction erased a note's entity links** (#65).
+- **Practice cards asked which example the book used, or named the wrong person** (#230). Sentences that open with an example are no longer carded, and a card is dropped if it names someone the passage never mentions or if its answer barely uses its sentence. Blind-graded good cards rose from 0.65 to 0.70 over two runs.
+- **A model split between the graphics card and the processor slowed answers with no explanation** (#156). A banner now names the share on the card and the work it slows.
+- **A model download behind a Windows proxy setup script failed as a vague stall** (#155). The error now names the manual proxy setting that both the app and Ollama read.
+
+### Added
+- **The note search eval scores queries that share no word with their note** (`make eval-notes-paraphrase`, #100). Recall@1 0.64 and @5 0.79 on the 14 of 63 notes a local model could rephrase without overlap; long notes are not covered.
+
+### Not fixed in this release
+- **A suggested question can get an answer that cites nothing (#66).** The candidate fix also left real answers uncited, so it moved to 0.16.0.
+
+### Upgrading
+- **This release migrates the database.** The graph tables are added and filled from `graph.kuzu` on first launch; an older version cannot open the library afterwards.
 
 ## [0.14.5] - 2026-09-30
 

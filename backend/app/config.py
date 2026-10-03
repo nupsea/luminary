@@ -203,10 +203,10 @@ class Settings(BaseSettings):
     # single passage, which is the collapse the 8244526 revert exists to prevent;
     # 1250 saves only ~6s of prefill and is not worth a profile.
     #
-    # NOT YET MEASURED: the generation-quality cost of answering at 750. Measure it
-    # with `QA_CONTEXT_TOKEN_BUDGET=750` and a study --generate run before treating
-    # this as a shipped default rather than an opt-in for hosts that are unusable
-    # without it.
+    # Generation cost of 750 against 1500, two runs each (`make eval-gen`, judge
+    # qwen2.5:14b, 2026-10-02): on paper citation support rose (0.78/0.78 vs
+    # 0.72/0.69) and answer relevance fell (0.73/0.76 vs 0.78/0.82); on book the
+    # arms overlap. Faithfulness was not measured (HHEM unavailable offline).
     QA_CONTEXT_TOKEN_BUDGET_SLOW_HOST: int = 750
     # Whether a host measured slow still spends a whole LLM call classifying
     # intent. Same gate as the budget above, and the reason it is separate is

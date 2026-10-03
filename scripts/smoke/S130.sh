@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S130: RAGAS eval per-book breakdown
-# Calls GET /evals/results and asserts HTTP 200 with a non-empty JSON array.
+# Calls GET /evals/results and asserts every row names its dataset and run time.
+# The rows come from evals/scores_history.jsonl in the checkout; with none, it skips.
 #
 # Usage: bash scripts/smoke/S130.sh
 # Prerequisites: backend running on localhost:7820
@@ -22,12 +23,20 @@ if [ "$http_code" != "200" ]; then
   exit 1
 fi
 
-# Assert response is a non-empty JSON array (at least one result row)
-count=$(echo "$body" | python3 -c "import sys, json; data=json.load(sys.stdin); print(len(data))")
+count=$(echo "$body" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
 if [ "$count" -lt 1 ]; then
-  echo "FAIL: expected at least 1 result row, got $count"
+  echo "SKIP: no eval has run in this checkout, so there are no rows to check"
+  exit "$SMOKE_SKIP"
+fi
+
+bad=$(echo "$body" | python3 -c "
+import sys, json
+rows = json.load(sys.stdin)
+print(sum(1 for r in rows if not r.get('dataset') or not r.get('run_at')))")
+if [ "$bad" -ne 0 ]; then
+  echo "FAIL: $bad of $count rows lack a dataset or run_at"
   echo "Body: $body"
   exit 1
 fi
 
-echo "PASS: /evals/results returned HTTP 200 with $count result row(s)"
+echo "PASS: /evals/results returned $count row(s), each with a dataset and run time"
