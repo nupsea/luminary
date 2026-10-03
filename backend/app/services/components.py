@@ -670,6 +670,11 @@ def _mb(n: int) -> str:
     return f"{n / _MB:,.0f} MB"
 
 
+def _explain_pull_error(error: str) -> str:
+    """Steps for the user where a refused write or the network explains *error*."""
+    return storage_errors.explain(error) or network_errors.explain(error) or error
+
+
 async def install_ollama_model(model: str) -> AsyncIterator[dict]:
     """Pull a model, yielding progress events.
 
@@ -719,8 +724,7 @@ async def install_ollama_model(model: str) -> AsyncIterator[dict]:
 
                 if error := event.get("error"):
                     logger.warning("pull of %s failed: %s", model, error)
-                    detail = storage_errors.explain(error) or network_errors.explain(error)
-                    yield {"state": "failed", "detail": detail or error}
+                    yield {"state": "failed", "detail": _explain_pull_error(error)}
                     return
 
                 completed = int(event.get("completed") or 0)
