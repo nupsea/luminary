@@ -110,7 +110,7 @@ async def test_concept_chunk_produces_why_how_question(test_db):
 
     llm_response = (
         '[{"question": "Why is data replication important in distributed systems?", '
-        '"answer": "It enables fault tolerance by keeping copies on multiple nodes.", '
+        '"answer": "If one node fails, the system can still serve reads from the replicas.", '
         '"source_excerpt": "copies of data are kept on multiple nodes"}]'
     )
 

@@ -7,8 +7,14 @@ unable to choose what is worth asking on its own (#191). Pure module: no I/O, no
 from __future__ import annotations
 
 import re
+import unicodedata
 
-_SENT_END = re.compile(r"(?<=[.!?\"'”’)\]])\s+(?=[\"'“‘(\[]?[A-Z0-9])")
+# A footnote number after a word's full stop ("the model.2 For") still ends the sentence; a
+# digit before the dot ("GPT-3.5 Turbo") does not.
+_SENT_END = re.compile(
+    r"(?:(?<=[.!?\"'”’)\]])|(?<=[a-z”’)][.!?]\d)|(?<=[a-z”’)][.!?]\d\d))"
+    r"\s+(?=[\"'“‘(\[]?[A-Z0-9])"
+)
 _CODE_LINE = re.compile(
     r"^\s*(def|class|import|from|return|if|elif|else|for|while|try|except|with)\b.*:\s*$"
     r"|^\s*(import|return)\b|\s[-+*/]?=\s|==|=>|->|;\s*$|[{}]\s*$|\)\s*:?\s*$|^\s*@\w"
@@ -124,10 +130,9 @@ _STOP = frozenset(
         "us",
     )
 )
-# Share of an answer's content words its best sentence must carry. Brackets, on the hand-graded
-# #191 unit cards: 0.29 "The passage does not explicitly state what these bounds are" (bad),
-# 0.33 "The database rejects them rather than merely filtering out reads" (good).
-MIN_ANSWER_COVERAGE = 0.3
+# Share of an answer's content words its best sentence must carry; below it the answer was written
+# from elsewhere. Bracketed by test_the_coverage_floor_sits_between_its_two_graded_cases.
+MIN_ANSWER_COVERAGE = 0.5
 
 
 def _is_prose(line: str) -> bool:
@@ -219,8 +224,38 @@ def listed_sentence(unit: str, speaker: str | None) -> str:
     return f"{speaker} says: {body}" if speaker else body
 
 
+_NAME = re.compile(r"\b[A-Z][\w'’-]+")
+_POSSESSIVE = re.compile(r"['’]s?$")
+# Capitalised for grammar, not because they name anything.
+_NOT_NAMES = frozenset(("I", "According"))
+
+
+def names_not_in(question: str, text: str) -> list[str]:
+    """Capitalised words of *question*, after its first, that *text* never contains.
+
+    A card naming someone the passage never mentions guessed who acted ("Arachne" for Penelope's
+    maid). A wrong name the passage does mention passes.
+    """
+    question = unicodedata.normalize("NFKC", question)
+    scope = unicodedata.normalize("NFKC", text).lower()
+    return [
+        word
+        for m in _NAME.finditer(question)
+        if m.start() > 0
+        and (word := _POSSESSIVE.sub("", m.group())) not in _NOT_NAMES
+        and word.lower() not in scope
+    ]
+
+
+# A sentence that opens with its example illustrates the sentence before it; asked on its own,
+# the card tests the illustration ("GPT-4 breaks the phrase into nine tokens") (#230).
+_EXAMPLE_OPENER = re.compile(
+    r"^\W*(?:(?:for example|for instance|as an example)\b|e\.g\.)", re.IGNORECASE
+)
+
+
 def _learnable_words(unit: str) -> int:
-    if _CITATION.search(unit):
+    if _CITATION.search(unit) or _EXAMPLE_OPENER.match(_LEADING_LABEL.sub("", unit, count=1)):
         return 0
     body = _FURNITURE_SPAN.sub(" ", unit)
     alpha = sum(c.isalpha() for c in body) / max(1, len(body))
