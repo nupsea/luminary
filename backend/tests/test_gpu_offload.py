@@ -210,20 +210,20 @@ async def test_the_endpoint_says_whether_the_card_was_measured():
 def test_installing_the_chat_model_loads_it(monkeypatch):
     from app.services import components  # noqa: PLC0415
 
-    async def pull(_model):
-        yield {"state": "downloading", "detail": "pulling"}
-        yield {"state": "ready", "detail": _MODEL}
+    async def nothing_to_adopt():
+        return None
 
     warmed: list[bool] = []
-    monkeypatch.setattr(components, "install_ollama_model", pull)
+    monkeypatch.setattr(components, "adopt_installed_chat_model", nothing_to_adopt)
+    monkeypatch.setattr(components, "_current_chat_model", lambda: f"ollama/{_MODEL}")
     monkeypatch.setattr(warmup, "warm_chat_model", lambda: warmed.append(True))
 
-    async def run():
-        return [e async for e in components.install_component("chat_model")]
-
-    events = asyncio.run(run())
-    assert events[-1]["state"] == "ready"
+    asyncio.run(components.after_model_install(_MODEL))
     assert warmed == [True]
+
+    warmed.clear()
+    asyncio.run(components.after_model_install("some-other-model:1b"))
+    assert warmed == [], "a model that is not the chat model is not loaded as one"
 
 
 def test_changing_the_gpu_runner_measures_again(monkeypatch, tmp_path):

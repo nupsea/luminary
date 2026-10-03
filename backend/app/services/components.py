@@ -775,12 +775,21 @@ async def install_ollama_model(model: str) -> AsyncIterator[dict]:
         }
         return
 
+    await after_model_install(model)
+    yield {"state": "ready", "detail": model}
+
+
+async def after_model_install(model: str) -> None:
+    """Use a just-installed model where chat had none, and load it if it is the chat model.
+
+    Every install path runs this -- the setup screen, Settings' Pull and a model choice --
+    so none of them leaves the model unused until the user selects it.
+    """
     await adopt_installed_chat_model()
     if _registry_tag(_current_chat_model()) == model:
         from app.services.warmup import warm_chat_model  # noqa: PLC0415
 
         warm_chat_model()
-    yield {"state": "ready", "detail": model}
 
 
 def _current_chat_model() -> str:
