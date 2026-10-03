@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Practice cards asked which example the book used, or named the wrong person.** Sentences that open with an example are no longer carded, and a card is dropped if it names someone the passage never mentions or if its answer barely uses its sentence. Blind-graded good cards rose from 0.65 to 0.70 over two runs.
+
 ## [0.14.5] - 2026-09-30
 
 ### Fixed
