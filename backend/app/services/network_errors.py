@@ -9,6 +9,8 @@ than guess.
 
 import re
 
+from app import proxy_env
+
 # Python's ssl/requests/httpx wording, then Go's (Ollama).
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -69,6 +71,15 @@ _SENTENCES = {
 }
 
 
+# The one case the person can fix without IT changing the network: give the app a
+# manual proxy, which both it and Ollama read at launch (#155).
+PAC_ONLY = (
+    "Your network sets its proxy with a setup script, which Luminary cannot use yet. "
+    "Ask your IT team for the proxy server's address and port, enter them in Windows "
+    "Settings > Network & internet > Proxy > Manual proxy setup, then restart Luminary."
+)
+
+
 def kind(text: str) -> str | None:
     """The failure class *text* describes, or None when it names none."""
     return next((name for name, pattern in _PATTERNS if pattern.search(text)), None)
@@ -77,4 +88,9 @@ def kind(text: str) -> str | None:
 def explain(text: str) -> str | None:
     """A sentence for the person reading the setup screen, or None."""
     found = kind(text)
-    return _SENTENCES[found] if found else None
+    if found is None:
+        return None
+    # A certificate refusal is the proxy answering, so the script was not the problem.
+    if found != "inspected" and proxy_env.pac_only():
+        return PAC_ONLY
+    return _SENTENCES[found]
