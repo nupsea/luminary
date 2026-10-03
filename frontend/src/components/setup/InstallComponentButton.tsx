@@ -11,7 +11,7 @@ import { Download, Loader2, RotateCw } from "lucide-react"
 import { ChatModelChoice } from "@/components/setup/ChatModelChoice"
 import { ReportProblem } from "@/components/setup/ReportProblem"
 import { useComponents } from "@/hooks/useSetup"
-import { formatBytes, installComponent } from "@/lib/setupApi"
+import { formatBytes, installComponent, refreshModelState } from "@/lib/setupApi"
 import { cn } from "@/lib/utils"
 
 interface Props {
@@ -88,9 +88,8 @@ export function InstallComponentButton({
           setProgress(event.detail)
         }
       })
-      await queryClient.invalidateQueries({ queryKey: ["setup"] })
-      // A chat-model install loads it, which can turn the host verdict.
-      await queryClient.invalidateQueries({ queryKey: ["host-support"] })
+      // A model install can switch the chat model and turn the host verdict.
+      await refreshModelState(queryClient)
       if (!failed) onInstalled?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Install failed")

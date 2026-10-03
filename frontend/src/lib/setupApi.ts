@@ -1,5 +1,7 @@
 // setupApi — /setup/* : startup progress, installable components, capabilities
 
+import type { QueryClient } from "@tanstack/react-query"
+
 import { apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 
@@ -199,4 +201,19 @@ export async function installOrThrow(
     else onProgress(event)
   })
   if (failure) throw new Error(failure)
+}
+
+/**
+ * Refresh everything that names or depends on the installed models.
+ *
+ * An install changes what Ask's Auto, the model banner, Settings and the setup screen
+ * show; refreshing only one of them left the others offering a model that was already
+ * there, or pointing at one that was not.
+ */
+export async function refreshModelState(queryClient: QueryClient): Promise<void> {
+  await Promise.all(
+    [["setup"], ["llm-settings"], ["host-support"], ["settings-models"], ["llm-routing"]].map(
+      (queryKey) => queryClient.invalidateQueries({ queryKey }),
+    ),
+  )
 }

@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **When the engine stopped after startup, the app went silent.** Every action said "Is Luminary still running?". The app now returns to the start screen with the reason and a Try again button.
 - **A refused write showed a raw `mkdir … operation not permitted`.** The app now checks the folder and gives the steps that apply: another owner, a lock, no write permission, or a macOS refusal. Problem reports include the folder check and free space.
 - **On a large Mac the app downloaded the 14B chat model without asking.** Every model that fits is offered with its download size and trade-off; one is marked recommended, and only the one you pick is downloaded.
+- **A downloaded model was not used until you selected it by hand.** Ask on Auto kept asking for the absent default after you pulled another model. An installed model now becomes the chat model when the current one is missing, and every screen updates at once.
+- **Every model failure said "LLM unreachable … run: ollama serve".** Ask, Practice, teach-back and summaries now name the cause (model not installed, still loading, the model's own error, server down, API key) and what to do; a missing model offers the model choice in place.
 - **"Audio and video support" offered an Install button that could only fail.** It now says how to add ffmpeg (`brew install ffmpeg` on macOS) and offers Check again.
 
 ## [0.15.0] - 2026-10-03

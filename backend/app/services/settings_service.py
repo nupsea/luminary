@@ -415,7 +415,9 @@ def get_llm_error_message(exc: BaseException | None = None) -> str:
         verdict = local_inference_support()
         if not verdict.supported and verdict.message:
             return verdict.message
-        return "The local model server is not answering. Quit Luminary and reopen it."
+        from app.services.llm_errors import server_down_message  # noqa: PLC0415
+
+        return server_down_message()
     elif mode == "hybrid":
         return (
             "LLM service is unreachable. "

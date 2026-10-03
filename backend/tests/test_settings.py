@@ -614,7 +614,7 @@ def restore_mode():
 
 def test_llm_error_message_private_mentions_ollama(restore_mode):
     svc_module._cache["llm_mode"] = "private"
-    assert "ollama serve" in get_llm_error_message()
+    assert "local model server is not answering" in get_llm_error_message()
 
 
 def test_llm_error_message_hybrid_mentions_keys_and_ollama(restore_mode):
@@ -633,7 +633,7 @@ def test_llm_error_message_cloud_mentions_keys_not_ollama(restore_mode):
 
 def test_llm_error_message_defaults_to_private_when_unset(restore_mode):
     svc_module._cache.pop("llm_mode", None)
-    assert "ollama serve" in get_llm_error_message()
+    assert "local model server is not answering" in get_llm_error_message()
 
 
 # The engine offer — whether the fast-or-private question was ever answered

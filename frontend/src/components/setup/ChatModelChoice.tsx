@@ -8,7 +8,12 @@ import { toast } from "sonner"
 
 import { ReportProblem } from "@/components/setup/ReportProblem"
 import { apiPatch } from "@/lib/apiClient"
-import { formatBytes, installOrThrow, type ChatModelChoice as Choice } from "@/lib/setupApi"
+import {
+  formatBytes,
+  installOrThrow,
+  refreshModelState,
+  type ChatModelChoice as Choice,
+} from "@/lib/setupApi"
 import { cn } from "@/lib/utils"
 
 function bare(model: string): string {
@@ -38,9 +43,7 @@ export function ChatModelChoice({ choices }: { choices: Choice[] }) {
       }
       // Switched only after the download completes, so a failed one leaves the old model.
       await apiPatch("/settings/llm", { local_chat_model: choice.model })
-      await queryClient.invalidateQueries({ queryKey: ["setup"] })
-      await queryClient.invalidateQueries({ queryKey: ["llm-settings"] })
-      await queryClient.invalidateQueries({ queryKey: ["host-support"] })
+      await refreshModelState(queryClient)
       toast.success(`Now using ${bare(choice.model)} for chat and flashcards`)
     } catch (e) {
       setError({ model: choice.model, detail: e instanceof Error ? e.message : "Install failed" })

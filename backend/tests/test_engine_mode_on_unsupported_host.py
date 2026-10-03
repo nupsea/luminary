@@ -242,7 +242,7 @@ def test_a_private_mode_error_names_the_host_not_ollama(mode):
     with _host(UNSUPPORTED):
         assert get_llm_error_message() == "no local models here"
     with _host(SUPPORTED):
-        assert "ollama serve" in get_llm_error_message()
+        assert "local model server is not answering" in get_llm_error_message()
 
 
 # Changing the one setting

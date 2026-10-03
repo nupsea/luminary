@@ -232,4 +232,4 @@ async def test_503_on_generate(test_db, monkeypatch):
         )
 
     assert resp.status_code == 503, f"Expected 503, got {resp.status_code}: {resp.text}"
-    assert "Ollama is not running" in resp.json()["detail"]
+    assert "local model server is not answering" in resp.json()["detail"]

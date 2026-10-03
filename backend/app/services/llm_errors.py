@@ -43,6 +43,15 @@ def _bare(model: str) -> str:
     return model.split("/", 1)[-1]
 
 
+def server_down_message() -> str:
+    restart = (
+        "Quit Luminary and reopen it; that restarts the model server."
+        if is_packaged()
+        else "Start it with `ollama serve`, then try again."
+    )
+    return f"The local model server is not answering. {restart}"
+
+
 def describe(exc: BaseException) -> tuple[str, str]:
     """(reason, sentence). `reason` lets a surface offer the fix, e.g. a model choice."""
     chain = _chain(exc)
@@ -63,8 +72,8 @@ def describe(exc: BaseException) -> tuple[str, str]:
     if (missing := missing_model_from(exc)) is not None:
         return (
             "model_missing",
-            f"The model {_bare(missing)} is not installed on this computer. "
-            "Choose a chat model to install it.",
+            f"The model {_bare(missing)} is not installed on this computer. Pick an "
+            "installed model, or install one in Settings > Models & components.",
         )
     if any(isinstance(e, LLMTimeoutError) for e in chain):
         return (
@@ -79,12 +88,7 @@ def describe(exc: BaseException) -> tuple[str, str]:
             "again, quit Luminary and reopen it.",
         )
     if local:
-        restart = (
-            "Quit Luminary and reopen it; that restarts the model server."
-            if is_packaged()
-            else "Start it with `ollama serve`, then try again."
-        )
-        return "server_down", f"The local model server is not answering. {restart}"
+        return "server_down", server_down_message()
     return (
         "provider_down",
         "The cloud provider could not be reached. Check your internet connection and try again.",

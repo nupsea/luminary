@@ -37,9 +37,11 @@ import httpx
 
 from app import proxy_env
 from app.config import get_settings
+from app.database import get_session_factory
 from app.model_registry import (
     CHAT_CHOICES,
     REGISTRY,
+    TEXT_PREFERENCE,
     default_chat_model,
     default_vision_model,
     fits_host,
@@ -773,7 +775,40 @@ async def install_ollama_model(model: str) -> AsyncIterator[dict]:
         }
         return
 
+    await adopt_installed_chat_model()
+    if _registry_tag(_current_chat_model()) == model:
+        from app.services.warmup import warm_chat_model  # noqa: PLC0415
+
+        warm_chat_model()
     yield {"state": "ready", "detail": model}
+
+
+def _current_chat_model() -> str:
+    from app.services.settings_service import get_local_chat_model  # noqa: PLC0415
+
+    return get_local_chat_model()
+
+
+async def adopt_installed_chat_model() -> str | None:
+    """Point chat at an installed model when the current one is not installed.
+
+    Auto otherwise kept naming a default nobody downloaded: a fresh 52 GB Mac pulled the
+    4B by hand and every Ask still went to the absent 14B until the user picked the 4B.
+    Returns the model adopted, or None when nothing changed.
+    """
+    from app.services import settings_service  # noqa: PLC0415
+
+    installed = await _installed_ollama_models()
+    current = settings_service.get_local_chat_model()
+    if not installed or _ollama_installed(_registry_tag(current), installed):
+        return None
+    for model_id in dict.fromkeys((*CHAT_CHOICES, *TEXT_PREFERENCE)):
+        if _ollama_installed(_registry_tag(model_id), installed):
+            async with get_session_factory()() as session:
+                await settings_service.update_llm_settings(session, local_chat_model=model_id)
+            logger.info("chat model %s is not installed; now using %s", current, model_id)
+            return model_id
+    return None
 
 
 def _stalled(done: dict[str, int], totals: dict[str, int]) -> dict:
@@ -934,10 +969,6 @@ async def install_component(component_id: str) -> AsyncIterator[dict]:
     if comp.kind == "ollama_model":
         async for event in install_ollama_model(comp.ref):
             yield event
-            if comp.id == "chat_model" and event["state"] == "ready":
-                from app.services.warmup import warm_chat_model  # noqa: PLC0415
-
-                warm_chat_model()
         return
 
     if comp.kind == "hf_model":
