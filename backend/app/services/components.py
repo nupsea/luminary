@@ -35,6 +35,7 @@ from pathlib import Path
 
 import httpx
 
+from app import proxy_env
 from app.config import get_settings
 from app.model_registry import (
     REGISTRY,
@@ -701,6 +702,12 @@ async def install_ollama_model(model: str) -> AsyncIterator[dict]:
 
 def _stalled(done: dict[str, int], totals: dict[str, int]) -> dict:
     progress = f" at {_mb(sum(done.values()))} of {_mb(sum(totals.values()))}" if totals else ""
+    if proxy_env.pac_only():
+        return {
+            "state": "failed",
+            "stalled": True,
+            "detail": f"The download stopped{progress}. {network_errors.PAC_ONLY}",
+        }
     return {
         "state": "failed",
         "stalled": True,

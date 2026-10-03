@@ -15,6 +15,7 @@ from app.services.flashcard_units import (
     best_unit,
     choose_units,
     listed_sentence,
+    names_not_in,
     split_speeches,
     split_units,
 )
@@ -36,6 +37,37 @@ def test_a_hard_wrapped_sentence_is_one_unit():
 def test_the_excerpt_separator_never_joins_a_sentence():
     text = "The first excerpt ends here.\n\n[...]\n\nThe second excerpt starts here."
     assert split_units(text) == ["The first excerpt ends here.", "The second excerpt starts here."]
+
+
+def test_a_footnote_marker_still_ends_a_sentence():
+    # Fused, the two read as one long sentence that length selection then picked (AI Engineering).
+    text = (
+        "A token can be a part of a word, depending on the model.2 For example, GPT-4 breaks "
+        "the phrase into nine tokens.13 Tokens are counted."
+    )
+    assert split_units(text) == [
+        "A token can be a part of a word, depending on the model.2",
+        "For example, GPT-4 breaks the phrase into nine tokens.13",
+        "Tokens are counted.",
+    ]
+
+
+@pytest.mark.parametrize(
+    "text", ["Use GPT-3.5 Turbo for this.", "See section 4.2 The results follow."]
+)
+def test_a_decimal_is_not_a_footnote(text):
+    assert split_units(text) == [text]
+
+
+def test_a_sentence_that_opens_with_its_example_is_never_chosen():
+    claim = "A token can be a character, a word, or a part of a word, depending on the model."
+    example = "For example, GPT-4 breaks the phrase I can't wait to build AI apps into nine tokens."
+    assert choose_units([claim, example], 1) == [claim]
+    assert choose_units([example], 1) == []
+    assert choose_units(["E.g. a vowel and a consonant make up this syllable."], 1) == []
+    # A chunk's section label in front does not hide the opener.
+    labelled = "[Debugging] For example, Linux started out as a program to explore a chip."
+    assert choose_units([labelled], 1) == []
 
 
 def test_a_section_label_stays_with_its_own_paragraph():
@@ -152,6 +184,45 @@ def test_an_answer_no_sentence_carries_falls_below_the_floor():
     assert coverage < MIN_ANSWER_COVERAGE
 
 
+def test_the_coverage_floor_sits_between_its_two_graded_cases():
+    unit = (
+        "Any other expression on the left side is a syntax error (we will see exceptions to this "
+        "rule later)."
+    )
+    bad = (
+        "The passage states that any other expression on the left side results in a syntax error "
+        "rather than giving a reason for allowing it elsewhere."
+    )
+    assert best_unit(bad, [unit])[1] < MIN_ANSWER_COVERAGE
+    verse = (
+        "Therefore, arise, thou Son of Kunti! brace Thine arm for conflict, nerve thy heart to "
+        "meet-- As things alike to thee--pleasure or pain, Profit or ruin, victory or defeat: So "
+        "minded, gird thee to the fight, for so Thou shalt not sin!"
+    )
+    assert best_unit("for so he shall not sin!", [verse])[1] >= MIN_ANSWER_COVERAGE
+
+
+PLAY_SCENE = (
+    "HAMLET. Let the bloat King tempt you again to bed, Pinch wanton on your cheek. "
+    "QUEEN. What shall I do? Laertes' Effect"
+)
+
+
+@pytest.mark.parametrize(
+    ("question", "unshown"),
+    [
+        ("What plan does King Polonius propose?", ["Polonius"]),
+        ("What does Hamlet tell the Queen to let the King do?", []),
+        ("What did Hamlet's speech ask of the Queen?", []),
+        ("What is Laertes' role?", []),
+        ("Who first stated the Law of Eﬀect?", ["Law"]),
+        ("Polonius asks what of the Queen?", []),
+    ],
+)
+def test_a_name_the_passage_never_gives_is_found(question, unshown):
+    assert names_not_in(question, PLAY_SCENE) == unshown
+
+
 @pytest.mark.parametrize(
     "question",
     [
@@ -253,6 +324,26 @@ async def test_unit_cards_drop_a_pasted_sentence_and_an_unsupported_answer():
     moved = {k: after[k] - before.get(k, 0) for k in after}
     assert moved["card_reject_not_a_question"] == 1
     assert moved["card_reject_ungrounded"] == 1
+
+
+async def test_unit_cards_drop_a_question_naming_someone_the_passage_does_not():
+    text = "One of her maids who knew what she was doing told us, and we caught her at work.\n"
+    llm = _llm(
+        [
+            {
+                "id": 1,
+                "question": "Who told Telemachus that Arachne was undoing her work?",
+                "answer": "One of her maids who knew what she was doing.",
+            },
+            {
+                "id": 1,
+                "question": "Who told the suitors she was undoing her work?",
+                "answer": "One of her maids who knew what she was doing.",
+            },
+        ]
+    )
+    cards = await _unit_cards(llm, text, 1, set(), None, "doc")
+    assert [c["question"] for c in cards] == ["Who told the suitors she was undoing her work?"]
 
 
 async def test_a_speech_is_listed_with_its_speaker_and_quoted_verbatim():

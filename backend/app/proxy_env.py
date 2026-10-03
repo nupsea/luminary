@@ -33,6 +33,32 @@ def _windows_bypass() -> list[str]:
     return [e.lstrip("*") for e in entries if e and e != "<local>"]
 
 
+def _windows_pac_url() -> str:
+    """Windows' "Use setup script" address, or "" where none is set."""
+    if sys.platform != "win32":
+        return ""
+    try:
+        import winreg  # noqa: PLC0415
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, "AutoConfigURL")
+    except OSError:
+        return ""
+    return str(value).strip()
+
+
+def pac_only() -> bool:
+    """Whether the only proxy is a setup script (PAC), which neither this app nor Ollama
+    reads (#155). Call after `pin_system_proxy`: a manual proxy is then in the environment."""
+    if not _windows_pac_url():
+        return False
+    proxies = urllib.request.getproxies_environment()
+    return not any(proxies.get(s) for s in ("http", "https", "all"))
+
+
 def pin_system_proxy(environ: MutableMapping[str, str] = os.environ) -> None:
     configured = urllib.request.getproxies_environment()
     system = {} if configured else urllib.request.getproxies()

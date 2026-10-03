@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-refusal eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-reader-switch luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-reader-switch luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -10,6 +10,9 @@ BACKEND_URL ?= http://localhost:7820
 # The vision model is resolved by the backend (Settings), never by the eval, and
 # is recorded per run; `make eval-models` prints both before anything runs.
 EVAL_TEXT_MODEL ?= ollama/qwen2.5:14b-instruct
+
+# eval-false-premise measures the answering model; its floor was set on the shipped default.
+FALSE_PREMISE_MODEL ?= ollama/qwen3.5:4b
 
 LUMINARY_PORT ?= 7820
 
@@ -503,6 +506,13 @@ eval-notes:
 	uv run --project $(CURDIR)/backend python evals/run_note_search_eval.py \
 		--backend-url $(BACKEND_URL) --assert-thresholds
 
+# Adds paraphrase recall: a local Ollama model writes each query with no word from the note.
+PARAPHRASE_MODEL ?= qwen2.5:14b-instruct
+eval-notes-paraphrase:
+	@echo "Note search eval with paraphrase recall (backend + Ollama must be running)..."
+	uv run --project $(CURDIR)/backend python evals/run_note_search_eval.py \
+		--backend-url $(BACKEND_URL) --assert-thresholds --paraphrase $(PARAPHRASE_MODEL)
+
 # Ingestion fidelity: how much of each source document survives into chunks.
 # Deterministic, LLM-free, no backend needed -- it reads the dev database directly.
 # Retrieval scores what was indexed and cannot report what never arrived, so this
@@ -564,7 +574,7 @@ eval-chat-routing:
 # evals/golden/retrieval_and_memory_tutorial_unanswerable.meta.json.
 eval-false-premise:
 	@echo "False-premise eval: questions whose document contradicts their premise (#158)..."
-	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_false_premise_eval.py --backend-url $(BACKEND_URL) --model $(EVAL_TEXT_MODEL) --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_false_premise_eval.py --backend-url $(BACKEND_URL) --model $(FALSE_PREMISE_MODEL) --assert-thresholds
 
 eval-refusal:
 	@echo "Refusal eval: questions with no answer in the document (asserted floor is a collapse detector)..."

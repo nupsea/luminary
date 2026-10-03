@@ -8,6 +8,7 @@ import {
   hostNotice,
   localModelNotice,
   modelUnavailableMessage,
+  splitNotice,
   type HostVerdict,
 } from "./engineModes"
 import type { RoutingResponse, WorkRoutingItem } from "./llmRouting"
@@ -88,6 +89,46 @@ describe("hostNotice", () => {
 
   it("disappears when nothing is refused", () => {
     expect(hostNotice(UNSUPPORTED, routing("cloud", [row("answering", "Answering", false)]))).toBeNull()
+  })
+})
+
+describe("splitNotice", () => {
+  const split = (share: number | null): HostVerdict => ({
+    supported: true,
+    host: "Windows/AMD64, 62% of the model on the graphics card",
+    message: null,
+    gpu_share: share,
+  })
+  const work = [
+    row("answering", "Answering your question", false),
+    { ...row("figures", "Reading figures", false), on_device: false },
+  ]
+
+  it("names the measured split, what is slowed, and what Cloud mode costs", () => {
+    const text = splitNotice(split(0.627), routing("private", work))
+    expect(text).toContain("62% of it runs on the card and the rest on the processor")
+    expect(text).toContain("so answering your question will be slower")
+    expect(text).not.toContain("reading figures")
+    expect(text).toContain("Cloud mode is faster")
+    expect(text).toContain("your provider charges for each request")
+  })
+
+  it("says nothing when the whole model is on the card, or none of it is measured", () => {
+    expect(splitNotice(split(1), routing("private", work))).toBeNull()
+    expect(splitNotice(split(null), routing("private", work))).toBeNull()
+  })
+
+  it("leaves a model on the processor to the refusal, not to this notice", () => {
+    const refused = { ...split(0), supported: false }
+    expect(splitNotice(refused, routing("private", work))).toBeNull()
+  })
+
+  it("says nothing in Cloud mode, which already runs this work with the key", () => {
+    expect(splitNotice(split(0.5), routing("cloud", work))).toBeNull()
+  })
+
+  it("waits for the routing report rather than guess what runs here", () => {
+    expect(splitNotice(split(0.5), undefined)).toBeNull()
   })
 })
 

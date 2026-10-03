@@ -673,7 +673,7 @@ chapters with their card counts, and "Random from this book" draws across chapte
 the unpractised. A document with no headings gets fixed page windows labelled by page range, never
 invented chapter titles.
 
-The card-quality fix (#230, 0.15.1) comes first, or the job writes the defect into every chapter of every book: the
+The card-quality fix (#230) shipped in 0.15.0 first, or the job writes the defect into every chapter of every book: the
 unit splitter fuses a sentence with the next one across a footnote marker (`model.2 For`,
 `flashcard_units.py` `_SENT_END`), length selection then picks the fused unit, and the unit prompt
 lacks the shipped prompt's rule against asking which example the text used

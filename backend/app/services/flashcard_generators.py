@@ -81,6 +81,7 @@ from app.services.flashcard_units import (
     best_unit,
     choose_units,
     listed_sentence,
+    names_not_in,
     split_speeches,
 )
 from app.services.llm import LLMAPIConnectionError, LLMServiceUnavailableError
@@ -875,6 +876,10 @@ async def _unit_cards(
         if coverage < MIN_ANSWER_COVERAGE:
             llm_output_stats.record_card_gate(REJECT_UNGROUNDED)
             logger.info("flashcard: dropped unit card, answer in no sentence: %r", answer[:80])
+            continue
+        if names_not_in(question, text):
+            llm_output_stats.record_card_gate(REJECT_UNGROUNDED)
+            logger.info("flashcard: dropped unit card, names someone unshown: %r", question[:80])
             continue
         cards.append({"question": question, "answer": answer, "source_excerpt": unit})
     return cards
