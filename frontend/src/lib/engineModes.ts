@@ -16,6 +16,8 @@ export interface EngineModeDef {
   /** What this mode means on a host that cannot run a local model. */
   onUnsupportedHost: string
   needsKey: boolean
+  /** Why this mode is the one to pick for a given use, or absent. Never preselects it (I-16). */
+  recommendation?: string
 }
 
 export const ALWAYS_LOCAL =
@@ -40,6 +42,9 @@ export const ENGINE_MODES: readonly EngineModeDef[] = [
     onUnsupportedHost:
       "Answers and cards work. Summaries, tags and titles are not made, because this machine can't run a local model.",
     needsKey: true,
+    // The writer model, not the prompt, is the remaining lever on card quality (#230).
+    recommendation:
+      "Recommended for Ask and Practice: a cloud model writes better answers and practice cards than the small local model.",
   },
   {
     id: "cloud",

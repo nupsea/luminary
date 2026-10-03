@@ -48,7 +48,8 @@ export function engineOfferCopy(localSupported: boolean | undefined): {
       "That is the default, and nothing here has ever left. It is also the slow arm: a " +
       "local model finishes an answer in tens of seconds. With an Anthropic, OpenAI or " +
       "Google key, Hybrid or Cloud mode answers in a few, and each says exactly what it " +
-      "sends before you choose it.",
+      "sends before you choose it. Hybrid is the one we recommend for Ask and Practice: " +
+      "answers and cards come from a stronger model, and summaries stay on this machine.",
   }
 }
 

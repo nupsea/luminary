@@ -17,6 +17,10 @@ One stored setting, `llm_mode`, decides which engine runs synthesis. The default
 `settings_service.get_effective_routing` resolves the route. **No key still means a fully working
 local app** (I-16), which is why hybrid is offered and never defaulted.
 
+Hybrid carries a recommendation for Ask and Practice (`EngineModeDef.recommendation`), shown in
+`EngineChoice`, Settings and the engine offer. It is a label, never a preselection or a default:
+the local default is a 4B model, and the writer model is the remaining lever on card quality (#230).
+
 **Only synthesis is routable.** Embedding, retrieval, reranking, transcription, entity extraction and
 the learner record stay local in every mode, and `llm_routing.routing_report` reports them as fixed.
 A hosted embedder is a different vector space, so it is a full re-embed and never a setting (I-9).
