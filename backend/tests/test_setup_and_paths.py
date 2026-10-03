@@ -598,9 +598,9 @@ def test_tool_install_never_spawns_a_subprocess(monkeypatch):
 
     events = asyncio.run(_run())
     assert not called
-    # ffmpeg has no automatic source yet; it must say so rather than guess a build.
+    # ffmpeg has no automatic source yet; it must say how to add it rather than guess a build.
     assert events[-1]["state"] == "failed"
-    assert "no automatic installer" in events[-1]["detail"]
+    assert "Then check again" in events[-1]["detail"]
 
 
 def test_capabilities_require_every_component_a_feature_depends_on(monkeypatch):
@@ -787,3 +787,43 @@ def test_verifying_a_download_may_take_longer_than_the_stall_limit(monkeypatch):
     ]
     events = _pull_with(monkeypatch, _PullStream(script))
     assert events[-1] == {"state": "ready", "detail": "qwen3.5:4b"}
+
+
+def test_chat_choices_offer_each_model_the_host_can_hold(monkeypatch):
+    """A 36GB Mac is recommended 14B but may keep the 4B; a 16GB host gets only the 4B."""
+    from app.services import settings_service
+
+    monkeypatch.setattr(
+        components_module, "default_chat_model", lambda: "ollama/qwen2.5:14b-instruct"
+    )
+    monkeypatch.setattr(settings_service, "get_local_chat_model", lambda: "ollama/qwen3.5:4b")
+
+    big = components_module.chat_model_choices({"qwen3.5:4b"}, ram_gb=36)
+    assert [c["model"] for c in big] == ["ollama/qwen2.5:14b-instruct", "ollama/qwen3.5:4b"]
+    fourteen, four = big
+    assert fourteen["recommended"] and not fourteen["selected"] and not fourteen["installed"]
+    assert four["selected"] and four["installed"] and four["reads_figures"]
+    assert all(c["trade_off"] for c in big)
+
+    small = components_module.chat_model_choices(set(), ram_gb=16)
+    assert [c["model"] for c in small] == ["ollama/qwen3.5:4b"]
+
+
+def test_the_chat_download_is_the_model_the_user_chose(monkeypatch):
+    """Choosing the 4B on a host recommended 14B must not download 14B."""
+    from app.services import settings_service
+
+    monkeypatch.setattr(settings_service, "get_local_chat_model", lambda: "ollama/qwen3.5:4b")
+    chat = components_module.get_component("chat_model")
+    assert chat is not None and chat.ref == "qwen3.5:4b"
+
+
+def test_a_tool_is_not_offered_an_installer_it_does_not_have(monkeypatch):
+    """The ffmpeg button could only fail and then asked for a problem report."""
+    monkeypatch.setattr(components_module, "running_in_container", lambda: False)
+    monkeypatch.setattr(components_module.sys, "platform", "darwin")
+    statuses = asyncio.run(components_module.component_status())
+    ffmpeg = next(c for c in statuses if c["id"] == "ffmpeg")
+    assert ffmpeg["installable"] is False
+    assert "brew install ffmpeg" in ffmpeg["advice"]
+    assert all(c["installable"] for c in statuses if c["kind"] != "tool")

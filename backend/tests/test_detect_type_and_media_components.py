@@ -179,6 +179,24 @@ def test_a_tool_outside_the_bundles_path_is_still_found(tmp_path, monkeypatch):
     assert components_module.resolve_tool("ffmpeg") == str(tool)
 
 
+def test_a_winget_install_is_found_before_path_catches_up(tmp_path, monkeypatch):
+    """winget adds its Links folder to PATH only for processes started after the install."""
+    import app.services.components as components_module
+
+    links = tmp_path / "Microsoft" / "WinGet" / "Links"
+    links.mkdir(parents=True)
+    tool = links / "ffmpeg.exe"
+    tool.write_text("")
+    tool.chmod(0o755)
+
+    monkeypatch.setattr(components_module.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(components_module, "tool_bin_dir", lambda: tmp_path / "bundle")
+    monkeypatch.setattr(components_module.shutil, "which", lambda _n: None)
+
+    assert components_module.resolve_tool("ffmpeg") == str(tool)
+
+
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason=(

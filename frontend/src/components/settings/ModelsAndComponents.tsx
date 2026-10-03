@@ -10,6 +10,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Check, Loader2, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
+import { ChatModelChoice } from "@/components/setup/ChatModelChoice"
 import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import { ModelDriftNotice, type ModelDrift, type ModelRole } from "@/components/settings/ModelDriftNotice"
 import { useComponents } from "@/hooks/useSetup"
@@ -71,6 +72,10 @@ function ComponentRow({ component }: { component: Component }) {
         </span>
       </div>
 
+      {component.choices && component.choices.length > 1 && (
+        <ChatModelChoice choices={component.choices} />
+      )}
+
       {component.enables.length > 0 && (
         <p className="text-xs text-muted-foreground">Enables: {component.enables.join(", ")}</p>
       )}
@@ -102,7 +107,7 @@ function ComponentRow({ component }: { component: Component }) {
             <Trash2 size={12} /> Remove
           </button>
         )
-      ) : (
+      ) : component.choices && component.choices.length > 1 ? null : (
         <InstallComponentButton componentId={component.id} />
       )}
     </div>

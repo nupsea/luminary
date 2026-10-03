@@ -25,7 +25,9 @@ export function ReportProblem({ problem, detail }: { problem: string; detail?: s
     try {
       setReport(await apiPost<OpenedReport>("/setup/report/open", { problem, detail: detail ?? "" }))
     } catch {
-      toast.error("Couldn't put the report together. Is Luminary still running?")
+      toast.error(
+        "Couldn't put the report together: Luminary's engine is not answering. Quit Luminary and reopen it.",
+      )
     } finally {
       setLoading(false)
     }

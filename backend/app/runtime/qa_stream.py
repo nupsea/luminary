@@ -11,17 +11,12 @@ import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 
-from app.exceptions import DependencyUnavailable
 from app.repos import qa_repo
 from app.runtime import chat_graph
 from app.services.llm import (
-    LLMAPIConnectionError,
-    LLMAuthenticationError,
-    LLMNotFoundError,
-    LLMRateLimitError,
-    LLMServiceUnavailableError,
     get_llm_service,
 )
+from app.services.llm_errors import describe as describe_llm_failure
 from app.services.llm_routing import is_on_device
 from app.services.qa import (
     NOT_FOUND_SENTINEL,
@@ -56,30 +51,14 @@ def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
-def _llm_error_message(exc: Exception) -> str:
-    if isinstance(exc, DependencyUnavailable):
-        return exc.detail
-    if isinstance(exc, ValueError):
-        return "LLM provider not configured. Add your API key in Settings."
-    if isinstance(exc, LLMAuthenticationError):
-        return "LLM API key is invalid. Check your key in Settings."
-    if isinstance(exc, LLMRateLimitError):
-        return "Rate limit reached. Free tier quota exhausted — wait and retry, or switch provider."
-    if isinstance(exc, LLMNotFoundError):
-        return f"Model not found ({type(exc).__name__}). Check the model name in Settings."
-    if isinstance(exc, (LLMServiceUnavailableError, LLMAPIConnectionError)):
-        return (
-            "LLM unreachable. Check your network or Settings — if using Ollama, run: ollama serve"
-        )
-    return f"LLM error ({type(exc).__name__}). Check backend logs and Settings."
-
-
 def _llm_error_event(exc: Exception) -> str:
+    reason, message = describe_llm_failure(exc)
     return _sse(
         {
             "type": "error",
             "error": "llm_unavailable",
-            "message": _llm_error_message(exc),
+            "reason": reason,
+            "message": message,
             "done": True,
         }
     )

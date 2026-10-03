@@ -11,6 +11,7 @@ import {
   apiGet,
   apiPost,
   apiPut,
+  detailFromError,
 } from "@/lib/apiClient"
 import { buildSearchParams } from "@/lib/studyUtils"
 import type { FlashcardSearchFilters } from "@/lib/studyUtils"
@@ -82,7 +83,8 @@ export class GenerateError extends Error {
 }
 
 function asGenerateError(err: unknown, message: string): never {
-  if (err instanceof ApiError) throw new GenerateError(err.status, message)
+  // The server's detail names the cause and the fix (a missing model, a refused key).
+  if (err instanceof ApiError) throw new GenerateError(err.status, detailFromError(err, message).message)
   throw new GenerateError(0, message)
 }
 

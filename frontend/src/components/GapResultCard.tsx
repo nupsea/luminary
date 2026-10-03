@@ -3,6 +3,7 @@ import { useState } from "react"
 import { Link } from "react-router-dom"
 
 import { ApiError, apiPost } from "@/lib/apiClient"
+import { LOCAL_MODEL_DOWN } from "@/lib/engineModes"
 
 export interface GapCardData {
   type: "gap_result"
@@ -69,7 +70,7 @@ export function GapResultCard({ data, documentId }: GapResultCardProps) {
         }
         if (!detail) {
           if (err.status === 503) {
-            detail = "Ollama is unavailable. Start it with: ollama serve"
+            detail = LOCAL_MODEL_DOWN
           } else {
             detail = `HTTP ${err.status}`
           }

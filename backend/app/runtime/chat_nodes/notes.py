@@ -205,7 +205,7 @@ async def notes_gap_node(state: ChatState) -> dict:
 
     except Exception as exc:
         if isinstance(exc, LLMUnavailableError):
-            error_msg = get_llm_error_message()
+            error_msg = get_llm_error_message(exc)
         else:
             error_msg = "Gap analysis failed. Please try again."
         logger.warning("notes_gap_node: detect_gaps failed: %s", exc, exc_info=True)

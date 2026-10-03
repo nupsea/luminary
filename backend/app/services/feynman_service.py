@@ -115,9 +115,7 @@ class FeynmanService:
                 stream=False,
             )
         except LLMUnavailableError as exc:
-            raise DependencyUnavailable(
-                "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
-            ) from exc
+            raise DependencyUnavailable(get_llm_error_message(exc)) from exc
 
         # Strip any accidental gaps: block from opening message
         opening_message = _strip_gaps_block(str(raw))
@@ -231,7 +229,7 @@ class FeynmanService:
         except LLMUnavailableError as exc:
             logger.warning("Feynman stream_turn: LLM unavailable: %s", exc)
             await db_session.rollback()
-            error_msg = get_llm_error_message()
+            error_msg = get_llm_error_message(exc)
             yield f"data: {json.dumps({'error': 'llm_unavailable', 'message': error_msg})}\n\n"
             return
 
@@ -410,7 +408,7 @@ class FeynmanService:
         except LLMUnavailableError as exc:
             logger.warning("generate_model_explanation: LLM unavailable: %s", exc)
             await db_session.rollback()
-            error_msg = get_llm_error_message()
+            error_msg = get_llm_error_message(exc)
             yield f"data: {json.dumps({'error': 'llm_unavailable', 'message': error_msg})}\n\n"
             return
 

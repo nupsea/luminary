@@ -353,6 +353,20 @@ def recommended_assignment(
     return None
 
 
+# The chat models offered as a choice, strongest first, with what each costs. The
+# user picks; the recommendation is `default_chat_model()`. Speed is from #230.
+CHAT_CHOICES: dict[str, str] = {
+    "ollama/qwen2.5:14b-instruct": (
+        "Better answers and practice cards, but about twice as slow. "
+        "Reading figures needs the vision model as well."
+    ),
+    "ollama/qwen3.5:4b": (
+        "Faster, and leaves memory for other apps. It also reads figures, so it is "
+        "the only model you need. Answers and cards are simpler."
+    ),
+}
+
+
 # Where one model must serve every role, this is the order to try. It is the
 # text ranking from the P6 8GB-class run (`qwen3.5:4b` led card_reject_rate
 # 0.0278 vs gemma3's 0.1161 and generation_rate 1.0000 vs 0.9238) intersected

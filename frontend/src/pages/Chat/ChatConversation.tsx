@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge"
 import { SourceCitationChips } from "@/components/SourceCitationChips"
 import type { SourceCitation } from "@/components/SourceCitationChips"
 import { GapResultCard } from "@/components/GapResultCard"
+import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import type { GapCardData } from "@/components/GapResultCard"
 import { QuizQuestionCard } from "@/components/QuizQuestionCard"
 import { VoiceRecordButton } from "@/components/VoiceRecordButton"
@@ -628,7 +629,14 @@ export function ChatConversation({
               setMessages((m) =>
                 m.map((msg) =>
                   msg.id === assistantId
-                    ? { ...msg, isStreaming: false, text: "", error: errorMsg, failedQuestion: question }
+                    ? {
+                      ...msg,
+                      isStreaming: false,
+                      text: "",
+                      error: errorMsg,
+                      errorReason: payload["reason"] as string | undefined,
+                      failedQuestion: question,
+                    }
                     : msg,
                 ),
               )
@@ -718,7 +726,7 @@ export function ChatConversation({
       logger.error("[Chat] fetch failed", { endpoint: "/qa", error: errMsg })
       const shown =
         errMsg.includes("Failed to fetch") || errMsg.includes("NetworkError")
-          ? "Cannot reach the server. Is the backend running on port 7820?"
+          ? "Luminary's engine is not answering. If this keeps happening, quit Luminary and reopen it."
           : `Could not get a response: ${errMsg}`
       setMessages((m) =>
         m.map((msg) =>
@@ -1034,6 +1042,9 @@ export function ChatConversation({
                           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                           <span>{msg.error}</span>
                         </p>
+                        {msg.errorReason === "model_missing" && (
+                          <InstallComponentButton componentId="chat_model" />
+                        )}
                         <button
                           onClick={() => retryMessage(msg.id, msg.failedQuestion ?? "")}
                           disabled={isStreaming || !msg.failedQuestion}

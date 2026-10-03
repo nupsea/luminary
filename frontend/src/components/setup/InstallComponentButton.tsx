@@ -6,11 +6,12 @@
 
 import { useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { Download, Loader2 } from "lucide-react"
+import { Download, Loader2, RotateCw } from "lucide-react"
 
+import { ChatModelChoice } from "@/components/setup/ChatModelChoice"
 import { ReportProblem } from "@/components/setup/ReportProblem"
 import { useComponents } from "@/hooks/useSetup"
-import { formatBytes, installComponent } from "@/lib/setupApi"
+import { formatBytes, installComponent, refreshModelState } from "@/lib/setupApi"
 import { cn } from "@/lib/utils"
 
 interface Props {
@@ -32,9 +33,41 @@ export function InstallComponentButton({
   const [progress, setProgress] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [choosing, setChoosing] = useState(false)
 
   const component = components?.find((c) => c.id === componentId)
   if (!component || component.installed || !component.offered) return null
+
+  // A tool has no installer; the advice shown with the component says how to add it.
+  if (component.installable === false) {
+    return (
+      <span className={cn("inline-flex flex-col gap-1", className)}>
+        <button
+          type="button"
+          onClick={() => void queryClient.invalidateQueries({ queryKey: ["setup"] })}
+          className="inline-flex items-center gap-1.5 self-start rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
+        >
+          <RotateCw size={13} /> Check again
+        </button>
+      </span>
+    )
+  }
+
+  // More than one model fits: the user picks, never the app.
+  if (component.choices && component.choices.length > 1) {
+    return (
+      <span className={cn("inline-flex flex-col gap-1.5", className)}>
+        <button
+          type="button"
+          onClick={() => setChoosing((open) => !open)}
+          className="inline-flex items-center gap-1.5 self-start rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
+        >
+          <Download size={13} /> Choose a {component.label.toLowerCase()}
+        </button>
+        {choosing && <ChatModelChoice choices={component.choices} />}
+      </span>
+    )
+  }
 
   async function run() {
     setBusy(true)
@@ -55,9 +88,8 @@ export function InstallComponentButton({
           setProgress(event.detail)
         }
       })
-      await queryClient.invalidateQueries({ queryKey: ["setup"] })
-      // A chat-model install loads it, which can turn the host verdict.
-      await queryClient.invalidateQueries({ queryKey: ["host-support"] })
+      // A model install can switch the chat model and turn the host verdict.
+      await refreshModelState(queryClient)
       if (!failed) onInstalled?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Install failed")

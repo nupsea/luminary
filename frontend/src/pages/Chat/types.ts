@@ -96,6 +96,8 @@ export interface ChatMessage {
   // Set when this turn failed (network, LLM unavailable, ...). Carries the
   // message to show and the question to re-send via the inline Retry button.
   error?: string
+  /** Why it failed, from the server; "model_missing" offers the model choice in place. */
+  errorReason?: string
   failedQuestion?: string
 }
 

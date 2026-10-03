@@ -15,6 +15,7 @@ import { type ModelDrift } from "@/components/settings/ModelDriftNotice"
 import { OreillySettings } from "@/components/settings/OreillySettings"
 import { ReportIssue } from "@/components/settings/ReportIssue"
 import type { components } from "@/types/api"
+import { refreshModelState } from "@/lib/setupApi"
 
 // Types
 
@@ -348,7 +349,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
           const text = line.slice(6)
           if (text === "done") {
             toast.success(`Pulled ${model}`)
-            void queryClient.invalidateQueries({ queryKey: ["llm-settings"] })
+            void refreshModelState(queryClient)
           } else if (text) {
             setPullLines((prev) => [...prev, text])
             setTimeout(() => {
@@ -574,9 +575,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
               }
               onSave={async (updates) => {
                 await patchLLMSettings(updates)
-                await queryClient.invalidateQueries({ queryKey: ["llm-settings"] })
-                await queryClient.invalidateQueries({ queryKey: ["setup"] })
-                await queryClient.invalidateQueries({ queryKey: ["settings-models"] })
+                await refreshModelState(queryClient)
               }}
             />
           </section>

@@ -208,6 +208,11 @@ async def _warm_llm() -> None:
 
     if not _unavailable_here("chat", "chat_model"):
         await _one(None, "interactive")
+        if status.state_of("chat_model") == "missing":
+            from app.services.components import adopt_installed_chat_model  # noqa: PLC0415
+
+            if await adopt_installed_chat_model() is not None:
+                await _one(None, "interactive")
     if bg and bg != fg and refusal("background") is None:
         await _one(bg, "background")
 

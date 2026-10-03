@@ -13,6 +13,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { AlertTriangle, Check, Download, Info, Loader2, RotateCw } from "lucide-react"
 
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
+import { ChatModelChoice } from "@/components/setup/ChatModelChoice"
 import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import { ReportProblem } from "@/components/setup/ReportProblem"
 import { useComponents, useStartupStatus } from "@/hooks/useSetup"
@@ -111,7 +112,11 @@ function PhaseRow({ phase, component }: { phase: StartupPhase; component?: Compo
 
         {missing && componentId && (
           <span className="mt-1.5 block">
-            <InstallComponentButton componentId={componentId} reportable={false} />
+            {component?.choices && component.choices.length > 1 ? (
+              <ChatModelChoice choices={component.choices} />
+            ) : (
+              <InstallComponentButton componentId={componentId} reportable={false} />
+            )}
           </span>
         )}
       </span>

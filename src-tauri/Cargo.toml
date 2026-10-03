@@ -7,7 +7,7 @@ members = ["host"]
 
 [package]
 name = "luminary-desktop"
-version = "0.15.0"
+version = "0.15.1"
 description = "Luminary"
 edition = "2021"
 rust-version = "1.77"
