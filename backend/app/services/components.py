@@ -442,7 +442,7 @@ def _well_known_tool_dirs() -> tuple[str, ...]:
     # winget links its packages here and adds it to PATH only for processes started
     # after the install, so a running Luminary would otherwise not see ffmpeg.
     if sys.platform == "win32" and (local := os.environ.get("LOCALAPPDATA")):
-        return (str(Path(local) / "Microsoft" / "WinGet" / "Links"),)
+        return (str(Path(local) / "Microsoft" / "WinGet" / "Links"), *_WELL_KNOWN_TOOL_DIRS)
     return _WELL_KNOWN_TOOL_DIRS
 
 

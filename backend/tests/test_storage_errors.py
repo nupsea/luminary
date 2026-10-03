@@ -40,6 +40,7 @@ def test_a_read_only_folder_names_the_finder_fix(tmp_path, monkeypatch):
         locked.chmod(0o700)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="ownership is read from POSIX uids")
 def test_another_owner_is_named(tmp_path, monkeypatch):
     monkeypatch.setattr(storage_errors.os, "getuid", lambda: os.stat(tmp_path).st_uid + 1)
     assert storage_errors.folder_problem(tmp_path) is not None
