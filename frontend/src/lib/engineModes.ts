@@ -70,6 +70,8 @@ export interface HostVerdict {
   host: string
   message: string | null
   measured?: boolean
+  /** Share of the model's bytes on the graphics card; below 1 the rest runs on the processor. */
+  gpu_share?: number | null
   /** A chat-model load is under way whose measurement can still turn the verdict. */
   settling?: boolean
 }
@@ -110,4 +112,32 @@ export function hostNotice(
         ? " Cloud mode makes summaries, tags and titles with your API key and sends sections of your documents to your provider; change it in Settings."
         : ""
   return `This machine can't run a local model at a usable speed (${host.host}). In ${mode.label} mode, not run: ${labels}.${next}`
+}
+
+/** Below 1 and above 0: the model is split between the graphics card and the processor (#156). */
+export function isSplit(host: HostVerdict | undefined): boolean {
+  const share = host?.gpu_share
+  return host?.supported === true && share != null && share > 0 && share < 1
+}
+
+/**
+ * The banner line for a model split between card and processor, or null. A split is
+ * supported, only slower (#156), so it names what runs locally and is slowed, and
+ * what Cloud mode would cost. Null in Cloud mode, which already runs that work with
+ * the key, and until the routing report says what runs here.
+ */
+export function splitNotice(
+  host: HostVerdict | undefined,
+  routing: RoutingResponse | undefined,
+): string | null {
+  if (!isSplit(host) || !routing || engineMode(routing.mode).id === "cloud") return null
+  const slowed = routing.work.filter((w) => w.on_device && !w.refused_reason)
+  if (slowed.length === 0) return null
+  const pct = Math.floor((host?.gpu_share ?? 0) * 100)
+  const labels = joinLabels(slowed.map((w) => w.label.toLowerCase()))
+  return (
+    `The local model does not fit on this graphics card: ${pct}% of it runs on the card and ` +
+    `the rest on the processor, so ${labels} will be slower. Cloud mode is faster: it uses ` +
+    "your API key, and your provider charges for each request. Change it in Settings."
+  )
 }
