@@ -1,8 +1,7 @@
 """Steps for a write the file system refused, chosen by looking at the folder.
 
-A raw `mkdir ...: operation not permitted` told a new user nothing and offered no fix. The
-folder itself says which fix applies: another owner, a Finder lock, no write permission, or
-none of these, which on macOS means the system refused a folder whose permissions allow it.
+The folder says which fix applies: another owner, a lock, no write permission, or none of
+these, which means the system refused a folder whose permissions allow it.
 """
 
 import os

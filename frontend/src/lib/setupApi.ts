@@ -207,8 +207,7 @@ export async function installOrThrow(
  * Refresh everything that names or depends on the installed models.
  *
  * An install changes what Ask's Auto, the model banner, Settings and the setup screen
- * show; refreshing only one of them left the others offering a model that was already
- * there, or pointing at one that was not.
+ * show, so they refresh together.
  */
 export async function refreshModelState(queryClient: QueryClient): Promise<void> {
   await Promise.all(

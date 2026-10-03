@@ -260,11 +260,9 @@ fn boot(app: AppHandle, sup: Arc<Supervisor>) {
     }
 }
 
-/// Bring the user back to the startup screen if the backend dies after startup.
+/// Bring the user back to the startup screen, with Try again, if the backend dies.
 ///
-/// Only startup used to watch it, so a backend that died later left a window whose
-/// every action failed with "Is Luminary still running?" and nothing else. A child
-/// no longer tracked was stopped by `shutdown` (quit or retry), which is not a death.
+/// A child no longer tracked was stopped by `shutdown` (quit or retry), not a crash.
 fn watch_backend(app: AppHandle, sup: Arc<Supervisor>, splash: Option<tauri::Url>) {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(1));

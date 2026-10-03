@@ -354,8 +354,7 @@ def recommended_assignment(
 
 
 # The chat models offered as a choice, strongest first, with what each costs. The
-# user picks; the recommendation is `default_chat_model()`. "Twice as slow" is the
-# 14B writer's 2.2x on the #230 card run.
+# user picks; the recommendation is `default_chat_model()`. Speed is from #230.
 CHAT_CHOICES: dict[str, str] = {
     "ollama/qwen2.5:14b-instruct": (
         "Better answers and practice cards, but about twice as slow. "

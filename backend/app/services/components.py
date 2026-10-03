@@ -799,11 +799,9 @@ def _current_chat_model() -> str:
 
 
 async def adopt_installed_chat_model() -> str | None:
-    """Point chat at an installed model when the current one is not installed.
+    """Point chat at the best installed model when the current one is not installed.
 
-    Auto otherwise kept naming a default nobody downloaded: a fresh 52 GB Mac pulled the
-    4B by hand and every Ask still went to the absent 14B until the user picked the 4B.
-    Returns the model adopted, or None when nothing changed.
+    Otherwise Auto keeps naming a default nobody downloaded. Returns the model adopted.
     """
     from app.services import settings_service  # noqa: PLC0415
 

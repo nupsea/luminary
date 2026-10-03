@@ -1,9 +1,7 @@
 """What to tell the user when a model call failed: the cause, and what they can do.
 
-Every surface said "LLM unreachable ... run: ollama serve" for a model that was not
-installed, still loading, or erroring, and the desktop app has no terminal to run it in.
-The cause is in the exception; this reads it once for Ask, Practice, teach-back and
-summaries alike.
+One reader of the exception for every surface; the desktop app has no terminal, so its
+advice never names a command.
 """
 
 import re
