@@ -79,6 +79,7 @@ class FlashcardRepo:
         document_id: str,
         *,
         bloom_level_min: int | None = None,
+        newest_first: bool = True,
     ) -> Sequence[FlashcardModel]:
         stmt = select(FlashcardModel).where(FlashcardModel.document_id == document_id)
         if bloom_level_min is not None:
@@ -86,7 +87,8 @@ class FlashcardRepo:
                 FlashcardModel.bloom_level.is_not(None),
                 FlashcardModel.bloom_level >= bloom_level_min,
             )
-        stmt = stmt.order_by(FlashcardModel.created_at.desc())
+        if newest_first:
+            stmt = stmt.order_by(FlashcardModel.created_at.desc())
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
@@ -183,6 +185,21 @@ class FlashcardRepo:
         ).one()
         total, due, new, mastered = (int(v or 0) for v in row)
         return total, due, new, mastered
+
+    async def scheduled_document_cards(self) -> list[tuple[str, float, datetime]]:
+        """(document id, stability, due date) for every reviewed, scheduled document card."""
+        result = await self.session.execute(
+            select(
+                FlashcardModel.document_id,
+                FlashcardModel.fsrs_stability,
+                FlashcardModel.due_date,
+            ).where(
+                FlashcardModel.document_id.is_not(None),
+                FlashcardModel.fsrs_stability > 0,
+                FlashcardModel.due_date.is_not(None),
+            )
+        )
+        return [(doc_id, stability, due) for doc_id, stability, due in result.all()]
 
     async def counts_by_document(self, document_ids: Sequence[str]) -> dict[str, int]:
         return await self._counts_by(FlashcardModel.document_id, document_ids)

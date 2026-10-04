@@ -319,7 +319,38 @@ class StudyRepo:
         )
         return total, page.scalars().all()
 
+    async def list_sessions_for_document(self, document_id: str) -> Sequence[StudySessionModel]:
+        result = await self.session.execute(
+            select(StudySessionModel).where(StudySessionModel.document_id == document_id)
+        )
+        return result.scalars().all()
+
+    async def list_ended_sessions_since(
+        self, cutoff: datetime, *, document_id: str | None = None
+    ) -> Sequence[StudySessionModel]:
+        stmt = select(StudySessionModel).where(
+            StudySessionModel.started_at >= cutoff,
+            StudySessionModel.ended_at.is_not(None),
+        )
+        if document_id:
+            stmt = stmt.where(StudySessionModel.document_id == document_id)
+        return (await self.session.execute(stmt)).scalars().all()
+
     # -- Review events / teachback results --------------------------------
+
+    async def predictions_since(self, cutoff: datetime) -> list[tuple[str, str, datetime]]:
+        """(predicted rating, actual rating, reviewed at) for reviews made with a prediction."""
+        result = await self.session.execute(
+            select(
+                ReviewEventModel.predicted_rating,
+                ReviewEventModel.rating,
+                ReviewEventModel.reviewed_at,
+            ).where(
+                ReviewEventModel.predicted_rating.is_not(None),
+                ReviewEventModel.reviewed_at >= cutoff,
+            )
+        )
+        return [(predicted, actual, at) for predicted, actual, at in result.all()]
 
     async def pending_teachback_counts(self, session_ids: Sequence[str]) -> dict[str, int]:
         if not session_ids:

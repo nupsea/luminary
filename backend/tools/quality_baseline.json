@@ -124,7 +124,7 @@
     "app/routers/qa.py": 2,
     "app/routers/references.py": 2,
     "app/routers/search.py": 4,
-    "app/routers/study.py": 44,
+    "app/routers/study.py": 30,
     "app/routers/summarize.py": 4,
     "app/routers/tags.py": 23,
     "app/runtime/chat_graph.py": 2,

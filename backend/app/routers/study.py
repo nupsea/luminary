@@ -19,6 +19,7 @@ import logging
 import math
 import re
 import uuid
+from collections import defaultdict
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 
@@ -30,11 +31,9 @@ from app.config import get_settings
 from app.database import get_db, get_session_factory
 from app.models import (
     ChunkModel,
-    DocumentModel,
     FlashcardModel,
     MisconceptionModel,
     ReviewEventModel,
-    SectionModel,
     StudyEventModel,
     StudySessionModel,
     TeachbackResultModel,
@@ -1657,11 +1656,8 @@ async def get_study_stats(
     """Return progress statistics for a document."""
     now = datetime.now(UTC)
 
-    # --- All flashcards for the document ---
-    cards_result = await db.execute(
-        select(FlashcardModel).where(FlashcardModel.document_id == document_id)
-    )
-    all_cards = cards_result.scalars().all()
+    repo = StudyRepo(db)
+    all_cards = await FlashcardRepo(db).list_for_document(document_id, newest_first=False)
     total_cards = len(all_cards)
 
     # --- Mastered cards ---
@@ -1685,11 +1681,7 @@ async def get_study_stats(
         round(sum(retention_values) / len(retention_values), 4) if retention_values else 0.0
     )
 
-    # --- Study sessions for this document ---
-    sessions_result = await db.execute(
-        select(StudySessionModel).where(StudySessionModel.document_id == document_id)
-    )
-    sessions = sessions_result.scalars().all()
+    sessions = await repo.list_sessions_for_document(document_id)
 
     # --- Total study time (minutes) ---
     total_study_time_minutes = sum(
@@ -1711,19 +1703,11 @@ async def get_study_stats(
     current_streak = streak
 
     # --- Per-section stability ---
-    chunk_ids = [c.chunk_id for c in all_cards]
     per_section: list[SectionStabilityItem] = []
-    if chunk_ids:
-        chunk_stmt = (
-            select(ChunkModel, SectionModel.heading)
-            .outerjoin(SectionModel, ChunkModel.section_id == SectionModel.id)
-            .where(ChunkModel.id.in_(chunk_ids))
+    if all_cards:
+        chunk_to_heading = await repo.chunk_section_headings(
+            [c.chunk_id for c in all_cards if c.chunk_id]
         )
-        chunk_rows = await db.execute(chunk_stmt)
-        chunk_to_heading: dict[str, str | None] = {}
-        for chunk, heading in chunk_rows:
-            chunk_to_heading[chunk.id] = heading
-
         section_groups: dict[str | None, list[FlashcardModel]] = {}
         for c in all_cards:
             heading = chunk_to_heading.get(c.chunk_id)
@@ -1780,15 +1764,9 @@ async def get_study_history(
     db: AsyncSession = Depends(get_db),
 ) -> list[DailyHistoryItem]:
     """Return daily study activity for the last N days, bucketed in local time."""
-    cutoff = datetime.now(UTC) - timedelta(days=days)
-    stmt = select(StudySessionModel).where(
-        StudySessionModel.started_at >= cutoff,
-        StudySessionModel.ended_at.is_not(None),
+    sessions = await StudyRepo(db).list_ended_sessions_since(
+        datetime.now(UTC) - timedelta(days=days), document_id=document_id
     )
-    if document_id:
-        stmt = stmt.where(StudySessionModel.document_id == document_id)
-    result = await db.execute(stmt)
-    sessions = result.scalars().all()
 
     # Group by local date: shift UTC -> client-local before taking .date()
     local_shift = timedelta(minutes=-tz_offset_minutes)
@@ -1848,36 +1826,13 @@ async def get_decay_debt(
     by avg_retention ascending (weakest first).
     """
     now = datetime.now(UTC)
-    # Fetch all reviewed cards with enough data to compute retention.
-    cards_result = await session.execute(
-        select(
-            FlashcardModel.id,
-            FlashcardModel.document_id,
-            FlashcardModel.fsrs_stability,
-            FlashcardModel.due_date,
-        ).where(
-            FlashcardModel.document_id.is_not(None),
-            FlashcardModel.fsrs_stability > 0,
-            FlashcardModel.due_date.is_not(None),
-        )
-    )
-    cards = cards_result.all()
-
+    cards = await FlashcardRepo(session).scheduled_document_cards()
     if not cards:
         return DecayDebtResponse(items=[], total_at_risk=0)
-
-    # Collect at-risk card IDs grouped by document.
-    doc_ids: list[str] = list({c[1] for c in cards})
-    docs_result = await session.execute(
-        select(DocumentModel.id, DocumentModel.title).where(DocumentModel.id.in_(doc_ids))
-    )
-    doc_title_map: dict[str, str] = {r[0]: r[1] for r in docs_result.all()}
-
-    # Group at-risk cards by document.
-    from collections import defaultdict
+    doc_title_map = await DocumentRepo(session).titles(list({c[0] for c in cards}))
 
     doc_cards: dict[str, list[tuple[float, int]]] = defaultdict(list)
-    for _card_id, doc_id, stability, due_date in cards:
+    for doc_id, stability, due_date in cards:
         # days elapsed since the scheduled due date (positive = overdue)
         due_aware = due_date.replace(tzinfo=UTC) if due_date.tzinfo is None else due_date
         days_since_due = (now - due_aware).total_seconds() / 86400
@@ -1928,24 +1883,9 @@ async def get_calibration_stats(
     days: int = Query(default=30, ge=7, le=90),
     session: AsyncSession = Depends(get_db),
 ) -> CalibrationStatsResponse:
-    cutoff = datetime.now(UTC) - timedelta(days=days)
-    rows = (
-        await session.execute(
-            select(
-                ReviewEventModel.predicted_rating,
-                ReviewEventModel.rating,
-                ReviewEventModel.reviewed_at,
-            ).where(
-                ReviewEventModel.predicted_rating.is_not(None),
-                ReviewEventModel.reviewed_at >= cutoff,
-            )
-        )
-    ).all()
-
+    rows = await StudyRepo(session).predictions_since(datetime.now(UTC) - timedelta(days=days))
     if not rows:
         return CalibrationStatsResponse(overall_match_rate=None, total_predictions=0, weeks=[])
-
-    from collections import defaultdict
 
     week_buckets: dict[str, list[bool]] = defaultdict(list)
     for predicted, actual, reviewed_at in rows:
@@ -1985,24 +1925,12 @@ async def get_section_heatmap(
     fragility_score ranges from 0.0 (well-retained) to 1.0 (completely forgotten).
     Sections with no flashcards are absent from the heatmap dict.
     """
-    # Two sequential reads: cards first (to get chunk_ids), then chunk→section mapping.
-    # The chunk_ids set is only known after the card query, so the second read follows here.
-    cards_result = await session.execute(
-        select(FlashcardModel).where(FlashcardModel.document_id == document_id)
-    )
-    cards = list(cards_result.scalars().all())
-
+    cards = list(await FlashcardRepo(session).list_for_document(document_id, newest_first=False))
     if not cards:
         return SectionHeatmapResponse(heatmap={})
-
-    chunk_ids = [c.chunk_id for c in cards if c.chunk_id]
-    chunk_to_section: dict[str, str | None] = {}
-    if chunk_ids:
-        chunk_rows = await session.execute(
-            select(ChunkModel.id, ChunkModel.section_id).where(ChunkModel.id.in_(chunk_ids))
-        )
-        for chunk_id, section_id in chunk_rows:
-            chunk_to_section[chunk_id] = section_id
+    chunk_to_section = await StudyRepo(session).chunk_section_id_map(
+        [c.chunk_id for c in cards if c.chunk_id]
+    )
 
     now = datetime.now(UTC)
     heatmap = _compute_section_heatmap(cards, chunk_to_section, now)
