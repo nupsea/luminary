@@ -271,3 +271,72 @@ async def test_discard_if_unused_keeps_any_run_with_an_attempt(test_db, attempt)
     assert resp.status_code == 204
     ids = {item["id"] for item in listed.json()["items"]}
     assert (sess.id in ids) is (attempt is not None)
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_filters_and_labels(test_db):
+    """mode, status and collection filters; titles, names and pending flags on each row."""
+    from app.models import CollectionModel, DocumentModel, TeachbackResultModel
+
+    _, factory, _ = test_db
+    now = datetime.now(UTC)
+    flash_done = _make_session(doc_id="doc_t", started_at=now - timedelta(hours=3))
+    teach_open = _make_session(started_at=now - timedelta(hours=2))
+    teach_open.mode, teach_open.ended_at, teach_open.collection_id = "teachback", None, "col"
+    teach_done = _make_session(started_at=now - timedelta(hours=1))
+    teach_done.mode, teach_done.collection_id = "teachback", "col"
+    async with factory() as session:
+        session.add_all([flash_done, teach_open, teach_done])
+        session.add(
+            DocumentModel(
+                id="doc_t",
+                title="The Doc",
+                format="txt",
+                content_type="book",
+                word_count=1,
+                page_count=0,
+                file_path="/tmp/x.txt",
+                stage="complete",
+            )
+        )
+        session.add(CollectionModel(id="col", name="The Collection"))
+        session.add(
+            TeachbackResultModel(
+                id=str(uuid.uuid4()),
+                session_id=teach_open.id,
+                flashcard_id="c",
+                user_explanation="e",
+                score=0,
+                status="pending",
+            )
+        )
+        await session.commit()
+
+    async def ids(query: str) -> list[str]:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get(f"/study/sessions{query}")
+        assert resp.status_code == 200
+        return [item["id"] for item in resp.json()["items"]]
+
+    assert await ids("?mode=teachback") == [teach_done.id, teach_open.id]
+    assert await ids("?status=incomplete") == [teach_open.id]
+    assert await ids("?status=complete") == [teach_done.id, flash_done.id]
+    assert await ids("?collection_id=col&status=complete") == [teach_done.id]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        items = {i["id"]: i for i in (await c.get("/study/sessions")).json()["items"]}
+    assert items[flash_done.id]["document_title"] == "The Doc"
+    assert items[flash_done.id]["collection_name"] is None
+    assert items[teach_open.id]["collection_name"] == "The Collection"
+    assert items[teach_open.id]["duration_minutes"] is None
+    assert items[teach_done.id]["duration_minutes"] == 15.0
+    assert [i for i in items if items[i]["has_pending_evaluations"]] == [teach_open.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["cards", "remaining-cards"])
+async def test_session_card_reads_404_for_a_missing_session(test_db, path):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/study/sessions/nope/{path}")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Session not found"

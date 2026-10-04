@@ -60,7 +60,6 @@
     "app/routers/evals.py::_run_eval_subprocess",
     "app/routers/evals.py::_run_generated_eval_subprocess",
     "app/routers/study.py::get_study_stats",
-    "app/routers/study.py::list_sessions",
     "app/routers/tags.py::migrate_tag_naming",
     "app/runtime/chat_graph.py::_resolve_targeted_document",
     "app/runtime/chat_nodes/confidence.py::augment_node",
@@ -102,7 +101,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 228,
+  "complexity_over_10": 226,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
@@ -125,7 +124,7 @@
     "app/routers/qa.py": 2,
     "app/routers/references.py": 2,
     "app/routers/search.py": 4,
-    "app/routers/study.py": 55,
+    "app/routers/study.py": 44,
     "app/routers/summarize.py": 4,
     "app/routers/tags.py": 23,
     "app/runtime/chat_graph.py": 2,

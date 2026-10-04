@@ -23,14 +23,13 @@ from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db, get_session_factory
 from app.models import (
     ChunkModel,
-    CollectionModel,
     DocumentModel,
     FlashcardModel,
     MisconceptionModel,
@@ -40,6 +39,7 @@ from app.models import (
     StudySessionModel,
     TeachbackResultModel,
 )
+from app.repos.collection_repo import CollectionRepo
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
 from app.repos.study_repo import DueScope, StudyRepo, get_study_repo
@@ -851,61 +851,23 @@ async def list_sessions(
     db: AsyncSession = Depends(get_db),
 ) -> SessionListResponse:
     """Return a paginated list of study sessions sorted by started_at desc."""
-    base_stmt = select(StudySessionModel)
-    if document_id:
-        base_stmt = base_stmt.where(StudySessionModel.document_id == document_id)
-    if collection_id:
-        base_stmt = base_stmt.where(StudySessionModel.collection_id == collection_id)
-    if mode:
-        base_stmt = base_stmt.where(StudySessionModel.mode == mode)
-    if status == "incomplete":
-        base_stmt = base_stmt.where(StudySessionModel.ended_at.is_(None))
-    elif status == "complete":
-        base_stmt = base_stmt.where(StudySessionModel.ended_at.is_not(None))
-
-    count_result = await db.execute(select(func.count()).select_from(base_stmt.subquery()))
-    total = count_result.scalar_one()
-
-    offset = (page - 1) * page_size
-    sessions_result = await db.execute(
-        base_stmt.order_by(StudySessionModel.started_at.desc()).offset(offset).limit(page_size)
+    repo = StudyRepo(db)
+    total, sessions = await repo.list_sessions(
+        document_id=document_id,
+        collection_id=collection_id,
+        mode=mode,
+        status=status,
+        offset=(page - 1) * page_size,
+        limit=page_size,
     )
-    sessions = sessions_result.scalars().all()
-
-    # Collect unique doc IDs to fetch titles in one query
-    doc_ids = {s.document_id for s in sessions if s.document_id}
-    doc_titles: dict[str, str] = {}
-    if doc_ids:
-        docs_result = await db.execute(select(DocumentModel).where(DocumentModel.id.in_(doc_ids)))
-        for doc in docs_result.scalars().all():
-            doc_titles[doc.id] = doc.title
-
-    coll_ids = {s.collection_id for s in sessions if s.collection_id}
-    coll_names: dict[str, str] = {}
-    if coll_ids:
-        colls_result = await db.execute(
-            select(CollectionModel).where(CollectionModel.id.in_(coll_ids))
-        )
-        for coll in colls_result.scalars().all():
-            coll_names[coll.id] = coll.name
-
-    # Map session_id -> pending teach-back count so the UI knows which rows
-    # still need polling. Single grouped query beats N+1.
-    session_ids = [s.id for s in sessions]
-    pending_by_session: dict[str, int] = {}
-    if session_ids:
-        pending_result = await db.execute(
-            select(
-                TeachbackResultModel.session_id,
-                func.count().label("n"),
-            )
-            .where(
-                TeachbackResultModel.session_id.in_(session_ids),
-                TeachbackResultModel.status == "pending",
-            )
-            .group_by(TeachbackResultModel.session_id)
-        )
-        pending_by_session = {sid: n for sid, n in pending_result.all() if sid is not None}
+    doc_titles = await DocumentRepo(db).titles(
+        list({s.document_id for s in sessions if s.document_id})
+    )
+    coll_names = await CollectionRepo(db).names(
+        list({s.collection_id for s in sessions if s.collection_id})
+    )
+    # The UI polls only the rows that still have a teach-back being graded.
+    pending_by_session = await repo.pending_teachback_counts([s.id for s in sessions])
 
     items: list[SessionListItem] = []
     for sess in sessions:
@@ -940,19 +902,9 @@ async def get_session_cards(
     db: AsyncSession = Depends(get_db),
 ) -> list[SessionCardDetail]:
     """Return per-card rating and correctness for a given session."""
-    sess_result = await db.execute(
-        select(StudySessionModel).where(StudySessionModel.id == session_id)
-    )
-    if sess_result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    events_result = await db.execute(
-        select(ReviewEventModel, FlashcardModel)
-        .join(FlashcardModel, ReviewEventModel.flashcard_id == FlashcardModel.id)
-        .where(ReviewEventModel.session_id == session_id)
-        .order_by(ReviewEventModel.reviewed_at)
-    )
-    rows = events_result.all()
+    repo = StudyRepo(db)
+    await repo.get_session_or_404(session_id)
+    rows = await repo.list_review_events_with_cards(session_id)
 
     return [
         SessionCardDetail(
@@ -1029,12 +981,8 @@ async def get_session_remaining_cards(
     under an open run deletes cards it planned, and those are neither progress
     nor work outstanding (I-47).
     """
-    sess_result = await db.execute(
-        select(StudySessionModel).where(StudySessionModel.id == session_id)
-    )
-    sess = sess_result.scalar_one_or_none()
-    if sess is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+    repo = StudyRepo(db)
+    sess = await repo.get_session_or_404(session_id)
 
     planned_ids: list[str] = list(sess.planned_card_ids or [])
     if not planned_ids:
@@ -1044,17 +992,7 @@ async def get_session_remaining_cards(
         )
         return SessionRemainingResponse(answered_count=0, planned_count=0, cards=[])
 
-    # A card is "answered" if it has a teach-back result OR a review event for this session.
-    tb_result = await db.execute(
-        select(TeachbackResultModel.flashcard_id).where(
-            TeachbackResultModel.session_id == session_id
-        )
-    )
-    answered: set[str] = {row[0] for row in tb_result.all()}
-    rev_result = await db.execute(
-        select(ReviewEventModel.flashcard_id).where(ReviewEventModel.session_id == session_id)
-    )
-    answered.update(row[0] for row in rev_result.all())
+    answered = await repo.answered_card_ids(session_id)
 
     # Planned means planned AND still there. Replacing a deck deletes the cards
     # an open run planned, and counting the dead ids made the header read "7 of 8
@@ -1063,10 +1001,7 @@ async def get_session_remaining_cards(
     # not progress, and it is not work outstanding either. The client cannot
     # repair this downstream, because dropping the dead ids from `cards` alone
     # keeps answered + remaining == planned and the inflation stays invisible.
-    cards_result = await db.execute(
-        select(FlashcardModel).where(FlashcardModel.id.in_(planned_ids))
-    )
-    live_by_id = {c.id: c for c in cards_result.scalars().all()}
+    live_by_id = await FlashcardRepo(db).get_many(planned_ids)
     # Preserve the original planned order.
     live_planned = [cid for cid in planned_ids if cid in live_by_id]
 

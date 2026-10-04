@@ -126,6 +126,16 @@ class DocumentRepo:
         )
         return result.scalar_one()
 
+    async def titles(self, document_ids: Sequence[str]) -> dict[str, str]:
+        if not document_ids:
+            return {}
+        result = await self.session.execute(
+            select(DocumentModel.id, DocumentModel.title).where(
+                DocumentModel.id.in_(list(document_ids))
+            )
+        )
+        return dict(result.tuples().all())
+
     async def tags_by_id(
         self, document_ids: Sequence[str] | None = None
     ) -> list[tuple[str, object]]:

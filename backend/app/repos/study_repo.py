@@ -289,7 +289,84 @@ class StudyRepo:
         await self.session.commit()
         return len(dead_ids)
 
+    async def list_sessions(
+        self,
+        *,
+        document_id: str | None,
+        collection_id: str | None,
+        mode: str | None,
+        status: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[int, Sequence[StudySessionModel]]:
+        """(total matching, one page newest first). status is incomplete | complete."""
+        stmt = select(StudySessionModel)
+        if document_id:
+            stmt = stmt.where(StudySessionModel.document_id == document_id)
+        if collection_id:
+            stmt = stmt.where(StudySessionModel.collection_id == collection_id)
+        if mode:
+            stmt = stmt.where(StudySessionModel.mode == mode)
+        if status == "incomplete":
+            stmt = stmt.where(StudySessionModel.ended_at.is_(None))
+        elif status == "complete":
+            stmt = stmt.where(StudySessionModel.ended_at.is_not(None))
+        total = (
+            await self.session.execute(select(func.count()).select_from(stmt.subquery()))
+        ).scalar_one()
+        page = await self.session.execute(
+            stmt.order_by(StudySessionModel.started_at.desc()).offset(offset).limit(limit)
+        )
+        return total, page.scalars().all()
+
     # -- Review events / teachback results --------------------------------
+
+    async def pending_teachback_counts(self, session_ids: Sequence[str]) -> dict[str, int]:
+        if not session_ids:
+            return {}
+        result = await self.session.execute(
+            select(TeachbackResultModel.session_id, func.count())
+            .where(
+                TeachbackResultModel.session_id.in_(list(session_ids)),
+                TeachbackResultModel.status == "pending",
+            )
+            .group_by(TeachbackResultModel.session_id)
+        )
+        return {sid: n for sid, n in result.all() if sid is not None}
+
+    async def list_review_events_with_cards(
+        self, session_id: str
+    ) -> list[tuple[ReviewEventModel, FlashcardModel]]:
+        """Events in review order, each with its card. Events of deleted cards drop out."""
+        result = await self.session.execute(
+            select(ReviewEventModel, FlashcardModel)
+            .join(FlashcardModel, ReviewEventModel.flashcard_id == FlashcardModel.id)
+            .where(ReviewEventModel.session_id == session_id)
+            .order_by(ReviewEventModel.reviewed_at)
+        )
+        return [(event, card) for event, card in result.all()]
+
+    async def answered_card_ids(self, session_id: str) -> set[str]:
+        """Cards with a teach-back result or a review event in this session."""
+        answered = set(
+            (
+                await self.session.execute(
+                    select(TeachbackResultModel.flashcard_id).where(
+                        TeachbackResultModel.session_id == session_id
+                    )
+                )
+            ).scalars()
+        )
+        answered.update(
+            (
+                await self.session.execute(
+                    select(ReviewEventModel.flashcard_id).where(
+                        ReviewEventModel.session_id == session_id
+                    )
+                )
+            ).scalars()
+        )
+        return answered
 
     async def list_review_events(self, session_id: str) -> Sequence[ReviewEventModel]:
         result = await self.session.execute(
