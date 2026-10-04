@@ -2,14 +2,9 @@
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
-# Fetch the document list to get a real document_id
-DOC_ID=$(curl -s "$BASE/documents?sort=newest&page=1&page_size=1" \
-  | python3 -c "import sys,json; items=json.load(sys.stdin).get('items',[]); print(items[0]['id'] if items else '')")
-
-if [ -z "$DOC_ID" ]; then
-  echo "SKIP: no documents in the library"
-  exit "$SMOKE_SKIP"
-fi
+# A fresh fixture has no cards, so every section is uncovered and fill-uncovered runs (#221).
+DOC_ID=$(smoke_ingest_fixture)
+trap 'curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC_ID" || true' EXIT
 
 # GET /flashcards/health/{document_id}
 RESP=$(curl -sf "$BASE/flashcards/health/$DOC_ID")
@@ -64,6 +59,18 @@ print('S160 fill-uncovered queued=%d OK' % d['queued'])
 "
   [ "$HTTP_STATUS" -eq 202 ] || { echo "FAIL: expected HTTP 202, got $HTTP_STATUS"; exit 1; }
   echo "S160 smoke: POST /flashcards/health/$DOC_ID/fill-uncovered OK"
+  # Generation runs in the background; deleting the fixture under it can leave
+  # orphan cards (#242), so give it a bounded wait to finish first.
+  for _ in $(seq 1 36); do
+    LEFT=$(curl -sf "$BASE/flashcards/health/$DOC_ID" | python3 -c "
+import sys, json
+left = set(json.load(sys.stdin).get('uncovered_section_ids', []))
+print(len(left & set('$UNCOVERED_IDS'.split())))
+")
+    [ "$LEFT" = "0" ] && break
+    sleep 5
+  done
 else
-  smoke_partial_skip "POST fill-uncovered: doc=$DOC_ID has no uncovered sections"
+  echo "FAIL: the fixture has no uncovered sections"
+  exit 1
 fi

@@ -150,3 +150,40 @@ smoke_partial_skip() {
     echo "PARTIAL SKIP: $1"
     printf '%s: %s\n' "$(basename "$0" .sh)" "$1" >> "$SMOKE_TMP/.partial-skips"
 }
+
+# smoke_ingest_fixture: ingest a small two-section document, wait for it, and print its
+# id. The caller deletes it on exit. A sub-check that needs a document gets this one,
+# never whatever the library holds, so whether it runs does not depend on the machine (#221).
+smoke_ingest_fixture() {
+    local src="$SMOKE_TMP/fixture-$$-$RANDOM.md" out="$SMOKE_TMP/fixture-$$.json" code doc_id
+    cat > "$src" <<'FIXTURE'
+# Smoke fixture
+
+## Write-ahead logging
+
+A write-ahead log records every change before the change is applied to the data
+file, so a crash between the two can be repaired by replaying the log on restart.
+Readers keep reading the last committed state while a writer appends to the log.
+
+## Checkpoints
+
+A checkpoint copies the logged changes back into the data file and lets the log be
+truncated. Without checkpoints the log grows without bound and recovery slows down,
+because every change since the last checkpoint must be replayed.
+FIXTURE
+    # Ingest deduplicates on the file's hash; a unique line keeps each call its own document.
+    printf '\nSmoke run %s.\n' "$$-$RANDOM" >> "$src"
+    code="$(curl -s -o "$out" -w '%{http_code}' -X POST "$BASE/documents/ingest" \
+        -F "file=@$src;type=text/markdown")"
+    rm -f "$src"
+    if [ "$code" != "200" ] && [ "$code" != "201" ]; then
+        echo "FAIL: fixture upload got $code: $(cat "$out")" >&2
+        return 1
+    fi
+    doc_id="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["document_id"])' "$out")"
+    smoke_wait_complete "$doc_id" >&2 || {
+        curl -s -o /dev/null -X DELETE "$BASE/documents/$doc_id" || true
+        return 1
+    }
+    echo "$doc_id"
+}

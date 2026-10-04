@@ -48,5 +48,5 @@ assert 'document_id' in d, f'missing document_id key: {d}'
 "
   echo "PASS: GET /study/path?document_id=$DOC_ID&concept=$CONCEPT"
 else
-  smoke_partial_skip "GET /study/path: no entry-point concepts for doc=$DOC_ID (no prerequisites extracted)"
+  smoke_partial_skip "GET /study/path: no entry-point concepts for doc=$DOC_ID; nothing writes prerequisite edges until #227"
 fi
