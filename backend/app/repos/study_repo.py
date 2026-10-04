@@ -82,6 +82,9 @@ class StudyRepo:
     async def get_session_or_404(self, session_id: str) -> StudySessionModel:
         return await get_or_404(self.session, StudySessionModel, session_id, name="Session")
 
+    async def find_session(self, session_id: str) -> StudySessionModel | None:
+        return await self.session.get(StudySessionModel, session_id)
+
     async def find_open_session(
         self,
         *,
@@ -352,6 +355,42 @@ class StudyRepo:
         )
         return [(predicted, actual, at) for predicted, actual, at in result.all()]
 
+    async def find_teachback(self, teachback_id: str) -> TeachbackResultModel | None:
+        return await self.session.get(TeachbackResultModel, teachback_id)
+
+    async def has_earlier_attempt(self, row: TeachbackResultModel) -> bool:
+        """Whether this card was already answered earlier in the same session."""
+        result = await self.session.execute(
+            select(TeachbackResultModel.id)
+            .where(
+                TeachbackResultModel.session_id == row.session_id,
+                TeachbackResultModel.flashcard_id == row.flashcard_id,
+                TeachbackResultModel.created_at < row.created_at,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def teachback_results_with_cards(
+        self, *, ids: Sequence[str] | None = None, session_id: str | None = None
+    ) -> list[tuple[TeachbackResultModel, str | None, str | None]]:
+        """(result, card question, card answer) by result ids or for a session, oldest first.
+
+        Outer join: a result whose card was deleted still comes back, with no text.
+        """
+        stmt = select(TeachbackResultModel, FlashcardModel.question, FlashcardModel.answer).join(
+            FlashcardModel,
+            TeachbackResultModel.flashcard_id == FlashcardModel.id,
+            isouter=True,
+        )
+        if ids is not None:
+            stmt = stmt.where(TeachbackResultModel.id.in_(list(ids)))
+        if session_id is not None:
+            stmt = stmt.where(TeachbackResultModel.session_id == session_id).order_by(
+                TeachbackResultModel.created_at
+            )
+        return [(tb, q, a) for tb, q, a in (await self.session.execute(stmt)).all()]
+
     async def pending_teachback_counts(self, session_ids: Sequence[str]) -> dict[str, int]:
         if not session_ids:
             return {}
@@ -420,6 +459,20 @@ class StudyRepo:
         return result.scalars().all()
 
     # -- Flashcard read patterns ------------------------------------------
+
+    async def due_or_unscheduled_for_document(self, document_id: str) -> list[FlashcardModel]:
+        stmt = (
+            select(FlashcardModel)
+            .where(
+                FlashcardModel.document_id == document_id,
+                or_(
+                    FlashcardModel.due_date <= datetime.now(UTC),
+                    FlashcardModel.due_date.is_(None),
+                ),
+            )
+            .order_by(FlashcardModel.due_date.asc())
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
 
     async def count_due(self, scope: DueScope) -> int:
         stmt = scope.apply(select(func.count()).select_from(FlashcardModel))

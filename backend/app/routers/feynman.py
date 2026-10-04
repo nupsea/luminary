@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.routers.study import (
+from app.schemas.study import (
     RubricCompletenessResponse,
     RubricDimensionResponse,
     TeachbackRubricResponse,
