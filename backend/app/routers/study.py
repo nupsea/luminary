@@ -337,33 +337,6 @@ async def _source_passage(card: FlashcardModel, session: AsyncSession) -> str:
     return text[max(0, middle - half) : middle + half]
 
 
-def _string_list(value: object) -> list[str]:
-    """One of the evaluator's lists, in the shape the store and the schema agree on.
-
-    The prompt asks for a list of strings and a model sometimes answers one nesting
-    deeper -- `"misconceptions": [["a", "b"]]`. That was written to the row verbatim,
-    and every later read of the session it belonged to failed `TeachbackResultItem`
-    with a 500, so a single malformed verdict took out the whole run's results and
-    the reader could not start a teach-back on that document again. Flattening is
-    applied on the way in, so no new row can carry it, and on the way out, so a row
-    already holding it is readable rather than fatal.
-    """
-    out: list[str] = []
-
-    def walk(v: object) -> None:
-        if isinstance(v, str):
-            if v.strip():
-                out.append(v.strip())
-        elif isinstance(v, (list, tuple)):
-            for item in v:
-                walk(item)
-        elif v is not None:
-            out.append(str(v))
-
-    walk(value)
-    return out
-
-
 def _verified_evidence(parsed: dict, source: str) -> str:
     """The evaluator's quote, kept only when it is really in the passage.
 
