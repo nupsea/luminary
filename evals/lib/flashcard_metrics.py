@@ -166,7 +166,9 @@ def judge_flashcard(card: dict, source_chunk: str, judge_model: str) -> dict:
         "clarity: 1-5, how unambiguous the question is with the passage taken away\n\n"
         "Count the distinct facts in the answer first and report that count, so the "
         "atomic verdict can be checked against it.\n"
-        "Return only JSON with keys factuality, atomic, clarity, facts_counted.\n\n"
+        "Return only JSON with keys factuality, atomic, clarity, facts_counted. "
+        'factuality is one of the strings "yes", "partial" or "no", never a boolean; '
+        "atomic is a boolean; clarity and facts_counted are integers.\n\n"
         f"Passage:\n{source_chunk}\n\n"
         f"Question:\n{card.get('question', '')}\n\nAnswer:\n{card.get('answer', '')}"
     )

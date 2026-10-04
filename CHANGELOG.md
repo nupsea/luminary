@@ -6,9 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-10-04
+
 ### Fixed
 - **Dictation failed with "Could not transcribe audio" after a fresh install of Speech to text.** The install took the newest PyAV, whose `open()` faster-whisper cannot call. It now installs the versions CI tests, an install with other versions is offered again, and a transcription failure names its cause.
 - **Dictate showed "Invalid constraint" on a Mac with no microphone.** Each microphone failure now says whether no device was found, access was denied or the device is busy, and where to fix it.
+- **Scraped DocBook pages headed chapters "Chapter 1. Philosophy — Prev Part I. Context".** The page's navigation line is no longer taken as a subtitle (#229). Applies to new ingests and re-parses.
+- **Deleting a document left its notes collection behind.** An empty one is now deleted with the document; one holding notes is kept as an ordinary collection (#241).
 
 ## [0.15.1] - 2026-10-03
 

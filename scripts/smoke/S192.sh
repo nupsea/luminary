@@ -38,55 +38,42 @@ else
   FAIL=1
 fi
 
-# Step 3: Find an existing document to test with
-echo "[3/5] Finding an existing document..."
-TMPFILE="$SMOKE_TMPDIR/s192_3.json"
-STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/documents?limit=1")
+# Step 3: ingest the fixture document the remaining steps act on
+echo "[3/5] Ingesting the smoke fixture..."
+DOC_ID=$(smoke_ingest_fixture)
+trap 'curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC_ID" || true; rm -rf "$SMOKE_TMPDIR"' EXIT
+echo "  Fixture document: $DOC_ID"
+# Step 4: POST /collections/auto/{doc_id} -> 201
+echo "[4/5] POST /collections/auto/{doc_id} -> 201"
+TMPFILE="$SMOKE_TMPDIR/s192_4.json"
+STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$BASE/collections/auto/$DOC_ID")
 BODY=$(cat "$TMPFILE")
 rm -f "$TMPFILE"
-if [ "$STATUS" != "200" ]; then
-  echo "  FAIL: GET /documents returned $STATUS"
-  FAIL=1
-else
-  DOC_ID=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items', []) if isinstance(d, dict) else d; print(items[0]['id'] if items else '')" 2>/dev/null || true)
-  if [ -n "$DOC_ID" ]; then
-    echo "  Found document: $DOC_ID"
-
-    # Step 4: POST /collections/auto/{doc_id} -> 201
-    echo "[4/5] POST /collections/auto/{doc_id} -> 201"
-    TMPFILE="$SMOKE_TMPDIR/s192_4.json"
-    STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$BASE/collections/auto/$DOC_ID")
-    BODY=$(cat "$TMPFILE")
-    rm -f "$TMPFILE"
-    if [ "$STATUS" = "201" ]; then
-      echo "  PASS: auto-collection created"
-      # Verify auto_document_id field
-      ADI=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('auto_document_id',''))" 2>/dev/null || true)
-      if [ "$ADI" = "$DOC_ID" ]; then
-        echo "  PASS: auto_document_id matches"
-      else
-        echo "  FAIL: auto_document_id mismatch: $ADI != $DOC_ID"
-        FAIL=1
-      fi
-    else
-      echo "  FAIL: expected 201, got $STATUS"
-      FAIL=1
-    fi
-
-    # Step 5: GET /collections/by-document/{doc_id} -> 200
-    echo "[5/5] GET /collections/by-document/{doc_id} -> 200"
-    TMPFILE="$SMOKE_TMPDIR/s192_5.json"
-    STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/collections/by-document/$DOC_ID")
-    rm -f "$TMPFILE"
-    if [ "$STATUS" = "200" ]; then
-      echo "  PASS: auto-collection retrieved"
-    else
-      echo "  FAIL: expected 200, got $STATUS"
-      FAIL=1
-    fi
+if [ "$STATUS" = "201" ]; then
+  echo "  PASS: auto-collection created"
+  # Verify auto_document_id field
+  ADI=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('auto_document_id',''))" 2>/dev/null || true)
+  if [ "$ADI" = "$DOC_ID" ]; then
+    echo "  PASS: auto_document_id matches"
   else
-    smoke_partial_skip "POST /collections/auto, GET by-document: the library has no document"
+    echo "  FAIL: auto_document_id mismatch: $ADI != $DOC_ID"
+    FAIL=1
   fi
+else
+  echo "  FAIL: expected 201, got $STATUS"
+  FAIL=1
+fi
+
+# Step 5: GET /collections/by-document/{doc_id} -> 200
+echo "[5/5] GET /collections/by-document/{doc_id} -> 200"
+TMPFILE="$SMOKE_TMPDIR/s192_5.json"
+STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/collections/by-document/$DOC_ID")
+rm -f "$TMPFILE"
+if [ "$STATUS" = "200" ]; then
+  echo "  PASS: auto-collection retrieved"
+else
+  echo "  FAIL: expected 200, got $STATUS"
+  FAIL=1
 fi
 
 if [ "$FAIL" -ne 0 ]; then
