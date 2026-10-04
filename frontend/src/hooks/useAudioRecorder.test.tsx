@@ -112,3 +112,22 @@ describe("useAudioRecorder", () => {
     expect(form.get("language")).toBe("en")
   })
 })
+
+describe("a microphone that cannot be opened", () => {
+  it("names the cause and the step instead of the browser's text", async () => {
+    const { toast } = await import("sonner")
+    getUserMedia.mockRejectedValueOnce(
+      Object.assign(new Error("Invalid constraint"), { name: "OverconstrainedError" }),
+    )
+    const api = hook()
+    await api.startRecording()
+    const shown = vi.mocked(toast.error).mock.calls.at(-1)?.[0] as string
+    expect(shown).toMatch(/^No microphone was found\./)
+    expect(shown).not.toContain("Invalid constraint")
+    expect(FakeRecorder.made).toHaveLength(0)
+    // The next click tries again rather than being swallowed.
+    getUserMedia.mockResolvedValueOnce({ getTracks: () => [{ stop: () => {} }] })
+    await api.startRecording()
+    expect(FakeRecorder.made).toHaveLength(1)
+  })
+})
