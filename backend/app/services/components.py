@@ -21,6 +21,7 @@ so the setup screen and the installer disagreed about what the app runs.
 
 import asyncio
 import importlib
+import importlib.metadata
 import importlib.util
 import json
 import logging
@@ -185,7 +186,9 @@ def catalogue() -> tuple[Component, ...]:
             description="Transcribes audio and video into searchable, studyable text.",
             kind="python_extra",
             ref="faster_whisper",
-            packages=("faster-whisper>=1.2.1",),
+            # Exact versions from uv.lock for every package the bundle lacks: an
+            # unpinned install took a PyAV whose `open()` faster-whisper cannot call.
+            packages=("faster-whisper==1.2.1", "av==16.1.0", "ctranslate2==4.7.1"),
             size_bytes=350 * _MB,
             # faster-whisper pulls PyAV, whose wheels bundle libx264 and libx265.
             # Apache-2.0 Luminary cannot ship those, so this is fetched from PyPI
@@ -458,10 +461,25 @@ async def _installed_ollama_models() -> set[str]:
     return {m.get("name", "") for m in data.get("models", [])}
 
 
+def _pins_met(comp: Component) -> bool:
+    """Every `name==version` in *comp.packages* is the version that imports."""
+    for requirement in comp.packages:
+        name, _, version = requirement.partition("==")
+        if not version:
+            continue
+        try:
+            if importlib.metadata.version(name) != version:
+                return False
+        except importlib.metadata.PackageNotFoundError:
+            return False
+    return True
+
+
 def _installed_locally(comp) -> bool:
     if comp.kind == "python_extra":
         activate_extras()
-        installed = importlib.util.find_spec(comp.ref) is not None
+        # A mismatched version reads as not installed, so the install is offered and replaces it.
+        installed = importlib.util.find_spec(comp.ref) is not None and _pins_met(comp)
         if installed and (weights := _EXTRA_WEIGHTS.get(comp.id)):
             installed = weights[0]()
         return installed
@@ -845,6 +863,23 @@ async def remove_ollama_model(model: str) -> None:
         resp.raise_for_status()
 
 
+def _drop_stale_metadata(target: Path, packages: tuple[str, ...]) -> None:
+    """Remove other versions' dist-info of pinned packages.
+
+    `pip --target --upgrade` replaces package folders but keeps an old dist-info,
+    which `importlib.metadata` may still read, so the pin check would never pass.
+    """
+    for requirement in packages:
+        name, _, version = requirement.partition("==")
+        if not version:
+            continue
+        stem = name.replace("-", "_").lower()
+        for info in target.glob("*.dist-info"):
+            dist, _, rest = info.name[: -len(".dist-info")].partition("-")
+            if dist.lower() == stem and rest != version:
+                shutil.rmtree(info, ignore_errors=True)
+
+
 async def install_python_extra(comp: Component) -> AsyncIterator[dict]:
     """Install packages into the extras directory using the bundled interpreter.
 
@@ -853,6 +888,7 @@ async def install_python_extra(comp: Component) -> AsyncIterator[dict]:
     """
     target = extras_dir()
     target.mkdir(parents=True, exist_ok=True)
+    _drop_stale_metadata(target, comp.packages)
 
     cmd = [
         sys.executable,

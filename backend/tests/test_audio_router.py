@@ -108,3 +108,21 @@ def test_dictate_pins_only_a_language_whisper_knows(hint, pinned):
     assert kwargs["language"] == pinned
     assert kwargs["vad_filter"] is True
     assert "initial_prompt" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_a_transcriber_failure_names_the_cause_and_the_reinstall():
+    """An installed faster-whisper calling a PyAV that refused its arguments was a bare 500."""
+    fake_transcriber = MagicMock()
+    fake_transcriber.dictate.side_effect = TypeError(
+        "open() got an unexpected keyword argument 'metadata_errors'"
+    )
+    with patch("app.routers.audio.get_audio_transcriber", return_value=fake_transcriber):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            files = {"file": ("test.webm", io.BytesIO(b"RIFFdummydata"), "audio/webm")}
+            response = await client.post("/audio/transcribe", files=files)
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "metadata_errors" in detail
+    assert "Reinstall Speech to text" in detail

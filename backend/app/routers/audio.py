@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from app.exceptions import InvalidInput
+from app.exceptions import DependencyUnavailable, InvalidInput
 from app.services.audio_transcriber import get_audio_transcriber
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,12 @@ async def transcribe_audio(
                 )
                 raise InvalidInput(
                     "The recording could not be read as audio. Try recording again."
+                ) from exc
+            except Exception as exc:
+                logger.exception("transcribe: speech to text failed")
+                raise DependencyUnavailable(
+                    f"Speech to text failed ({type(exc).__name__}: {str(exc)[:160]}). Reinstall "
+                    "Speech to text in Settings > Models & components, then try again."
                 ) from exc
         finally:
             if tmp_path.exists():
