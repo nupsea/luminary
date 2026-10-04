@@ -200,6 +200,26 @@ class CollectionRepo:
         await self.session.execute(stmt)
         await self.session.commit()
 
+    async def member_ids_recursive(self, collection_id: str) -> tuple[list[str], list[str]]:
+        """(document ids, note ids) in this collection and every collection below it."""
+        coll_ids = {collection_id}
+        pending = [collection_id]
+        while pending:
+            for child_id in await self.child_ids(pending.pop()):
+                if child_id not in coll_ids:
+                    coll_ids.add(child_id)
+                    pending.append(child_id)
+        rows = (
+            await self.session.execute(
+                select(CollectionMemberModel.member_id, CollectionMemberModel.member_type).where(
+                    CollectionMemberModel.collection_id.in_(list(coll_ids))
+                )
+            )
+        ).all()
+        doc_ids = list({member_id for member_id, kind in rows if kind == "document"})
+        note_ids = list({member_id for member_id, kind in rows if kind == "note"})
+        return doc_ids, note_ids
+
     async def count_members(self, collection_id: str) -> int:
         result = await self.session.execute(
             select(func.count(CollectionMemberModel.member_id)).where(

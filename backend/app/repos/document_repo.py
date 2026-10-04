@@ -126,6 +126,24 @@ class DocumentRepo:
         )
         return result.scalar_one()
 
+    async def tags_by_id(
+        self, document_ids: Sequence[str] | None = None
+    ) -> list[tuple[str, object]]:
+        """(id, raw tags) for these documents, or for every document when None."""
+        stmt = select(DocumentModel.id, DocumentModel.tags)
+        if document_ids is not None:
+            stmt = stmt.where(DocumentModel.id.in_(list(document_ids)))
+        return [(doc_id, tags) for doc_id, tags in (await self.session.execute(stmt)).all()]
+
+    async def list_recently_accessed_complete(self, limit: int) -> Sequence[DocumentModel]:
+        result = await self.session.execute(
+            select(DocumentModel)
+            .where(DocumentModel.stage == "complete")
+            .order_by(DocumentModel.last_accessed_at.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
     async def set_entity_chunks_scanned(self, document_id: str, scanned: int) -> None:
         await self.session.execute(
             update(DocumentModel)

@@ -2,21 +2,20 @@
 patterns the study router needs (due / weak flashcards, chunk-heading
 joins, per-session review events and teachback results).
 
-Bespoke multi-table dashboard queries (e.g.
-`get_collection_study_dashboard`, the tag-scoped filter logic inside
-`get_due_count` / `get_due_cards`) stay inline in `routers/study.py`
-because their join shapes are not reused elsewhere.
+Which cards a due-queue request covers is resolved in
+`services/study_queue.py`; this module only runs the resulting `DueScope`.
 """
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import Depends
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -36,6 +35,42 @@ from app.repos._helpers import get_or_404
 # back-compat with any callers that still reference them.
 GAP_STABILITY_THRESHOLD = 2.0
 GAP_MIN_REPS = 1
+
+
+@dataclass(frozen=True)
+class DueScope:
+    """Filters on the due queue. Every non-empty field narrows it.
+
+    `pool` is (document ids, note ids): a card sourced from either is in scope,
+    which is how a collection or a tag selects cards.
+    """
+
+    document_ids: Sequence[str] = ()
+    note_ids: Sequence[str] = ()
+    section_id: str | None = None
+    pool: tuple[Sequence[str], Sequence[str]] | None = None
+
+    def apply(self, stmt):  # type: ignore[no-untyped-def]
+        stmt = stmt.where(FlashcardModel.due_date <= datetime.now(UTC))
+        if self.section_id:
+            stmt = stmt.where(
+                FlashcardModel.chunk_id.in_(
+                    select(ChunkModel.id).where(ChunkModel.section_id == self.section_id)
+                )
+            )
+        if self.document_ids:
+            stmt = stmt.where(FlashcardModel.document_id.in_(list(self.document_ids)))
+        if self.note_ids:
+            stmt = stmt.where(FlashcardModel.note_id.in_(list(self.note_ids)))
+        if self.pool is not None:
+            pool_docs, pool_notes = self.pool
+            stmt = stmt.where(
+                or_(
+                    FlashcardModel.document_id.in_(list(pool_docs)),
+                    FlashcardModel.note_id.in_(list(pool_notes)),
+                )
+            )
+        return stmt
 
 
 class StudyRepo:
@@ -277,6 +312,14 @@ class StudyRepo:
         return result.scalars().all()
 
     # -- Flashcard read patterns ------------------------------------------
+
+    async def count_due(self, scope: DueScope) -> int:
+        stmt = scope.apply(select(func.count()).select_from(FlashcardModel))
+        return (await self.session.execute(stmt)).scalar_one()
+
+    async def list_due(self, scope: DueScope, *, limit: int) -> list[FlashcardModel]:
+        stmt = scope.apply(select(FlashcardModel)).order_by(FlashcardModel.due_date.asc())
+        return list((await self.session.execute(stmt.limit(limit))).scalars().all())
 
     async def list_weak_flashcards(
         self,

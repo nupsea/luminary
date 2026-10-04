@@ -140,6 +140,16 @@ class FlashcardRepo:
         )
         return list(result.scalars().all())
 
+    async def concept_ids_for_cards(self, card_ids: Sequence[str]) -> list[str]:
+        if not card_ids:
+            return []
+        result = await self.session.execute(
+            select(FlashcardModel.concept_id).where(
+                FlashcardModel.id.in_(list(card_ids)), FlashcardModel.concept_id.is_not(None)
+            )
+        )
+        return [c for c in result.scalars().all() if c]
+
     async def list_ids_for_collection(self, collection_id: str) -> list[str]:
         result = await self.session.execute(
             select(FlashcardModel.id).where(collection_card_filter(collection_id))
