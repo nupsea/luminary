@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Dictation failed with "Could not transcribe audio" after a fresh install of Speech to text.** The install took the newest PyAV, whose `open()` faster-whisper cannot call. It now installs the versions CI tests, an install with other versions is offered again, and a transcription failure names its cause.
+- **Dictate showed "Invalid constraint" on a Mac with no microphone.** Each microphone failure now says whether no device was found, access was denied or the device is busy, and where to fix it.
+
 ## [0.15.1] - 2026-10-03
 
 ### Fixed
@@ -15,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A downloaded model was not used until you selected it by hand.** Ask on Auto kept asking for the absent default after you pulled another model. An installed model now becomes the chat model when the current one is missing, and every screen updates at once.
 - **Every model failure said "LLM unreachable … run: ollama serve".** Ask, Practice, teach-back and summaries now name the cause (model not installed, still loading, the model's own error, server down, API key) and what to do; a missing model offers the model choice in place.
 - **"Audio and video support" offered an Install button that could only fail.** It now says how to add ffmpeg (`brew install ffmpeg` on macOS) and offers Check again.
+- **The app icon had no tile behind it on Windows and Linux.** All three platforms now show the same squircle tile.
 
 ### Known issues
 - **On a fresh macOS 27 install, the first model download was refused once** ("operation not permitted") and the engine crashed at the same moment; the folder's permissions were fine and the cause is not known. A retry after reopening worked. The app now explains the refusal, offers the steps and restarts the engine.
