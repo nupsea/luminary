@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from "react"
 import { toast } from "sonner"
 import { apiPost, detailFromError } from "@/lib/apiClient"
+import { micErrorMessage } from "@/lib/micErrors"
 
 export interface UseAudioRecorderOptions {
   onTranscribed: (text: string) => void
@@ -34,7 +35,14 @@ export function useAudioRecorder({ onTranscribed }: UseAudioRecorderOptions) {
         return
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      } catch (err: unknown) {
+        busyRef.current = false
+        toast.error(micErrorMessage(err), { duration: 15000 })
+        return
+      }
       streamRef.current = stream
 
       let mimeType: string | undefined
@@ -100,8 +108,9 @@ export function useAudioRecorder({ onTranscribed }: UseAudioRecorderOptions) {
     } catch (err: unknown) {
       stopTracks()
       busyRef.current = false
-      const msg = err instanceof Error ? err.message : "Microphone access denied or unavailable."
-      toast.error(msg)
+      toast.error(
+        `Recording could not start${err instanceof Error && err.message ? ` (${err.message})` : ""}. Try again.`,
+      )
     }
   }, [onTranscribed, stopTracks])
 
