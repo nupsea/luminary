@@ -434,3 +434,36 @@ def test_contents_page_twins_are_dropped(tmp_path):
     result = bp.parse(f, "txt")
     assert result is not None
     assert all(s.text.strip() for s in result.sections)
+
+
+def test_docbook_nav_line_is_never_a_subtitle(tmp_path):
+    """A scraped DocBook page puts its navigation under the chapter heading (#229)."""
+    text = "\n".join(
+        f"Chapter {n}. {title}\nPrev {prev}\nNext\n"
+        f"The chapter on {title.lower()} opens here with real prose to read.\n"
+        "Prev\nUp\nNext\nHome\n"
+        for n, title, prev in (
+            (1, "Philosophy", "Part I. Context"),
+            (2, "History", "Chapter 1. Philosophy"),
+            (3, "Contrasts", "Chapter 2. History"),
+        )
+    )
+    f = tmp_path / "docbook.txt"
+    f.write_text(text)
+
+    result = bp.parse(f, "txt")
+    assert result is not None
+    assert [s.heading for s in result.sections] == [
+        "Chapter 1. Philosophy",
+        "Chapter 2. History",
+        "Chapter 3. Contrasts",
+    ]
+
+
+def test_nav_line_shapes():
+    from app.services.universal_parser import _is_nav_line
+
+    for nav in ("Prev", "Up", "Next", "Home", "Prev Part I. Context", "Next Chapter 2. History"):
+        assert _is_nav_line(nav), nav
+    for title in ("Next Steps", "Up the Line", "Homeward Bound", "Previews of Coming Attractions"):
+        assert not _is_nav_line(title), title

@@ -31,7 +31,7 @@ from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
 from app.services.source_text import read_source_text
-from app.services.universal_parser import _drop_bodyless
+from app.services.universal_parser import _drop_bodyless, _is_nav_line
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
@@ -604,11 +604,10 @@ class BookParser:
             lines = body_chunk.splitlines()
             subtitle = ""
             body_offset = 0
-            # TODO(#229): a scraped page's nav line ("Prev Part I. Context") passes as a subtitle.
             for li, line in enumerate(lines[:3]):
                 stripped = line.strip()
                 if stripped:
-                    if _is_subtitle(stripped):
+                    if _is_subtitle(stripped) and not _is_nav_line(stripped):
                         subtitle = stripped
                         body_offset = li + 1
                     break
