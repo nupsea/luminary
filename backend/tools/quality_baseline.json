@@ -7,7 +7,6 @@
     "app/routers/documents.py::list_documents",
     "app/routers/search.py::search",
     "app/routers/study.py::_evaluate_teachback_bg",
-    "app/routers/study.py::get_collection_study_dashboard",
     "app/routers/tags.py::migrate_tag_naming",
     "app/runtime/chat_nodes/comparative.py::comparative_node",
     "app/runtime/chat_nodes/notes.py::notes_gap_node",
@@ -60,7 +59,6 @@
     "app/routers/documents.py::list_documents",
     "app/routers/evals.py::_run_eval_subprocess",
     "app/routers/evals.py::_run_generated_eval_subprocess",
-    "app/routers/study.py::get_collection_study_dashboard",
     "app/routers/study.py::get_study_stats",
     "app/routers/study.py::list_sessions",
     "app/routers/tags.py::migrate_tag_naming",
@@ -104,7 +102,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 229,
+  "complexity_over_10": 228,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
@@ -127,7 +125,7 @@
     "app/routers/qa.py": 2,
     "app/routers/references.py": 2,
     "app/routers/search.py": 4,
-    "app/routers/study.py": 82,
+    "app/routers/study.py": 55,
     "app/routers/summarize.py": 4,
     "app/routers/tags.py": 23,
     "app/runtime/chat_graph.py": 2,

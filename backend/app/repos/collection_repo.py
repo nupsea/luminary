@@ -200,6 +200,34 @@ class CollectionRepo:
         await self.session.execute(stmt)
         await self.session.commit()
 
+    async def parent_links(self) -> list[tuple[str, str | None]]:
+        """(id, parent id) for every collection: the whole tree in one query."""
+        result = await self.session.execute(
+            select(CollectionModel.id, CollectionModel.parent_collection_id)
+        )
+        return [(cid, pid) for cid, pid in result.all()]
+
+    async def names(self, collection_ids: Sequence[str]) -> dict[str, str]:
+        if not collection_ids:
+            return {}
+        result = await self.session.execute(
+            select(CollectionModel.id, CollectionModel.name).where(
+                CollectionModel.id.in_(list(collection_ids))
+            )
+        )
+        return dict(result.tuples().all())
+
+    async def memberships(self, collection_ids: Sequence[str]) -> list[tuple[str, str, str]]:
+        """(collection id, member id, member type) for every member of these collections."""
+        result = await self.session.execute(
+            select(
+                CollectionMemberModel.collection_id,
+                CollectionMemberModel.member_id,
+                CollectionMemberModel.member_type,
+            ).where(CollectionMemberModel.collection_id.in_(list(collection_ids)))
+        )
+        return [(cid, mid, kind) for cid, mid, kind in result.all()]
+
     async def member_ids_recursive(self, collection_id: str) -> tuple[list[str], list[str]]:
         """(document ids, note ids) in this collection and every collection below it."""
         coll_ids = {collection_id}

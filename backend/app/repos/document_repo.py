@@ -135,6 +135,24 @@ class DocumentRepo:
             stmt = stmt.where(DocumentModel.id.in_(list(document_ids)))
         return [(doc_id, tags) for doc_id, tags in (await self.session.execute(stmt)).all()]
 
+    async def titles_with_chunk_counts(
+        self, document_ids: Sequence[str]
+    ) -> list[tuple[str, str, int]]:
+        """(id, title, chunk count). Chunks, not word_count, which is 0 on many imported books."""
+        if not document_ids:
+            return []
+        chunks = (
+            select(func.count(ChunkModel.id))
+            .where(ChunkModel.document_id == DocumentModel.id)
+            .scalar_subquery()
+        )
+        result = await self.session.execute(
+            select(DocumentModel.id, DocumentModel.title, chunks).where(
+                DocumentModel.id.in_(list(document_ids))
+            )
+        )
+        return [(did, title, int(n or 0)) for did, title, n in result.all()]
+
     async def list_recently_accessed_complete(self, limit: int) -> Sequence[DocumentModel]:
         result = await self.session.execute(
             select(DocumentModel)

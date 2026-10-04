@@ -25,6 +25,7 @@ from app.models import (
     NoteLinkModel,
     NoteModel,
     NoteSourceModel,
+    NoteTagIndexModel,
 )
 from app.repos._helpers import get_or_404
 
@@ -84,6 +85,30 @@ class NoteRepo:
             .limit(limit)
         )
         return [(row[0], row[1], row[2]) for row in result.all()]
+
+    async def tag_pairs(self, note_ids: Sequence[str]) -> list[tuple[str, str]]:
+        """(tag, note id) from the tag index for these notes."""
+        if not note_ids:
+            return []
+        result = await self.session.execute(
+            select(NoteTagIndexModel.tag_full, NoteTagIndexModel.note_id).where(
+                NoteTagIndexModel.note_id.in_(list(note_ids))
+            )
+        )
+        return [(tag, nid) for tag, nid in result.all()]
+
+    async def snippets(self, note_ids: Sequence[str], chars: int) -> list[tuple[str, str, int]]:
+        """(id, first `chars` of content, content length), without loading whole bodies."""
+        if not note_ids:
+            return []
+        result = await self.session.execute(
+            select(
+                NoteModel.id,
+                func.substr(NoteModel.content, 1, chars),
+                func.length(NoteModel.content),
+            ).where(NoteModel.id.in_(list(note_ids)))
+        )
+        return [(nid, snippet or "", int(length or 0)) for nid, snippet, length in result.all()]
 
     async def autocomplete_content(
         self, prefix: str, limit: int = 8
