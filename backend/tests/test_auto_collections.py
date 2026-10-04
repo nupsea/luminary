@@ -101,3 +101,50 @@ def test_create_auto_collection_404_for_missing_document(client):
     """POST /collections/auto returns 404 when document does not exist."""
     resp = client.post(f"/collections/auto/{uuid.uuid4()}")
     assert resp.status_code == 404
+
+
+# DELETE /documents/{id}: its auto-collection does not outlive it unless it holds notes
+
+
+def _add_note_member(collection_id: str) -> None:
+    import asyncio  # noqa: PLC0415
+
+    from app.database import get_session_factory  # noqa: PLC0415
+    from app.models import CollectionMemberModel  # noqa: PLC0415
+
+    async def _insert():
+        async with get_session_factory()() as session:
+            session.add(
+                CollectionMemberModel(
+                    id=str(uuid.uuid4()),
+                    collection_id=collection_id,
+                    member_id=str(uuid.uuid4()),
+                    member_type="note",
+                )
+            )
+            await session.commit()
+
+    asyncio.run(_insert())
+
+
+def test_deleting_a_document_drops_its_empty_auto_collection(client):
+    doc_id = _create_document(client)
+    col_id = client.post(f"/collections/auto/{doc_id}").json()["id"]
+
+    assert client.delete(f"/documents/{doc_id}").status_code in (200, 204)
+
+    assert client.get(f"/collections/by-document/{doc_id}").status_code == 404
+    assert client.get(f"/collections/{col_id}").status_code == 404
+
+
+def test_deleting_a_document_keeps_an_auto_collection_that_holds_notes(client):
+    doc_id = _create_document(client)
+    col_id = client.post(f"/collections/auto/{doc_id}").json()["id"]
+    _add_note_member(col_id)
+
+    assert client.delete(f"/documents/{doc_id}").status_code in (200, 204)
+
+    assert client.get(f"/collections/by-document/{doc_id}").status_code == 404
+    kept = client.get(f"/collections/{col_id}")
+    assert kept.status_code == 200
+    assert kept.json()["auto_document_id"] is None

@@ -62,6 +62,7 @@ from app.models import (
     SummaryModel,
     WebReferenceModel,
 )
+from app.repos.collection_repo import CollectionRepo
 
 # indirect: get_lancedb_service is patched in tests
 from app.services import vector_store as _vector_store_module
@@ -120,6 +121,18 @@ _LEARNER_RECORD_TABLES: tuple[type, ...] = (
     PomodoroSessionModel,
     PredictionEventModel,
 )
+
+
+async def _retire_auto_collection(session: AsyncSession, document_id: str) -> None:
+    """Drop a deleted document's auto-collection, or keep it as a plain one if it holds notes."""
+    repo = CollectionRepo(session)
+    col = await repo.find_by_auto_document_id(document_id)
+    if col is None:
+        return
+    if await repo.count_members(col.id) or await repo.child_ids(col.id):
+        col.auto_document_id = None
+    else:
+        await session.delete(col)
 
 
 class DocumentDeletionService:
@@ -209,6 +222,7 @@ class DocumentDeletionService:
                 CollectionMemberModel.member_type == "document",
             )
         )
+        await _retire_auto_collection(session, document_id)
         # The library summary describes every document, so a delete drops it (#140).
         # The caller schedules the regeneration once the transaction commits.
         await session.execute(delete(LibrarySummaryModel))
