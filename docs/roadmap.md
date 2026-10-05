@@ -664,24 +664,28 @@ shape is decided with the tenant seam in view, not retrofitted to it.
 **Chapter practice: questions written at ingestion, offered at each chapter's end (#231).** Practice
 starts from a button and writes its cards on demand.
 
-*Built:* the `chapter_cards` enrichment job (`services/chapter_cards.py`) writes every chapter's
-cards once a document is readable, and skips on a host `llm_routing.refusal` refuses. Chapters
-come from heading text ("Chapter 3.", "Part II.", numbered headings that count up), else from
-~30k-character windows labelled by page range or by their first topical heading, never by an
-invented title; a document under 40k characters is one chapter (`services/chapters.py`). Per
-~3.5k window the model writes 1-3 study notes and each becomes one gated card
-(`services/flashcard_chapter.py`). Cards are stored `fsrs_state='held'` with no due date and a
-`chapter_id`, so they stay out of the review queue. Measured on qwen3.5:4b over 12 chapters, two
-blind runs against the unit path: core ideas covered 0.29 -> 0.57 and 0.31 -> 0.63, sound cards
-0.81 -> 0.93 and 0.82 -> 0.97. It costs about 7 s of generation per 1k characters: DDIA chapter 3
-(74k characters) took 528 s for 40 cards, so a whole book is hours of background work.
+*Built:* chapters come from heading text ("Chapter 3.", "Part II.", numbered headings that
+count up), else from ~30k-character windows labelled by page range or by their first topical
+heading, never by an invented title; a document under 40k characters is one chapter
+(`services/chapters.py`). Per ~3.5k window the model writes 1-3 study notes and each becomes one
+gated card (`services/flashcard_chapter.py`). Cards are stored `fsrs_state='held'` with no due
+date and a `chapter_id`, so they stay out of the review queue. Ingestion writes a document's first
+two chapters (`services/chapter_cards.py`); `services/chapter_backfill.py` writes the rest one
+chapter at a time for documents read in the last two weeks: the chapter being read and the next
+whenever the runtime is free, later ones only when the machine is idle (mains power, no question
+for five minutes, processor not busy, nothing ingesting), and only if the model is loaded or fits
+with 2GB to spare. It adds no model and no serving slot (I-31), runs as background calls that
+yield to the learner, and unloads a model it loaded. Measured on qwen3.5:4b over 12 chapters, two
+blind runs against the unit path: core ideas covered 0.27 -> 0.56 and 0.26 -> 0.54, sound cards
+0.77 -> 0.87 and 0.74 -> 0.92. Cost on the 4B: DDIA chapter 3 (74k characters) took 261 s for 34
+cards, so a 30k-character chapter is under two minutes against roughly twenty to read it.
 
 *Open:* practising a chapter moves its held cards into FSRS; the reader offers "Practice this
 chapter" past a chapter's last section (Practice, Later, Don't ask for this book) and opens the
 dock on it; Study lists each book's chapters with card counts, and "Random from this book" draws
-across chapters weighted toward the unpractised. First-person fiction yields 1-2 cards a chapter
-(*The Time Machine*, *Moby-Dick*): the answer-coverage floor rejects the model's third-person
-paraphrase of an "I" narrator.
+across chapters weighted toward the unpractised. Fiction is the weak kind: sound
+0.69 and 0.82 of chapter cards on the 4B against 0.89 and 0.93 for non-fiction, the failures mostly
+characters confused in first-person narrative (who shivered, who is ill, Ahab for Ishmael).
 
 ### 6. An architecture that can take tenants — 0.17.0
 
