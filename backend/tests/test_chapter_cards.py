@@ -302,6 +302,38 @@ async def test_a_chapter_that_yields_no_card_is_not_written_again(long_book, fak
 
     monkeypatch.setattr(chapter_backfill, "not_now", now)
     await _read_at(long_book, "ch0")
-    assert await chapter_backfill.run_once() is True
-    assert await chapter_backfill.run_once() is True
+    assert (await chapter_backfill.run_once())[0] is True
+    assert (await chapter_backfill.run_once())[0] is True
     assert await _written(long_book) == {"ch0", "ch1"}
+
+
+async def test_a_model_the_backfill_loaded_is_unloaded_when_work_runs_out(monkeypatch):
+    unloaded: list[str] = []
+    steps = iter([(True, "qwen3.5:4b"), (True, None), (False, None)])
+
+    async def run_once():
+        return next(steps)
+
+    async def unload(model):
+        unloaded.append(model)
+
+    monkeypatch.setattr(chapter_backfill, "run_once", run_once)
+    monkeypatch.setattr(chapter_backfill, "_unload", unload)
+    backfill = chapter_backfill.ChapterBackfill()
+    assert [await backfill._step() for _ in range(3)] == [True, True, False]
+    assert unloaded == ["qwen3.5:4b"]
+
+
+async def test_a_model_already_loaded_is_left_for_the_learner(monkeypatch):
+    unloaded: list[str] = []
+
+    async def run_once():
+        return False, None
+
+    async def unload(model):
+        unloaded.append(model)
+
+    monkeypatch.setattr(chapter_backfill, "run_once", run_once)
+    monkeypatch.setattr(chapter_backfill, "_unload", unload)
+    await chapter_backfill.ChapterBackfill()._step()
+    assert unloaded == []

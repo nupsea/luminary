@@ -86,26 +86,45 @@ async def next_chapter() -> Pick | None:
     return later
 
 
-async def _model_fits() -> str | None:
-    """Why loading the model now would crowd the machine, or None."""
+def _local_model():  # type: ignore[no-untyped-def]
     from app.services.model_router import resolve  # noqa: PLC0415
 
     choice = resolve("background")
-    if not choice.is_local:
-        return None
-    name = choice.model.removeprefix("ollama/")
+    return choice if choice.is_local else None
+
+
+async def _ollama(path: str, payload: dict | None = None) -> dict:
+    url = f"{get_settings().OLLAMA_URL}{path}"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await (client.post(url, json=payload) if payload else client.get(url))
+        return resp.json()
+
+
+async def _resident(name: str) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{get_settings().OLLAMA_URL}/api/ps")
-            loaded = {m.get("name") for m in resp.json().get("models") or []}
+        loaded = {m.get("name") for m in (await _ollama("/api/ps")).get("models") or []}
     except (httpx.HTTPError, ValueError):
-        loaded = set()
-    if loaded & {name, f"{name}:latest"}:
+        return False
+    return bool(loaded & {name, f"{name}:latest"})
+
+
+async def _model_fits() -> str | None:
+    """Why loading the model now would crowd the machine, or None."""
+    choice = _local_model()
+    if choice is None or await _resident(choice.model.removeprefix("ollama/")):
         return None
     needed = (choice.profile.resident_bytes if choice.profile else 0) + HEADROOM_BYTES
     if psutil.virtual_memory().available < needed:
         return "not enough free memory to load the model"
     return None
+
+
+async def _unload(model: str) -> None:
+    """Free a model the backfill loaded; the server would otherwise hold it for its keep-alive."""
+    try:
+        await _ollama("/api/generate", {"model": model, "keep_alive": 0})
+    except (httpx.HTTPError, ValueError):
+        logger.info("chapter backfill could not unload %s", model)
 
 
 def _battery_reason(ahead: bool) -> str | None:
@@ -119,14 +138,8 @@ def _battery_reason(ahead: bool) -> str | None:
 
 async def _idle_reason() -> str | None:
     """Why later chapters must wait, or None when the machine is idle."""
-    from app.services.llm_admission import current_state  # noqa: PLC0415
-
-    state = current_state()
-    if state is not None and state.interactive_inflight:
+    if not _learner_quiet():
         return "in use"
-    if state is not None and state.last_interactive_end > 0:
-        if time.monotonic() - state.last_interactive_end < QUIET_SECONDS:
-            return "in use"
     async with get_session_factory()() as session:
         since = datetime.now(UTC) - timedelta(days=1)
         if await DocumentRepo(session).enrichment_in_progress(since):
@@ -145,19 +158,36 @@ async def not_now(pick: Pick) -> str | None:
     return reason or await _model_fits()
 
 
-async def run_once() -> bool:
-    """Write one chapter if one is waiting and the machine can spare it; whether it did."""
+def _learner_quiet() -> bool:
+    from app.services.llm_admission import current_state  # noqa: PLC0415
+
+    state = current_state()
+    if state is None:
+        return True
+    if state.interactive_inflight:
+        return False
+    return time.monotonic() - state.last_interactive_end >= QUIET_SECONDS
+
+
+async def run_once() -> tuple[bool, str | None]:
+    """Write one chapter if one is waiting and the machine can spare it.
+
+    Returns whether it wrote, and the model it had to load to do so (None if already loaded).
+    """
     pick = await next_chapter()
     if pick is None:
-        return False
+        return False, None
     reason = await not_now(pick)
     if reason is not None:
         logger.debug("chapter backfill waits (%s): %s", reason, pick.chapter.title[:60])
-        return False
+        return False, None
+    choice = _local_model()
+    name = choice.model.removeprefix("ollama/") if choice else None
+    loaded = name if name and not await _resident(name) else None
     async with get_session_factory()() as session:
         names = await _known_names(pick.document_id, session)
         await write_chapter(pick.document_id, pick.title, pick.chapter, names, session)
-    return True
+    return True, loaded
 
 
 class ChapterBackfill:
@@ -165,6 +195,8 @@ class ChapterBackfill:
 
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
+        # The model this loop loaded, unloaded when it runs out of work.
+        self._loaded: str | None = None
 
     def start(self) -> None:
         if get_settings().CHAPTER_CARDS_BACKFILL and self._task is None:
@@ -176,14 +208,23 @@ class ChapterBackfill:
             await asyncio.gather(self._task, return_exceptions=True)
             self._task = None
 
+    async def _step(self) -> bool:
+        try:
+            wrote, loaded = await run_once()
+        except Exception:
+            logger.exception("chapter backfill failed; retrying next tick")
+            return False
+        self._loaded = self._loaded or loaded
+        # A learner who started asking meanwhile is using the model: leave it loaded.
+        if not wrote and self._loaded and _learner_quiet():
+            await _unload(self._loaded)
+            self._loaded = None
+        return wrote
+
     async def _loop(self) -> None:
         # Waits first: start-up already loads models and drains the enrichment queue.
         wrote = False
         while True:
             if not wrote:
                 await asyncio.sleep(TICK_SECONDS)
-            try:
-                wrote = await run_once()
-            except Exception:
-                logger.exception("chapter backfill failed; retrying next tick")
-                wrote = False
+            wrote = await self._step()
