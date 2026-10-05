@@ -234,6 +234,8 @@ def card_from_reply(
 
 
 async def _ask(llm: Any, model: str | None, prompt: str, system: str) -> str:
+    # background=True keeps the book on this machine in Hybrid mode and yields the runtime to
+    # anything the user is waiting on (llm_admission).
     async with get_enrichment_llm_semaphore():
         return await llm.generate(
             prompt,
@@ -241,6 +243,7 @@ async def _ask(llm: Any, model: str | None, prompt: str, system: str) -> str:
             model=model,
             stream=False,
             response_format={"type": "json_object"},
+            background=True,
         )
 
 

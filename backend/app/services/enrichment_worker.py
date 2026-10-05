@@ -32,7 +32,7 @@ JOB_MODEL_ROLE: dict[str, str] = {
     "web_refs": "background",
     "prerequisites": "background",
     "concept_link": "background",
-    "chapter_cards": "generation",
+    "chapter_cards": "background",
 }
 JOBS_WITHOUT_A_MODEL = frozenset({"image_extract"})
 

@@ -121,9 +121,11 @@ class _FakeLLM:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.foreground = 0
 
-    async def generate(self, prompt: str, *, system: str, **_kw) -> str:
+    async def generate(self, prompt: str, *, system: str, **kw) -> str:
         self.calls += 1
+        self.foreground += not kw.get("background")
         if system == CHAPTER_NOTES_SYSTEM:
             return json.dumps({"notes": ["A log is an append-only sequence of records."]})
         evidence = prompt.split("Evidence from the book:\n", 1)[1].split("\n")[0]
@@ -164,6 +166,8 @@ def fakes(monkeypatch):
 
 async def test_the_job_writes_held_cards_outside_the_review_queue(book, fakes):
     await chapter_cards.chapter_cards_handler("doc", "job")
+    # Background: stays on this machine in Hybrid mode and yields to the user.
+    assert fakes.calls > 0 and fakes.foreground == 0
 
     async with book.factory() as session:
         cards = (await session.execute(select(FlashcardModel))).scalars().all()

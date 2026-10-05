@@ -64,13 +64,12 @@ async def write_chapter(
     document_id: str, book: str, chapter: Chapter, known_names: str, session: AsyncSession
 ) -> int:
     from app.services.flashcard import get_llm_service  # noqa: PLC0415
-    from app.services.flashcard_generators import _generation_model  # noqa: PLC0415
 
     rows = await DocumentRepo(session).chunks_with_headings(chapter.section_ids)
     passages = [Passage(chunk.id, chunk.text, heading) for chunk, heading in rows]
     cards = await write_chapter_cards(
         get_llm_service(),
-        _generation_model(),
+        None,  # background routing picks the on-device model
         get_embedding_service().encode,
         book=book,
         passages=passages,
