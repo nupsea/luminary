@@ -13,7 +13,7 @@ import asyncio
 import json
 import logging
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -66,6 +66,12 @@ class Window:
     chunk_ids: list[str] = field(default_factory=list)
     units: list[str] = field(default_factory=list)
 
+    def add(self, passage: Passage, text: str) -> None:
+        if passage.heading not in self.heading.split(" / "):
+            self.heading = f"{self.heading} / {passage.heading}"
+        self.text = f"{self.text}\n\n{text}" if self.text else text
+        self.chunk_ids.append(passage.chunk_id)
+
 
 @dataclass(frozen=True)
 class ChapterCard:
@@ -82,41 +88,47 @@ def _without_overlap(prev: str, nxt: str) -> str:
     return nxt
 
 
-def build_windows(passages: Sequence[Passage]) -> list[Window]:
-    """Section-aligned windows of about WINDOW_CHARS, without reference lists or chunk overlap."""
-    windows: list[Window] = []
-    cur: Window | None = None
+def _opens_window(cur: Window, heading: str, text: str) -> bool:
+    """A new window starts when this one is full, or at a section that would overfill it."""
+    if len(cur.text) >= WINDOW_CHARS:
+        return True
+    new_section = heading not in cur.heading.split(" / ")
+    return (
+        new_section
+        and len(cur.text) >= MIN_WINDOW_CHARS
+        and len(cur.text) + len(text) > WINDOW_CHARS
+    )
+
+
+def _sampled(windows: list[Window]) -> list[Window]:
+    if len(windows) <= MAX_CHAPTER_WINDOWS:
+        return windows
+    step = len(windows) / MAX_CHAPTER_WINDOWS
+    return [windows[int(i * step)] for i in range(MAX_CHAPTER_WINDOWS)]
+
+
+def _readable(passages: Sequence[Passage]) -> Iterator[tuple[Passage, str]]:
+    """Each passage's own text: reference lists dropped, overlap with the one before removed."""
     prev = ""
     for p in passages:
         if _is_reference_chunk(p.text, p.heading):
             continue
         text = _without_overlap(prev, p.text).strip()
         prev = p.text
-        if not text:
-            continue
-        new_section = cur is not None and p.heading not in cur.heading.split(" / ")
-        if (
-            cur is None
-            or len(cur.text) >= WINDOW_CHARS
-            or (
-                new_section
-                and len(cur.text) >= MIN_WINDOW_CHARS
-                and len(cur.text) + len(text) > WINDOW_CHARS
-            )
-        ):
-            cur = Window(heading=p.heading)
-            windows.append(cur)
-        elif new_section:
-            cur.heading = f"{cur.heading} / {p.heading}"
-        cur.text = f"{cur.text}\n\n{text}" if cur.text else text
-        cur.chunk_ids.append(p.chunk_id)
+        if text:
+            yield p, text
+
+
+def build_windows(passages: Sequence[Passage]) -> list[Window]:
+    """Section-aligned windows of about WINDOW_CHARS, without reference lists or chunk overlap."""
+    windows: list[Window] = []
+    for p, text in _readable(passages):
+        if not windows or _opens_window(windows[-1], p.heading, text):
+            windows.append(Window(heading=p.heading))
+        windows[-1].add(p, text)
     for w in windows:
         w.units = list(dict.fromkeys(u for u in split_units(w.text) if _learnable_words(u) > 0))
-    kept = [w for w in windows if w.units]
-    if len(kept) <= MAX_CHAPTER_WINDOWS:
-        return kept
-    step = len(kept) / MAX_CHAPTER_WINDOWS
-    return [kept[int(i * step)] for i in range(MAX_CHAPTER_WINDOWS)]
+    return _sampled([w for w in windows if w.units])
 
 
 def _notes_wanted(window: Window) -> int:
@@ -170,6 +182,24 @@ def _names_the_work(question: str, book: str) -> bool:
     return bool(title) and title <= set(_WORDS.findall(question.lower()))
 
 
+_CLOSERS = " \"'\u201d\u2019)]"
+
+
+def _question_and_answer(raw: str, document_id: str) -> tuple[str, str] | None:
+    replies = _parse_llm_response(raw, document_id, expect="object")
+    item = next((x for x in replies if isinstance(x, dict)), None)
+    if item is None:
+        return None
+    return card_field(item, "question", "front", "q"), card_field(item, "answer", "back", "a")
+
+
+def _answer_coverage(answer: str, shown: str, units: Sequence[str]) -> float:
+    """The writer saw a span, so the answer may draw on all of it at the one-sentence floor."""
+    words = _content(answer)
+    span = len(words & _content(shown)) / len(words) if words else 0.0
+    return max(best_unit(answer, list(units))[1], span)
+
+
 def card_from_reply(
     raw: str,
     *,
@@ -181,20 +211,13 @@ def card_from_reply(
     document_id: str,
 ) -> tuple[dict[str, str] | None, str]:
     """The card in *raw* if it passes every gate, else (None, why it was dropped)."""
-    item = next(
-        (x for x in _parse_llm_response(raw, document_id, expect="object") if isinstance(x, dict)),
-        None,
-    )
-    if item is None:
+    parsed = _question_and_answer(raw, document_id)
+    if parsed is None:
         return None, "unparsed"
-    q = card_field(item, "question", "front", "q")
-    a = card_field(item, "answer", "back", "a")
-    if not q.rstrip(" \"'”’)]").endswith("?"):
+    q, a = parsed
+    if not q.rstrip(_CLOSERS).endswith("?"):
         return None, "not a question"
-    # The writer saw a span, so the answer may draw on all of it at the one-sentence floor.
-    words = _content(a)
-    span_coverage = len(words & _content(shown)) / len(words) if words else 0.0
-    coverage = max(best_unit(a, window.units)[1], span_coverage)
+    coverage = _answer_coverage(a, shown, window.units)
     if coverage < MIN_ANSWER_COVERAGE:
         return None, f"answer in no sentence ({coverage:.2f})"
     unshown = names_not_in(q, f"{book} {window.heading} {known_names} {window.text}")

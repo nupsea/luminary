@@ -94,16 +94,20 @@ def _counts_up(sections: Sequence[SectionExtent], found: list[int]) -> bool:
     return sum(b > a for a, b in steps) >= MIN_ASCENDING_SHARE * len(steps)
 
 
+def _matching(sections: Sequence[SectionExtent], mark: re.Pattern[str]) -> list[int]:
+    return [i for i, s in enumerate(sections) if mark.match(s.heading)]
+
+
 def _boundaries(sections: Sequence[SectionExtent]) -> list[int] | None:
     """Indexes of sections that open a chapter, or None when headings carry no chapter marks."""
-    chapters = [i for i, s in enumerate(sections) if _CHAPTER_MARK.match(s.heading)]
-    parts = [i for i, s in enumerate(sections) if _PART_MARK.match(s.heading)]
+    chapters = _matching(sections, _CHAPTER_MARK)
+    parts = _matching(sections, _PART_MARK)
     if len(chapters) >= MIN_MARKED_CHAPTERS:
         # A part's opening pages are their own unit, not the tail of the chapter before.
         return sorted(set(chapters) | {i for i in parts if i > chapters[0]})
     if len(parts) >= MIN_MARKED_CHAPTERS:
         return parts
-    numbered = [i for i, s in enumerate(sections) if _NUMBERED.match(s.heading)]
+    numbered = _matching(sections, _NUMBERED)
     if len(numbered) >= MIN_NUMBERED_CHAPTERS and _counts_up(sections, numbered):
         return numbered
     return None
@@ -136,40 +140,43 @@ def _without_back_matter(members: list[SectionExtent]) -> list[SectionExtent]:
     return members
 
 
+def _starts(ordered: Sequence[SectionExtent]) -> tuple[list[int], bool]:
+    """Indexes opening each chapter, and whether they came from heading marks."""
+    if sum(s.chars for s in ordered) < WHOLE_DOCUMENT_CHARS:
+        return [0], False
+    marked = _boundaries(ordered)
+    return (marked, True) if marked is not None else (_windows(ordered), False)
+
+
+def _chapter(members: list[SectionExtent], order: int, title: str | None) -> Chapter:
+    page_start = min((s.page_start for s in members if s.page_start), default=0)
+    page_end = max((s.page_end for s in members), default=0)
+    return Chapter(
+        id=members[0].id,
+        title=title or _window_title(members, page_start, page_end),
+        order=order,
+        section_ids=[s.id for s in members],
+        chars=sum(s.chars for s in members),
+        page_start=page_start,
+        page_end=page_end,
+    )
+
+
 def detect_chapters(sections: Sequence[SectionExtent], document_title: str) -> list[Chapter]:
     """Chapters in reading order. Front matter before the first marked chapter is left out."""
     ordered = sorted((s for s in sections if s.chars > 0), key=lambda s: s.first_chunk)
     if not ordered:
         return []
-    marked = None
-    if sum(s.chars for s in ordered) < WHOLE_DOCUMENT_CHARS:
-        starts = [0]
-    else:
-        marked = _boundaries(ordered)
-        starts = marked if marked is not None else _windows(ordered)
-    chapters: list[Chapter] = []
-    for n, start in enumerate(starts):
-        end = starts[n + 1] if n + 1 < len(starts) else len(ordered)
+    starts, marked = _starts(ordered)
+    ends = [*starts[1:], len(ordered)]
+    chapters = []
+    for n, (start, end) in enumerate(zip(starts, ends, strict=True)):
         members = _without_back_matter(list(ordered[start:end]))
-        page_start = min((s.page_start for s in members if s.page_start), default=0)
-        page_end = max((s.page_end for s in members), default=0)
-        if marked is not None:
-            title = members[0].heading.strip()
-        elif len(starts) == 1:
-            title = document_title
+        if marked:
+            title: str | None = members[0].heading.strip()
         else:
-            title = _window_title(members, page_start, page_end)
-        chapters.append(
-            Chapter(
-                id=members[0].id,
-                title=title,
-                order=n,
-                section_ids=[s.id for s in members],
-                chars=sum(s.chars for s in members),
-                page_start=page_start,
-                page_end=page_end,
-            )
-        )
+            title = document_title if len(starts) == 1 else None
+        chapters.append(_chapter(members, n, title))
     return chapters
 
 
