@@ -19,7 +19,7 @@ contract tests on the prompt and the verification, not a quality claim.
 
 import pytest
 
-from app.routers.study import (
+from app.services.teachback_service import (
     _CORRECTION_USER_TMPL,
     _TEACHBACK_SYSTEM,
     _TEACHBACK_USER_TMPL,
@@ -134,7 +134,7 @@ async def test_a_correction_card_that_repeats_its_card_is_dropped(question, kept
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    from app.routers.study import _insert_correction_flashcard
+    from app.services.teachback_service import _insert_correction_flashcard
 
     card = SimpleNamespace(
         question=_STEPMOTHER_CARD,
@@ -152,7 +152,7 @@ async def test_a_correction_card_that_repeats_its_card_is_dropped(question, kept
         else card.source_excerpt,
     }
     session = MagicMock()
-    with patch("app.routers.study._sync_flashcard_fts", AsyncMock()):
+    with patch("app.services.teachback_service._sync_flashcard_fts", AsyncMock()):
         new_id = await _insert_correction_flashcard(card, payload, session, _STORY)
 
     assert (new_id is not None) is kept

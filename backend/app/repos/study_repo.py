@@ -2,21 +2,20 @@
 patterns the study router needs (due / weak flashcards, chunk-heading
 joins, per-session review events and teachback results).
 
-Bespoke multi-table dashboard queries (e.g.
-`get_collection_study_dashboard`, the tag-scoped filter logic inside
-`get_due_count` / `get_due_cards`) stay inline in `routers/study.py`
-because their join shapes are not reused elsewhere.
+Which cards a due-queue request covers is resolved in
+`services/study_queue.py`; this module only runs the resulting `DueScope`.
 """
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import Depends
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -38,6 +37,42 @@ GAP_STABILITY_THRESHOLD = 2.0
 GAP_MIN_REPS = 1
 
 
+@dataclass(frozen=True)
+class DueScope:
+    """Filters on the due queue. Every non-empty field narrows it.
+
+    `pool` is (document ids, note ids): a card sourced from either is in scope,
+    which is how a collection or a tag selects cards.
+    """
+
+    document_ids: Sequence[str] = ()
+    note_ids: Sequence[str] = ()
+    section_id: str | None = None
+    pool: tuple[Sequence[str], Sequence[str]] | None = None
+
+    def apply(self, stmt):  # type: ignore[no-untyped-def]
+        stmt = stmt.where(FlashcardModel.due_date <= datetime.now(UTC))
+        if self.section_id:
+            stmt = stmt.where(
+                FlashcardModel.chunk_id.in_(
+                    select(ChunkModel.id).where(ChunkModel.section_id == self.section_id)
+                )
+            )
+        if self.document_ids:
+            stmt = stmt.where(FlashcardModel.document_id.in_(list(self.document_ids)))
+        if self.note_ids:
+            stmt = stmt.where(FlashcardModel.note_id.in_(list(self.note_ids)))
+        if self.pool is not None:
+            pool_docs, pool_notes = self.pool
+            stmt = stmt.where(
+                or_(
+                    FlashcardModel.document_id.in_(list(pool_docs)),
+                    FlashcardModel.note_id.in_(list(pool_notes)),
+                )
+            )
+        return stmt
+
+
 class StudyRepo:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -46,6 +81,9 @@ class StudyRepo:
 
     async def get_session_or_404(self, session_id: str) -> StudySessionModel:
         return await get_or_404(self.session, StudySessionModel, session_id, name="Session")
+
+    async def find_session(self, session_id: str) -> StudySessionModel | None:
+        return await self.session.get(StudySessionModel, session_id)
 
     async def find_open_session(
         self,
@@ -254,7 +292,151 @@ class StudyRepo:
         await self.session.commit()
         return len(dead_ids)
 
+    async def list_sessions(
+        self,
+        *,
+        document_id: str | None,
+        collection_id: str | None,
+        mode: str | None,
+        status: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[int, Sequence[StudySessionModel]]:
+        """(total matching, one page newest first). status is incomplete | complete."""
+        stmt = select(StudySessionModel)
+        if document_id:
+            stmt = stmt.where(StudySessionModel.document_id == document_id)
+        if collection_id:
+            stmt = stmt.where(StudySessionModel.collection_id == collection_id)
+        if mode:
+            stmt = stmt.where(StudySessionModel.mode == mode)
+        if status == "incomplete":
+            stmt = stmt.where(StudySessionModel.ended_at.is_(None))
+        elif status == "complete":
+            stmt = stmt.where(StudySessionModel.ended_at.is_not(None))
+        total = (
+            await self.session.execute(select(func.count()).select_from(stmt.subquery()))
+        ).scalar_one()
+        page = await self.session.execute(
+            stmt.order_by(StudySessionModel.started_at.desc()).offset(offset).limit(limit)
+        )
+        return total, page.scalars().all()
+
+    async def list_sessions_for_document(self, document_id: str) -> Sequence[StudySessionModel]:
+        result = await self.session.execute(
+            select(StudySessionModel).where(StudySessionModel.document_id == document_id)
+        )
+        return result.scalars().all()
+
+    async def list_ended_sessions_since(
+        self, cutoff: datetime, *, document_id: str | None = None
+    ) -> Sequence[StudySessionModel]:
+        stmt = select(StudySessionModel).where(
+            StudySessionModel.started_at >= cutoff,
+            StudySessionModel.ended_at.is_not(None),
+        )
+        if document_id:
+            stmt = stmt.where(StudySessionModel.document_id == document_id)
+        return (await self.session.execute(stmt)).scalars().all()
+
     # -- Review events / teachback results --------------------------------
+
+    async def predictions_since(self, cutoff: datetime) -> list[tuple[str, str, datetime]]:
+        """(predicted rating, actual rating, reviewed at) for reviews made with a prediction."""
+        result = await self.session.execute(
+            select(
+                ReviewEventModel.predicted_rating,
+                ReviewEventModel.rating,
+                ReviewEventModel.reviewed_at,
+            ).where(
+                ReviewEventModel.predicted_rating.is_not(None),
+                ReviewEventModel.reviewed_at >= cutoff,
+            )
+        )
+        return [(predicted, actual, at) for predicted, actual, at in result.all()]
+
+    async def find_teachback(self, teachback_id: str) -> TeachbackResultModel | None:
+        return await self.session.get(TeachbackResultModel, teachback_id)
+
+    async def has_earlier_attempt(self, row: TeachbackResultModel) -> bool:
+        """Whether this card was already answered earlier in the same session."""
+        result = await self.session.execute(
+            select(TeachbackResultModel.id)
+            .where(
+                TeachbackResultModel.session_id == row.session_id,
+                TeachbackResultModel.flashcard_id == row.flashcard_id,
+                TeachbackResultModel.created_at < row.created_at,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def teachback_results_with_cards(
+        self, *, ids: Sequence[str] | None = None, session_id: str | None = None
+    ) -> list[tuple[TeachbackResultModel, str | None, str | None]]:
+        """(result, card question, card answer) by result ids or for a session, oldest first.
+
+        Outer join: a result whose card was deleted still comes back, with no text.
+        """
+        stmt = select(TeachbackResultModel, FlashcardModel.question, FlashcardModel.answer).join(
+            FlashcardModel,
+            TeachbackResultModel.flashcard_id == FlashcardModel.id,
+            isouter=True,
+        )
+        if ids is not None:
+            stmt = stmt.where(TeachbackResultModel.id.in_(list(ids)))
+        if session_id is not None:
+            stmt = stmt.where(TeachbackResultModel.session_id == session_id).order_by(
+                TeachbackResultModel.created_at
+            )
+        return [(tb, q, a) for tb, q, a in (await self.session.execute(stmt)).all()]
+
+    async def pending_teachback_counts(self, session_ids: Sequence[str]) -> dict[str, int]:
+        if not session_ids:
+            return {}
+        result = await self.session.execute(
+            select(TeachbackResultModel.session_id, func.count())
+            .where(
+                TeachbackResultModel.session_id.in_(list(session_ids)),
+                TeachbackResultModel.status == "pending",
+            )
+            .group_by(TeachbackResultModel.session_id)
+        )
+        return {sid: n for sid, n in result.all() if sid is not None}
+
+    async def list_review_events_with_cards(
+        self, session_id: str
+    ) -> list[tuple[ReviewEventModel, FlashcardModel]]:
+        """Events in review order, each with its card. Events of deleted cards drop out."""
+        result = await self.session.execute(
+            select(ReviewEventModel, FlashcardModel)
+            .join(FlashcardModel, ReviewEventModel.flashcard_id == FlashcardModel.id)
+            .where(ReviewEventModel.session_id == session_id)
+            .order_by(ReviewEventModel.reviewed_at)
+        )
+        return [(event, card) for event, card in result.all()]
+
+    async def answered_card_ids(self, session_id: str) -> set[str]:
+        """Cards with a teach-back result or a review event in this session."""
+        answered = set(
+            (
+                await self.session.execute(
+                    select(TeachbackResultModel.flashcard_id).where(
+                        TeachbackResultModel.session_id == session_id
+                    )
+                )
+            ).scalars()
+        )
+        answered.update(
+            (
+                await self.session.execute(
+                    select(ReviewEventModel.flashcard_id).where(
+                        ReviewEventModel.session_id == session_id
+                    )
+                )
+            ).scalars()
+        )
+        return answered
 
     async def list_review_events(self, session_id: str) -> Sequence[ReviewEventModel]:
         result = await self.session.execute(
@@ -277,6 +459,28 @@ class StudyRepo:
         return result.scalars().all()
 
     # -- Flashcard read patterns ------------------------------------------
+
+    async def due_or_unscheduled_for_document(self, document_id: str) -> list[FlashcardModel]:
+        stmt = (
+            select(FlashcardModel)
+            .where(
+                FlashcardModel.document_id == document_id,
+                or_(
+                    FlashcardModel.due_date <= datetime.now(UTC),
+                    FlashcardModel.due_date.is_(None),
+                ),
+            )
+            .order_by(FlashcardModel.due_date.asc())
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def count_due(self, scope: DueScope) -> int:
+        stmt = scope.apply(select(func.count()).select_from(FlashcardModel))
+        return (await self.session.execute(stmt)).scalar_one()
+
+    async def list_due(self, scope: DueScope, *, limit: int) -> list[FlashcardModel]:
+        stmt = scope.apply(select(FlashcardModel)).order_by(FlashcardModel.due_date.asc())
+        return list((await self.session.execute(stmt.limit(limit))).scalars().all())
 
     async def list_weak_flashcards(
         self,

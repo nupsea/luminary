@@ -12,9 +12,10 @@ also stay inline.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from fastapi import Depends
-from sqlalchemy import delete, or_, select
+from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -78,6 +79,7 @@ class FlashcardRepo:
         document_id: str,
         *,
         bloom_level_min: int | None = None,
+        newest_first: bool = True,
     ) -> Sequence[FlashcardModel]:
         stmt = select(FlashcardModel).where(FlashcardModel.document_id == document_id)
         if bloom_level_min is not None:
@@ -85,7 +87,8 @@ class FlashcardRepo:
                 FlashcardModel.bloom_level.is_not(None),
                 FlashcardModel.bloom_level >= bloom_level_min,
             )
-        stmt = stmt.order_by(FlashcardModel.created_at.desc())
+        if newest_first:
+            stmt = stmt.order_by(FlashcardModel.created_at.desc())
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
@@ -114,6 +117,18 @@ class FlashcardRepo:
         result = await self.session.execute(stmt)
         return [(row[0], row[1]) for row in result.all()]
 
+    async def find(self, card_id: str) -> FlashcardModel | None:
+        return await self.session.get(FlashcardModel, card_id)
+
+    async def get_many(self, card_ids: Sequence[str]) -> dict[str, FlashcardModel]:
+        """The cards among these ids that still exist, by id."""
+        if not card_ids:
+            return {}
+        result = await self.session.execute(
+            select(FlashcardModel).where(FlashcardModel.id.in_(list(card_ids)))
+        )
+        return {card.id: card for card in result.scalars().all()}
+
     async def list_existing_ids_in(self, card_ids: Sequence[str]) -> list[str]:
         if not card_ids:
             return []
@@ -139,6 +154,81 @@ class FlashcardRepo:
             .distinct()
         )
         return list(result.scalars().all())
+
+    async def scope_stats(
+        self, document_ids: Sequence[str], note_ids: Sequence[str], *, mastered_above: float
+    ) -> tuple[int, int, int, int]:
+        """(total, due now, new, mastered) over cards from these documents or notes."""
+        clauses = []
+        if document_ids:
+            clauses.append(FlashcardModel.document_id.in_(list(document_ids)))
+        if note_ids:
+            clauses.append(FlashcardModel.note_id.in_(list(note_ids)))
+        if not clauses:
+            return 0, 0, 0, 0
+        now = datetime.now(UTC)
+        row = (
+            await self.session.execute(
+                select(
+                    func.count(FlashcardModel.id),
+                    func.sum(
+                        case(
+                            (
+                                FlashcardModel.due_date.is_not(None)
+                                & (FlashcardModel.due_date <= now),
+                                1,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    func.sum(case((FlashcardModel.fsrs_state == "new", 1), else_=0)),
+                    func.sum(case((FlashcardModel.fsrs_stability > mastered_above, 1), else_=0)),
+                ).where(or_(*clauses))
+            )
+        ).one()
+        total, due, new, mastered = (int(v or 0) for v in row)
+        return total, due, new, mastered
+
+    async def scheduled_document_cards(self) -> list[tuple[str, float, datetime]]:
+        """(document id, stability, due date) for every reviewed, scheduled document card."""
+        result = await self.session.execute(
+            select(
+                FlashcardModel.document_id,
+                FlashcardModel.fsrs_stability,
+                FlashcardModel.due_date,
+            ).where(
+                FlashcardModel.document_id.is_not(None),
+                FlashcardModel.fsrs_stability > 0,
+                FlashcardModel.due_date.is_not(None),
+            )
+        )
+        return [(doc_id, stability, due) for doc_id, stability, due in result.all()]
+
+    async def counts_by_document(self, document_ids: Sequence[str]) -> dict[str, int]:
+        return await self._counts_by(FlashcardModel.document_id, document_ids)
+
+    async def counts_by_note(self, note_ids: Sequence[str]) -> dict[str, int]:
+        return await self._counts_by(FlashcardModel.note_id, note_ids)
+
+    async def _counts_by(self, column, ids: Sequence[str]) -> dict[str, int]:  # type: ignore[no-untyped-def]
+        if not ids:
+            return {}
+        result = await self.session.execute(
+            select(column, func.count(FlashcardModel.id))
+            .where(column.in_(list(ids)))
+            .group_by(column)
+        )
+        return {key: int(n) for key, n in result.all()}
+
+    async def concept_ids_for_cards(self, card_ids: Sequence[str]) -> list[str]:
+        if not card_ids:
+            return []
+        result = await self.session.execute(
+            select(FlashcardModel.concept_id).where(
+                FlashcardModel.id.in_(list(card_ids)), FlashcardModel.concept_id.is_not(None)
+            )
+        )
+        return [c for c in result.scalars().all() if c]
 
     async def list_ids_for_collection(self, collection_id: str) -> list[str]:
         result = await self.session.execute(

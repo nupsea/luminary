@@ -26,7 +26,7 @@ from app.models import (
     StudySessionModel,
     TeachbackResultModel,
 )
-from app.routers.study import _latest_attempt_per_card, _teachback_tally
+from app.services.teachback_service import _latest_attempt_per_card, teachback_tally
 
 _T0 = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
 
@@ -57,7 +57,7 @@ def test_the_screenshot_case():
         _attempt("simplex", 90, minute=1),
         _attempt("geometry", 45, minute=2),
     ]
-    reviewed, correct, accuracy, pending = _teachback_tally(rows)
+    reviewed, correct, accuracy, pending = teachback_tally(rows)
     assert (reviewed, correct, pending) == (2, 1, 0)
     assert accuracy == 67.5
 
@@ -65,7 +65,7 @@ def test_the_screenshot_case():
 def test_a_worse_second_attempt_also_stands():
     """Latest, not best. The summary reports where the learner ended up."""
     rows = [_attempt("c1", 90, minute=0), _attempt("c1", 20, minute=1)]
-    reviewed, correct, accuracy, _pending = _teachback_tally(rows)
+    reviewed, correct, accuracy, _pending = teachback_tally(rows)
     assert (reviewed, correct, accuracy) == (1, 0, 20.0)
 
 
@@ -73,7 +73,7 @@ def test_accuracy_is_none_while_a_standing_attempt_is_unscored():
     """Not 0.0, and not a mean of whatever finished: an unscored card is
     unscored, and a run that is still scoring has no average yet."""
     rows = [_attempt("c1", 80, minute=0), _attempt("c2", 0, minute=1, status="pending")]
-    reviewed, _correct, accuracy, pending = _teachback_tally(rows)
+    reviewed, _correct, accuracy, pending = teachback_tally(rows)
     assert reviewed == 2
     assert pending == 1
     assert accuracy is None
@@ -86,7 +86,7 @@ def test_a_superseded_pending_attempt_does_not_hold_the_run_open():
         _attempt("c1", 0, minute=0, status="pending"),
         _attempt("c1", 70, minute=1),
     ]
-    reviewed, correct, accuracy, pending = _teachback_tally(rows)
+    reviewed, correct, accuracy, pending = teachback_tally(rows)
     assert (reviewed, correct, pending, accuracy) == (1, 1, 0, 70.0)
 
 
@@ -155,7 +155,7 @@ async def test_end_session_counts_cards_not_submissions(test_db):
 
 async def test_only_the_first_attempt_reschedules_the_card(test_db):
     """The re-answer is stored and scored; it does not touch FSRS or add an event."""
-    from app.routers.study import _evaluate_teachback_bg
+    from app.services.teachback_service import _evaluate_teachback_bg
 
     _engine, factory, _tmp = test_db
     doc_id = str(uuid.uuid4())
@@ -187,7 +187,7 @@ async def test_only_the_first_attempt_reschedules_the_card(test_db):
         '"accuracy": 85, "completeness": 80, "clarity": 90, "clarity_comment": "Clear."}'
     )
     for tb in (first, second):
-        with patch("app.routers.study.get_llm_service") as mock_get_llm:
+        with patch("app.services.teachback_service.get_llm_service") as mock_get_llm:
             mock_llm = AsyncMock()
             mock_llm.generate = AsyncMock(return_value=response)
             mock_get_llm.return_value = mock_llm
@@ -360,7 +360,7 @@ async def test_appending_to_a_session_that_is_gone_is_a_404(test_db):
     ],
 )
 def test_list_fields_are_normalised_to_strings(label, raw_value, expected):
-    from app.routers.study import _parse_teachback_response
+    from app.services.teachback_service import _parse_teachback_response
 
     parsed = _parse_teachback_response(
         json.dumps({"accuracy": 50, "completeness": 50, "misconceptions": raw_value})
@@ -371,7 +371,7 @@ def test_list_fields_are_normalised_to_strings(label, raw_value, expected):
 
 def test_absent_list_fields_become_empty_lists_not_none():
     """Everything downstream is typed list[str]; None is not one of them."""
-    from app.routers.study import _parse_teachback_response
+    from app.services.teachback_service import _parse_teachback_response
 
     parsed = _parse_teachback_response('{"accuracy": 70, "completeness": 70}')
     assert parsed is not None
@@ -391,7 +391,7 @@ def test_a_card_graded_twice_is_one_card_reviewed():
     from datetime import UTC, datetime, timedelta
 
     from app.models import ReviewEventModel
-    from app.routers.study import _latest_event_per_card
+    from app.services.teachback_service import latest_event_per_card
 
     now = datetime.now(UTC)
     events = [
@@ -414,7 +414,7 @@ def test_a_card_graded_twice_is_one_card_reviewed():
         ),
     ]
 
-    latest = _latest_event_per_card(events)
+    latest = latest_event_per_card(events)
 
     assert len(latest) == 2
     # The grade that stands is the later one: the learner improved on it.
@@ -425,7 +425,7 @@ def test_the_latest_event_wins_regardless_of_query_order():
     from datetime import UTC, datetime, timedelta
 
     from app.models import ReviewEventModel
-    from app.routers.study import _latest_event_per_card
+    from app.services.teachback_service import latest_event_per_card
 
     now = datetime.now(UTC)
     later = ReviewEventModel(
@@ -439,7 +439,7 @@ def test_the_latest_event_wins_regardless_of_query_order():
         id="e1", session_id="s", flashcard_id="a", is_correct=True, reviewed_at=now
     )
 
-    latest = _latest_event_per_card([later, earlier])
+    latest = latest_event_per_card([later, earlier])
 
     assert [e.id for e in latest] == ["e2"]
 

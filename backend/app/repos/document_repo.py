@@ -126,6 +126,58 @@ class DocumentRepo:
         )
         return result.scalar_one()
 
+    async def chunks_by_ids(self, chunk_ids: Sequence[str]) -> Sequence[ChunkModel]:
+        result = await self.session.execute(
+            select(ChunkModel).where(ChunkModel.id.in_(list(chunk_ids)))
+        )
+        return result.scalars().all()
+
+    async def titles(self, document_ids: Sequence[str]) -> dict[str, str]:
+        if not document_ids:
+            return {}
+        result = await self.session.execute(
+            select(DocumentModel.id, DocumentModel.title).where(
+                DocumentModel.id.in_(list(document_ids))
+            )
+        )
+        return dict(result.tuples().all())
+
+    async def tags_by_id(
+        self, document_ids: Sequence[str] | None = None
+    ) -> list[tuple[str, object]]:
+        """(id, raw tags) for these documents, or for every document when None."""
+        stmt = select(DocumentModel.id, DocumentModel.tags)
+        if document_ids is not None:
+            stmt = stmt.where(DocumentModel.id.in_(list(document_ids)))
+        return [(doc_id, tags) for doc_id, tags in (await self.session.execute(stmt)).all()]
+
+    async def titles_with_chunk_counts(
+        self, document_ids: Sequence[str]
+    ) -> list[tuple[str, str, int]]:
+        """(id, title, chunk count). Chunks, not word_count, which is 0 on many imported books."""
+        if not document_ids:
+            return []
+        chunks = (
+            select(func.count(ChunkModel.id))
+            .where(ChunkModel.document_id == DocumentModel.id)
+            .scalar_subquery()
+        )
+        result = await self.session.execute(
+            select(DocumentModel.id, DocumentModel.title, chunks).where(
+                DocumentModel.id.in_(list(document_ids))
+            )
+        )
+        return [(did, title, int(n or 0)) for did, title, n in result.all()]
+
+    async def list_recently_accessed_complete(self, limit: int) -> Sequence[DocumentModel]:
+        result = await self.session.execute(
+            select(DocumentModel)
+            .where(DocumentModel.stage == "complete")
+            .order_by(DocumentModel.last_accessed_at.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
     async def set_entity_chunks_scanned(self, document_id: str, scanned: int) -> None:
         await self.session.execute(
             update(DocumentModel)

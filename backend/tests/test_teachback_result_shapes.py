@@ -20,7 +20,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import TeachbackResultModel
-from app.routers.study import _string_list
+from app.services.teachback_service import _string_list
 
 
 def test_a_nested_list_is_flattened():
