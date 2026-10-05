@@ -53,12 +53,9 @@ import {
 import { SessionHistory } from "@/components/study/SessionHistory"
 
 import { CardGenerator } from "./CardGenerator"
-import { materialExhausted, noCardsNote, summariseDeck } from "./practiceDeck"
+import { READER_CARD_LIMIT, materialExhausted, noCardsNote, summariseDeck } from "./practiceDeck"
 import { RecallRunner } from "./RecallRunner"
 
-// A reading-session run, not a daily queue: the Study page's 50 is the number
-// for clearing a backlog, and 50 cards is longer than the reading it interrupts.
-const READER_CARD_LIMIT = 20
 
 interface PracticePanelProps {
   documentId: string
@@ -535,7 +532,7 @@ function DeckState({
   )
 }
 
-function StartButton({
+export function StartButton({
   testId,
   icon: Icon,
   label,

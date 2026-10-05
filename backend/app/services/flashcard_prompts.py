@@ -577,8 +577,7 @@ def flashcard_units_user_tmpl() -> str:
     return render_for(FLASHCARD_UNITS_USER_SPEC, "generation")
 
 
-# Chapter cards (#231; measurement in docs/roadmap.md). Content examples leak into output ("he"
-# became "He states that ..." in 14 answers): name no example here.
+# Chapter cards (#231). Name no content example here: the model copies it into answers.
 CHAPTER_NOTES_SYSTEM = (
     "You write study notes for a student. Each note states one important idea from the "
     "passage as a complete sentence the student could learn and be tested on."
