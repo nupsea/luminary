@@ -4867,6 +4867,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sections/{document_id}/chapters/prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Chapter Prompt
+         * @description Whether the reader offers practice at each chapter's end ("Don't ask for this book").
+         */
+        put: operations["set_chapter_prompt_sections__document_id__chapters_prompt_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sections/{document_id}/chapters/{chapter_id}/practice": {
         parameters: {
             query?: never;
@@ -7173,6 +7193,13 @@ export interface components {
             /** Due */
             due: number;
         };
+        /** ChapterList */
+        ChapterList: {
+            /** Ask At Chapter End */
+            ask_at_chapter_end: boolean;
+            /** Chapters */
+            chapters: components["schemas"]["ChapterItem"][];
+        };
         /** ChapterProgressItem */
         ChapterProgressItem: {
             /** Section Id */
@@ -7185,6 +7212,11 @@ export interface components {
             covered_objectives: number;
             /** Progress Pct */
             progress_pct: number;
+        };
+        /** ChapterPromptRequest */
+        ChapterPromptRequest: {
+            /** Ask At Chapter End */
+            ask_at_chapter_end: boolean;
         };
         /** ChunkItem */
         ChunkItem: {
@@ -19779,8 +19811,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChapterItem"][];
+                    "application/json": components["schemas"]["ChapterList"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_chapter_prompt_sections__document_id__chapters_prompt_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChapterPromptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

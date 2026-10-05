@@ -357,9 +357,9 @@ async def test_practising_a_chapter_admits_its_cards_to_review(book, fakes):
         assert await StudyRepo(session).due_or_unscheduled_for_document("doc") == []
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        before = (await client.get("/sections/doc/chapters")).json()
+        before = (await client.get("/sections/doc/chapters")).json()["chapters"]
         practised = await client.post("/sections/doc/chapters/s1/practice")
-        after = (await client.get("/sections/doc/chapters")).json()
+        after = (await client.get("/sections/doc/chapters")).json()["chapters"]
         missing = await client.post("/sections/doc/chapters/nope/practice")
 
     assert [(c["id"], c["title"], c["cards"], c["held"], c["due"]) for c in before] == [
@@ -371,3 +371,19 @@ async def test_practising_a_chapter_admits_its_cards_to_review(book, fakes):
     assert missing.status_code == 404
     async with book.factory() as session:
         assert await StudyRepo(session).count_due(DueScope(document_ids=["doc"])) == 1
+
+
+async def test_dont_ask_for_this_book_is_remembered(book):
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = (await client.get("/sections/doc/chapters")).json()["ask_at_chapter_end"]
+        off = await client.put("/sections/doc/chapters/prompt", json={"ask_at_chapter_end": False})
+        later = (await client.get("/sections/doc/chapters")).json()["ask_at_chapter_end"]
+        unknown = await client.put(
+            "/sections/nope/chapters/prompt", json={"ask_at_chapter_end": False}
+        )
+
+    assert (first, off.status_code, later, unknown.status_code) == (True, 204, False, 404)

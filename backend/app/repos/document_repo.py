@@ -246,6 +246,14 @@ class DocumentRepo:
             .values(entity_chunks_scanned=scanned)
         )
 
+    async def set_chapter_prompt_off(self, document_id: str, off: bool) -> None:
+        await self.session.execute(
+            update(DocumentModel)
+            .where(DocumentModel.id == document_id)
+            .values(chapter_prompt_off=off)
+        )
+        await self.session.commit()
+
     async def read_section_count(self, document_id: str) -> int:
         result = await self.session.execute(
             select(func.count()).where(ReadingProgressModel.document_id == document_id)

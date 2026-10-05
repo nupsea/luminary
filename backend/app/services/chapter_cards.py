@@ -120,13 +120,17 @@ class ChapterOverview:
     due: int
 
 
-async def chapter_overview(document_id: str, session: AsyncSession) -> list[ChapterOverview]:
+async def chapter_overview(
+    document_id: str, session: AsyncSession
+) -> tuple[bool, list[ChapterOverview]]:
+    """(whether the reader offers practice at each chapter's end, the chapters with counts)."""
     doc = await DocumentRepo(session).get_or_404(document_id)
     counts = await FlashcardRepo(session).chapter_counts(document_id)
-    return [
+    chapters = [
         ChapterOverview(c, *counts.get(c.id, (0, 0, 0)))
         for c in await chapters_for_document(document_id, doc.title, session)
     ]
+    return not doc.chapter_prompt_off, chapters
 
 
 async def practise_chapter(

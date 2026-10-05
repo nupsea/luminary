@@ -267,25 +267,46 @@ class ChapterItem(BaseModel):
     due: int
 
 
-@router.get("/{document_id}/chapters", response_model=list[ChapterItem])
-async def get_chapters(document_id: str) -> list[ChapterItem]:
+class ChapterList(BaseModel):
+    ask_at_chapter_end: bool
+    chapters: list[ChapterItem]
+
+
+class ChapterPromptRequest(BaseModel):
+    ask_at_chapter_end: bool
+
+
+@router.get("/{document_id}/chapters", response_model=ChapterList)
+async def get_chapters(document_id: str) -> ChapterList:
     """The document's chapters in reading order, with their card counts (#231)."""
     async with get_session_factory()() as session:
-        overview = await chapter_overview(document_id, session)
-    return [
-        ChapterItem(
-            id=o.chapter.id,
-            title=o.chapter.title,
-            order=o.chapter.order,
-            section_ids=o.chapter.section_ids,
-            page_start=o.chapter.page_start,
-            page_end=o.chapter.page_end,
-            cards=o.cards,
-            held=o.held,
-            due=o.due,
-        )
-        for o in overview
-    ]
+        ask, overview = await chapter_overview(document_id, session)
+    return ChapterList(
+        ask_at_chapter_end=ask,
+        chapters=[
+            ChapterItem(
+                id=o.chapter.id,
+                title=o.chapter.title,
+                order=o.chapter.order,
+                section_ids=o.chapter.section_ids,
+                page_start=o.chapter.page_start,
+                page_end=o.chapter.page_end,
+                cards=o.cards,
+                held=o.held,
+                due=o.due,
+            )
+            for o in overview
+        ],
+    )
+
+
+@router.put("/{document_id}/chapters/prompt", status_code=204)
+async def set_chapter_prompt(document_id: str, body: ChapterPromptRequest) -> None:
+    """Whether the reader offers practice at each chapter's end ("Don't ask for this book")."""
+    async with get_session_factory()() as session:
+        repo = DocumentRepo(session)
+        await repo.get_or_404(document_id)
+        await repo.set_chapter_prompt_off(document_id, not body.ask_at_chapter_end)
 
 
 @router.post(
