@@ -575,3 +575,58 @@ FLASHCARD_UNITS_USER_SPEC = PromptSpec(
 def flashcard_units_user_tmpl() -> str:
     """The unit-first user prompt, rendered for the model that will generate the cards."""
     return render_for(FLASHCARD_UNITS_USER_SPEC, "generation")
+
+
+# Chapter cards (#231): the model writes study notes per window, then one card per note. Measured
+# on qwen3.5:4b against the unit path over 12 chapters, two blind runs: core ideas covered
+# 0.29 -> 0.57 and 0.31 -> 0.63, sound cards 0.81 -> 0.93 and 0.82 -> 0.97. Content examples
+# leak into output ("he" became "He states that ..." in 14 answers): name no example here.
+CHAPTER_NOTES_SYSTEM = (
+    "You write study notes for a student. Each note states one important idea from the "
+    "passage as a complete sentence the student could learn and be tested on."
+)
+CHAPTER_NOTES_USER_TMPL = (
+    "Book: {book}\n"
+    "Section: {heading}\n"
+    "\n"
+    "Passage:\n"
+    "{text}\n"
+    "\n"
+    "Write the {k} most important ideas a student should learn from this passage.\n"
+    "- One idea per note, one complete sentence, faithful to the passage and using its "
+    "key terms.\n"
+    "- Name the subject of every note (the system, concept, study, person or character it"
+    ' is about) instead of writing "it", "this approach", "the experiment", "the '
+    'narrator" or "the author".\n'
+    "- Prefer definitions, how something works, causes, trade-offs and the passage's main"
+    " claims. Skip anecdotes, asides, illustrations and numbers that are not the point.\n"
+    '- Each note must say something specific. Skip general remarks such as "there are '
+    'many uses" or "this is important" that a reader could write without the passage.\n'
+    "- In a story, note the events, decisions and revelations that move it forward, "
+    "naming the characters.\n"
+    'Return JSON: {{"notes": ["...", "..."]}}'
+)
+
+CHAPTER_CARD_SYSTEM = "You write one flashcard that tests an important idea from a book."
+CHAPTER_CARD_USER_TMPL = (
+    "Book: {book}\n"
+    "Section: {heading}\n"
+    "\n"
+    "Idea to test: {note}\n"
+    "\n"
+    "Evidence from the book:\n"
+    "{evidence}\n"
+    "\n"
+    "Write one question and its answer that test this idea.\n"
+    "- The question must make sense on its own months later, without the book open: name "
+    'what it asks about. Never write "the passage", "the text", "the author", or "the '
+    'experiment"/"the study"/"this" without naming it.\n'
+    "- Ask about the idea itself (what it is, how it works, why, or what it contrasts "
+    "with), not a minor detail of the evidence.\n"
+    "- Do not refer to chapter or section numbers.\n"
+    "- The answer is short (a phrase or one sentence), supported by the evidence, and "
+    "reuses the evidence's key words. State the fact itself about what the question "
+    "names; never attribute it to the writer or speaker, and never write in the first "
+    "person.\n"
+    'Return JSON: {{"question": "...", "answer": "..."}}'
+)

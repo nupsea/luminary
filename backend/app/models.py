@@ -247,6 +247,9 @@ class FlashcardModel(Base):
     # passage was text supplied directly (a reader selection) and is not
     # reconstructible from the library.
     source_chunk_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # The chapter a pre-written card belongs to, by the id of the chapter's first section
+    # (app.services.chapters). Such cards wait in fsrs_state 'held' until the chapter is practised.
+    chapter_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
@@ -735,6 +738,7 @@ class EnrichmentJobModel(Base):
       prerequisites    -- prerequisite graph extraction
       web_refs         -- web reference resolution
       concept_link     -- cross-document concept linking
+      chapter_cards    -- cards written per chapter, held until the chapter is practised
 
     status values:
       pending  -- queued, not yet started

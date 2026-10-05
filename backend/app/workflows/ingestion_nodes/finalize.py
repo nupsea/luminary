@@ -248,7 +248,7 @@ async def error_finalize_node(state: IngestionState) -> IngestionState:
 
 
 async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
-    """Create enrichment jobs: image_extract (PDF/EPUB only) and concept_link (always).
+    """Create enrichment jobs: image_extract (PDF/EPUB only), concept_link and chapter_cards.
 
     Non-fatal: enrichment failure does not prevent document from being usable.
 
@@ -321,6 +321,25 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
     except Exception as exc:
         logger.warning(
             "enrichment_enqueue_node: concept_link enqueue failed (non-fatal): %s",
+            exc,
+            extra={"doc_id": doc_id},
+        )
+
+    try:
+        async with get_session_factory()() as session:
+            session.add(
+                EnrichmentJobModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    job_type="chapter_cards",
+                    status="pending",
+                )
+            )
+            await session.commit()
+        needs_dispatch = True
+    except Exception as exc:
+        logger.warning(
+            "enrichment_enqueue_node: chapter_cards enqueue failed (non-fatal): %s",
             exc,
             extra={"doc_id": doc_id},
         )

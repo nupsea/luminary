@@ -143,6 +143,17 @@ class FlashcardRepo:
         )
         return list(result.scalars().all())
 
+    async def chapter_ids_with_cards(self, document_id: str) -> set[str]:
+        result = await self.session.execute(
+            select(FlashcardModel.chapter_id)
+            .where(
+                FlashcardModel.document_id == document_id,
+                FlashcardModel.chapter_id.is_not(None),
+            )
+            .distinct()
+        )
+        return set(result.scalars().all())
+
     async def list_document_ids_for_cards(self, card_ids: Sequence[str]) -> list[str]:
         """Distinct documents these cards belong to. Note-sourced cards have none."""
         if not card_ids:

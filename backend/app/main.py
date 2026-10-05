@@ -60,6 +60,7 @@ from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
 from app.services.background import all_pending, clear_registries, task_registry
+from app.services.chapter_cards import chapter_cards_handler
 from app.services.components import (
     activate_extras,
     install_ollama_model,
@@ -224,6 +225,7 @@ async def lifespan(app: FastAPI):
     # TODO(#227): nothing enqueues this job, so no prerequisite edge is ever written.
     _worker.register("prerequisites", prereq_extract_handler)
     _worker.register("concept_link", concept_link_handler)
+    _worker.register("chapter_cards", chapter_cards_handler)
     await _worker.start()
 
     # Load persisted LLM settings into cache so cloud mode is active from first request,
