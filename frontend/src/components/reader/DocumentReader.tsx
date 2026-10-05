@@ -12,10 +12,14 @@ import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { toggleDocumentFavorite } from "@/pages/Learning/api"
 import { useTimeOnTask } from "@/lib/useTimeOnTask"
+import type { Chapter } from "@/lib/chapterApi"
 import { cn, stripMarkdown } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
+import { ChapterEndPrompt } from "./ChapterEndPrompt"
+import { ChapterPracticePanel } from "./ChapterPracticePanel"
+import { useChapterEndOffer } from "./useChapterEndOffer"
 import { PracticePanel } from "./PracticePanel"
 import { isSurfaceVisible } from "@/lib/surfaceManifest"
 import { PanelZoomResetButton } from "@/components/PanelZoomResetButton"
@@ -277,6 +281,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
   // A section the learner chose to practise, with no passage selected.
   const [practiceSection, setPracticeSection] = useState<{ id: string; heading: string } | null>(null)
+  // A chapter the learner chose to practise at its end (#231).
+  const [practiceChapter, setPracticeChapter] = useState<Chapter | null>(null)
 
   // in-document Cmd+F search state
   const [searchOpen, setSearchOpen] = useState(false)
@@ -402,6 +408,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const openAsk = useCallback(() => { showPanel("ask") }, [showPanel])
   const openNotes = useCallback(() => { showPanel("note") }, [showPanel])
   const openPractice = useCallback(() => { showPanel("practice") }, [showPanel])
+  const openChapterPractice = useCallback((chapter: Chapter) => {
+    setPracticeChapter(chapter)
+    showPanel("practice")
+  }, [showPanel])
   const selection = useSelectionWorkflow({
     documentId,
     setChatPreload,
@@ -871,6 +881,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   // Track reading progress via IntersectionObserver (3-second dwell per section)
   useReadingProgress(documentId, doc?.sections.length ?? 0, readerContainerRef)
+  const chapterEnd = useChapterEndOffer(documentId, doc?.sections.length ?? 0)
 
   // fetch saved reading position on mount; show ResumeBanner unless already dismissed this session
   useEffect(() => {
@@ -1433,6 +1444,15 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 )}
               </div>
 
+              {chapterEnd.offer && (
+                <ChapterEndPrompt
+                  documentId={documentId}
+                  chapter={chapterEnd.offer}
+                  onPractice={openChapterPractice}
+                  onDismiss={chapterEnd.dismiss}
+                />
+              )}
+
               {/* Resume banner — shown once per session when a saved position exists */}
               {resumePosition && (
                 <ResumeBanner
@@ -1915,6 +1935,14 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                   onClose={closeFeynman}
                 />
               </Suspense>
+            ) : practiceChapter ? (
+              <ChapterPracticePanel
+                key={practiceChapter.id}
+                documentId={documentId}
+                chapter={practiceChapter}
+                onJumpToSource={revealCardSource}
+                onClose={() => setPracticeChapter(null)}
+              />
             ) : (
               <PracticePanel
                 documentId={documentId}

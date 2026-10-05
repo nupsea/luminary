@@ -85,3 +85,7 @@ export function advanceLabel(opts: {
   if (opts.fromSummary) return "Back to results"
   return opts.index + 1 >= opts.queueLength ? "Finish" : "Next card"
 }
+
+// A reading-session run, not a daily queue: the Study page's 50 is the number
+// for clearing a backlog, and 50 cards is longer than the reading it interrupts.
+export const READER_CARD_LIMIT = 20

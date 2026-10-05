@@ -63,7 +63,9 @@ import { apiGet, apiPost } from "@/lib/apiClient"
 import type { DocListItem } from "./Study/types"
 import { fetchDocList } from "./Study/api"
 import { StudyBrowser, type CollectionNode } from "./Study/StudyBrowser"
+import { DocumentChapters } from "@/components/DocumentChapters"
 import { DocumentTopics } from "@/components/DocumentTopics"
+import { type Chapter, practiceChapter } from "@/lib/chapterApi"
 import { FlashcardManager } from "./Study/FlashcardManager"
 
 
@@ -329,6 +331,33 @@ export default function Study() {
     }
   }
 
+  // A chapter's written cards (#231): practising admits them all to review, the run takes
+  // the session-sized slice.
+  const runChapterStudy = async (chapter: Chapter, mode: StudyMode) => {
+    if (studyPhase.phase !== "idle" || !studyDocumentId) return
+    setStudyPhase({ phase: "preparing", mode })
+    try {
+      const cards = await practiceChapter(studyDocumentId, chapter.id)
+      const outcome = await prepareSectionStudyFromCards(
+        studyDocumentId,
+        cards.slice(0, FLASHCARD_CARD_LIMIT),
+        mode,
+      )
+      const scope: PrepareStudySessionOptions = {
+        mode,
+        documentId: studyDocumentId,
+        collectionId: null,
+        cardLimit: FLASHCARD_CARD_LIMIT,
+        resumeSessionId: null,
+      }
+      setStudyPhase({ phase: "ready", mode, outcome, scopeForBeginNew: scope })
+    } catch (err) {
+      console.warn("Failed to study chapter", err)
+      setStudyPhase({ phase: "idle" })
+      toast.error("Couldn't start this chapter.")
+    }
+  }
+
   const handleStudySection = (sectionId: string, sectionHeading: string) =>
     void runSectionStudy(sectionId, sectionHeading, "flashcard")
   const handleTeachbackSection = (sectionId: string, sectionHeading: string) =>
@@ -559,6 +588,10 @@ export default function Study() {
                 </div>
               )
             })()}
+            <DocumentChapters
+              documentId={studyDocumentId}
+              onPractice={(chapter, mode) => void runChapterStudy(chapter, mode)}
+            />
             <DocumentTopics
               documentId={studyDocumentId}
               onStudySection={handleStudySection}
