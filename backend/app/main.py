@@ -60,6 +60,8 @@ from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
 from app.services.background import all_pending, clear_registries, task_registry
+from app.services.chapter_backfill import ChapterBackfill
+from app.services.chapter_cards import chapter_cards_handler
 from app.services.components import (
     activate_extras,
     install_ollama_model,
@@ -96,6 +98,7 @@ def configure_logging(log_level: str = "INFO") -> None:
 
 
 logger = logging.getLogger(__name__)
+_chapter_backfill = ChapterBackfill()
 
 
 _APP_VERSION = app_version()
@@ -224,7 +227,9 @@ async def lifespan(app: FastAPI):
     # TODO(#227): nothing enqueues this job, so no prerequisite edge is ever written.
     _worker.register("prerequisites", prereq_extract_handler)
     _worker.register("concept_link", concept_link_handler)
+    _worker.register("chapter_cards", chapter_cards_handler)
     await _worker.start()
+    _chapter_backfill.start()
 
     # Load persisted LLM settings into cache so cloud mode is active from first request,
     # not only after the frontend hits GET /settings/llm.
@@ -387,6 +392,7 @@ async def lifespan(app: FastAPI):
 
     # Every step here is bounded. A desktop app that takes minutes to quit reads
     # as a hang, and a supervisor that gives up SIGKILLs whatever is mid-write.
+    await _chapter_backfill.stop()
     await get_enrichment_worker().stop()
     await get_ingestion_jobs().cancel_all()
 

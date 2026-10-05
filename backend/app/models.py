@@ -247,6 +247,9 @@ class FlashcardModel(Base):
     # passage was text supplied directly (a reader selection) and is not
     # reconstructible from the library.
     source_chunk_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # The chapter a pre-written card belongs to, by the id of the chapter's first section
+    # (app.services.chapters). Such cards wait in fsrs_state 'held' until the chapter is practised.
+    chapter_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
@@ -735,6 +738,7 @@ class EnrichmentJobModel(Base):
       prerequisites    -- prerequisite graph extraction
       web_refs         -- web reference resolution
       concept_link     -- cross-document concept linking
+      chapter_cards    -- cards written per chapter, held until the chapter is practised
 
     status values:
       pending  -- queued, not yet started
@@ -761,6 +765,25 @@ class EnrichmentJobModel(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class ChapterCardRunModel(Base):
+    """A chapter whose cards have been written, so it is never written twice (#231).
+
+    Recorded even when the chapter yielded no card: "has cards" cannot mark a chapter done,
+    and one that gives none (a 200-character part title, first-person fiction) would be
+    picked again on every pass. `chapter_id` is the chapter's first section id.
+
+    Note: any new delete path in documents.py must also delete these rows
+    (no FK CASCADE in SQLite without pragma enforcement).
+    """
+
+    __tablename__ = "chapter_card_runs"
+
+    document_id: Mapped[str] = mapped_column(String, primary_key=True)
+    chapter_id: Mapped[str] = mapped_column(String, primary_key=True)
+    cards: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    written_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class ImageModel(Base):

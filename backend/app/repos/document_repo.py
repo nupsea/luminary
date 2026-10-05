@@ -28,6 +28,8 @@ from app.database import get_db, get_session_factory
 from app.models import (
     ChunkModel,
     DocumentModel,
+    EnrichmentJobModel,
+    ReadingPositionModel,
     ReadingProgressModel,
     SectionModel,
 )
@@ -85,6 +87,29 @@ class DocumentRepo:
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
+    async def section_extents(self, document_id: str) -> dict[str, tuple[int, int, int, int]]:
+        """{section_id: (first chunk_index, characters, first page, last page)} from its chunks.
+
+        Pages come from chunks, not `sections.page_start`: on a PDF whose sections nest, a
+        section's own range spans its children's (Hegel: one section claims pages 6-178).
+        """
+        page = func.nullif(ChunkModel.page_number, 0)
+        result = await self.session.execute(
+            select(
+                ChunkModel.section_id,
+                func.min(ChunkModel.chunk_index),
+                func.sum(func.length(ChunkModel.text)),
+                func.min(page),
+                func.max(page),
+            )
+            .where(ChunkModel.document_id == document_id, ChunkModel.section_id.isnot(None))
+            .group_by(ChunkModel.section_id)
+        )
+        return {
+            sid: (int(first), int(chars or 0), int(lo or 0), int(hi or 0))
+            for sid, first, chars, lo, hi in result.all()
+        }
+
     async def chunk_counts_by_section(self, document_id: str) -> dict[str, int]:
         """Return {section_id: chunk_count} for a document. Skips chunks
         with null section_id (orphan / unmapped)."""
@@ -125,6 +150,18 @@ class DocumentRepo:
             select(func.count(DocumentModel.id)).where(DocumentModel.is_favorite.is_(True))
         )
         return result.scalar_one()
+
+    async def chunks_with_headings(
+        self, section_ids: Sequence[str]
+    ) -> list[tuple[ChunkModel, str]]:
+        """(chunk, its section's heading) for these sections, in reading order."""
+        result = await self.session.execute(
+            select(ChunkModel, SectionModel.heading)
+            .join(SectionModel, SectionModel.id == ChunkModel.section_id)
+            .where(ChunkModel.section_id.in_(list(section_ids)))
+            .order_by(ChunkModel.chunk_index)
+        )
+        return [(chunk, heading) for chunk, heading in result.all()]
 
     async def chunks_by_ids(self, chunk_ids: Sequence[str]) -> Sequence[ChunkModel]:
         result = await self.session.execute(
@@ -177,6 +214,30 @@ class DocumentRepo:
             .limit(limit)
         )
         return result.scalars().all()
+
+    async def recently_read(self, since: datetime) -> list[tuple[str, str, str | None]]:
+        """(document id, title, last section read) since *since*, most recently read first."""
+        result = await self.session.execute(
+            select(
+                ReadingPositionModel.document_id,
+                DocumentModel.title,
+                ReadingPositionModel.last_section_id,
+            )
+            .join(DocumentModel, DocumentModel.id == ReadingPositionModel.document_id)
+            .where(ReadingPositionModel.updated_at >= since)
+            .order_by(ReadingPositionModel.updated_at.desc())
+        )
+        return [(doc_id, title, section) for doc_id, title, section in result.all()]
+
+    async def enrichment_in_progress(self, since: datetime) -> bool:
+        """Whether any document's enrichment queued or started since *since* is unfinished."""
+        result = await self.session.execute(
+            select(func.count(EnrichmentJobModel.id)).where(
+                EnrichmentJobModel.status.in_(("pending", "running")),
+                EnrichmentJobModel.created_at >= since,
+            )
+        )
+        return bool(result.scalar_one())
 
     async def set_entity_chunks_scanned(self, document_id: str, scanned: int) -> None:
         await self.session.execute(
