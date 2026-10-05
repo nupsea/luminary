@@ -9,6 +9,9 @@ from app.database import get_session_factory
 from app.exceptions import NotFound
 from app.models import SectionModel
 from app.repos.document_repo import DocumentRepo
+from app.schemas.flashcards import FlashcardResponse
+from app.services.chapter_cards import chapter_overview, practise_chapter
+from app.services.flashcards_router_service import to_response
 
 logger = logging.getLogger(__name__)
 
@@ -248,3 +251,48 @@ async def get_section_content(
             item.content = item.content[:_INLINE_CONTENT_LIMIT]
 
     return SectionContentPage(items=result, total=total, offset=offset, limit=limit)
+
+
+class ChapterItem(BaseModel):
+    """A chapter as chapter practice sees it; `id` is its first section's id."""
+
+    id: str
+    title: str
+    order: int
+    section_ids: list[str]
+    page_start: int = 0
+    page_end: int = 0
+    cards: int
+    held: int
+    due: int
+
+
+@router.get("/{document_id}/chapters", response_model=list[ChapterItem])
+async def get_chapters(document_id: str) -> list[ChapterItem]:
+    """The document's chapters in reading order, with their card counts (#231)."""
+    async with get_session_factory()() as session:
+        overview = await chapter_overview(document_id, session)
+    return [
+        ChapterItem(
+            id=o.chapter.id,
+            title=o.chapter.title,
+            order=o.chapter.order,
+            section_ids=o.chapter.section_ids,
+            page_start=o.chapter.page_start,
+            page_end=o.chapter.page_end,
+            cards=o.cards,
+            held=o.held,
+            due=o.due,
+        )
+        for o in overview
+    ]
+
+
+@router.post(
+    "/{document_id}/chapters/{chapter_id}/practice", response_model=list[FlashcardResponse]
+)
+async def practice_chapter(document_id: str, chapter_id: str) -> list[FlashcardResponse]:
+    """Admit a chapter's held cards to the review schedule and return all its cards."""
+    async with get_session_factory()() as session:
+        cards = await practise_chapter(document_id, chapter_id, session)
+    return [to_response(c) for c in cards]

@@ -342,3 +342,32 @@ async def test_a_model_already_loaded_is_left_for_the_learner(monkeypatch):
     monkeypatch.setattr(chapter_backfill, "_unload", unload)
     await chapter_backfill.ChapterBackfill()._step()
     assert unloaded == []
+
+
+# -- practising a chapter --------------------------------------------------------------------
+
+
+async def test_practising_a_chapter_admits_its_cards_to_review(book, fakes):
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    await chapter_cards.chapter_cards_handler("doc", "job")
+    async with book.factory() as session:
+        assert await StudyRepo(session).due_or_unscheduled_for_document("doc") == []
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        before = (await client.get("/sections/doc/chapters")).json()
+        practised = await client.post("/sections/doc/chapters/s1/practice")
+        after = (await client.get("/sections/doc/chapters")).json()
+        missing = await client.post("/sections/doc/chapters/nope/practice")
+
+    assert [(c["id"], c["title"], c["cards"], c["held"], c["due"]) for c in before] == [
+        ("s1", "DDIA", 1, 1, 0)
+    ]
+    assert practised.status_code == 200
+    assert [c["fsrs_state"] for c in practised.json()] == ["new"]
+    assert [(c["held"], c["due"]) for c in after] == [(0, 1)]
+    assert missing.status_code == 404
+    async with book.factory() as session:
+        assert await StudyRepo(session).count_due(DueScope(document_ids=["doc"])) == 1

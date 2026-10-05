@@ -4847,6 +4847,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sections/{document_id}/chapters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Chapters
+         * @description The document's chapters in reading order, with their card counts (#231).
+         */
+        get: operations["get_chapters_sections__document_id__chapters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sections/{document_id}/chapters/{chapter_id}/practice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Practice Chapter
+         * @description Admit a chapter's held cards to the review schedule and return all its cards.
+         */
+        post: operations["practice_chapter_sections__document_id__chapters__chapter_id__practice_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/llm/routing": {
         parameters: {
             query?: never;
@@ -5457,11 +5497,7 @@ export interface paths {
         };
         /**
          * Get Collection Study Dashboard
-         * @description Return a summary of study status for all material in a collection
-         *
-         *     Rewritten to use SQL aggregates and a small fixed number of queries regardless
-         *     of tag count, sub-enclave count, or tree depth. Previously this endpoint could
-         *     issue 20+ sequential queries per click.
+         * @description Study status for everything in a collection and the collections below it.
          */
         get: operations["get_collection_study_dashboard_study_collections__collection_id__dashboard_get"];
         put?: never;
@@ -7106,6 +7142,36 @@ export interface components {
             stability: number;
             /** Due Date */
             due_date: string | null;
+        };
+        /**
+         * ChapterItem
+         * @description A chapter as chapter practice sees it; `id` is its first section's id.
+         */
+        ChapterItem: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Order */
+            order: number;
+            /** Section Ids */
+            section_ids: string[];
+            /**
+             * Page Start
+             * @default 0
+             */
+            page_start: number;
+            /**
+             * Page End
+             * @default 0
+             */
+            page_end: number;
+            /** Cards */
+            cards: number;
+            /** Held */
+            held: number;
+            /** Due */
+            due: number;
         };
         /** ChapterProgressItem */
         ChapterProgressItem: {
@@ -19683,6 +19749,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SectionContentPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_chapters_sections__document_id__chapters_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    practice_chapter_sections__document_id__chapters__chapter_id__practice_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+                chapter_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlashcardResponse"][];
                 };
             };
             /** @description Validation Error */
