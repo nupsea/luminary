@@ -45,8 +45,8 @@ MIN_ASCENDING_SHARE = 0.8
 # paper (32k) have numbered headings over 1-2k sections, too small to practise one at a time;
 # the shortest book in the dev library is 110k.
 WHOLE_DOCUMENT_CHARS = 40_000
-# Unmarked documents are cut into windows of about this size at section boundaries. Marked
-# chapters in the dev library run 5k-35k (Moby-Dick) to 35k-175k (DDIA).
+# Unmarked documents are cut into windows of about this size at section boundaries, near a
+# marked chapter's median in the dev library (Moby-Dick's 7k, AI Engineering's 113k).
 WINDOW_CHARS = 30_000
 # A page label is shown only when the pages could hold the text: thinkpython2's windows run
 # about 1.5k characters a page, while Hegel's chunks carry their section's first page, so a

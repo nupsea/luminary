@@ -661,25 +661,27 @@ pins loopback against DNS rebinding, and that pin may only widen when authentica
 A token resolves to a principal. 0.17.0 hangs the request context off that principal, so the token
 shape is decided with the tenant seam in view, not retrofitted to it.
 
-**Chapter practice: questions written at ingestion, offered at each chapter's end (#231).** Practice today
-starts from a button and writes its cards on demand. In 0.16.0 an enrichment job writes about five
-cards per top-level section after a document is readable, in reading order, and skips on a host
-`llm_routing.refusal` refuses. They sit with their chapter **outside the review schedule**: a card
-enters FSRS only once its chapter is practised, so ingesting a 30-chapter book never adds 150 due
-cards. The reader offers "Practice this chapter" when the reader moves past a chapter's last section
-(Practice, Later, Don't ask for this book); Practice opens the existing dock (flashcards or
-teach-back) on that chapter, and finishing returns to the reading position. Study shows each book's
-chapters with their card counts, and "Random from this book" draws across chapters, weighted toward
-the unpractised. A document with no headings gets fixed page windows labelled by page range, never
-invented chapter titles.
+**Chapter practice: questions written at ingestion, offered at each chapter's end (#231).** Practice
+starts from a button and writes its cards on demand.
 
-The card-quality fix (#230) shipped in 0.15.0, ahead of this job, which would otherwise write the defect into every chapter: the
-unit splitter fuses a sentence with the next one across a footnote marker (`model.2 For`,
-`flashcard_units.py` `_SENT_END`), length selection then picks the fused unit, and the unit prompt
-lacks the shipped prompt's rule against asking which example the text used
-(`flashcard_prompts.py` `FLASHCARD_UNITS_SYSTEM`). Seen on *AI Engineering*, 2026-10-02: "What is
-an example of a model breaking the phrase ... into nine tokens?" answered "GPT-4". The gate is a
-blind graded run over the #191 documents that is no worse than 0.84 and 0.88 good-among-delivered.
+*Built:* the `chapter_cards` enrichment job (`services/chapter_cards.py`) writes every chapter's
+cards once a document is readable, and skips on a host `llm_routing.refusal` refuses. Chapters
+come from heading text ("Chapter 3.", "Part II.", numbered headings that count up), else from
+~30k-character windows labelled by page range or by their first topical heading, never by an
+invented title; a document under 40k characters is one chapter (`services/chapters.py`). Per
+~3.5k window the model writes 1-3 study notes and each becomes one gated card
+(`services/flashcard_chapter.py`). Cards are stored `fsrs_state='held'` with no due date and a
+`chapter_id`, so they stay out of the review queue. Measured on qwen3.5:4b over 12 chapters, two
+blind runs against the unit path: core ideas covered 0.29 -> 0.57 and 0.31 -> 0.63, sound cards
+0.81 -> 0.93 and 0.82 -> 0.97. It costs about 7 s of generation per 1k characters: DDIA chapter 3
+(74k characters) took 528 s for 40 cards, so a whole book is hours of background work.
+
+*Open:* practising a chapter moves its held cards into FSRS; the reader offers "Practice this
+chapter" past a chapter's last section (Practice, Later, Don't ask for this book) and opens the
+dock on it; Study lists each book's chapters with card counts, and "Random from this book" draws
+across chapters weighted toward the unpractised. First-person fiction yields 1-2 cards a chapter
+(*The Time Machine*, *Moby-Dick*): the answer-coverage floor rejects the model's third-person
+paraphrase of an "I" narrator.
 
 ### 6. An architecture that can take tenants — 0.17.0
 

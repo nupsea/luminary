@@ -577,10 +577,8 @@ def flashcard_units_user_tmpl() -> str:
     return render_for(FLASHCARD_UNITS_USER_SPEC, "generation")
 
 
-# Chapter cards (#231): the model writes study notes per window, then one card per note. Measured
-# on qwen3.5:4b against the unit path over 12 chapters, two blind runs: core ideas covered
-# 0.29 -> 0.57 and 0.31 -> 0.63, sound cards 0.81 -> 0.93 and 0.82 -> 0.97. Content examples
-# leak into output ("he" became "He states that ..." in 14 answers): name no example here.
+# Chapter cards (#231; measurement in docs/roadmap.md). Content examples leak into output ("he"
+# became "He states that ..." in 14 answers): name no example here.
 CHAPTER_NOTES_SYSTEM = (
     "You write study notes for a student. Each note states one important idea from the "
     "passage as a complete sentence the student could learn and be tested on."

@@ -109,3 +109,6 @@ scripts/smoke/.last-run
 
 # Screenshots from make verify-citation.
 frontend/.citation-verify/
+
+# Written by make ci (pytest --cov).
+backend/.coverage
