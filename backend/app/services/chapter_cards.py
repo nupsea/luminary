@@ -1,9 +1,10 @@
-"""The enrichment job that writes each chapter's cards once a document is readable (#231).
+"""Writing a chapter's cards, and the ingestion job that writes a document's first chapters (#231).
 
-Cards are stored in fsrs_state 'held' with no due date, so ingesting a 30-chapter book adds
-nothing to the review queue; a chapter's cards are scheduled when that chapter is practised.
-A chapter that already has cards is skipped, so a job interrupted mid-book resumes where it
-stopped instead of writing the early chapters twice.
+Ingestion writes only the first INGEST_CHAPTERS chapters, so a book is practisable when the
+reader starts it without hours of generation up front; `chapter_backfill` writes the rest as
+the reader moves through it. Cards are stored in fsrs_state 'held' with no due date, so they
+add nothing to the review queue until their chapter is practised. Every written chapter is
+recorded, so an interrupted job resumes and no chapter is written twice.
 """
 
 from __future__ import annotations
@@ -32,6 +33,9 @@ HELD = "held"
 # Names the document's own entity graph holds may appear in a question though its window
 # does not show them ("the Time Traveller" in a chapter that only says "I").
 KNOWN_NAMES = 40
+# A reader opening a new book reaches the end of chapter 1 first; the second is written ahead
+# so the prompt at that chapter's end has cards even if the backfill has not run yet.
+INGEST_CHAPTERS = 2
 
 
 async def _known_names(document_id: str, session: AsyncSession) -> str:
@@ -81,26 +85,26 @@ async def write_chapter(
         row = _card_row(document_id, chapter, card, now)
         session.add(row)
         await _sync_flashcard_fts(row, session)
+    await FlashcardRepo(session).record_chapter_written(document_id, chapter.id, len(cards))
     await session.commit()
+    logger.info(
+        "chapter_cards: doc=%s chapter %d %r chars=%d cards=%d",
+        document_id,
+        chapter.order + 1,
+        chapter.title[:60],
+        chapter.chars,
+        len(cards),
+    )
     return len(cards)
 
 
 async def chapter_cards_handler(document_id: str, job_id: str) -> None:
-    """Enrichment handler for job_type='chapter_cards'."""
+    """Enrichment handler for job_type='chapter_cards': the document's first chapters."""
     async with get_session_factory()() as session:
         doc = await DocumentRepo(session).get_or_404(document_id)
         chapters = await chapters_for_document(document_id, doc.title, session)
-        done = await FlashcardRepo(session).chapter_ids_with_cards(document_id)
+        done = await FlashcardRepo(session).chapters_written(document_id)
         known_names = await _known_names(document_id, session)
-        for chapter in chapters:
-            if chapter.id in done:
-                continue
-            written = await write_chapter(document_id, doc.title, chapter, known_names, session)
-            logger.info(
-                "chapter_cards: doc=%s chapter=%d/%d %r cards=%d",
-                document_id,
-                chapter.order + 1,
-                len(chapters),
-                chapter.title[:60],
-                written,
-            )
+        for chapter in chapters[:INGEST_CHAPTERS]:
+            if chapter.id not in done:
+                await write_chapter(document_id, doc.title, chapter, known_names, session)

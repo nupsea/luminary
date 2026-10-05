@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import (
+    ChapterCardRunModel,
     ChunkModel,
     CollectionMemberModel,
     FlashcardModel,
@@ -143,16 +144,18 @@ class FlashcardRepo:
         )
         return list(result.scalars().all())
 
-    async def chapter_ids_with_cards(self, document_id: str) -> set[str]:
+    async def chapters_written(self, document_id: str) -> set[str]:
         result = await self.session.execute(
-            select(FlashcardModel.chapter_id)
-            .where(
-                FlashcardModel.document_id == document_id,
-                FlashcardModel.chapter_id.is_not(None),
+            select(ChapterCardRunModel.chapter_id).where(
+                ChapterCardRunModel.document_id == document_id
             )
-            .distinct()
         )
         return set(result.scalars().all())
+
+    async def record_chapter_written(self, document_id: str, chapter_id: str, cards: int) -> None:
+        self.session.add(
+            ChapterCardRunModel(document_id=document_id, chapter_id=chapter_id, cards=cards)
+        )
 
     async def list_document_ids_for_cards(self, card_ids: Sequence[str]) -> list[str]:
         """Distinct documents these cards belong to. Note-sourced cards have none."""

@@ -321,6 +321,9 @@ class Settings(BaseSettings):
     # On: it beat the shipped prompt in every document type over two blind runs. It ignores the
     # Easy/Medium/Hard choice and sets no Bloom level; "hard" as worded asks for unstated content.
     FLASHCARD_UNIT_SELECTION: bool = True
+    # Chapter cards beyond the first two are written in the background as the reader moves
+    # through a book (#231). Off: only ingestion writes them, so later chapters have no cards.
+    CHAPTER_CARDS_BACKFILL: bool = True
     # Prompt arm for the model matrix (P6). `shipped` renders the contract plus
     # the accommodations a model still needs; `bare` renders the contract alone.
     # A model that scores HIGHER on `bare` is telling you the accommodation set

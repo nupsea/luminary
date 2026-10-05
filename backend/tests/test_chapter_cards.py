@@ -2,14 +2,22 @@
 
 import json
 import re
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from sqlalchemy import func, select
 
-from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
+from app.models import (
+    ChunkModel,
+    DocumentModel,
+    FlashcardModel,
+    ReadingPositionModel,
+    SectionModel,
+)
+from app.repos.flashcard_repo import FlashcardRepo
 from app.repos.study_repo import DueScope, StudyRepo
-from app.services import chapter_cards
+from app.services import chapter_backfill, chapter_cards
 from app.services.flashcard_chapter import (
     MAX_CHAPTER_WINDOWS,
     Passage,
@@ -188,3 +196,112 @@ async def test_a_rerun_skips_chapters_that_already_have_cards(book, fakes):
     assert fakes.calls == calls
     async with book.factory() as session:
         assert (await session.execute(select(func.count(FlashcardModel.id)))).scalar_one() == 1
+
+
+# -- writing the rest as the reader goes ---------------------------------------------------------
+
+# Long enough that the document is not one chapter (chapters.WHOLE_DOCUMENT_CHARS).
+_CHAPTER_TEXT = (LOG + " ") * 120
+
+
+@pytest.fixture
+async def long_book(memory_db):
+    async with memory_db.factory() as session:
+        session.add(
+            DocumentModel(id="bk", title="DDIA", format="pdf", content_type="book", file_path="/x")
+        )
+        for i in range(5):
+            sid = f"ch{i}"
+            session.add(
+                SectionModel(
+                    id=sid,
+                    document_id="bk",
+                    heading=f"Chapter {i + 1}. Part",
+                    level=1,
+                    section_order=i,
+                )
+            )
+            session.add(
+                ChunkModel(
+                    id=f"k{i}", document_id="bk", section_id=sid, text=_CHAPTER_TEXT, chunk_index=i
+                )
+            )
+        await session.commit()
+    return memory_db
+
+
+async def _written(db) -> set[str]:
+    async with db.factory() as session:
+        return await FlashcardRepo(session).chapters_written("bk")
+
+
+async def _read_at(db, section_id: str) -> None:
+    async with db.factory() as session:
+        session.add(ReadingPositionModel(document_id="bk", last_section_id=section_id))
+        await session.commit()
+
+
+async def test_ingestion_writes_only_the_first_chapters(long_book, fakes):
+    await chapter_cards.chapter_cards_handler("bk", "job")
+    assert await _written(long_book) == {"ch0", "ch1"}
+
+
+async def test_nothing_beyond_ingestion_for_a_book_nobody_opened(long_book, fakes):
+    await chapter_cards.chapter_cards_handler("bk", "job")
+    assert await chapter_backfill.next_chapter() is None
+
+
+async def test_the_chapter_being_read_and_the_next_come_first(long_book, fakes):
+    await chapter_cards.chapter_cards_handler("bk", "job")
+    await _read_at(long_book, "ch2")
+
+    pick = await chapter_backfill.next_chapter()
+    assert (pick.chapter.id, pick.ahead) == ("ch2", True)
+
+    async with long_book.factory() as session:
+        repo = FlashcardRepo(session)
+        await repo.record_chapter_written("bk", "ch2", 0)
+        await repo.record_chapter_written("bk", "ch3", 0)
+        await session.commit()
+    pick = await chapter_backfill.next_chapter()
+    assert (pick.chapter.id, pick.ahead) == ("ch4", False)
+
+
+@pytest.mark.parametrize(
+    ("plugged", "percent", "ahead", "blocked"),
+    [
+        (False, 90, False, "on battery"),
+        (False, 20, True, "battery low"),
+        (False, 90, True, None),
+        (True, 10, False, None),
+    ],
+)
+def test_battery_policy(monkeypatch, plugged, percent, ahead, blocked):
+    battery = SimpleNamespace(percent=percent, power_plugged=plugged)
+    monkeypatch.setattr(chapter_backfill.psutil, "sensors_battery", lambda: battery)
+    assert chapter_backfill._battery_reason(ahead) == blocked
+
+
+async def test_later_chapters_wait_while_the_learner_is_asking(monkeypatch, memory_db):
+    from app.services import llm_admission
+
+    async with llm_admission.interactive_call():
+        assert await chapter_backfill._idle_reason() == "in use"
+    # The quiet period after the question still counts as in use.
+    assert await chapter_backfill._idle_reason() == "in use"
+
+
+async def test_a_chapter_that_yields_no_card_is_not_written_again(long_book, fakes, monkeypatch):
+    async def no_cards(*_a, **_kw):
+        return []
+
+    monkeypatch.setattr(chapter_cards, "write_chapter_cards", no_cards)
+
+    async def now(_pick):
+        return None
+
+    monkeypatch.setattr(chapter_backfill, "not_now", now)
+    await _read_at(long_book, "ch0")
+    assert await chapter_backfill.run_once() is True
+    assert await chapter_backfill.run_once() is True
+    assert await _written(long_book) == {"ch0", "ch1"}

@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.models import (
     AnnotationModel,
+    ChapterCardRunModel,
     ChatSessionModel,
     ChatSuggestionHistoryModel,
     ChunkModel,
@@ -75,6 +76,7 @@ logger = logging.getLogger(__name__)
 # so dependent rows go before their referents (matters when foreign-key constraints
 # are enabled; harmless otherwise).
 _DOCUMENT_ID_CHILD_TABLES: tuple[type, ...] = (
+    ChapterCardRunModel,
     EnrichmentJobModel,
     ImageModel,
     LearningObjectiveModel,

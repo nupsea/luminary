@@ -28,6 +28,8 @@ from app.database import get_db, get_session_factory
 from app.models import (
     ChunkModel,
     DocumentModel,
+    EnrichmentJobModel,
+    ReadingPositionModel,
     ReadingProgressModel,
     SectionModel,
 )
@@ -212,6 +214,30 @@ class DocumentRepo:
             .limit(limit)
         )
         return result.scalars().all()
+
+    async def recently_read(self, since: datetime) -> list[tuple[str, str, str | None]]:
+        """(document id, title, last section read) since *since*, most recently read first."""
+        result = await self.session.execute(
+            select(
+                ReadingPositionModel.document_id,
+                DocumentModel.title,
+                ReadingPositionModel.last_section_id,
+            )
+            .join(DocumentModel, DocumentModel.id == ReadingPositionModel.document_id)
+            .where(ReadingPositionModel.updated_at >= since)
+            .order_by(ReadingPositionModel.updated_at.desc())
+        )
+        return [(doc_id, title, section) for doc_id, title, section in result.all()]
+
+    async def enrichment_in_progress(self, since: datetime) -> bool:
+        """Whether any document's enrichment queued or started since *since* is unfinished."""
+        result = await self.session.execute(
+            select(func.count(EnrichmentJobModel.id)).where(
+                EnrichmentJobModel.status.in_(("pending", "running")),
+                EnrichmentJobModel.created_at >= since,
+            )
+        )
+        return bool(result.scalar_one())
 
     async def set_entity_chunks_scanned(self, document_id: str, scanned: int) -> None:
         await self.session.execute(

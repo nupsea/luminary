@@ -767,6 +767,25 @@ class EnrichmentJobModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
+class ChapterCardRunModel(Base):
+    """A chapter whose cards have been written, so it is never written twice (#231).
+
+    Recorded even when the chapter yielded no card: "has cards" cannot mark a chapter done,
+    and one that gives none (a 200-character part title, first-person fiction) would be
+    picked again on every pass. `chapter_id` is the chapter's first section id.
+
+    Note: any new delete path in documents.py must also delete these rows
+    (no FK CASCADE in SQLite without pragma enforcement).
+    """
+
+    __tablename__ = "chapter_card_runs"
+
+    document_id: Mapped[str] = mapped_column(String, primary_key=True)
+    chapter_id: Mapped[str] = mapped_column(String, primary_key=True)
+    cards: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    written_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
 class ImageModel(Base):
     """Extracted image from a PDF or EPUB document.
 
