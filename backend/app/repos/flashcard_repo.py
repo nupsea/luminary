@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from fastapi import Depends
-from sqlalchemy import case, delete, func, or_, select
+from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -28,6 +28,7 @@ from app.models import (
     TeachbackResultModel,
 )
 from app.repos._helpers import get_or_404
+from app.types import CARD_HELD
 
 
 def collection_card_filter(collection_id: str):
@@ -156,6 +157,49 @@ class FlashcardRepo:
         self.session.add(
             ChapterCardRunModel(document_id=document_id, chapter_id=chapter_id, cards=cards)
         )
+
+    async def chapter_counts(self, document_id: str) -> dict[str, tuple[int, int, int]]:
+        """{chapter_id: (cards, held, due now)} for a document's chapter cards."""
+        now = datetime.now(UTC)
+        result = await self.session.execute(
+            select(
+                FlashcardModel.chapter_id,
+                func.count(FlashcardModel.id),
+                func.sum(case((FlashcardModel.fsrs_state == CARD_HELD, 1), else_=0)),
+                func.sum(case((FlashcardModel.due_date <= now, 1), else_=0)),
+            )
+            .where(
+                FlashcardModel.document_id == document_id,
+                FlashcardModel.chapter_id.is_not(None),
+            )
+            .group_by(FlashcardModel.chapter_id)
+        )
+        return {cid: (int(n), int(held or 0), int(due or 0)) for cid, n, held, due in result.all()}
+
+    async def list_for_chapter(self, document_id: str, chapter_id: str) -> list[FlashcardModel]:
+        result = await self.session.execute(
+            select(FlashcardModel)
+            .where(
+                FlashcardModel.document_id == document_id,
+                FlashcardModel.chapter_id == chapter_id,
+            )
+            .order_by(FlashcardModel.created_at, FlashcardModel.id)
+        )
+        return list(result.scalars().all())
+
+    async def release_held(self, document_id: str, chapter_id: str) -> int:
+        """Move a chapter's held cards into the review schedule, due now."""
+        result = await self.session.execute(
+            update(FlashcardModel)
+            .where(
+                FlashcardModel.document_id == document_id,
+                FlashcardModel.chapter_id == chapter_id,
+                FlashcardModel.fsrs_state == CARD_HELD,
+            )
+            .values(fsrs_state="new", due_date=datetime.now(UTC))
+        )
+        await self.session.commit()
+        return result.rowcount or 0
 
     async def list_document_ids_for_cards(self, card_ids: Sequence[str]) -> list[str]:
         """Distinct documents these cards belong to. Note-sourced cards have none."""

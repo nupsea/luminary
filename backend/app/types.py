@@ -1,6 +1,9 @@
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypedDict
 
+# A card written ahead for a chapter, outside the review schedule until the chapter is practised.
+CARD_HELD = "held"
+
 ContentType = Literal[
     "book",
     "conversation",

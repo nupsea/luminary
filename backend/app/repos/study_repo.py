@@ -28,6 +28,7 @@ from app.models import (
     TeachbackResultModel,
 )
 from app.repos._helpers import get_or_404
+from app.types import CARD_HELD
 
 # Gap-detection thresholds. Defined here so the repo is the single
 # source of truth for "what counts as a weak card". `routers/study.py`
@@ -465,6 +466,7 @@ class StudyRepo:
             select(FlashcardModel)
             .where(
                 FlashcardModel.document_id == document_id,
+                FlashcardModel.fsrs_state != CARD_HELD,
                 or_(
                     FlashcardModel.due_date <= datetime.now(UTC),
                     FlashcardModel.due_date.is_(None),

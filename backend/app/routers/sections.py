@@ -9,6 +9,9 @@ from app.database import get_session_factory
 from app.exceptions import NotFound
 from app.models import SectionModel
 from app.repos.document_repo import DocumentRepo
+from app.schemas.flashcards import FlashcardResponse
+from app.services.chapter_cards import chapter_overview, practise_chapter
+from app.services.flashcards_router_service import to_response
 
 logger = logging.getLogger(__name__)
 
@@ -248,3 +251,69 @@ async def get_section_content(
             item.content = item.content[:_INLINE_CONTENT_LIMIT]
 
     return SectionContentPage(items=result, total=total, offset=offset, limit=limit)
+
+
+class ChapterItem(BaseModel):
+    """A chapter as chapter practice sees it; `id` is its first section's id."""
+
+    id: str
+    title: str
+    order: int
+    section_ids: list[str]
+    page_start: int = 0
+    page_end: int = 0
+    cards: int
+    held: int
+    due: int
+
+
+class ChapterList(BaseModel):
+    ask_at_chapter_end: bool
+    chapters: list[ChapterItem]
+
+
+class ChapterPromptRequest(BaseModel):
+    ask_at_chapter_end: bool
+
+
+@router.get("/{document_id}/chapters", response_model=ChapterList)
+async def get_chapters(document_id: str) -> ChapterList:
+    """The document's chapters in reading order, with their card counts (#231)."""
+    async with get_session_factory()() as session:
+        ask, overview = await chapter_overview(document_id, session)
+    return ChapterList(
+        ask_at_chapter_end=ask,
+        chapters=[
+            ChapterItem(
+                id=o.chapter.id,
+                title=o.chapter.title,
+                order=o.chapter.order,
+                section_ids=o.chapter.section_ids,
+                page_start=o.chapter.page_start,
+                page_end=o.chapter.page_end,
+                cards=o.cards,
+                held=o.held,
+                due=o.due,
+            )
+            for o in overview
+        ],
+    )
+
+
+@router.put("/{document_id}/chapters/prompt", status_code=204)
+async def set_chapter_prompt(document_id: str, body: ChapterPromptRequest) -> None:
+    """Whether the reader offers practice at each chapter's end ("Don't ask for this book")."""
+    async with get_session_factory()() as session:
+        repo = DocumentRepo(session)
+        await repo.get_or_404(document_id)
+        await repo.set_chapter_prompt_off(document_id, not body.ask_at_chapter_end)
+
+
+@router.post(
+    "/{document_id}/chapters/{chapter_id}/practice", response_model=list[FlashcardResponse]
+)
+async def practice_chapter(document_id: str, chapter_id: str) -> list[FlashcardResponse]:
+    """Admit a chapter's held cards to the review schedule and return all its cards."""
+    async with get_session_factory()() as session:
+        cards = await practise_chapter(document_id, chapter_id, session)
+    return [to_response(c) for c in cards]

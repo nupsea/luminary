@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session_factory
+from app.exceptions import NotFound
 from app.models import FlashcardModel
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
@@ -26,10 +28,10 @@ from app.services.flashcard_chapter import ChapterCard, Passage, write_chapter_c
 from app.services.flashcard_factuality import FACTUALITY_UNCHECKED
 from app.services.flashcard_parsers import grounding_state
 from app.services.flashcard_search import _sync_flashcard_fts
+from app.types import CARD_HELD
 
 logger = logging.getLogger(__name__)
 
-HELD = "held"
 # Names the document's own entity graph holds may appear in a question though its window
 # does not show them ("the Time Traveller" in a chapter that only says "I").
 KNOWN_NAMES = 40
@@ -53,7 +55,7 @@ def _card_row(document_id: str, chapter: Chapter, card: ChapterCard, now: dateti
         question=card.question,
         answer=card.answer,
         source_excerpt=card.source_excerpt,
-        fsrs_state=HELD,
+        fsrs_state=CARD_HELD,
         due_date=None,
         created_at=now,
         section_heading=chapter.title[:300],
@@ -108,3 +110,39 @@ async def chapter_cards_handler(document_id: str, job_id: str) -> None:
         for chapter in chapters[:INGEST_CHAPTERS]:
             if chapter.id not in done:
                 await write_chapter(document_id, doc.title, chapter, known_names, session)
+
+
+@dataclass(frozen=True)
+class ChapterOverview:
+    chapter: Chapter
+    cards: int
+    held: int
+    due: int
+
+
+async def chapter_overview(
+    document_id: str, session: AsyncSession
+) -> tuple[bool, list[ChapterOverview]]:
+    """(whether the reader offers practice at each chapter's end, the chapters with counts)."""
+    doc = await DocumentRepo(session).get_or_404(document_id)
+    counts = await FlashcardRepo(session).chapter_counts(document_id)
+    chapters = [
+        ChapterOverview(c, *counts.get(c.id, (0, 0, 0)))
+        for c in await chapters_for_document(document_id, doc.title, session)
+    ]
+    return not doc.chapter_prompt_off, chapters
+
+
+async def practise_chapter(
+    document_id: str, chapter_id: str, session: AsyncSession
+) -> list[FlashcardModel]:
+    """The chapter's cards, its held ones now in the review schedule.
+
+    Every held card is scheduled, not only those a run reaches: practising a chapter is what
+    admits it to review, and a card left held would never come due.
+    """
+    repo = FlashcardRepo(session)
+    if not await repo.list_for_chapter(document_id, chapter_id):
+        raise NotFound(f"No cards for chapter {chapter_id}")
+    await repo.release_held(document_id, chapter_id)
+    return await repo.list_for_chapter(document_id, chapter_id)
