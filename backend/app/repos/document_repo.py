@@ -126,6 +126,12 @@ class DocumentRepo:
         )
         return result.scalar_one()
 
+    async def chunks_by_ids(self, chunk_ids: Sequence[str]) -> Sequence[ChunkModel]:
+        result = await self.session.execute(
+            select(ChunkModel).where(ChunkModel.id.in_(list(chunk_ids)))
+        )
+        return result.scalars().all()
+
     async def titles(self, document_ids: Sequence[str]) -> dict[str, str]:
         if not document_ids:
             return {}

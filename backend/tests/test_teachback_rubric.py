@@ -21,7 +21,7 @@ from sqlalchemy import select
 
 from app.main import app
 from app.models import FlashcardModel, TeachbackResultModel
-from app.routers.study import (
+from app.services.teachback_service import (
     _TEACHBACK_USER_TMPL,
     _parse_teachback_response,
     _rubric_from_evaluation,
@@ -172,7 +172,7 @@ async def test_teachback_stores_rubric_json(test_db):
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        with patch("app.routers.study.get_llm_service") as mock_llm_factory:
+        with patch("app.services.teachback_service.get_llm_service") as mock_llm_factory:
             mock_llm_factory.return_value = _StubLLM(_FULL_RESPONSE)
 
             resp = await client.post(
@@ -211,7 +211,7 @@ async def test_teachback_rubric_missed_points_count(test_db):
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        with patch("app.routers.study.get_llm_service") as mock_llm_factory:
+        with patch("app.services.teachback_service.get_llm_service") as mock_llm_factory:
             mock_llm_factory.return_value = _StubLLM(_FULL_RESPONSE)
 
             resp = await client.post(
@@ -242,7 +242,7 @@ async def test_teachback_missing_clarity_keeps_the_score(test_db):
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        with patch("app.routers.study.get_llm_service") as mock_llm_factory:
+        with patch("app.services.teachback_service.get_llm_service") as mock_llm_factory:
             mock_llm_factory.return_value = _StubLLM(_NO_CLARITY_RESPONSE)
 
             resp = await client.post(
@@ -274,7 +274,7 @@ async def test_teachback_without_dimensions_is_not_scored(test_db):
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        with patch("app.routers.study.get_llm_service") as mock_llm_factory:
+        with patch("app.services.teachback_service.get_llm_service") as mock_llm_factory:
             # Twice: an unreadable reply buys one retry before the verdict is
             # refused, and this one is unreadable both times.
             mock_llm_factory.return_value = _StubLLM(
@@ -417,11 +417,11 @@ async def test_the_evaluation_is_greedy_and_its_retry_samples():
     the reply that just failed, so only the retry samples."""
     from unittest.mock import AsyncMock
 
-    from app.routers.study import _evaluate_teachback_llm
+    from app.services.teachback_service import _evaluate_teachback_llm
 
     llm = AsyncMock()
     llm.generate = AsyncMock(side_effect=["not json", "{" + _DIMS + "}"])
-    with patch("app.routers.study.get_llm_service", return_value=llm):
+    with patch("app.services.teachback_service.get_llm_service", return_value=llm):
         parsed = await _evaluate_teachback_llm("prompt")
 
     assert parsed is not None

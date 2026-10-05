@@ -117,6 +117,9 @@ class FlashcardRepo:
         result = await self.session.execute(stmt)
         return [(row[0], row[1]) for row in result.all()]
 
+    async def find(self, card_id: str) -> FlashcardModel | None:
+        return await self.session.get(FlashcardModel, card_id)
+
     async def get_many(self, card_ids: Sequence[str]) -> dict[str, FlashcardModel]:
         """The cards among these ids that still exist, by id."""
         if not card_ids:

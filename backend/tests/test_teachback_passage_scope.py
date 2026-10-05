@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.models import ChunkModel, FlashcardModel
-from app.routers.study import _card_scope_passage, _source_passage
+from app.services.teachback_service import _card_scope_passage, _source_passage
 
 _TEXT = {
     12: "If you care about the outcome, whatever it is, technical or usage, you can do it.",
