@@ -307,6 +307,11 @@ async def test_a_chapter_that_yields_no_card_is_not_written_again(long_book, fak
     assert await _written(long_book) == {"ch0", "ch1"}
 
 
+async def test_a_machine_booted_moments_ago_with_no_question_is_quiet(monkeypatch):
+    monkeypatch.setattr(chapter_backfill.time, "monotonic", lambda: 10.0)
+    assert chapter_backfill._learner_quiet() is True
+
+
 async def test_a_model_the_backfill_loaded_is_unloaded_when_work_runs_out(monkeypatch):
     unloaded: list[str] = []
     steps = iter([(True, "qwen3.5:4b"), (True, None), (False, None)])

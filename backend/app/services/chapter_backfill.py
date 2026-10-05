@@ -166,6 +166,9 @@ def _learner_quiet() -> bool:
         return True
     if state.interactive_inflight:
         return False
+    # 0.0 means no question yet; monotonic() counts from boot, so a fresh machine reads as busy.
+    if state.last_interactive_end <= 0.0:
+        return True
     return time.monotonic() - state.last_interactive_end >= QUIET_SECONDS
 
 
