@@ -39,6 +39,14 @@ KNOWN_NAMES = 40
 # so the prompt at that chapter's end has cards even if the backfill has not run yet.
 INGEST_CHAPTERS = 2
 
+# Chapters being written in this process. The ingestion job and the backfill both write, and
+# the run table refuses a second copy only at commit, after minutes of model time.
+_writing: set[tuple[str, str]] = set()
+
+
+def being_written(document_id: str) -> set[str]:
+    return {chapter_id for doc, chapter_id in _writing if doc == document_id}
+
 
 async def _known_names(document_id: str, session: AsyncSession) -> str:
     entities = await GraphEntityRepo(session).entities_for_document(document_id)
@@ -67,6 +75,20 @@ def _card_row(document_id: str, chapter: Chapter, card: ChapterCard, now: dateti
 
 
 async def write_chapter(
+    document_id: str, book: str, chapter: Chapter, known_names: str, session: AsyncSession
+) -> int | None:
+    """The number of cards written, or None when this process is already writing the chapter."""
+    key = (document_id, chapter.id)
+    if key in _writing:
+        return None
+    _writing.add(key)
+    try:
+        return await _write_chapter(document_id, book, chapter, known_names, session)
+    finally:
+        _writing.discard(key)
+
+
+async def _write_chapter(
     document_id: str, book: str, chapter: Chapter, known_names: str, session: AsyncSession
 ) -> int:
     from app.services.flashcard import get_llm_service  # noqa: PLC0415
@@ -105,10 +127,10 @@ async def chapter_cards_handler(document_id: str, job_id: str) -> None:
     async with get_session_factory()() as session:
         doc = await DocumentRepo(session).get_or_404(document_id)
         chapters = await chapters_for_document(document_id, doc.title, session)
-        done = await FlashcardRepo(session).chapters_written(document_id)
         known_names = await _known_names(document_id, session)
         for chapter in chapters[:INGEST_CHAPTERS]:
-            if chapter.id not in done:
+            # Read per chapter: the backfill may have written one while this job wrote another.
+            if chapter.id not in await FlashcardRepo(session).chapters_written(document_id):
                 await write_chapter(document_id, doc.title, chapter, known_names, session)
 
 

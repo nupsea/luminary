@@ -28,7 +28,7 @@ from app.config import get_settings
 from app.database import get_session_factory
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
-from app.services.chapter_cards import _known_names, write_chapter
+from app.services.chapter_cards import _known_names, being_written, write_chapter
 from app.services.chapters import Chapter, chapters_for_document
 
 logger = logging.getLogger(__name__)
@@ -56,9 +56,13 @@ class Pick:
     ahead: bool
 
 
-def _reading_index(chapters: list[Chapter], section_id: str | None) -> int:
+def _reading_index(chapters: list[Chapter], section_id: str | None, page: int | None) -> int:
+    # The PDF view saves a page and no section, so the page places a PDF reader.
     for i, c in enumerate(chapters):
         if section_id in c.section_ids:
+            return i
+    for i, c in enumerate(chapters):
+        if page and c.page_start and c.page_start <= page <= c.page_end:
             return i
     return 0
 
@@ -69,10 +73,11 @@ async def next_chapter() -> Pick | None:
     later: Pick | None = None
     async with get_session_factory()() as session:
         reading = await DocumentRepo(session).recently_read(since)
-        for document_id, title, section_id in reading:
+        for document_id, title, section_id, page in reading:
             chapters = await chapters_for_document(document_id, title, session)
             written = await FlashcardRepo(session).chapters_written(document_id)
-            here = _reading_index(chapters, section_id)
+            written |= being_written(document_id)
+            here = _reading_index(chapters, section_id, page)
             # Ahead first, then the rest of the book from the reader onward, then what was read.
             order = chapters[here:] + chapters[:here]
             for chapter in order:
@@ -189,8 +194,8 @@ async def run_once() -> tuple[bool, str | None]:
     loaded = name if name and not await _resident(name) else None
     async with get_session_factory()() as session:
         names = await _known_names(pick.document_id, session)
-        await write_chapter(pick.document_id, pick.title, pick.chapter, names, session)
-    return True, loaded
+        cards = await write_chapter(pick.document_id, pick.title, pick.chapter, names, session)
+    return cards is not None, loaded
 
 
 class ChapterBackfill:

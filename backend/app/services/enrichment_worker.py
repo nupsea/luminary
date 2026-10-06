@@ -233,11 +233,13 @@ class EnrichmentQueueWorker:
                         EnrichmentJobModel.status == "pending",
                     )
                     .order_by(
-                        # Prioritize image extraction and analysis
+                        # Chapter cards before image analysis: a reader who opens the book
+                        # reaches chapter 1's end in minutes; analysing every figure took 30.
                         case(
                             (EnrichmentJobModel.job_type == "image_extract", 1),
-                            (EnrichmentJobModel.job_type == "image_analyze", 2),
-                            else_=3,
+                            (EnrichmentJobModel.job_type == "chapter_cards", 2),
+                            (EnrichmentJobModel.job_type == "image_analyze", 3),
+                            else_=4,
                         ),
                         EnrichmentJobModel.created_at,
                     )

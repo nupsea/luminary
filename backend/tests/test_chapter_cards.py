@@ -267,6 +267,23 @@ async def test_the_chapter_being_read_and_the_next_come_first(long_book, fakes):
     assert (pick.chapter.id, pick.ahead) == ("ch4", False)
 
 
+async def test_a_reader_in_the_pdf_view_is_placed_by_page(long_book, fakes):
+    """The PDF view saves a page and no section; reading chapter 3 there is not chapter 1."""
+    from sqlalchemy import update
+
+    await chapter_cards.chapter_cards_handler("bk", "job")
+    async with long_book.factory() as session:
+        for i in range(5):
+            await session.execute(
+                update(ChunkModel).where(ChunkModel.id == f"k{i}").values(page_number=10 * i + 5)
+            )
+        session.add(ReadingPositionModel(document_id="bk", last_pdf_page=25))
+        await session.commit()
+
+    pick = await chapter_backfill.next_chapter()
+    assert (pick.chapter.id, pick.ahead) == ("ch2", True)
+
+
 @pytest.mark.parametrize(
     ("plugged", "percent", "ahead", "blocked"),
     [
@@ -305,6 +322,36 @@ async def test_a_chapter_that_yields_no_card_is_not_written_again(long_book, fak
     assert (await chapter_backfill.run_once())[0] is True
     assert (await chapter_backfill.run_once())[0] is True
     assert await _written(long_book) == {"ch0", "ch1"}
+
+
+async def test_a_chapter_is_never_written_twice_at_once(long_book, fakes, monkeypatch):
+    import asyncio
+
+    release = asyncio.Event()
+    real = chapter_cards.write_chapter_cards
+
+    async def slow(*a, **kw):
+        await release.wait()
+        return await real(*a, **kw)
+
+    monkeypatch.setattr(chapter_cards, "write_chapter_cards", slow)
+    first = asyncio.create_task(chapter_cards.chapter_cards_handler("bk", "job"))
+    await asyncio.sleep(0)
+    while not chapter_cards.being_written("bk"):
+        await asyncio.sleep(0.01)
+
+    # The backfill passes over the chapter ingestion is writing, and refuses it if handed it.
+    await _read_at(long_book, "ch0")
+    pick = await chapter_backfill.next_chapter()
+    assert pick.chapter.id == "ch1"
+    async with long_book.factory() as session:
+        chapters = await chapter_cards.chapters_for_document("bk", "DDIA", session)
+        assert await chapter_cards.write_chapter("bk", "DDIA", chapters[0], "", session) is None
+
+    release.set()
+    await first
+    assert await _written(long_book) == {"ch0", "ch1"}
+    assert not chapter_cards.being_written("bk")
 
 
 async def test_a_machine_booted_moments_ago_with_no_question_is_quiet(monkeypatch):
