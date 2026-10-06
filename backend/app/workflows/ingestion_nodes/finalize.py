@@ -32,6 +32,7 @@ from app.services.document_tagger import enrich_document_tags
 from app.services.enrichment_worker import get_enrichment_worker
 from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.library_summary import get_library_summary_service
+from app.services.llm_admission import unattended
 from app.services.model_router import resolve
 from app.services.section_summarizer import (
     defer_section_summaries,
@@ -153,7 +154,10 @@ async def _run_progressive_summarization(doc_id: str) -> None:
             )
 
     try:
-        rest_inserted = await section_svc.generate_progressive_rest(doc_id, rest_units, next_index)
+        with unattended():
+            rest_inserted = await section_svc.generate_progressive_rest(
+                doc_id, rest_units, next_index
+            )
         logger.info(
             "progressive summarize: %d remaining section summaries stored",
             rest_inserted,
@@ -166,7 +170,8 @@ async def _run_progressive_summarization(doc_id: str) -> None:
             extra={"doc_id": doc_id},
         )
 
-    await _run_pregenerate(doc_id)
+    with unattended():
+        await _run_pregenerate(doc_id)
 
 
 async def section_summarize_node(state: IngestionState) -> IngestionState:

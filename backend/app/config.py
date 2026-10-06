@@ -149,6 +149,9 @@ class Settings(BaseSettings):
     # Hold the reserve this long after an interactive call ends, so a background
     # call is not admitted between two turns of the same conversation.
     LLM_ADMISSION_GRACE_SECONDS: float = 5.0
+    # Share of time unattended work (enrichment, chapter backfill) may keep the local model
+    # busy while Settings > "Quiet background work" is on: it rests as long as it ran.
+    BACKGROUND_LLM_DUTY: float = 0.5
     # Starvation bound. Someone who keeps chatting must not stop ingestion
     # for ever: a background call held this long is admitted anyway and logged.
     LLM_ADMISSION_MAX_DEFER_SECONDS: float = 60.0

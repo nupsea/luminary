@@ -13,6 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.services.background import fire_and_forget, task_registry
+from app.services.background_prefs import (
+    chapter_backfill,
+    quiet_background,
+    set_background_prefs,
+)
 from app.services.settings_service import (
     get_llm_settings,
     get_rerank_enabled,
@@ -632,3 +637,37 @@ async def patch_retrieval_settings(
 ) -> RetrievalSettingsResponse:
     await set_rerank_enabled(db, body.rerank_enabled)
     return RetrievalSettingsResponse(rerank_enabled=await get_rerank_enabled(db))
+
+
+# Background work
+
+
+class BackgroundSettingsResponse(BaseModel):
+    chapter_backfill: bool
+    quiet_background: bool
+
+
+class BackgroundSettingsPatch(BaseModel):
+    chapter_backfill: bool | None = None
+    quiet_background: bool | None = None
+
+
+def _background_settings() -> BackgroundSettingsResponse:
+    return BackgroundSettingsResponse(
+        chapter_backfill=chapter_backfill(), quiet_background=quiet_background()
+    )
+
+
+@router.get("/background", response_model=BackgroundSettingsResponse)
+async def get_background_settings() -> BackgroundSettingsResponse:
+    return _background_settings()
+
+
+@router.patch("/background", response_model=BackgroundSettingsResponse)
+async def patch_background_settings(
+    body: BackgroundSettingsPatch, db: AsyncSession = Depends(get_db)
+) -> BackgroundSettingsResponse:
+    await set_background_prefs(
+        db, chapter_backfill=body.chapter_backfill, quiet_background=body.quiet_background
+    )
+    return _background_settings()

@@ -29,8 +29,10 @@ from app.config import get_settings
 from app.database import get_session_factory
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
+from app.services.background_prefs import chapter_backfill
 from app.services.chapter_cards import _known_names, being_written, write_chapter, writing_any
 from app.services.chapters import Chapter, chapters_for_document
+from app.services.llm_admission import unattended
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +160,8 @@ async def not_now(pick: Pick) -> str | None:
     """Why *pick* must wait, or None when it may be written now."""
     from app.services.llm_routing import refusal  # noqa: PLC0415
 
+    if not chapter_backfill():
+        return "turned off in Settings"
     # Two writers share the one model slot, so a second chapter only delays the one in hand.
     if writing_any():
         return "a chapter is being written"
@@ -217,8 +221,9 @@ class ChapterBackfill:
         self._loaded: str | None = None
 
     def start(self) -> None:
-        if get_settings().CHAPTER_CARDS_BACKFILL and self._task is None:
-            self._task = asyncio.create_task(self._loop(), name="chapter-backfill")
+        if self._task is None:
+            with unattended():
+                self._task = asyncio.create_task(self._loop(), name="chapter-backfill")
 
     async def stop(self) -> None:
         if self._task is not None:

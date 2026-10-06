@@ -19,6 +19,7 @@ from app.exceptions import LocalInferenceRefused
 from app.models import DocumentModel, EnrichmentJobModel
 from app.services.components import component_for_model
 from app.services.llm import LLMUnavailableError, missing_model_from
+from app.services.llm_admission import unattended
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +170,9 @@ class EnrichmentQueueWorker:
                 )
 
         self._running = True
-        self._task = asyncio.create_task(self._poll_loop())
+        # Every job inherits this: nobody waits on a queued job (llm_admission._rest).
+        with unattended():
+            self._task = asyncio.create_task(self._poll_loop())
         logger.info("EnrichmentQueueWorker: started")
 
     async def stop(self) -> None:

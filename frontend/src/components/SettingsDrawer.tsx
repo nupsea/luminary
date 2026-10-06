@@ -133,6 +133,63 @@ function RetrievalControl() {
   )
 }
 
+interface BackgroundSettings {
+  chapter_backfill: boolean
+  quiet_background: boolean
+}
+
+const BACKGROUND_ROWS: { key: keyof BackgroundSettings; label: string; help: string }[] = [
+  {
+    key: "quiet_background",
+    label: "Quiet background work",
+    help:
+      "Work nobody is waiting on (figures, summaries, chapter questions) rests between steps, " +
+      "keeping the machine cooler and quieter. It finishes about twice as late.",
+  },
+  {
+    key: "chapter_backfill",
+    label: "Write chapter questions ahead",
+    help:
+      "Write questions for the chapters of books you are reading while the machine is free. " +
+      "Off: only a new book's first chapters get questions.",
+  },
+]
+
+function BackgroundControl() {
+  const queryClient = useQueryClient()
+  const { data } = useQuery({
+    queryKey: ["background-settings"],
+    queryFn: () => apiGet<BackgroundSettings>("/settings/background"),
+    staleTime: 60_000,
+  })
+  const mutation = useMutation({
+    mutationFn: (updates: Partial<BackgroundSettings>): Promise<BackgroundSettings> =>
+      apiPatch("/settings/background", updates),
+    onSuccess: (fresh) => queryClient.setQueryData(["background-settings"], fresh),
+    onError: () => toast.error("Could not update background settings"),
+  })
+  return (
+    <section className="space-y-3">
+      <h3 className="text-sm font-semibold text-foreground">Background work</h3>
+      {BACKGROUND_ROWS.map((row) => (
+        <label key={row.key} className="flex cursor-pointer items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-foreground">{row.label}</p>
+            <p className="text-xs text-muted-foreground">{row.help}</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={data?.[row.key] ?? true}
+            disabled={!data || mutation.isPending}
+            onChange={(e) => mutation.mutate({ [row.key]: e.target.checked })}
+            className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-border accent-primary"
+          />
+        </label>
+      ))}
+    </section>
+  )
+}
+
 async function fetchModels(provider: string): Promise<ModelOption[]> {
   try {
     return await apiGet<ModelOption[]>("/settings/llm/models", { provider })
@@ -685,6 +742,10 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
 
           {/* Section 2.7: Retrieval — L3 reranker toggle */}
           <RetrievalControl />
+
+          <div className="border-t border-border" />
+
+          <BackgroundControl />
 
           <div className="border-t border-border" />
 

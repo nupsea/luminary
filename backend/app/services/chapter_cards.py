@@ -31,6 +31,7 @@ from app.services.flashcard_chapter import ChapterCard, Passage, write_chapter_c
 from app.services.flashcard_factuality import FACTUALITY_UNCHECKED
 from app.services.flashcard_parsers import grounding_state
 from app.services.flashcard_search import _sync_flashcard_fts
+from app.services.llm_admission import unattended
 from app.types import CARD_HELD
 
 logger = logging.getLogger(__name__)
@@ -149,10 +150,12 @@ async def chapter_cards_handler(document_id: str, job_id: str) -> None:
         doc = await DocumentRepo(session).get_or_404(document_id)
         chapters = await chapters_for_document(document_id, doc.title, session)
         known_names = await _known_names(document_id, session)
-        for chapter in chapters[:INGEST_CHAPTERS]:
-            # Read per chapter: the backfill may have written one while this job wrote another.
-            if chapter.id not in await FlashcardRepo(session).chapters_written(document_id):
-                await write_chapter(document_id, doc.title, chapter, known_names, session)
+        # The reader offers these at the end of chapter one, so they are not paced.
+        with unattended(False):
+            for chapter in chapters[:INGEST_CHAPTERS]:
+                # Read per chapter: the backfill may have written one while this job wrote another.
+                if chapter.id not in await FlashcardRepo(session).chapters_written(document_id):
+                    await write_chapter(document_id, doc.title, chapter, known_names, session)
 
 
 @dataclass(frozen=True)
