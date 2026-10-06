@@ -693,6 +693,16 @@ before release. Fiction is the weak kind: sound
 0.69 and 0.82 of chapter cards on the 4B against 0.89 and 0.93 for non-fiction, the failures mostly
 characters confused in first-person narrative (who shivered, who is ill, Ahab for Ishmael).
 
+0.15.4 bounds every Ollama we start (I-64), paces unattended model calls (Settings > Background
+work) and writes a new book's first chapters before any backfill.
+
+*Open:* paced against unpaced GPU duty was never measured on a real ingest, only in
+`test_concurrent_unattended_callers_keep_the_pace`: both profile runs ran on a saturated host. A
+new book's first chapters still share the background slot with up to three deferred section
+summaries (`section_summarizer.py:364`). The backend peaks near 4.6 GB while GLiNER runs; beside
+the 4B and a 7B vision model that leaves a 16 GB host little headroom, and no 16 GB host was
+measured.
+
 ### 6. An architecture that can take tenants — 0.17.0
 
 **Only the seams that are expensive to add once users have data.** There is no tenancy UI and no

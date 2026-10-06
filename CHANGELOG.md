@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.4] - 2026-10-07
+
 ### Fixed
 - **The desktop app could take 20 GB and get other apps force-quit.** Its model server kept up to 8 GB of prompt cache that the default model never reuses; it is now capped at 512 MB. The one-command Mac install had the same gap and is capped too.
 - **A new book's first chapter questions waited behind other books' background chapters.** Background chapter writing now pauses until they are written.
