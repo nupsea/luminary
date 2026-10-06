@@ -230,6 +230,9 @@ async def _sample(
         "chapters": len(chapters) if chapters is not None else None,
         "chapters_with_cards": sum(1 for c in chapters or [] if c.get("cards")),
         "cards": sum(c.get("cards") or 0 for c in chapters or []),
+        # Other processes' load: a run beside a swapping, saturated host times the host.
+        "load1": round(psutil.getloadavg()[0], 1),
+        "swap_used": psutil.swap_memory().used,
     }
 
 
@@ -499,6 +502,10 @@ def _timeline(samples: list[dict]) -> dict[str, Any]:
         "gpu_p50_pct": _pct(gpu, 0.5),
         "gpu_p90_pct": _pct(gpu, 0.9),
         "gpu_saturated_share": round(sum(g >= 90 for g in gpu) / len(gpu), 3) if gpu else None,
+        "load1_max": max((s.get("load1") or 0 for s in samples), default=None),
+        "swap_used_max_mb": round(max(s.get("swap_used") or 0 for s in samples) / MB, 1)
+        if samples
+        else None,
         "min_available_mb": round(min(s["available"] for s in samples) / MB, 1)
         if samples
         else None,
@@ -522,6 +529,10 @@ def _print_report(summary: dict, samples: list[dict]) -> None:
         f">=90%: {summary['gpu_saturated_share']}"
     )
     print(f"  min available RAM        {summary['min_available_mb']!s:>10} MB")
+    print(
+        f"  host load (1-min max)    {summary['load1_max']!s:>10}   "
+        f"swap used max {summary['swap_used_max_mb']} MB"
+    )
     lib = summary.get("library_after") or {}
     print(f"  host                     {summary['total_ram_mb'] / 1024:>10,.1f} GB RAM")
     print(f"  OLLAMA_MAX_LOADED_MODELS {summary.get('ollama_max_loaded') or 'unset'!s:>10}")
