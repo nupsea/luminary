@@ -686,8 +686,10 @@ held cards (Practice, Later, Don't ask for this book, stored per document) and o
 (`ChapterPracticePanel.tsx`). The dock's Practice tab and Study both list each book's chapters
 (`DocumentChapters.tsx`); "Random chapter" favours unpractised chapters 3:1.
 
-*Open:* the reader offer, the chapter panel and the Study list have unit tests only; none was run in
-a browser or the desktop shell. Fiction is the weak kind: sound
+Shipped in 0.15.3, after a manual run in the browser on the dev server.
+
+*Open:* the reader offer, the chapter panel and the Study list were not run in the desktop shell
+before release. Fiction is the weak kind: sound
 0.69 and 0.82 of chapter cards on the 4B against 0.89 and 0.93 for non-fiction, the failures mostly
 characters confused in first-person narrative (who shivered, who is ill, Ahab for Ishmael).
 

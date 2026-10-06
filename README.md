@@ -31,10 +31,10 @@ Download the installer for your system and open it. Every file is also on the
 
 | System | Download | Then |
 |---|---|---|
-| **macOS** (Apple Silicon, macOS 14+) | [![Download .dmg](https://img.shields.io/badge/Download%20.dmg-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/nupsea/luminary/releases/download/v0.15.2/Luminary_0.15.2_aarch64.dmg) | Open it and drag Luminary to Applications |
-| **Windows 10 or 11** | [![Download .exe](https://img.shields.io/badge/Download%20.exe-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/nupsea/luminary/releases/download/v0.15.2/Luminary_0.15.2_x64-setup.exe) | Run it; installs for your user only, no administrator prompt |
-| **Linux** (Debian, Ubuntu) | [![Download .deb](https://img.shields.io/badge/Download%20.deb-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](https://github.com/nupsea/luminary/releases/download/v0.15.2/Luminary_0.15.2_amd64.deb) | Open it in your software installer, or `sudo apt install ./Luminary_*_amd64.deb` |
-| **Linux** (any x86_64) | [![Download AppImage](https://img.shields.io/badge/Download%20AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/nupsea/luminary/releases/download/v0.15.2/Luminary_0.15.2_amd64.AppImage) | `chmod +x` it and run it |
+| **macOS** (Apple Silicon, macOS 14+) | [![Download .dmg](https://img.shields.io/badge/Download%20.dmg-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/nupsea/luminary/releases/download/v0.15.3/Luminary_0.15.3_aarch64.dmg) | Open it and drag Luminary to Applications |
+| **Windows 10 or 11** | [![Download .exe](https://img.shields.io/badge/Download%20.exe-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/nupsea/luminary/releases/download/v0.15.3/Luminary_0.15.3_x64-setup.exe) | Run it; installs for your user only, no administrator prompt |
+| **Linux** (Debian, Ubuntu) | [![Download .deb](https://img.shields.io/badge/Download%20.deb-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](https://github.com/nupsea/luminary/releases/download/v0.15.3/Luminary_0.15.3_amd64.deb) | Open it in your software installer, or `sudo apt install ./Luminary_*_amd64.deb` |
+| **Linux** (any x86_64) | [![Download AppImage](https://img.shields.io/badge/Download%20AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/nupsea/luminary/releases/download/v0.15.3/Luminary_0.15.3_amd64.AppImage) | `chmod +x` it and run it |
 
 The Windows installer is not yet code-signed: at *Windows protected your PC*, choose
 **More info → Run anyway**.
