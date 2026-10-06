@@ -535,7 +535,10 @@ pub fn spawn_ollama(
         // Reaches only the runner child; must name the tree the binary runs from.
         .env("OLLAMA_LIBRARY_PATH", engine.join(OLLAMA_LIBRARY_DIR))
         .env("OLLAMA_KEEP_ALIVE", "30m")
-        .env("LLAMA_ARG_CACHE_RAM", ollama_cache_ram_mib(data_dir).to_string())
+        .env(
+            "LLAMA_ARG_CACHE_RAM",
+            ollama_cache_ram_mib(data_dir).to_string(),
+        )
         .env(
             "OLLAMA_NUM_PARALLEL",
             ollama_num_parallel(data_dir).to_string(),
