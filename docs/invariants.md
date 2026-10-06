@@ -287,7 +287,8 @@ Unset, llama-server keeps up to 8192 MiB of host RAM in prompt-cache entries. qw
 no entry is ever reused, and each one-shot background prompt adds about 210 MiB until the cap is
 reached: the bundled 4B server held 13.4 GB beside a 5 GB vision server, and jetsam killed apps.
 `supervisor.rs` clears the environment before spawning, so only `LLAMA_ARG_CACHE_RAM` set there
-reaches it (512, as compose and both installers set it). `test_ollama_runtime_budget.py` and
+reaches it (512, as compose, both installers and `bootstrap.sh` set it, the last through launchd
+and its own environment). `test_ollama_runtime_budget.py` (every launch path, every cap) and
 `supervisor::tests::the_prompt_cache_is_bounded_whatever_env_says` guard it.
 
 ## Retired numbers

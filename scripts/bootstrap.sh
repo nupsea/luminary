@@ -332,8 +332,16 @@ else
 fi
 VISION_CONCURRENCY="$NUM_PARALLEL"   # I-31: size every semaphore at the slot count
 
-launchctl setenv OLLAMA_MAX_LOADED_MODELS "$MAX_LOADED" 2>/dev/null || true
-launchctl setenv OLLAMA_NUM_PARALLEL "$NUM_PARALLEL" 2>/dev/null || true
+# Ollama's own defaults are a 5-minute unload and an 8 GiB prompt cache (I-64).
+OLLAMA_KEEP_ALIVE=30m
+LLAMA_ARG_CACHE_RAM=512
+OLLAMA_MAX_LOADED_MODELS="$MAX_LOADED"
+OLLAMA_NUM_PARALLEL="$NUM_PARALLEL"
+# Exported too: the `nohup ollama serve` fallback below inherits this shell, not launchd.
+export OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL OLLAMA_KEEP_ALIVE LLAMA_ARG_CACHE_RAM
+for knob in OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL OLLAMA_KEEP_ALIVE LLAMA_ARG_CACHE_RAM; do
+    launchctl setenv "$knob" "${!knob}" 2>/dev/null || true
+done
 
 if curl -sf --max-time 2 "http://127.0.0.1:11434/api/version" >/dev/null 2>&1; then
     _info "Ollama already running (profile applies after its next restart)."

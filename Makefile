@@ -317,7 +317,7 @@ docker-run: require-compose-release
 #
 # Ollama must listen beyond loopback or the container cannot reach it: it binds
 # 127.0.0.1 by default, and `host.docker.internal` arrives from the bridge.
-#   OLLAMA_HOST=0.0.0.0:11434 ollama serve
+#   OLLAMA_HOST=0.0.0.0:11434 LLAMA_ARG_CACHE_RAM=512 ollama serve
 #
 # `--profile ai ... --no-deps app`, not a bare `docker compose up`. Every service
 # in this file carries a profile, so with none selected Compose 2.0.0-beta.4 built
@@ -329,14 +329,14 @@ docker-run-host-ollama: require-compose-release
 	@command -v ollama >/dev/null || { echo "Install Ollama first: https://ollama.com/download"; exit 1; }
 	@curl -sf http://localhost:11434/api/tags >/dev/null \
 		|| { echo "Ollama is not answering on :11434. Start it with:"; \
-		     echo "   OLLAMA_HOST=0.0.0.0:11434 ollama serve"; exit 1; }
+		     echo "   OLLAMA_HOST=0.0.0.0:11434 LLAMA_ARG_CACHE_RAM=512 ollama serve"; exit 1; }
 	@if command -v lsof >/dev/null 2>&1; then \
 		lsof -nP -iTCP:11434 -sTCP:LISTEN 2>/dev/null \
 			| grep -qE "TCP \*:11434|TCP 0\.0\.0\.0:11434" \
 		|| { echo "Ollama is listening on loopback only, so the container cannot reach it."; \
 		     echo "The curl above passes over 127.0.0.1 and proves nothing about the bridge:"; \
 		     echo "that is exactly the case this check exists to catch. Restart it as:"; \
-		     echo "   OLLAMA_HOST=0.0.0.0:11434 ollama serve"; exit 1; }; \
+		     echo "   OLLAMA_HOST=0.0.0.0:11434 LLAMA_ARG_CACHE_RAM=512 ollama serve"; exit 1; }; \
 	fi
 	@m=$${LITELLM_DEFAULT_MODEL:-ollama/qwen3.5:4b}; m=$${m#ollama/}; \
 	curl -sf http://localhost:11434/api/tags | grep -q "\"$$m\"" \
