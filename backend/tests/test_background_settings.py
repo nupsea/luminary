@@ -83,3 +83,26 @@ async def test_work_someone_waits_on_or_a_loud_setting_never_rests(setup, memory
         with llm_admission.unattended():
             waited = await two_calls()
     assert waited < 0.1
+
+
+async def test_concurrent_unattended_callers_keep_the_pace(monkeypatch):
+    """Ingestion runs several unattended callers at once (summaries three wide, figures,
+    diagrams). Checking the rest only before queueing let a queued caller walk past a rest
+    earned while it waited: three callers kept the runtime 76% busy, and a real ingest 100%."""
+    monkeypatch.setattr(llm_admission, "enrichment_concurrency", lambda: 1)
+    # The queue polls every 0.2 s; left alone, its gaps between 0.1 s calls pass for rest.
+    monkeypatch.setattr(llm_admission, "_POLL_SECONDS", 0.005)
+    spans: list[tuple[float, float]] = []
+
+    async def worker() -> None:
+        for _ in range(4):
+            async with llm_admission.background_call():
+                t = asyncio.get_running_loop().time()
+                await asyncio.sleep(0.1)
+                spans.append((t, asyncio.get_running_loop().time()))
+
+    with llm_admission.unattended():
+        await asyncio.gather(*(worker() for _ in range(3)))
+    spans.sort()
+    busy = sum(e - s for s, e in spans)  # one slot, so calls never overlap
+    assert busy / (spans[-1][1] - spans[0][0]) < 0.6

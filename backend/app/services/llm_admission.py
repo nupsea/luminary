@@ -383,10 +383,15 @@ async def background_call():
     """Hold a background call until the runtime has room for it."""
     state = _state()
     paced = _unattended.get() and not _awaited.get()
-    if paced:
-        await _rest(state)
-    if admission_enabled():
-        await _wait_for_slot(state, _awaited.get())
+    while True:
+        if paced:
+            await _rest(state)
+        if admission_enabled():
+            await _wait_for_slot(state, _awaited.get())
+        # A call that ended while this one queued may have earned a rest; checked only before
+        # queueing, three concurrent callers kept the runtime 76% busy instead of 50%.
+        if not paced or state.rest_until <= time.monotonic():
+            break
     started = time.monotonic()
     entry = [started]
     state.background_activity.append(entry)
