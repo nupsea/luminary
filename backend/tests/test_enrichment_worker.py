@@ -464,3 +464,49 @@ async def test_boot_always_requeues_skipped_regardless_of_attempts(test_db):
     await worker.stop()
 
     assert await _boot_status_of(factory, job_id) == "pending"
+
+
+@pytest.mark.asyncio
+async def test_chapter_cards_run_before_image_analysis(test_db):
+    """A reader reaches chapter 1's end in minutes; analysing a book's figures took 30."""
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Test",
+                format="pdf",
+                content_type="book",
+                word_count=10,
+                page_count=1,
+                file_path="/fake.pdf",
+                stage="enriching",
+            )
+        )
+        # Created in the order ingestion queues them; image_analyze is queued by image_extract.
+        for job_type in ("image_extract", "concept_link", "chapter_cards", "image_analyze"):
+            session.add(
+                EnrichmentJobModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    job_type=job_type,
+                    status="pending",
+                    created_at=datetime.now(UTC),
+                )
+            )
+        await session.commit()
+
+    ran: list[str] = []
+    worker = EnrichmentQueueWorker(poll_interval_s=0.1)
+    for job_type in ("image_extract", "concept_link", "chapter_cards", "image_analyze"):
+
+        async def handler(document_id: str, j_id: str, job_type: str = job_type) -> None:
+            ran.append(job_type)
+
+        worker.register(job_type, handler)
+    await worker._dispatch_pending()
+    await _drain(worker)
+    await worker.stop()
+
+    assert ran == ["image_extract", "chapter_cards", "image_analyze", "concept_link"]

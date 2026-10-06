@@ -51,14 +51,14 @@ import {
 } from "@/lib/studySessionService"
 
 import { SessionHistory } from "@/components/study/SessionHistory"
+import { DocumentChapters } from "@/components/DocumentChapters"
+import { type Chapter, fetchChapters } from "@/lib/chapterApi"
 
 import { CardGenerator } from "./CardGenerator"
-import { materialExhausted, noCardsNote, summariseDeck } from "./practiceDeck"
+import { READER_CARD_LIMIT, materialExhausted, noCardsNote, summariseDeck } from "./practiceDeck"
 import { RecallRunner } from "./RecallRunner"
+import { StartButton } from "./StartButton"
 
-// A reading-session run, not a daily queue: the Study page's 50 is the number
-// for clearing a backlog, and 50 cards is longer than the reading it interrupts.
-const READER_CARD_LIMIT = 20
 
 interface PracticePanelProps {
   documentId: string
@@ -70,6 +70,7 @@ interface PracticePanelProps {
   onClearScope: () => void
   /** Put the document on the passage a card came from. */
   onJumpToSource: (sectionId: string) => void
+  onPracticeChapter: (chapter: Chapter) => void
 }
 
 interface ActiveRun {
@@ -85,6 +86,7 @@ export function PracticePanel({
   context,
   onClearScope,
   onJumpToSource,
+  onPracticeChapter,
 }: PracticePanelProps) {
   const qc = useQueryClient()
   const [run, setRun] = useState<ActiveRun | null>(null)
@@ -166,6 +168,13 @@ export function PracticePanel({
     : practiceModel
 
   const { total: deckTotal, due: dueCards } = summariseDeck(deck ?? [])
+  // Chapter questions stay out of the deck until their chapter is practised (#231).
+  const { data: chapterList } = useQuery({
+    queryKey: ["chapters", documentId],
+    queryFn: () => fetchChapters(documentId),
+    staleTime: 60_000,
+  })
+  const heldQuestions = (chapterList?.chapters ?? []).reduce((n, c) => n + c.held, 0)
 
   async function start(mode: StudyMode, ahead: boolean, resumeSessionId?: string) {
     setStarting(mode)
@@ -401,8 +410,14 @@ export function PracticePanel({
                 <DeckState
                   total={deckTotal}
                   due={dueCards.length}
+                  held={heldQuestions}
                   starting={starting}
                   onStart={start}
+                />
+                <DocumentChapters
+                  documentId={documentId}
+                  className=""
+                  onOpen={onPracticeChapter}
                 />
               </>
             )}
@@ -476,14 +491,28 @@ export function PracticePanel({
 function DeckState({
   total,
   due,
+  held,
   starting,
   onStart,
 }: {
   total: number
   due: number
+  held: number
   starting: StudyMode | null
   onStart: (mode: StudyMode, ahead: boolean) => void
 }) {
+  if (total === 0 && held > 0) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-5">
+        <p data-testid="deck-summary" className="text-base font-medium text-foreground">
+          {held} chapter question{held === 1 ? "" : "s"} waiting.
+        </p>
+        <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+          Practise a chapter below and its questions join your reviews.
+        </p>
+      </div>
+    )
+  }
   if (total === 0) {
     return (
       <div className="rounded-xl border border-border bg-card p-5">
@@ -532,39 +561,6 @@ function DeckState({
         />
       </div>
     </div>
-  )
-}
-
-function StartButton({
-  testId,
-  icon: Icon,
-  label,
-  hint,
-  busy,
-  disabled,
-  onClick,
-}: {
-  testId: string
-  icon: typeof Brain
-  label: string
-  hint: string
-  busy: boolean
-  disabled: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      data-testid={testId}
-      onClick={onClick}
-      disabled={disabled}
-      className="flex flex-col items-start gap-1 rounded-lg border border-border bg-background px-4 py-3 text-left transition-colors hover:border-primary hover:bg-muted/50 disabled:opacity-50"
-    >
-      <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-        {busy ? <Loader2 size={14} className="animate-spin" /> : <Icon size={14} />}
-        {label}
-      </span>
-      <span className="text-xs text-muted-foreground">{hint}</span>
-    </button>
   )
 }
 

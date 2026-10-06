@@ -10,6 +10,7 @@ recorded, so an interrupted job resumes and no chapter is written twice.
 from __future__ import annotations
 
 import logging
+import random
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -39,6 +40,18 @@ KNOWN_NAMES = 40
 # so the prompt at that chapter's end has cards even if the backfill has not run yet.
 INGEST_CHAPTERS = 2
 
+# Chapters being written in this process. The ingestion job and the backfill both write, and
+# the run table refuses a second copy only at commit, after minutes of model time.
+_writing: set[tuple[str, str]] = set()
+
+
+def being_written(document_id: str) -> set[str]:
+    return {chapter_id for doc, chapter_id in _writing if doc == document_id}
+
+
+def writing_any() -> bool:
+    return bool(_writing)
+
 
 async def _known_names(document_id: str, session: AsyncSession) -> str:
     entities = await GraphEntityRepo(session).entities_for_document(document_id)
@@ -67,6 +80,20 @@ def _card_row(document_id: str, chapter: Chapter, card: ChapterCard, now: dateti
 
 
 async def write_chapter(
+    document_id: str, book: str, chapter: Chapter, known_names: str, session: AsyncSession
+) -> int | None:
+    """The number of cards written, or None when this process is already writing the chapter."""
+    key = (document_id, chapter.id)
+    if key in _writing:
+        return None
+    _writing.add(key)
+    try:
+        return await _write_chapter(document_id, book, chapter, known_names, session)
+    finally:
+        _writing.discard(key)
+
+
+async def _write_chapter(
     document_id: str, book: str, chapter: Chapter, known_names: str, session: AsyncSession
 ) -> int:
     from app.services.flashcard import get_llm_service  # noqa: PLC0415
@@ -105,10 +132,10 @@ async def chapter_cards_handler(document_id: str, job_id: str) -> None:
     async with get_session_factory()() as session:
         doc = await DocumentRepo(session).get_or_404(document_id)
         chapters = await chapters_for_document(document_id, doc.title, session)
-        done = await FlashcardRepo(session).chapters_written(document_id)
         known_names = await _known_names(document_id, session)
         for chapter in chapters[:INGEST_CHAPTERS]:
-            if chapter.id not in done:
+            # Read per chapter: the backfill may have written one while this job wrote another.
+            if chapter.id not in await FlashcardRepo(session).chapters_written(document_id):
                 await write_chapter(document_id, doc.title, chapter, known_names, session)
 
 
@@ -133,16 +160,37 @@ async def chapter_overview(
     return not doc.chapter_prompt_off, chapters
 
 
-async def practise_chapter(
-    document_id: str, chapter_id: str, session: AsyncSession
+def draw(
+    cards: list[FlashcardModel], count: int | None, rng: random.Random
 ) -> list[FlashcardModel]:
-    """The chapter's cards, its held ones now in the review schedule.
+    """*count* of a chapter's cards at random, the ones never practised before the rest."""
+    held = [c for c in cards if c.fsrs_state == CARD_HELD]
+    seen = [c for c in cards if c.fsrs_state != CARD_HELD]
+    rng.shuffle(held)
+    rng.shuffle(seen)
+    drawn = (held + seen)[: count or len(cards)]
+    rng.shuffle(drawn)
+    return drawn
 
-    Every held card is scheduled, not only those a run reaches: practising a chapter is what
-    admits it to review, and a card left held would never come due.
+
+async def practise_chapter(
+    document_id: str,
+    chapter_id: str,
+    count: int | None,
+    session: AsyncSession,
+    rng: random.Random | None = None,
+) -> list[FlashcardModel]:
+    """*count* of the chapter's cards (all when None), the held ones drawn now in review.
+
+    Only drawn cards are admitted: the rest stay held, so the chapter still shows them as new
+    and the next practice draws them first.
     """
     repo = FlashcardRepo(session)
-    if not await repo.list_for_chapter(document_id, chapter_id):
+    cards = await repo.list_for_chapter(document_id, chapter_id)
+    if not cards:
         raise NotFound(f"No cards for chapter {chapter_id}")
-    await repo.release_held(document_id, chapter_id)
-    return await repo.list_for_chapter(document_id, chapter_id)
+    drawn = draw(cards, count, rng or random.Random())  # noqa: S311
+    await repo.release_held([c.id for c in drawn])
+    for card in drawn:
+        await session.refresh(card)
+    return drawn

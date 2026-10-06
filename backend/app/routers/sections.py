@@ -3,7 +3,7 @@ import re
 from typing import Literal
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.database import get_session_factory
 from app.exceptions import NotFound
@@ -276,6 +276,11 @@ class ChapterPromptRequest(BaseModel):
     ask_at_chapter_end: bool
 
 
+class ChapterPracticeRequest(BaseModel):
+    # None practises every card in the chapter.
+    count: int | None = Field(default=None, ge=1)
+
+
 @router.get("/{document_id}/chapters", response_model=ChapterList)
 async def get_chapters(document_id: str) -> ChapterList:
     """The document's chapters in reading order, with their card counts (#231)."""
@@ -312,8 +317,12 @@ async def set_chapter_prompt(document_id: str, body: ChapterPromptRequest) -> No
 @router.post(
     "/{document_id}/chapters/{chapter_id}/practice", response_model=list[FlashcardResponse]
 )
-async def practice_chapter(document_id: str, chapter_id: str) -> list[FlashcardResponse]:
-    """Admit a chapter's held cards to the review schedule and return all its cards."""
+async def practice_chapter(
+    document_id: str, chapter_id: str, body: ChapterPracticeRequest | None = None
+) -> list[FlashcardResponse]:
+    """Draw *count* of a chapter's cards at random, unpractised first, and admit them to review."""
     async with get_session_factory()() as session:
-        cards = await practise_chapter(document_id, chapter_id, session)
+        cards = await practise_chapter(
+            document_id, chapter_id, body.count if body else None, session
+        )
     return [to_response(c) for c in cards]

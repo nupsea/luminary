@@ -215,19 +215,20 @@ class DocumentRepo:
         )
         return result.scalars().all()
 
-    async def recently_read(self, since: datetime) -> list[tuple[str, str, str | None]]:
-        """(document id, title, last section read) since *since*, most recently read first."""
+    async def recently_read(self, since: datetime) -> list[tuple[str, str, str | None, int | None]]:
+        """(document id, title, last section, last PDF page) read since *since*, newest first."""
         result = await self.session.execute(
             select(
                 ReadingPositionModel.document_id,
                 DocumentModel.title,
                 ReadingPositionModel.last_section_id,
+                ReadingPositionModel.last_pdf_page,
             )
             .join(DocumentModel, DocumentModel.id == ReadingPositionModel.document_id)
             .where(ReadingPositionModel.updated_at >= since)
             .order_by(ReadingPositionModel.updated_at.desc())
         )
-        return [(doc_id, title, section) for doc_id, title, section in result.all()]
+        return [(doc_id, title, section, page) for doc_id, title, section, page in result.all()]
 
     async def enrichment_in_progress(self, since: datetime) -> bool:
         """Whether any document's enrichment queued or started since *since* is unfinished."""

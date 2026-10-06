@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.3] - 2026-10-06
+
+### Added
+- **Practice by chapter (#231).** Each chapter gets its own questions: the first two at ingestion, the rest in the background while you read, nearest your place first, only when the machine can spare the model. They stay out of your reviews until you practise them.
+- **The reader offers a chapter's practice at its end**, in the Read and PDF views: Practice, Later, or Don't ask for this book.
+- **Choose how many questions to practise.** A run draws that many at random, unpractised first; only those join your reviews, and the rest wait for the next run.
+- **Chapters are listed on the Study page and in the reader's Practice tab** with their new and due counts, so a chapter can be practised again at any time. Random chapter favours ones not yet practised.
+
+### Changed
+- **A new document finishes processing a few minutes later**: its first chapters' questions are written before its figures are analysed.
+
 ## [0.15.2] - 2026-10-04
 
 ### Fixed

@@ -9,7 +9,7 @@
  *  - Full-screen StudySession replaces tab content when studying
  */
 
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState, useEffect } from "react"
 import {
   ArrowLeft,
@@ -63,7 +63,9 @@ import { apiGet, apiPost } from "@/lib/apiClient"
 import type { DocListItem } from "./Study/types"
 import { fetchDocList } from "./Study/api"
 import { StudyBrowser, type CollectionNode } from "./Study/StudyBrowser"
+import { DocumentChapters } from "@/components/DocumentChapters"
 import { DocumentTopics } from "@/components/DocumentTopics"
+import { type Chapter, practiceChapter } from "@/lib/chapterApi"
 import { FlashcardManager } from "./Study/FlashcardManager"
 
 
@@ -128,6 +130,7 @@ function StartReviewDueCard({ onStart }: { onStart: () => void }) {
 }
 
 export default function Study() {
+  const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { canGoBack, backLabel, goBack } = useBackNavigation()
   const {
@@ -326,6 +329,29 @@ export default function Study() {
       console.warn("Failed to study section", err)
       setStudyPhase({ phase: "idle" })
       toast.error("Couldn't start studying this section.")
+    }
+  }
+
+  // A chapter run (#231): the cards the draw admitted to review, all of them.
+  const runChapterStudy = async (chapter: Chapter, mode: StudyMode, count: number) => {
+    if (studyPhase.phase !== "idle" || !studyDocumentId) return
+    setStudyPhase({ phase: "preparing", mode })
+    try {
+      const cards = await practiceChapter(studyDocumentId, chapter.id, count)
+      void queryClient.invalidateQueries({ queryKey: ["chapters", studyDocumentId] })
+      const outcome = await prepareSectionStudyFromCards(studyDocumentId, cards, mode)
+      const scope: PrepareStudySessionOptions = {
+        mode,
+        documentId: studyDocumentId,
+        collectionId: null,
+        cardLimit: FLASHCARD_CARD_LIMIT,
+        resumeSessionId: null,
+      }
+      setStudyPhase({ phase: "ready", mode, outcome, scopeForBeginNew: scope })
+    } catch (err) {
+      console.warn("Failed to study chapter", err)
+      setStudyPhase({ phase: "idle" })
+      toast.error("Couldn't start this chapter.")
     }
   }
 
@@ -559,6 +585,10 @@ export default function Study() {
                 </div>
               )
             })()}
+            <DocumentChapters
+              documentId={studyDocumentId}
+              onPractice={(chapter, mode, count) => void runChapterStudy(chapter, mode, count)}
+            />
             <DocumentTopics
               documentId={studyDocumentId}
               onStudySection={handleStudySection}

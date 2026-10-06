@@ -661,8 +661,7 @@ pins loopback against DNS rebinding, and that pin may only widen when authentica
 A token resolves to a principal. 0.17.0 hangs the request context off that principal, so the token
 shape is decided with the tenant seam in view, not retrofitted to it.
 
-**Chapter practice: questions written at ingestion, offered at each chapter's end (#231).** Practice
-starts from a button and writes its cards on demand.
+**Chapter practice: questions written at ingestion, offered at each chapter's end (#231).**
 
 *Built:* chapters come from heading text ("Chapter 3.", "Part II.", numbered headings that
 count up), else from ~30k-character windows labelled by page range or by their first topical
@@ -680,10 +679,17 @@ blind runs against the unit path: core ideas covered 0.27 -> 0.56 and 0.26 -> 0.
 0.77 -> 0.87 and 0.74 -> 0.92. Cost on the 4B: DDIA chapter 3 (74k characters) took 261 s for 34
 cards, so a 30k-character chapter is under two minutes against roughly twenty to read it.
 
-*Open:* practising a chapter moves its held cards into FSRS; the reader offers "Practice this
-chapter" past a chapter's last section (Practice, Later, Don't ask for this book) and opens the
-dock on it; Study lists each book's chapters with card counts, and "Random from this book" draws
-across chapters weighted toward the unpractised. Fiction is the weak kind: sound
+Practising a chapter draws the number of questions the learner picks, at random with unpractised
+cards first, and moves only those into FSRS (`POST /sections/{doc}/chapters/{id}/practice`, `draw`);
+the rest stay held for the next draw. The reader offers it once reading moves past a chapter with
+held cards (Practice, Later, Don't ask for this book, stored per document) and opens the dock on it
+(`ChapterPracticePanel.tsx`). The dock's Practice tab and Study both list each book's chapters
+(`DocumentChapters.tsx`); "Random chapter" favours unpractised chapters 3:1.
+
+Shipped in 0.15.3, after a manual run in the browser on the dev server.
+
+*Open:* the reader offer, the chapter panel and the Study list were not run in the desktop shell
+before release. Fiction is the weak kind: sound
 0.69 and 0.82 of chapter cards on the 4B against 0.89 and 0.93 for non-fiction, the failures mostly
 characters confused in first-person narrative (who shivered, who is ill, Ahab for Ishmael).
 
