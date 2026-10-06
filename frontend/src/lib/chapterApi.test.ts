@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   type Chapter,
+  chapterEndState,
   chapterIndexAt,
   finishedChapter,
   pickChapter,
@@ -41,11 +42,34 @@ describe("chapter end", () => {
     expect(finishedChapter(book, 0, 1)?.id).toBe("c1")
     expect(finishedChapter(book, 1, 0)).toBeNull()
     expect(finishedChapter(book, 0, 0)).toBeNull()
-    expect(finishedChapter(book, undefined, 1)).toBeNull()
+    expect(finishedChapter(book, 0, undefined)).toBeNull()
+  })
+
+  it("arriving in a chapter finishes the one before it", () => {
+    expect(finishedChapter(book, undefined, 1)?.id).toBe("c1")
+    expect(finishedChapter(book, undefined, 0)).toBeNull()
   })
 
   it("offers practice only for a chapter with unpractised cards", () => {
     expect(book.map(worthOffering)).toEqual([true, false, false])
+  })
+})
+
+describe("chapter end state", () => {
+  const list = (chapters: Chapter[], ask = true) => ({ ask_at_chapter_end: ask, chapters })
+
+  it("waits for a finished chapter's questions, then offers it", () => {
+    const before = chapterEndState(list([chapter("c1", [], 0, 0)]), "c1")
+    expect(before).toEqual({ offer: null, awaiting: true })
+    const after = chapterEndState(list([chapter("c1", [], 5, 5)]), "c1")
+    expect(after.offer?.id).toBe("c1")
+    expect(after.awaiting).toBe(false)
+  })
+
+  it("neither offers nor waits once practised, or when the book says not to ask", () => {
+    expect(chapterEndState(list(book), "c2")).toEqual({ offer: null, awaiting: false })
+    expect(chapterEndState(list(book, false), "c1")).toEqual({ offer: null, awaiting: false })
+    expect(chapterEndState(list(book), null)).toEqual({ offer: null, awaiting: false })
   })
 })
 

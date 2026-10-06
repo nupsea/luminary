@@ -14,9 +14,11 @@ import type { StudyMode } from "@/lib/studySessionService"
 export function DocumentChapters({
   documentId,
   onPractice,
+  className = "mb-8",
 }: {
   documentId: string
   onPractice: (chapter: Chapter, mode: StudyMode) => void
+  className?: string
 }) {
   const { data } = useQuery({
     queryKey: ["chapters", documentId],
@@ -32,7 +34,7 @@ export function DocumentChapters({
   }
 
   return (
-    <div data-testid="document-chapters" className="mb-8 rounded-xl border border-border bg-card/40 p-5">
+    <div data-testid="document-chapters" className={`${className} rounded-xl border border-border bg-card/40 p-5`}>
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <BookOpen size={18} className="text-primary" />

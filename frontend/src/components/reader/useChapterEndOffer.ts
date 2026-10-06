@@ -2,20 +2,20 @@
  * Which chapter the reader just finished, to offer practising it (#231).
  *
  * The views report where the reader is (`reach`); moving into a later chapter finishes the one
- * left. Asked once per chapter in a reading session ("Later" means not now, not never); the
- * "Don't ask for this book" choice is the document's and comes back with the chapters.
+ * left (`finishedChapter`). A chapter finished before its questions were written is offered
+ * when they arrive. Asked once per chapter in a reading session ("Later" means not now, not
+ * never); the "Don't ask for this book" choice is the document's and comes back with the chapters.
  */
 
 import { useCallback, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import {
-  type Chapter,
   type ReaderPlace,
+  chapterEndState,
   chapterIndexAt,
   fetchChapters,
   finishedChapter,
-  worthOffering,
 } from "@/lib/chapterApi"
 
 function askedKey(documentId: string) {
@@ -38,31 +38,43 @@ function rememberAsked(documentId: string, asked: Set<string>) {
   }
 }
 
+// How often to look again for the questions of a chapter finished before they were written.
+const AWAIT_CARDS_MS = 30_000
+
 export function useChapterEndOffer(documentId: string) {
+  // The chapter just finished; offered once its questions exist, which may be after it ends.
+  const [finished, setFinished] = useState<string | null>(null)
   const { data } = useQuery({
     queryKey: ["chapters", documentId],
     queryFn: () => fetchChapters(documentId),
     staleTime: 60_000,
+    refetchInterval: (query) =>
+      chapterEndState(query.state.data, finished).awaiting ? AWAIT_CARDS_MS : false,
   })
-  const [offer, setOffer] = useState<Chapter | null>(null)
   const current = useRef<number | undefined>(undefined)
 
   const reach = useCallback(
     (place: ReaderPlace) => {
       const chapters = data?.chapters ?? []
       const here = chapterIndexAt(chapters, place)
-      if (!data?.ask_at_chapter_end || here === undefined) return
+      if (here === undefined || here === current.current) return
       const ended = finishedChapter(chapters, current.current, here)
       current.current = here
-      if (!ended || !worthOffering(ended)) return
-      const asked = readAsked(documentId)
-      if (asked.has(ended.id)) return
-      asked.add(ended.id)
-      rememberAsked(documentId, asked)
-      setOffer(ended)
+      if (ended && !readAsked(documentId).has(ended.id)) setFinished(ended.id)
     },
     [data, documentId],
   )
 
-  return { offer, reach, dismiss: () => setOffer(null) }
+  const { offer } = chapterEndState(data, finished)
+
+  const dismiss = useCallback(() => {
+    if (finished) {
+      const asked = readAsked(documentId)
+      asked.add(finished)
+      rememberAsked(documentId, asked)
+    }
+    setFinished(null)
+  }, [documentId, finished])
+
+  return { offer, reach, dismiss }
 }

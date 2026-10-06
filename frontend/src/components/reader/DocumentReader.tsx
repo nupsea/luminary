@@ -1965,6 +1965,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 context=""
                 onClearScope={() => setPracticeSection(null)}
                 onJumpToSource={revealCardSource}
+                onPracticeChapter={openChapterPractice}
               />
             )}
           </div>

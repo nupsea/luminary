@@ -36,20 +36,35 @@ export function chapterIndexAt(chapters: Chapter[], place: ReaderPlace): number 
 
 /**
  * The chapter the reader just finished, when reading moved from one chapter into a later one.
- * Moving back, or jumping inside a chapter, finishes nothing.
+ * Arriving in a chapter (a resumed position) counts the one before it as read, so a chapter
+ * finished in an earlier visit is still offered. Moving back, or within a chapter, finishes nothing.
  */
 export function finishedChapter(
   chapters: Chapter[],
   fromIndex: number | undefined,
   toIndex: number | undefined,
 ): Chapter | null {
-  if (fromIndex === undefined || toIndex === undefined || toIndex <= fromIndex) return null
-  return chapters[fromIndex] ?? null
+  if (toIndex === undefined) return null
+  if (fromIndex === undefined) return chapters[toIndex - 1] ?? null
+  return toIndex > fromIndex ? (chapters[fromIndex] ?? null) : null
 }
 
 /** Offered only for a chapter that has cards nobody has practised yet. */
 export function worthOffering(chapter: Chapter): boolean {
   return chapter.cards > 0 && chapter.held > 0
+}
+
+/**
+ * What a finished chapter means for the reader now: offer it, wait for its questions to be
+ * written, or neither (already practised, or the book asks not to be offered).
+ */
+export function chapterEndState(
+  list: ChapterList | undefined,
+  finishedId: string | null,
+): { offer: Chapter | null; awaiting: boolean } {
+  const chapter = list?.chapters.find((c) => c.id === finishedId)
+  if (!list?.ask_at_chapter_end || !chapter) return { offer: null, awaiting: false }
+  return { offer: worthOffering(chapter) ? chapter : null, awaiting: chapter.cards === 0 }
 }
 
 /**
