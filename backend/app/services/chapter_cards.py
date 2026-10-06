@@ -9,9 +9,11 @@ recorded, so an interrupted job resumes and no chapter is written twice.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
 import uuid
+import weakref
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -43,6 +45,19 @@ INGEST_CHAPTERS = 2
 # Chapters being written in this process. The ingestion job and the backfill both write, and
 # the run table refuses a second copy only at commit, after minutes of model time.
 _writing: set[tuple[str, str]] = set()
+
+
+# One chapter at a time across every writer: they share one model slot, so a second writer
+# only halves the speed of the chapter a reader is waiting on. Keyed by loop, as in
+# enrichment_concurrency.
+_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _one_writer() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    return _locks.setdefault(loop, asyncio.Lock())
 
 
 def being_written(document_id: str) -> set[str]:
@@ -88,7 +103,8 @@ async def write_chapter(
         return None
     _writing.add(key)
     try:
-        return await _write_chapter(document_id, book, chapter, known_names, session)
+        async with _one_writer():
+            return await _write_chapter(document_id, book, chapter, known_names, session)
     finally:
         _writing.discard(key)
 
