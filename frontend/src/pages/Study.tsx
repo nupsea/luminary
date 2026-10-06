@@ -9,7 +9,7 @@
  *  - Full-screen StudySession replaces tab content when studying
  */
 
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState, useEffect } from "react"
 import {
   ArrowLeft,
@@ -130,6 +130,7 @@ function StartReviewDueCard({ onStart }: { onStart: () => void }) {
 }
 
 export default function Study() {
+  const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { canGoBack, backLabel, goBack } = useBackNavigation()
   const {
@@ -331,18 +332,14 @@ export default function Study() {
     }
   }
 
-  // A chapter's written cards (#231): practising admits them all to review, the run takes
-  // the session-sized slice.
-  const runChapterStudy = async (chapter: Chapter, mode: StudyMode) => {
+  // A chapter run (#231): the cards the draw admitted to review, all of them.
+  const runChapterStudy = async (chapter: Chapter, mode: StudyMode, count: number) => {
     if (studyPhase.phase !== "idle" || !studyDocumentId) return
     setStudyPhase({ phase: "preparing", mode })
     try {
-      const cards = await practiceChapter(studyDocumentId, chapter.id)
-      const outcome = await prepareSectionStudyFromCards(
-        studyDocumentId,
-        cards.slice(0, FLASHCARD_CARD_LIMIT),
-        mode,
-      )
+      const cards = await practiceChapter(studyDocumentId, chapter.id, count)
+      void queryClient.invalidateQueries({ queryKey: ["chapters", studyDocumentId] })
+      const outcome = await prepareSectionStudyFromCards(studyDocumentId, cards, mode)
       const scope: PrepareStudySessionOptions = {
         mode,
         documentId: studyDocumentId,
@@ -590,7 +587,7 @@ export default function Study() {
             })()}
             <DocumentChapters
               documentId={studyDocumentId}
-              onPractice={(chapter, mode) => void runChapterStudy(chapter, mode)}
+              onPractice={(chapter, mode, count) => void runChapterStudy(chapter, mode, count)}
             />
             <DocumentTopics
               documentId={studyDocumentId}

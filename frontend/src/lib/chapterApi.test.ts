@@ -4,6 +4,8 @@ import {
   type Chapter,
   chapterEndState,
   chapterIndexAt,
+  chapterStatus,
+  defaultDrawCount,
   finishedChapter,
   pickChapter,
   worthOffering,
@@ -86,5 +88,20 @@ describe("random chapter", () => {
 
   it("is null when no chapter has cards", () => {
     expect(pickChapter([chapter("x", ["s"], 0, 0)])).toBeNull()
+  })
+})
+
+describe("chapter practice choice", () => {
+  it("starts at ten questions, or the whole chapter when it has fewer", () => {
+    expect(defaultDrawCount(chapter("a", [], 23, 23))).toBe(10)
+    expect(defaultDrawCount(chapter("b", [], 4, 4))).toBe(4)
+  })
+
+  it("says how many questions are new and how many are due", () => {
+    const due = (c: Chapter, n: number) => ({ ...c, due: n })
+    expect(chapterStatus(chapter("a", [], 0, 0))).toBe("not written yet")
+    expect(chapterStatus(chapter("a", [], 23, 23))).toBe("23 new")
+    expect(chapterStatus(due(chapter("a", [], 23, 13), 10))).toBe("13 new, 10 due")
+    expect(chapterStatus(due(chapter("a", [], 23, 0), 4))).toBe("4 due of 23")
   })
 })

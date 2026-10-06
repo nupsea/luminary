@@ -10,6 +10,7 @@ recorded, so an interrupted job resumes and no chapter is written twice.
 from __future__ import annotations
 
 import logging
+import random
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -159,16 +160,37 @@ async def chapter_overview(
     return not doc.chapter_prompt_off, chapters
 
 
-async def practise_chapter(
-    document_id: str, chapter_id: str, session: AsyncSession
+def draw(
+    cards: list[FlashcardModel], count: int | None, rng: random.Random
 ) -> list[FlashcardModel]:
-    """The chapter's cards, its held ones now in the review schedule.
+    """*count* of a chapter's cards at random, the ones never practised before the rest."""
+    held = [c for c in cards if c.fsrs_state == CARD_HELD]
+    seen = [c for c in cards if c.fsrs_state != CARD_HELD]
+    rng.shuffle(held)
+    rng.shuffle(seen)
+    drawn = (held + seen)[: count or len(cards)]
+    rng.shuffle(drawn)
+    return drawn
 
-    Every held card is scheduled, not only those a run reaches: practising a chapter is what
-    admits it to review, and a card left held would never come due.
+
+async def practise_chapter(
+    document_id: str,
+    chapter_id: str,
+    count: int | None,
+    session: AsyncSession,
+    rng: random.Random | None = None,
+) -> list[FlashcardModel]:
+    """*count* of the chapter's cards (all when None), the held ones drawn now in review.
+
+    Only drawn cards are admitted: the rest stay held, so the chapter still shows them as new
+    and the next practice draws them first.
     """
     repo = FlashcardRepo(session)
-    if not await repo.list_for_chapter(document_id, chapter_id):
+    cards = await repo.list_for_chapter(document_id, chapter_id)
+    if not cards:
         raise NotFound(f"No cards for chapter {chapter_id}")
-    await repo.release_held(document_id, chapter_id)
-    return await repo.list_for_chapter(document_id, chapter_id)
+    drawn = draw(cards, count, rng or random.Random())  # noqa: S311
+    await repo.release_held([c.id for c in drawn])
+    for card in drawn:
+        await session.refresh(card)
+    return drawn

@@ -187,15 +187,13 @@ class FlashcardRepo:
         )
         return list(result.scalars().all())
 
-    async def release_held(self, document_id: str, chapter_id: str) -> int:
-        """Move a chapter's held cards into the review schedule, due now."""
+    async def release_held(self, card_ids: Sequence[str]) -> int:
+        """Move these cards, those still held, into the review schedule, due now."""
+        if not card_ids:
+            return 0
         result = await self.session.execute(
             update(FlashcardModel)
-            .where(
-                FlashcardModel.document_id == document_id,
-                FlashcardModel.chapter_id == chapter_id,
-                FlashcardModel.fsrs_state == CARD_HELD,
-            )
+            .where(FlashcardModel.id.in_(list(card_ids)), FlashcardModel.fsrs_state == CARD_HELD)
             .values(fsrs_state="new", due_date=datetime.now(UTC))
         )
         await self.session.commit()

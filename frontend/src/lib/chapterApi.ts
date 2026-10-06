@@ -13,9 +13,24 @@ export type ChapterList = components["schemas"]["ChapterList"]
 export const fetchChapters = (documentId: string) =>
   apiGet<ChapterList>(`/sections/${documentId}/chapters`)
 
-/** Admits the chapter's held cards to review and returns all its cards. */
-export const practiceChapter = (documentId: string, chapterId: string) =>
-  apiPost<Flashcard[]>(`/sections/${documentId}/chapters/${chapterId}/practice`)
+/** Draws *count* of the chapter's cards at random, unpractised first, and admits them to review. */
+export const practiceChapter = (documentId: string, chapterId: string, count: number) =>
+  apiPost<Flashcard[]>(`/sections/${documentId}/chapters/${chapterId}/practice`, { count })
+
+/** How many questions a chapter run starts at, before the learner changes it. */
+const DEFAULT_DRAW = 10
+
+export function defaultDrawCount(chapter: Chapter): number {
+  return Math.min(DEFAULT_DRAW, chapter.cards)
+}
+
+/** A chapter's questions in a few words: how many are new and how many are due. */
+export function chapterStatus(chapter: Chapter): string {
+  if (chapter.cards === 0) return "not written yet"
+  if (chapter.held === chapter.cards) return `${chapter.cards} new`
+  if (chapter.held > 0) return `${chapter.held} new, ${chapter.due} due`
+  return `${chapter.due} due of ${chapter.cards}`
+}
 
 export const setAskAtChapterEnd = (documentId: string, ask: boolean) =>
   apiPut<void>(`/sections/${documentId}/chapters/prompt`, { ask_at_chapter_end: ask })

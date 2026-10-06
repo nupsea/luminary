@@ -679,11 +679,12 @@ blind runs against the unit path: core ideas covered 0.27 -> 0.56 and 0.26 -> 0.
 0.77 -> 0.87 and 0.74 -> 0.92. Cost on the 4B: DDIA chapter 3 (74k characters) took 261 s for 34
 cards, so a 30k-character chapter is under two minutes against roughly twenty to read it.
 
-Practising a chapter moves its held cards into FSRS (`POST /sections/{doc}/chapters/{id}/practice`);
-the reader offers it once reading moves past a chapter with held cards (Practice, Later, Don't ask
-for this book, stored per document) and opens the dock on it (`ChapterPracticePanel.tsx`); Study
-lists each book's chapters with card counts, and "Random from this book" favours unpractised
-chapters 3:1 (`DocumentChapters.tsx`).
+Practising a chapter draws the number of questions the learner picks, at random with unpractised
+cards first, and moves only those into FSRS (`POST /sections/{doc}/chapters/{id}/practice`, `draw`);
+the rest stay held for the next draw. The reader offers it once reading moves past a chapter with
+held cards (Practice, Later, Don't ask for this book, stored per document) and opens the dock on it
+(`ChapterPracticePanel.tsx`). The dock's Practice tab and Study both list each book's chapters
+(`DocumentChapters.tsx`); "Random chapter" favours unpractised chapters 3:1.
 
 *Open:* the reader offer, the chapter panel and the Study list have unit tests only; none was run in
 a browser or the desktop shell. Fiction is the weak kind: sound

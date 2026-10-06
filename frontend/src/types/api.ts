@@ -4898,7 +4898,7 @@ export interface paths {
         put?: never;
         /**
          * Practice Chapter
-         * @description Admit a chapter's held cards to the review schedule and return all its cards.
+         * @description Draw *count* of a chapter's cards at random, unpractised first, and admit them to review.
          */
         post: operations["practice_chapter_sections__document_id__chapters__chapter_id__practice_post"];
         delete?: never;
@@ -7199,6 +7199,11 @@ export interface components {
             ask_at_chapter_end: boolean;
             /** Chapters */
             chapters: components["schemas"]["ChapterItem"][];
+        };
+        /** ChapterPracticeRequest */
+        ChapterPracticeRequest: {
+            /** Count */
+            count?: number | null;
         };
         /** ChapterProgressItem */
         ChapterProgressItem: {
@@ -19868,7 +19873,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ChapterPracticeRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

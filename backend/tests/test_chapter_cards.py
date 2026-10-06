@@ -422,6 +422,59 @@ async def test_practising_a_chapter_admits_its_cards_to_review(book, fakes):
         assert await StudyRepo(session).count_due(DueScope(document_ids=["doc"])) == 1
 
 
+def test_a_draw_takes_unpractised_cards_before_practised_ones():
+    import random
+
+    cards = [SimpleNamespace(id=f"h{i}", fsrs_state="held") for i in range(5)] + [
+        SimpleNamespace(id=f"r{i}", fsrs_state="review") for i in range(5)
+    ]
+    rng = random.Random(7)
+    assert {c.id for c in chapter_cards.draw(cards, 3, rng)} <= {f"h{i}" for i in range(5)}
+    seven = chapter_cards.draw(cards, 7, rng)
+    assert len(seven) == 7 and {f"h{i}" for i in range(5)} <= {c.id for c in seven}
+    assert len(chapter_cards.draw(cards, None, rng)) == 10
+    assert len(chapter_cards.draw(cards, 50, rng)) == 10
+
+
+async def test_practising_part_of_a_chapter_leaves_the_rest_new(book):
+    from datetime import UTC, datetime
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    async with book.factory() as session:
+        for i in range(5):
+            session.add(
+                FlashcardModel(
+                    id=f"card{i}",
+                    document_id="doc",
+                    chunk_id="c1",
+                    question=f"Question {i}?",
+                    answer="An answer.",
+                    source_excerpt=LOG,
+                    fsrs_state="held",
+                    created_at=datetime.now(UTC),
+                    chapter_id="s1",
+                )
+            )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = await client.post("/sections/doc/chapters/s1/practice", json={"count": 2})
+        middle = (await client.get("/sections/doc/chapters")).json()["chapters"]
+        second = await client.post("/sections/doc/chapters/s1/practice", json={"count": 3})
+        after = (await client.get("/sections/doc/chapters")).json()["chapters"]
+        zero = await client.post("/sections/doc/chapters/s1/practice", json={"count": 0})
+
+    assert [c["fsrs_state"] for c in first.json()] == ["new", "new"]
+    assert [(c["cards"], c["held"], c["due"]) for c in middle] == [(5, 3, 2)]
+    # The second draw takes the three never practised, not the two just seen.
+    assert {c["id"] for c in second.json()}.isdisjoint({c["id"] for c in first.json()})
+    assert [(c["held"], c["due"]) for c in after] == [(0, 5)]
+    assert zero.status_code == 422
+
+
 async def test_dont_ask_for_this_book_is_remembered(book):
     from httpx import ASGITransport, AsyncClient
 

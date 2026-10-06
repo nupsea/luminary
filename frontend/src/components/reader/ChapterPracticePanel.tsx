@@ -1,14 +1,14 @@
 /**
  * ChapterPracticePanel -- the Practice face while a chapter is being practised (#231).
  *
- * Starting admits the chapter's cards to review (POST .../practice), so the cards a run does
- * not reach still come due later; the run itself is the reader-sized slice of them.
+ * The run is the cards drawn by POST .../practice; only those join review, the rest stay new.
  */
 
 import { useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { Brain, MessageSquareQuote, X } from "lucide-react"
+import { X } from "lucide-react"
 
+import { ChapterPracticeSetup } from "@/components/ChapterPracticeSetup"
 import { type Chapter, practiceChapter } from "@/lib/chapterApi"
 import {
   type PreparedStudySessionOutcome,
@@ -17,7 +17,6 @@ import {
 } from "@/lib/studySessionService"
 
 import { READER_CARD_LIMIT } from "./practiceDeck"
-import { StartButton } from "./PracticePanel"
 import { RecallRunner } from "./RecallRunner"
 
 interface ChapterPracticePanelProps {
@@ -43,16 +42,12 @@ export function ChapterPracticePanel({
   const [starting, setStarting] = useState<StudyMode | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  async function start(mode: StudyMode) {
+  async function start(mode: StudyMode, count: number) {
     setStarting(mode)
     setError(null)
     try {
-      const cards = await practiceChapter(documentId, chapter.id)
-      const initial = await prepareSectionStudyFromCards(
-        documentId,
-        cards.slice(0, READER_CARD_LIMIT),
-        mode,
-      )
+      const cards = await practiceChapter(documentId, chapter.id, count)
+      const initial = await prepareSectionStudyFromCards(documentId, cards, mode)
       if (initial.kind === "empty") {
         setError("This chapter has no cards yet.")
         return
@@ -104,32 +99,11 @@ export function ChapterPracticePanel({
       ) : (
         <div className="min-h-0 flex-1 overflow-auto p-4">
           <div className="mx-auto w-full max-w-2xl rounded-xl border border-border bg-card p-5">
-            <p className="text-base font-medium text-foreground">
-              {chapter.cards} question{chapter.cards === 1 ? "" : "s"} on this chapter.
-            </p>
-            <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-              Practising adds them to your review schedule, so the ones you miss come back.
-            </p>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <StartButton
-                testId="chapter-recall"
-                icon={Brain}
-                label="Recall"
-                hint="Guess, then check"
-                busy={starting === "flashcard"}
-                disabled={starting !== null}
-                onClick={() => void start("flashcard")}
-              />
-              <StartButton
-                testId="chapter-explain"
-                icon={MessageSquareQuote}
-                label="Explain it"
-                hint="Write, then get scored"
-                busy={starting === "teachback"}
-                disabled={starting !== null}
-                onClick={() => void start("teachback")}
-              />
-            </div>
+            <ChapterPracticeSetup
+              chapter={chapter}
+              starting={starting}
+              onStart={(mode, count) => void start(mode, count)}
+            />
             {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
           </div>
         </div>
