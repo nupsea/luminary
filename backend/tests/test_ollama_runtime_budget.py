@@ -69,7 +69,8 @@ def test_the_desktop_shell_bounds_it_too():
     the desktop."""
     rust = (REPO / "src-tauri" / "src" / "supervisor.rs").read_text()
     spawn = rust[rust.index("pub fn spawn_ollama") : rust.index("pub fn spawn_backend")]
-    assert '.env("LLAMA_ARG_CACHE_RAM", ollama_cache_ram_mib(data_dir)' in spawn
+    # rustfmt decides the line breaks, so compare without whitespace.
+    assert '.env("LLAMA_ARG_CACHE_RAM",ollama_cache_ram_mib(data_dir)' in "".join(spawn.split())
     assert "const OLLAMA_CACHE_RAM_MIB: u32 = 512;" in rust
 
 
