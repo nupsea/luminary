@@ -30,6 +30,8 @@ import asyncio
 import json
 import math
 import platform
+import re
+import shutil
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -158,6 +160,47 @@ async def _stage(client: httpx.AsyncClient, backend: str, doc_id: str | None) ->
     return resp.json().get("stage")
 
 
+def _gpu_pct() -> int | None:
+    """GPU busy share now: Apple's IOAccelerator counter, else nvidia-smi, else None.
+
+    psutil cannot see it, and the model runs there: a processor-only reading calls a machine
+    idle while its GPU is pinned.
+    """
+    try:
+        if platform.system() == "Darwin":
+            out = subprocess.run(  # noqa: S603 -- fixed argv
+                ["/usr/sbin/ioreg", "-r", "-d", "1", "-c", "IOAccelerator"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout
+            m = re.search(r'"Device Utilization %"=(\d+)', out)
+            return int(m.group(1)) if m else None
+        nvidia = shutil.which("nvidia-smi")
+        if nvidia is None:
+            return None
+        out = subprocess.run(  # noqa: S603 -- fixed argv
+            [nvidia, "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout
+        return int(out.split()[0]) if out.strip() else None
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return None
+
+
+async def _get_json(client: httpx.AsyncClient, url: str) -> Any:
+    try:
+        resp = await client.get(url, timeout=10.0)
+        resp.raise_for_status()
+        return resp.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
 async def _sample(
     client: httpx.AsyncClient,
     backend: str,
@@ -168,6 +211,11 @@ async def _sample(
 ) -> dict[str, Any]:
     models = await _ollama_models(client, ollama_url)
     vm = psutil.virtual_memory()
+    queue = await _get_json(client, f"{backend}/enrichment/queue") or {}
+    chapters = None
+    if doc_id:
+        listing = await _get_json(client, f"{backend}/sections/{doc_id}/chapters") or {}
+        chapters = listing.get("chapters")
     return {
         "t": round(time.monotonic() - t0, 2),
         "stage": await _stage(client, backend, doc_id),
@@ -177,6 +225,11 @@ async def _sample(
         "loaded_count": len(models),
         "available": vm.available,
         "used": vm.total - vm.available,
+        "gpu_pct": _gpu_pct(),
+        "queue": {k: queue.get(k) for k in ("pending", "running", "active")},
+        "chapters": len(chapters) if chapters is not None else None,
+        "chapters_with_cards": sum(1 for c in chapters or [] if c.get("cards")),
+        "cards": sum(c.get("cards") or 0 for c in chapters or []),
     }
 
 
@@ -389,8 +442,8 @@ def _summarise(samples: list[dict], probes: list[dict], meta: dict) -> dict:
         # Bumped when a field changes meaning. Schema 1 summed a second
         # Luminary install into peak_rss_mb; rows without this key predate the
         # fix and are not comparable to rows carrying it. Schema 3 adds the
-        # TTFT distribution and the gate counters the run itself moved.
-        "schema": 3,
+        # TTFT distribution and the gate counters the run itself moved; 4 the timeline and GPU.
+        "schema": 4,
         **meta,
         "peak_rss_mb": round(peak / MB, 1),
         "peak_backend_mb": round(peak_backend / MB, 1),
@@ -410,11 +463,65 @@ def _summarise(samples: list[dict], probes: list[dict], meta: dict) -> dict:
             1 for p in probes if p["error"] and not p["error"].startswith("skipped")
         ),
         "samples": len(samples),
+        **_timeline(samples),
+    }
+
+
+def _first_t(samples: list[dict], cond: Any) -> float | None:
+    return next((s["t"] for s in samples if cond(s)), None)
+
+
+def _timeline(samples: list[dict]) -> dict[str, Any]:
+    """When each stage, each chapter's cards and the drained queue were first seen, and the GPU.
+
+    Times are sample times, so each is late by up to one --interval.
+    """
+    stages: dict[str, float] = {}
+    for s in samples:
+        stages.setdefault(s["stage"] or "unknown", s["t"])
+    complete = stages.get("complete")
+    gpu = [s["gpu_pct"] for s in samples if s.get("gpu_pct") is not None]
+    drained = None
+    if complete is not None:
+        drained = _first_t(
+            samples,
+            lambda s: s["t"] >= complete and not (s.get("queue") or {}).get("active"),
+        )
+    return {
+        "stage_first_seen_s": stages,
+        "first_chapter_cards_s": _first_t(samples, lambda s: s.get("chapters_with_cards", 0) >= 1),
+        "second_chapter_cards_s": _first_t(samples, lambda s: s.get("chapters_with_cards", 0) >= 2),
+        "chapters": samples[-1].get("chapters") if samples else None,
+        "chapters_with_cards": samples[-1].get("chapters_with_cards") if samples else None,
+        "cards_final": samples[-1].get("cards") if samples else None,
+        "queue_drained_s": drained,
+        "gpu_mean_pct": round(sum(gpu) / len(gpu), 1) if gpu else None,
+        "gpu_p50_pct": _pct(gpu, 0.5),
+        "gpu_p90_pct": _pct(gpu, 0.9),
+        "gpu_saturated_share": round(sum(g >= 90 for g in gpu) / len(gpu), 3) if gpu else None,
+        "min_available_mb": round(min(s["available"] for s in samples) / MB, 1)
+        if samples
+        else None,
     }
 
 
 def _print_report(summary: dict, samples: list[dict]) -> None:
     print()
+    print(f"  pacing (quiet background) {summary.get('quiet_background')!s:>9}")
+    for stage, t in summary["stage_first_seen_s"].items():
+        print(f"  stage {stage:<18} at {t:>8.1f} s")
+    for key in ("first_chapter_cards_s", "second_chapter_cards_s", "queue_drained_s"):
+        print(f"  {key:<24} {summary[key]!s:>10}")
+    print(
+        f"  chapters / with cards / cards {summary['chapters']} / "
+        f"{summary['chapters_with_cards']} / {summary['cards_final']}"
+    )
+    print(
+        f"  GPU busy                 mean {summary['gpu_mean_pct']}%  p50 "
+        f"{summary['gpu_p50_pct']}%  p90 {summary['gpu_p90_pct']}%  "
+        f">=90%: {summary['gpu_saturated_share']}"
+    )
+    print(f"  min available RAM        {summary['min_available_mb']!s:>10} MB")
     lib = summary.get("library_after") or {}
     print(f"  host                     {summary['total_ram_mb'] / 1024:>10,.1f} GB RAM")
     print(f"  OLLAMA_MAX_LOADED_MODELS {summary.get('ollama_max_loaded') or 'unset'!s:>10}")
@@ -473,6 +580,16 @@ async def run(args: argparse.Namespace) -> int:
             return 1
         backend_version = health.json().get("version")
         admission_before = await _admission_snapshot(client, backend)
+        switches = {
+            k: v == "on"
+            for k, v in (("quiet_background", args.quiet), ("chapter_backfill", args.backfill))
+            if v
+        }
+        if switches:
+            resp = await client.patch(f"{backend}/settings/background", json=switches)
+            resp.raise_for_status()
+        background = await _get_json(client, f"{backend}/settings/background") or {}
+        idle_streak = 0
 
         procs = _find_procs(backend, ollama_url)
         if not procs["backend"]:
@@ -601,7 +718,12 @@ async def run(args: argparse.Namespace) -> int:
                 print("ingestion reported an error; stopping")
                 break
             pending = bool(probe_offsets or probe_tasks)
-            if settle_until is not None and now >= settle_until and not pending:
+            last = samples[-1]
+            quiet = not (last.get("queue") or {}).get("active") and (last.get("gpu_pct") or 0) < 30
+            idle_streak = idle_streak + 1 if quiet else 0
+            # --until-idle: deferred summaries never enter the queue, so the GPU must be quiet too.
+            settled = not args.until_idle or idle_streak >= 3
+            if settle_until is not None and now >= settle_until and settled and not pending:
                 break
             if deadline is not None and now >= deadline and not pending:
                 break
@@ -650,6 +772,8 @@ async def run(args: argparse.Namespace) -> int:
         "ingest_error": ingest_error,
         "probe_window": args.probe_window or None,
         "admission": admission,
+        "quiet_background": background.get("quiet_background"),
+        "chapter_backfill": background.get("chapter_backfill"),
     }
     summary = _summarise(samples, probes, meta)
 
@@ -716,6 +840,13 @@ def main() -> int:
         "'ingesting' asks the document being ingested (readiness, not latency)",
     )
     ap.add_argument("--max-duration", type=float, default=3600.0)
+    ap.add_argument(
+        "--until-idle",
+        action="store_true",
+        help="after --settle, keep sampling until the queue and the GPU stay idle (3 samples)",
+    )
+    ap.add_argument("--quiet", choices=["on", "off"], help="set background pacing first")
+    ap.add_argument("--backfill", choices=["on", "off"], help="set the chapter backfill first")
     ap.add_argument("--out", default=".luminary/mem_profile/latest.jsonl")
     ap.add_argument("--summary", help="append the one-line summary to this file")
     args = ap.parse_args()
