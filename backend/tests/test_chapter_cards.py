@@ -356,6 +356,62 @@ async def test_a_chapter_is_never_written_twice_at_once(long_book, fakes, monkey
     assert not chapter_cards.being_written("bk")
 
 
+async def test_a_new_documents_first_chapters_come_before_the_backfill(long_book, fakes):
+    """A book just added is read from its start; another book's backfill would halve its speed."""
+    from datetime import UTC, datetime
+
+    from app.models import EnrichmentJobModel
+
+    await _read_at(long_book, "ch2")
+    pick = await chapter_backfill.next_chapter()
+    assert pick.ahead
+    async with long_book.factory() as session:
+        job = EnrichmentJobModel(
+            id="j1",
+            document_id="bk",
+            job_type="chapter_cards",
+            status="pending",
+            created_at=datetime.now(UTC),
+        )
+        session.add(job)
+        await session.commit()
+        assert await chapter_backfill.not_now(pick) == "a new document's first chapters come first"
+        job.status = "done"
+        await session.commit()
+    assert await chapter_backfill.not_now(pick) != "a new document's first chapters come first"
+
+
+async def test_two_chapters_are_written_one_after_the_other(long_book, fakes, monkeypatch):
+    import asyncio
+
+    release = asyncio.Event()
+    entered: list[str] = []
+    real = chapter_cards.write_chapter_cards
+
+    async def slow(*a, **kw):
+        entered.append(kw["passages"][0].chunk_id)
+        await release.wait()
+        return await real(*a, **kw)
+
+    monkeypatch.setattr(chapter_cards, "write_chapter_cards", slow)
+    async with long_book.factory() as session:
+        chapters = await chapter_cards.chapters_for_document("bk", "DDIA", session)
+
+    async def write(chapter):
+        async with long_book.factory() as session:
+            return await chapter_cards.write_chapter("bk", "DDIA", chapter, "", session)
+
+    tasks = [asyncio.create_task(write(c)) for c in chapters[2:4]]
+    while not entered:
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)
+    assert entered == ["k2"], "the second writer started alongside the first"
+
+    release.set()
+    await asyncio.gather(*tasks)
+    assert entered == ["k2", "k3"]
+
+
 async def test_a_machine_booted_moments_ago_with_no_question_is_quiet(monkeypatch):
     monkeypatch.setattr(chapter_backfill.time, "monotonic", lambda: 10.0)
     assert chapter_backfill._learner_quiet() is True

@@ -223,6 +223,13 @@ def test_a_name_the_passage_never_gives_is_found(question, unshown):
     assert names_not_in(question, PLAY_SCENE) == unshown
 
 
+def test_a_name_differing_only_in_its_apostrophe_is_shown():
+    # A dropped AI Engineering card: the book typesets O’Reilly, the model typed O'Reilly.
+    shown = "A 2024 O’Reilly survey categorized the use cases into eight categories."
+    assert names_not_in("What does the 2024 O'Reilly survey categorize?", shown) == []
+    assert names_not_in("What does the 2024 O'Neil survey categorize?", shown) == ["O'Neil"]
+
+
 @pytest.mark.parametrize(
     "question",
     [

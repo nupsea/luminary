@@ -60,3 +60,55 @@ def test_the_native_installer_exports_them_to_the_server_it_starts():
         "export OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL "
         "OLLAMA_KEEP_ALIVE LLAMA_ARG_CACHE_RAM" in INSTALL_SH
     )
+
+
+def test_the_desktop_shell_bounds_it_too():
+    """I-64. The DMG/AppImage/MSI Ollama is spawned by `supervisor.rs` after
+    `env_clear()`, so nothing the user exports reaches it: unset, its qwen3.5
+    server grew to 13.4 GB (8 GiB of never-reused prompt cache) and jetsam killed
+    the desktop."""
+    rust = (REPO / "src-tauri" / "src" / "supervisor.rs").read_text()
+    spawn = rust[rust.index("pub fn spawn_ollama") : rust.index("pub fn spawn_backend")]
+    # rustfmt decides the line breaks, so compare without whitespace.
+    assert '.env("LLAMA_ARG_CACHE_RAM",ollama_cache_ram_mib(data_dir)' in "".join(spawn.split())
+    assert "const OLLAMA_CACHE_RAM_MIB: u32 = 512;" in rust
+
+
+BOOTSTRAP = (REPO / "scripts" / "bootstrap.sh").read_text()
+SUPERVISOR = (REPO / "src-tauri" / "src" / "supervisor.rs").read_text()
+
+# Every path that starts an Ollama for the user, on every OS: the desktop shell (DMG, MSI and
+# AppImage share supervisor.rs), compose, the native installers and the one-command Mac install.
+# get-luminary.* install the desktop app, so the shell covers them.
+LAUNCH_PATHS = {
+    "supervisor.rs": SUPERVISOR,
+    "docker-compose.yml": COMPOSE,
+    "install.sh": INSTALL_SH,
+    "install.ps1": INSTALL_PS1,
+    "bootstrap.sh": BOOTSTRAP,
+}
+
+
+def test_every_launch_path_sets_every_runtime_cap():
+    """A path missing one runs with Ollama's default: an 8 GiB prompt cache, three resident
+    models, a 5-minute unload. bootstrap.sh missed two until 0.15.4 (I-64)."""
+    caps = (
+        "LLAMA_ARG_CACHE_RAM",
+        "OLLAMA_KEEP_ALIVE",
+        "OLLAMA_MAX_LOADED_MODELS",
+        "OLLAMA_NUM_PARALLEL",
+    )
+    missing = [
+        (path, cap) for path, text in LAUNCH_PATHS.items() for cap in caps if cap not in text
+    ]
+    assert missing == []
+
+
+def test_bootstrap_hands_the_caps_to_both_ways_it_starts_ollama():
+    """Ollama.app reads launchd's environment; the `nohup ollama serve` fallback reads this
+    shell's. Each needs all four."""
+    knobs = "OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL OLLAMA_KEEP_ALIVE LLAMA_ARG_CACHE_RAM"
+    assert f"export {knobs}" in BOOTSTRAP
+    assert f"for knob in {knobs}; do" in BOOTSTRAP
+    assert 'launchctl setenv "$knob" "${!knob}"' in BOOTSTRAP
+    assert "LLAMA_ARG_CACHE_RAM=512" in BOOTSTRAP

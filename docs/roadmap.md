@@ -693,6 +693,16 @@ before release. Fiction is the weak kind: sound
 0.69 and 0.82 of chapter cards on the 4B against 0.89 and 0.93 for non-fiction, the failures mostly
 characters confused in first-person narrative (who shivered, who is ill, Ahab for Ishmael).
 
+0.15.4 bounds every Ollama we start (I-64), paces unattended model calls (Settings > Background
+work) and writes a new book's first chapters before any backfill.
+
+*Open:* paced against unpaced GPU duty was never measured on a real ingest, only in
+`test_concurrent_unattended_callers_keep_the_pace`: both profile runs ran on a saturated host. A
+new book's first chapters still share the background slot with up to three deferred section
+summaries (`section_summarizer.py:364`). The backend peaks near 4.6 GB while GLiNER runs; beside
+the 4B and a 7B vision model that leaves a 16 GB host little headroom, and no 16 GB host was
+measured.
+
 ### 6. An architecture that can take tenants — 0.17.0
 
 **Only the seams that are expensive to add once users have data.** There is no tenancy UI and no
@@ -926,6 +936,13 @@ something else.
   machine, while this puts every chunk of every document — and, for extraction, whole document text —
   on the wire. Synthesis is routable; the index is not. BYOK for **generation** on a host that cannot
   run a model is the supported answer and ships in 0.13.0.
+- **Telling the chapter card writer to copy the evidence's words** — rejected 2026-10-06. About
+  40% of chapter card replies fail "answer in no sentence", so it was tried to cut wasted calls.
+  Over two blind runs of 12 units on qwen3.5:4b it cut calls per kept card 2.35 -> 1.82 and
+  2.23 -> 1.69 and raised core coverage 0.48 -> 0.58 and 0.50 -> 0.60, but sound cards fell 0.81 -> 0.76
+  and 0.89 -> 0.78 (unsound cards 20 -> 33, 12 -> 31). It also makes the coverage check pass by
+  construction: copied words satisfy a lexical gate whether or not they answer the question. Fewer
+  wasted calls must come from asking fewer unanswerable questions, not from the answer's wording.
 - **Two Ollama services** — rejected on a single-GPU/8GB machine. See I-31: enrichment cost is
   call count, not concurrency, so the lever is fewer calls, never more parallelism.
 

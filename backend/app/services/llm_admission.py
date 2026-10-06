@@ -83,6 +83,10 @@ _MAX_DEFER_CEILING_SECONDS = 600.0
 # task or a request: background work they spawn inherits their context.
 _awaited: contextvars.ContextVar[bool] = contextvars.ContextVar("llm_awaited", default=False)
 
+# Set on work nobody is waiting on: enrichment jobs, the chapter backfill, summaries finished
+# after a document is readable. Inherited by the tasks it spawns.
+_unattended: contextvars.ContextVar[bool] = contextvars.ContextVar("llm_unattended", default=False)
+
 
 @dataclass
 class AdmissionState:
@@ -102,6 +106,8 @@ class AdmissionState:
     queue: list[tuple[int, int]] = field(default_factory=list)
     arrivals: itertools.count = field(default_factory=itertools.count)
     last_interactive_end: float = 0.0
+    # Unattended calls wait until then: see `_rest`.
+    rest_until: float = 0.0
     # How long the most recent interactive call ran. The deferral bound is
     # wall-clock, and 60s was calibrated where a call takes seconds; on a CPU-only
     # host one runs into minutes, so the bound expired mid-answer and admitted
@@ -331,19 +337,70 @@ def awaited():
         _awaited.reset(token)
 
 
+@contextlib.contextmanager
+def unattended(on: bool = True):
+    """Mark work started inside as unattended, so its local calls are paced (`_rest`)."""
+    token = _unattended.set(on)
+    try:
+        yield
+    finally:
+        _unattended.reset(token)
+
+
+def background_duty() -> float:
+    """The share of time unattended work may keep the runtime busy; 1.0 is unpaced."""
+    from app.services.background_prefs import quiet_background  # noqa: PLC0415
+
+    if not quiet_background():
+        return 1.0
+    return min(1.0, max(0.1, float(_settings().BACKGROUND_LLM_DUTY)))
+
+
+async def _rest(state: AdmissionState) -> None:
+    """Wait out the rest the last unattended call earned.
+
+    A laptop's fans follow the processor's sustained power, not its peak, and one ingest
+    queues an hour of calls: unpaced, that hour runs at full load. Resting as long as the
+    calls ran halves the sustained power and doubles how long the work takes. A rest
+    happens inside whatever the caller holds, so it costs at most one call's length.
+    """
+    # Another call ending meanwhile may lengthen the rest.
+    while True:
+        wait = state.rest_until - time.monotonic()
+        if wait <= 0:
+            return
+        await asyncio.sleep(wait)
+
+
+def _earn_rest(state: AdmissionState, busy: float) -> None:
+    duty = background_duty()
+    rest = busy * (1.0 - duty) / duty
+    state.rest_until = max(state.rest_until, time.monotonic() + rest)
+
+
 @asynccontextmanager
 async def background_call():
     """Hold a background call until the runtime has room for it."""
     state = _state()
-    if admission_enabled():
-        await _wait_for_slot(state, _awaited.get())
-    entry = [time.monotonic()]
+    paced = _unattended.get() and not _awaited.get()
+    while True:
+        if paced:
+            await _rest(state)
+        if admission_enabled():
+            await _wait_for_slot(state, _awaited.get())
+        # A call that ended while this one queued may have earned a rest it must also wait out.
+        if not paced or state.rest_until <= time.monotonic():
+            break
+    started = time.monotonic()
+    entry = [started]
     state.background_activity.append(entry)
     try:
         yield entry
     finally:
         with contextlib.suppress(ValueError):
             state.background_activity.remove(entry)
+        if paced:
+            _earn_rest(state, time.monotonic() - started)
 
 
 @asynccontextmanager

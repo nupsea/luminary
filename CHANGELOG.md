@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.4] - 2026-10-07
+
+### Fixed
+- **The desktop app could take 20 GB and get other apps force-quit.** Its model server kept up to 8 GB of prompt cache that the default model never reuses; it is now capped at 512 MB. The one-command Mac install had the same gap and is capped too.
+- **A new book's first chapter questions waited behind other books' background chapters.** Background chapter writing now pauses until they are written.
+- **The entity model was released the moment it finished loading**, so the next document paid a reload.
+- **A question naming O'Reilly was dropped as naming someone the book never mentions**, because the book printed a curly apostrophe.
+
+### Changed
+- **Background work is quieter.** Figures, summaries and chapter questions nobody is waiting on now rest between model calls, so the fans stay down; they finish about twice as late. A new book's first chapters still run at full speed.
+- **Settings > Background work** turns the pacing, and the writing of later chapters' questions, on or off.
+
 ## [0.15.3] - 2026-10-06
 
 ### Added

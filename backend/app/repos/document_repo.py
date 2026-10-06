@@ -240,6 +240,17 @@ class DocumentRepo:
         )
         return bool(result.scalar_one())
 
+    async def first_chapters_queued(self, since: datetime) -> bool:
+        """Whether ingestion-time chapter cards queued since *since* are still unwritten."""
+        result = await self.session.execute(
+            select(func.count(EnrichmentJobModel.id)).where(
+                EnrichmentJobModel.job_type == "chapter_cards",
+                EnrichmentJobModel.status.in_(("pending", "running")),
+                EnrichmentJobModel.created_at >= since,
+            )
+        )
+        return bool(result.scalar_one())
+
     async def set_entity_chunks_scanned(self, document_id: str, scanned: int) -> None:
         await self.session.execute(
             update(DocumentModel)

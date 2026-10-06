@@ -4,7 +4,8 @@ Work follows reading (#231): only documents read in the last RECENT_DAYS get cha
 the ones ingestion writes, so a library of unopened books costs nothing.
 
 - **Ahead**: the chapter being read and the next one. They are due within minutes, so they
-  are written whenever the runtime is free; admission still yields every call to the user.
+  are written whenever the runtime is free and no new document's first chapters are queued;
+  admission still yields every call to the user.
 - **Later chapters**: only while the machine is idle -- on mains power, no question asked in
   the last QUIET_SECONDS, the processor not busy with other programs, no document ingesting.
 
@@ -28,8 +29,10 @@ from app.config import get_settings
 from app.database import get_session_factory
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
+from app.services.background_prefs import chapter_backfill
 from app.services.chapter_cards import _known_names, being_written, write_chapter, writing_any
 from app.services.chapters import Chapter, chapters_for_document
+from app.services.llm_admission import unattended
 
 logger = logging.getLogger(__name__)
 
@@ -157,9 +160,16 @@ async def not_now(pick: Pick) -> str | None:
     """Why *pick* must wait, or None when it may be written now."""
     from app.services.llm_routing import refusal  # noqa: PLC0415
 
+    if not chapter_backfill():
+        return "turned off in Settings"
     # Two writers share the one model slot, so a second chapter only delays the one in hand.
     if writing_any():
         return "a chapter is being written"
+    # A book just added is read from its start, so its first chapters outrank any backfill.
+    async with get_session_factory()() as session:
+        since = datetime.now(UTC) - timedelta(days=1)
+        if await DocumentRepo(session).first_chapters_queued(since):
+            return "a new document's first chapters come first"
 
     reason = refusal("background") or _battery_reason(pick.ahead)
     if reason is None and not pick.ahead:
@@ -211,8 +221,9 @@ class ChapterBackfill:
         self._loaded: str | None = None
 
     def start(self) -> None:
-        if get_settings().CHAPTER_CARDS_BACKFILL and self._task is None:
-            self._task = asyncio.create_task(self._loop(), name="chapter-backfill")
+        if self._task is None:
+            with unattended():
+                self._task = asyncio.create_task(self._loop(), name="chapter-backfill")
 
     async def stop(self) -> None:
         if self._task is not None:

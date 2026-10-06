@@ -444,16 +444,20 @@ class EntityExtractor:
             type(self)._last_used = time.monotonic()
             return self._model
 
-    def release(self) -> bool:
-        """Give the model's memory back. Returns True if something was freed.
+    def release(self, idle_for: float = 0.0) -> bool:
+        """Give the model's memory back if idle *idle_for* seconds. True if something was freed.
 
         Safe to call at any time: the next `extract` reloads it. Held under
         MODEL_LOAD_LOCK so a release cannot land midway through a load -- a
         concurrent `from_pretrained` corrupts the model (see model_loading).
+        Idleness is judged under the lock: a caller that saw no model may have waited
+        out a load, and that model is about to be used.
         """
         import gc  # noqa: PLC0415
 
         with MODEL_LOAD_LOCK:
+            if self.idle_seconds() < idle_for:
+                return False
             if self._model is None and type(self)._model is None:
                 return False
             self._model = None

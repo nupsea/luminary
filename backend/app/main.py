@@ -60,6 +60,7 @@ from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
 from app.services.background import all_pending, clear_registries, task_registry
+from app.services.background_prefs import load_background_prefs
 from app.services.chapter_backfill import ChapterBackfill
 from app.services.chapter_cards import chapter_cards_handler
 from app.services.components import (
@@ -76,6 +77,7 @@ from app.services.graph_import import run_graph_import
 from app.services.image_enricher import image_analyze_handler
 from app.services.image_extractor import image_extract_handler
 from app.services.ingestion_jobs import get_ingestion_jobs
+from app.services.llm_admission import unattended
 from app.services.prereq_extractor import prereq_extract_handler
 from app.services.reference_enricher import web_refs_handler
 from app.services.settings_service import _cache as _llm_cache
@@ -236,6 +238,7 @@ async def lifespan(app: FastAPI):
     try:
         async with get_session_factory()() as _settings_db:
             await load_llm_settings(_settings_db)
+            await load_background_prefs(_settings_db)
         logger.info("LLM settings loaded from DB")
     except Exception:
         logger.warning("Failed to load LLM settings at startup; using defaults", exc_info=True)
@@ -326,7 +329,8 @@ async def lifespan(app: FastAPI):
             except Exception as exc:
                 logger.warning("Description backfill failed (non-fatal): %s", exc)
 
-        _background_tasks.add(asyncio.create_task(backfill_descriptions()))
+        with unattended():
+            _background_tasks.add(asyncio.create_task(backfill_descriptions()))
 
         # Note vectors, for libraries that predate the dimension fix. The note
         # table declared 1024 while the embedder produces 384 (I-9), so every
@@ -384,7 +388,8 @@ async def lifespan(app: FastAPI):
             except Exception as exc:
                 logger.warning("Section summary backfill failed (non-fatal): %s", exc)
 
-        _background_tasks.add(asyncio.create_task(backfill_section_summaries()))
+        with unattended():
+            _background_tasks.add(asyncio.create_task(backfill_section_summaries()))
 
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield

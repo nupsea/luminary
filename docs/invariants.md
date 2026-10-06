@@ -282,6 +282,15 @@ Mesa cannot show it. `scripts/desktop/prune_appimage.sh` removes host-owned libr
 driver cannot resolve, and must fail against the unpruned image. `verify_installed.sh` requires the
 shell's `page loaded` line.
 
+**I-64. Every Ollama we start bounds llama-server's prompt cache; the desktop shell included.**
+Unset, llama-server keeps up to 8192 MiB of host RAM in prompt-cache entries. qwen3.5 is hybrid, so
+no entry is ever reused, and each one-shot background prompt adds about 210 MiB until the cap is
+reached: the bundled 4B server held 13.4 GB beside a 5 GB vision server, and jetsam killed apps.
+`supervisor.rs` clears the environment before spawning, so only `LLAMA_ARG_CACHE_RAM` set there
+reaches it (512, as compose, both installers and `bootstrap.sh` set it, the last through launchd
+and its own environment). `test_ollama_runtime_budget.py` (every launch path, every cap) and
+`supervisor::tests::the_prompt_cache_is_bounded_whatever_env_says` guard it.
+
 ## Retired numbers
 
 Kept so existing references resolve.

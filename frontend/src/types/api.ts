@@ -5058,6 +5058,24 @@ export interface paths {
         patch: operations["patch_retrieval_settings_settings_retrieval_patch"];
         trace?: never;
     };
+    "/settings/background": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Background Settings */
+        get: operations["get_background_settings_settings_background_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Background Settings */
+        patch: operations["patch_background_settings_settings_background_patch"];
+        trace?: never;
+    };
     "/setup/components": {
         parameters: {
             query?: never;
@@ -6731,6 +6749,20 @@ export interface components {
         AssignCollectionsRequest: {
             /** Collection Ids */
             collection_ids: string[];
+        };
+        /** BackgroundSettingsPatch */
+        BackgroundSettingsPatch: {
+            /** Chapter Backfill */
+            chapter_backfill?: boolean | null;
+            /** Quiet Background */
+            quiet_background?: boolean | null;
+        };
+        /** BackgroundSettingsResponse */
+        BackgroundSettingsResponse: {
+            /** Chapter Backfill */
+            chapter_backfill: boolean;
+            /** Quiet Background */
+            quiet_background: boolean;
         };
         /** BatchAcceptItem */
         BatchAcceptItem: {
@@ -20105,6 +20137,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetrievalSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_background_settings_settings_background_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackgroundSettingsResponse"];
+                };
+            };
+        };
+    };
+    patch_background_settings_settings_background_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackgroundSettingsPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackgroundSettingsResponse"];
                 };
             };
             /** @description Validation Error */
