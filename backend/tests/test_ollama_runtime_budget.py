@@ -60,3 +60,14 @@ def test_the_native_installer_exports_them_to_the_server_it_starts():
         "export OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL "
         "OLLAMA_KEEP_ALIVE LLAMA_ARG_CACHE_RAM" in INSTALL_SH
     )
+
+
+def test_the_desktop_shell_bounds_it_too():
+    """I-64. The DMG/AppImage/MSI Ollama is spawned by `supervisor.rs` after
+    `env_clear()`, so nothing the user exports reaches it: unset, its qwen3.5
+    server grew to 13.4 GB (8 GiB of never-reused prompt cache) and jetsam killed
+    the desktop."""
+    rust = (REPO / "src-tauri" / "src" / "supervisor.rs").read_text()
+    spawn = rust[rust.index("pub fn spawn_ollama") : rust.index("pub fn spawn_backend")]
+    assert '.env("LLAMA_ARG_CACHE_RAM", ollama_cache_ram_mib(data_dir)' in spawn
+    assert "const OLLAMA_CACHE_RAM_MIB: u32 = 512;" in rust

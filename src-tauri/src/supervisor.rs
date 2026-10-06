@@ -501,6 +501,18 @@ fn ollama_max_loaded_models(data_dir: &Path) -> u32 {
     }
 }
 
+/// The bound compose, install.sh and install.ps1 already set. Not zero: the
+/// cache does pay off for a non-hybrid model.
+const OLLAMA_CACHE_RAM_MIB: u32 = 512;
+
+/// llama-server's host-RAM prompt cache in MiB (I-64). Unset, it is 8192, and
+/// `base_env` clears whatever the user exported. `.env` wins, capped at 2048.
+fn ollama_cache_ram_mib(data_dir: &Path) -> u32 {
+    env_file_value(data_dir, "LLAMA_ARG_CACHE_RAM")
+        .and_then(|v| v.parse().ok())
+        .map_or(OLLAMA_CACHE_RAM_MIB, |n: u32| n.min(2048))
+}
+
 /// `engine` is what `stage::engine_dir` returned.
 pub fn spawn_ollama(
     sup: &Supervisor,
@@ -523,6 +535,7 @@ pub fn spawn_ollama(
         // Reaches only the runner child; must name the tree the binary runs from.
         .env("OLLAMA_LIBRARY_PATH", engine.join(OLLAMA_LIBRARY_DIR))
         .env("OLLAMA_KEEP_ALIVE", "30m")
+        .env("LLAMA_ARG_CACHE_RAM", ollama_cache_ram_mib(data_dir).to_string())
         .env(
             "OLLAMA_NUM_PARALLEL",
             ollama_num_parallel(data_dir).to_string(),
@@ -865,6 +878,28 @@ mod tests {
         // The auto path is a two-way choice and never exceeds 2; more than that
         // is opt-in through .env only.
         assert_eq!(ollama_num_parallel(&dir), if gb >= 24 { 2 } else { 1 });
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_prompt_cache_is_bounded_whatever_env_says() {
+        let dir = std::env::temp_dir().join(format!("luminary-envcache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Unset is the case that held 8 GiB in a qwen3.5 server (I-64).
+        assert_eq!(ollama_cache_ram_mib(&dir), 512);
+
+        std::fs::write(dir.join(".env"), b"LLAMA_ARG_CACHE_RAM=0\n").unwrap();
+        assert_eq!(ollama_cache_ram_mib(&dir), 0);
+
+        // -1 is llama.cpp's "no limit": unparseable as u32, so it falls back.
+        for (line, want) in [
+            (&b"LLAMA_ARG_CACHE_RAM=8192\n"[..], 2048),
+            (&b"LLAMA_ARG_CACHE_RAM=-1\n"[..], 512),
+            (&b"LLAMA_ARG_CACHE_RAM=lots\n"[..], 512),
+        ] {
+            std::fs::write(dir.join(".env"), line).unwrap();
+            assert_eq!(ollama_cache_ram_mib(&dir), want);
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
