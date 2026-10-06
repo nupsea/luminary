@@ -513,6 +513,8 @@ interface ReadViewProps {
   searchMatchIndex?: number
   /** Callback to report total search matches found and section ID of active match */
   onSearchMatchReport?: (total: number, sectionId: string | null) => void
+  /** The section the reader has scrolled to. */
+  onActiveSectionChange?: (sectionId: string) => void
 }
 
 export function ReadView({
@@ -531,6 +533,7 @@ export function ReadView({
   searchHitSectionIds,
   searchMatchIndex = 0,
   onSearchMatchReport,
+  onActiveSectionChange,
 }: ReadViewProps) {
   // The mark is transient by design: it answers "which words were the source"
   // on arrival and then gets out of the way. Kept in state rather than read
@@ -745,6 +748,10 @@ export function ReadView({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections])
+
+  useEffect(() => {
+    if (activeSection) onActiveSectionChange?.(activeSection)
+  }, [activeSection, onActiveSectionChange])
 
   // Track which section is visible via IntersectionObserver
   useEffect(() => {

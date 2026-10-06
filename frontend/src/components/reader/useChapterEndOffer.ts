@@ -1,16 +1,18 @@
 /**
  * Which chapter the reader just finished, to offer practising it (#231).
  *
- * Asked once per chapter in a reading session ("Later" means not now, not never); the
+ * The views report where the reader is (`reach`); moving into a later chapter finishes the one
+ * left. Asked once per chapter in a reading session ("Later" means not now, not never); the
  * "Don't ask for this book" choice is the document's and comes back with the chapters.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import {
   type Chapter,
-  chapterIndexBySection,
+  type ReaderPlace,
+  chapterIndexAt,
   fetchChapters,
   finishedChapter,
   worthOffering,
@@ -36,49 +38,31 @@ function rememberAsked(documentId: string, asked: Set<string>) {
   }
 }
 
-/** The chapter to offer, from the topmost section the reader can see. */
-export function useChapterEndOffer(documentId: string, sectionCount: number) {
+export function useChapterEndOffer(documentId: string) {
   const { data } = useQuery({
     queryKey: ["chapters", documentId],
     queryFn: () => fetchChapters(documentId),
     staleTime: 60_000,
   })
-  const chapters = useMemo(() => data?.chapters ?? [], [data])
-  const index = useMemo(() => chapterIndexBySection(chapters), [chapters])
   const [offer, setOffer] = useState<Chapter | null>(null)
   const current = useRef<number | undefined>(undefined)
 
-  useEffect(() => {
-    if (!data?.ask_at_chapter_end || chapters.length < 2 || sectionCount === 0) return
-    const elements = Array.from(document.querySelectorAll<HTMLElement>("[data-section-id]"))
-    // Every visible section, not just the entries this callback reports: the topmost one is
-    // where the reader is.
-    const visible = new Map<string, number>()
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          const sid = (e.target as HTMLElement).dataset.sectionId ?? ""
-          if (e.isIntersecting) visible.set(sid, e.boundingClientRect.top)
-          else visible.delete(sid)
-        }
-        if (visible.size === 0) return
-        const [topId] = [...visible.entries()].reduce((a, b) => (a[1] <= b[1] ? a : b))
-        const next = index.get(topId)
-        const ended = finishedChapter(chapters, current.current, next)
-        if (next !== undefined) current.current = next
-        if (!ended || !worthOffering(ended)) return
-        const asked = readAsked(documentId)
-        if (asked.has(ended.id)) return
-        asked.add(ended.id)
-        rememberAsked(documentId, asked)
-        setOffer(ended)
-      },
-      { threshold: 0.2 },
-    )
-    for (const el of elements) observer.observe(el)
-    return () => observer.disconnect()
-  }, [data, chapters, index, documentId, sectionCount])
+  const reach = useCallback(
+    (place: ReaderPlace) => {
+      const chapters = data?.chapters ?? []
+      const here = chapterIndexAt(chapters, place)
+      if (!data?.ask_at_chapter_end || here === undefined) return
+      const ended = finishedChapter(chapters, current.current, here)
+      current.current = here
+      if (!ended || !worthOffering(ended)) return
+      const asked = readAsked(documentId)
+      if (asked.has(ended.id)) return
+      asked.add(ended.id)
+      rememberAsked(documentId, asked)
+      setOffer(ended)
+    },
+    [data, documentId],
+  )
 
-  return { offer, dismiss: () => setOffer(null) }
+  return { offer, reach, dismiss: () => setOffer(null) }
 }
-

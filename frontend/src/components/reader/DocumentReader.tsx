@@ -881,7 +881,17 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   // Track reading progress via IntersectionObserver (3-second dwell per section)
   useReadingProgress(documentId, doc?.sections.length ?? 0, readerContainerRef)
-  const chapterEnd = useChapterEndOffer(documentId, doc?.sections.length ?? 0)
+  const chapterEnd = useChapterEndOffer(documentId)
+  const { reach: reachPlace } = chapterEnd
+  const onReadSection = useCallback(
+    (sectionId: string) => {
+      if (leftTab === "read") reachPlace({ sectionId })
+    },
+    [leftTab, reachPlace],
+  )
+  useEffect(() => {
+    if (leftTab === "pdfview") reachPlace({ page: pdfCurrentPage })
+  }, [leftTab, pdfCurrentPage, reachPlace])
 
   // fetch saved reading position on mount; show ResumeBanner unless already dismissed this session
   useEffect(() => {
@@ -1419,6 +1429,16 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       <div className="relative flex flex-1 overflow-hidden">
         {/* Left panel — 60%; relative for SelectionActionBar absolute positioning */}
         <div ref={readerContainerRef} className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Fixed to the window, so it shows over every tab. */}
+          {chapterEnd.offer && (
+            <ChapterEndPrompt
+              documentId={documentId}
+              chapter={chapterEnd.offer}
+              onPractice={openChapterPractice}
+              onDismiss={chapterEnd.dismiss}
+            />
+          )}
+
           {/* Document header — hidden in PDF/Book view to maximise canvas area.
               The ingestion diagnostics grid (chunk/vector/entity counts) is a
               processing-health readout, not reading chrome: it stays on Sections,
@@ -1443,15 +1463,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                   </div>
                 )}
               </div>
-
-              {chapterEnd.offer && (
-                <ChapterEndPrompt
-                  documentId={documentId}
-                  chapter={chapterEnd.offer}
-                  onPractice={openChapterPractice}
-                  onDismiss={chapterEnd.dismiss}
-                />
-              )}
 
               {/* Resume banner — shown once per session when a saved position exists */}
               {resumePosition && (
@@ -1669,6 +1680,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 // scrolled to and never marked. `readSectionId` is exactly
                 // what `revealCitation` sets to `c.section_id` on every click.
                 citedSectionId={readSectionId}
+                onActiveSectionChange={onReadSection}
               />
             )}
           </div>

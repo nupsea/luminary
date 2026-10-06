@@ -20,10 +20,18 @@ export const practiceChapter = (documentId: string, chapterId: string) =>
 export const setAskAtChapterEnd = (documentId: string, ask: boolean) =>
   apiPut<void>(`/sections/${documentId}/chapters/prompt`, { ask_at_chapter_end: ask })
 
-export function chapterIndexBySection(chapters: Chapter[]): Map<string, number> {
-  const index = new Map<string, number>()
-  chapters.forEach((c, i) => c.section_ids.forEach((sid) => index.set(sid, i)))
-  return index
+/** Where the reader is, as each view knows it: the Read view by section, the PDF view by page. */
+export type ReaderPlace = { sectionId: string } | { page: number }
+
+/** The chapter at *place*; undefined outside every chapter (front matter, a blank page between). */
+export function chapterIndexAt(chapters: Chapter[], place: ReaderPlace): number | undefined {
+  const i =
+    "sectionId" in place
+      ? chapters.findIndex((c) => c.section_ids.includes(place.sectionId))
+      : chapters.findIndex(
+          (c) => c.page_start > 0 && c.page_start <= place.page && place.page <= c.page_end,
+        )
+  return i < 0 ? undefined : i
 }
 
 /**

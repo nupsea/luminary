@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   type Chapter,
-  chapterIndexBySection,
+  chapterIndexAt,
   finishedChapter,
   pickChapter,
   worthOffering,
@@ -19,9 +19,22 @@ const book = [
 ]
 
 describe("chapter end", () => {
-  it("maps every section to its chapter", () => {
-    const index = chapterIndexBySection(book)
-    expect([index.get("s2"), index.get("s3"), index.get("s4")]).toEqual([0, 1, 2])
+  it("finds the chapter from the Read view's section", () => {
+    const at = (sectionId: string) => chapterIndexAt(book, { sectionId })
+    expect([at("s2"), at("s3"), at("s4"), at("front")]).toEqual([0, 1, 2, undefined])
+  })
+
+  it("finds the chapter from the PDF view's page", () => {
+    // Pages as a PDF book has them: front matter, chapter 1 at 32-56, a blank 57, chapter 2.
+    const pdf = [
+      { ...book[0], page_start: 32, page_end: 56 },
+      { ...book[1], page_start: 58, page_end: 72 },
+      { ...book[2], page_start: 0, page_end: 0 },
+    ]
+    const at = (page: number) => chapterIndexAt(pdf, { page })
+    expect([at(10), at(32), at(56), at(57), at(58), at(72), at(0)]).toEqual([
+      undefined, 0, 0, undefined, 1, 1, undefined,
+    ])
   })
 
   it("a chapter ends only when reading moves forward into a later one", () => {
