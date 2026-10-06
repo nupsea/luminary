@@ -228,6 +228,8 @@ _NAME = re.compile(r"\b[A-Z][\w'’-]+")
 _POSSESSIVE = re.compile(r"['’]s?$")
 # Capitalised for grammar, not because they name anything.
 _NOT_NAMES = frozenset(("I", "According"))
+# NFKC leaves typographic apostrophes alone: a book's "O’Reilly" must match a model's "O'Reilly".
+_APOSTROPHES = str.maketrans({"‘": "'", "’": "'", "ʼ": "'"})
 
 
 def names_not_in(question: str, text: str) -> list[str]:
@@ -236,8 +238,8 @@ def names_not_in(question: str, text: str) -> list[str]:
     A card naming someone the passage never mentions guessed who acted ("Arachne" for Penelope's
     maid). A wrong name the passage does mention passes.
     """
-    question = unicodedata.normalize("NFKC", question)
-    scope = unicodedata.normalize("NFKC", text).lower()
+    question = unicodedata.normalize("NFKC", question).translate(_APOSTROPHES)
+    scope = unicodedata.normalize("NFKC", text).translate(_APOSTROPHES).lower()
     return [
         word
         for m in _NAME.finditer(question)
