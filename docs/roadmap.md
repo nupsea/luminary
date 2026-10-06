@@ -926,6 +926,13 @@ something else.
   machine, while this puts every chunk of every document — and, for extraction, whole document text —
   on the wire. Synthesis is routable; the index is not. BYOK for **generation** on a host that cannot
   run a model is the supported answer and ships in 0.13.0.
+- **Telling the chapter card writer to copy the evidence's words** — rejected 2026-10-06. About
+  40% of chapter card replies fail "answer in no sentence", so it was tried to cut wasted calls.
+  Over two blind runs of 12 units on qwen3.5:4b it cut calls per kept card 2.35 -> 1.82 and
+  2.23 -> 1.69 and raised core coverage 0.48 -> 0.58 and 0.50 -> 0.60, but sound cards fell 0.81 -> 0.76
+  and 0.89 -> 0.78 (unsound cards 20 -> 33, 12 -> 31). It also makes the coverage check pass by
+  construction: copied words satisfy a lexical gate whether or not they answer the question. Fewer
+  wasted calls must come from asking fewer unanswerable questions, not from the answer's wording.
 - **Two Ollama services** — rejected on a single-GPU/8GB machine. See I-31: enrichment cost is
   call count, not concurrency, so the lever is fewer calls, never more parallelism.
 
