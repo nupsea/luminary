@@ -9,6 +9,7 @@ does, so the tests below pin the release, the threshold, and the scope.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -26,8 +27,8 @@ class _FakeExtractor:
     def idle_seconds(self) -> float:
         return self._idle if self._loaded else float("inf")
 
-    def release(self) -> bool:
-        if not self._loaded:
+    def release(self, idle_for: float = 0.0) -> bool:
+        if not self._loaded or self._idle < idle_for:
             return False
         self._loaded = False
         self.released += 1
@@ -114,6 +115,38 @@ async def test_cancellation_stops_it(patched):
 
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+def test_a_load_finishing_while_release_waits_is_kept(tmp_path, monkeypatch):
+    """The reaper read "not loaded" (inf idle), then waited on the lock while ingestion loaded.
+
+    Releasing then dropped a model the extraction was about to use: its memory stayed held by
+    the extraction and the next ingestion paid a 6s reload. Idleness is re-read under the lock.
+    """
+    from app.services.ner import EntityExtractor
+
+    monkeypatch.setattr(EntityExtractor, "_model", None)
+    monkeypatch.setattr(EntityExtractor, "_last_used", 0.0)
+    ex = EntityExtractor(str(tmp_path), model_id="test/model")
+    assert ex.idle_seconds() == float("inf")
+
+    ex._model = object()  # the load the release waited out
+    EntityExtractor._last_used = time.monotonic()
+
+    assert ex.release(idle_for=180) is False
+    assert ex._model is not None
+
+
+def test_a_model_idle_past_the_threshold_is_released(tmp_path, monkeypatch):
+    from app.services.ner import EntityExtractor
+
+    monkeypatch.setattr(EntityExtractor, "_model", None)
+    monkeypatch.setattr(EntityExtractor, "_last_used", time.monotonic() - 600)
+    ex = EntityExtractor(str(tmp_path), model_id="test/model")
+    ex._model = object()
+
+    assert ex.release(idle_for=180) is True
+    assert ex._model is None
 
 
 def test_only_the_entity_model_is_reaped():

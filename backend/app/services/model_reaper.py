@@ -54,7 +54,8 @@ async def reap_idle_models(
 
             extractor = get_entity_extractor()
             idle = extractor.idle_seconds()
-            if idle >= threshold and extractor.release():
+            # In a thread: release waits on any load in progress, which takes seconds (I-2).
+            if idle >= threshold and await asyncio.to_thread(extractor.release, threshold):
                 logger.info(
                     "Released the entity model after %.0fs idle; ~1.4GB returned, "
                     "the next ingestion reloads it in about 6s",
