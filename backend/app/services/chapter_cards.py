@@ -48,6 +48,10 @@ def being_written(document_id: str) -> set[str]:
     return {chapter_id for doc, chapter_id in _writing if doc == document_id}
 
 
+def writing_any() -> bool:
+    return bool(_writing)
+
+
 async def _known_names(document_id: str, session: AsyncSession) -> str:
     entities = await GraphEntityRepo(session).entities_for_document(document_id)
     top = sorted(entities, key=lambda e: e.mention_count or 0, reverse=True)[:KNOWN_NAMES]

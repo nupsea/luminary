@@ -340,10 +340,12 @@ async def test_a_chapter_is_never_written_twice_at_once(long_book, fakes, monkey
     while not chapter_cards.being_written("bk"):
         await asyncio.sleep(0.01)
 
-    # The backfill passes over the chapter ingestion is writing, and refuses it if handed it.
+    # The backfill passes over the chapter ingestion is writing, waits rather than write the
+    # next one alongside it, and refuses the first if handed it.
     await _read_at(long_book, "ch0")
     pick = await chapter_backfill.next_chapter()
     assert pick.chapter.id == "ch1"
+    assert await chapter_backfill.not_now(pick) == "a chapter is being written"
     async with long_book.factory() as session:
         chapters = await chapter_cards.chapters_for_document("bk", "DDIA", session)
         assert await chapter_cards.write_chapter("bk", "DDIA", chapters[0], "", session) is None

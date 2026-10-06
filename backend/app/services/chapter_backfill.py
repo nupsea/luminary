@@ -28,7 +28,7 @@ from app.config import get_settings
 from app.database import get_session_factory
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
-from app.services.chapter_cards import _known_names, being_written, write_chapter
+from app.services.chapter_cards import _known_names, being_written, write_chapter, writing_any
 from app.services.chapters import Chapter, chapters_for_document
 
 logger = logging.getLogger(__name__)
@@ -156,6 +156,10 @@ async def _idle_reason() -> str | None:
 async def not_now(pick: Pick) -> str | None:
     """Why *pick* must wait, or None when it may be written now."""
     from app.services.llm_routing import refusal  # noqa: PLC0415
+
+    # Two writers share the one model slot, so a second chapter only delays the one in hand.
+    if writing_any():
+        return "a chapter is being written"
 
     reason = refusal("background") or _battery_reason(pick.ahead)
     if reason is None and not pick.ahead:
