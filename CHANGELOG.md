@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.5] - 2026-10-07
+
 ### Fixed
 - **On Windows, the first setting in `backend\.env` was silently ignored.** `install.ps1` wrote the file with a byte-order mark that the backend read as part of the key; the backend now accepts the mark and the installer no longer writes it.
 - **`make luminary` printed "Luminary is ready" when the backend never started**, e.g. right after `make install` in a shell without `~/.local/bin` on PATH. Make targets now find uv there, and the launcher exits with the backend's error instead.
