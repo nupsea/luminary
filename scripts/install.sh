@@ -435,7 +435,13 @@ if [ "$DEV" = 1 ]; then
     # luminary.sh resolve on every `uv run`; syncing them here keeps the first
     # launch from downloading them silently before the backend can start.
     _info "Syncing backend deps into backend/.venv (dev: all default groups)..."
-    (cd backend && uv sync)
+    (cd backend && uv sync --no-default-groups --group full --group dev --group media)
+    # Loaders never download (I-57), so the suite's embedding tests wait forever
+    # on an empty cache; GitHub CI fills the same one before `make ci`.
+    TEST_MODELS="${LUMINARY_TEST_MODEL_CACHE:-$HOME/.cache/luminary/test-models}"
+    [ -n "$(ls -A "$TEST_MODELS" 2>/dev/null)" ] || _record test-models
+    _info "Fetching the test suite's models into $TEST_MODELS (~1.4GB once)..."
+    (cd backend && uv run --no-sync python -m app.services.model_prefetch --models-dir "$TEST_MODELS")
 else
     _info "Syncing backend deps into backend/.venv (public profile)..."
     # `full` adds yt-dlp and the tree-sitter grammars. The article path
@@ -473,7 +479,7 @@ cat <<EOF
 
 [install] Done (dev workspace).
 
-  Backend venv:  backend/.venv  (uv sync: groups dev, full, media)
+  Backend venv:  backend/.venv  (groups: dev, full, media)
   Next:          make dev   or   make luminary
   Before a PR:   make ci
   Undo:          make uninstall

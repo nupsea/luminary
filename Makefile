@@ -7,6 +7,8 @@ export PATH := $(HOME)/.local/bin:$(HOME)/.cargo/bin:$(PATH)
 # Make 3.81 (macOS) execs a recipe with no shell syntax itself, using the PATH
 # it started with; recipes that start with uv use $(UV) for that reason.
 UV := $(or $(shell PATH="$(PATH)" command -v uv),uv)
+# The repo's check scripts need 3.10+; macOS's /usr/bin/python3 is 3.9.
+PY := $(UV) run --no-sync --project $(CURDIR)/backend python
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -397,10 +399,10 @@ lint:
 	cd frontend && ./node_modules/.bin/tsc -b --noEmit
 	cd frontend && npm run lint
 	cd frontend && npm run knip
-	python3 scripts/check_manifest_schema.py
-	python3 scripts/check_manifest_coverage.py
-	python3 scripts/check_public_surface_calls.py
-	python3 scripts/check_smoke_paths.py
+	$(PY) scripts/check_manifest_schema.py
+	$(PY) scripts/check_manifest_coverage.py
+	$(PY) scripts/check_public_surface_calls.py
+	$(PY) scripts/check_smoke_paths.py
 	bash scripts/check_powershell.sh
 
 test:
@@ -472,7 +474,7 @@ verify-reader-switch:
 
 measure-ttft:
 	@echo "Measuring time to first token (requires backend on :7820)..."
-	python3 scripts/measure_ttft.py --runs $(if $(RUNS),$(RUNS),5) $(if $(Q),--question "$(Q)",) $(if $(DOC),--document-id $(DOC),)
+	$(PY) scripts/measure_ttft.py --runs $(if $(RUNS),$(RUNS),5) $(if $(Q),--question "$(Q)",) $(if $(DOC),--document-id $(DOC),)
 
 # The only supported container topology: the model gets the GPU. Needs the NVIDIA
 # Container Toolkit on the host -- without it compose refuses the device
@@ -827,17 +829,17 @@ else
 	./scripts/check_public_import.sh
 	cd backend && uv run --with pytest-cov==7.1.0 pytest --cov=app --cov-report= --cov-fail-under=$(BACKEND_COVERAGE_FLOOR)
 endif
-	python3 scripts/check_manifest_schema.py
-	python3 scripts/check_manifest_coverage.py
-	python3 scripts/check_public_surface_calls.py
-	python3 scripts/check_smoke_paths.py
+	$(PY) scripts/check_manifest_schema.py
+	$(PY) scripts/check_manifest_coverage.py
+	$(PY) scripts/check_public_surface_calls.py
+	$(PY) scripts/check_smoke_paths.py
 	bash scripts/check_powershell.sh
 	# `npm run build` includes tsc. Vite only warns past chunkSizeWarningLimit; make it fatal.
 	cd frontend && out="$$(npm run build 2>&1)"; rc=$$?; printf '%s\n' "$$out"; \
 		[ $$rc -eq 0 ] || exit $$rc; \
 		! printf '%s' "$$out" | grep -q 'Some chunks are larger than' \
 		|| { echo 'FAIL: a chunk exceeds chunkSizeWarningLimit'; exit 1; }
-	python3 scripts/check_public_bundle_excludes_full.py
+	$(PY) scripts/check_public_bundle_excludes_full.py
 	cd frontend && npm run lint
 	cd frontend && npm run knip
 	# The frontend suite was never wired into a gate: 59 files of pure-logic

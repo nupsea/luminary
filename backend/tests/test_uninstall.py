@@ -31,7 +31,14 @@ def _checkout(tmp_path: Path, manifest: str | None) -> Path:
     repo = tmp_path / "repo"
     (repo / "scripts").mkdir(parents=True)
     shutil.copy(SCRIPTS / "uninstall.sh", repo / "scripts")
-    for d in ("backend/.venv/bin", "frontend/node_modules/x", "frontend/dist", ".luminary"):
+    for d in (
+        "backend/.venv/bin",
+        "backend/app/__pycache__",
+        "backend/.pytest_cache",
+        "frontend/node_modules/x",
+        "frontend/dist",
+        ".luminary",
+    ):
         (repo / d).mkdir(parents=True)
     (repo / ".luminary/luminary.db").write_text("library")
     (repo / "backend/.env").write_text(
@@ -65,14 +72,24 @@ def _run(tmp_path: Path, repo: Path, *args: str, listening: bool = False, stdin=
 
 
 def test_removes_the_checkout_env_and_only_what_the_manifest_recorded(tmp_path):
-    repo = _checkout(tmp_path, "model:qwen-test\nnode:brew\n")
+    repo = _checkout(tmp_path, "model:qwen-test\nnode:brew\ntest-models\n")
+    test_models = tmp_path / "home/.cache/luminary/test-models"
+    (test_models / "bge-small").mkdir(parents=True)
     proc, calls = _run(tmp_path, repo, "--yes")
 
     assert proc.returncode == 0, proc.stderr
-    for d in ("backend/.venv", "frontend/node_modules", "frontend/dist", ".install-manifest"):
+    for d in (
+        "backend/.venv",
+        "backend/app/__pycache__",
+        "backend/.pytest_cache",
+        "frontend/node_modules",
+        "frontend/dist",
+        ".install-manifest",
+    ):
         assert not (repo / d).exists(), d
     assert (repo / "backend/.env").read_text() == f"{USER_ENV_LINE}\n"
     assert (repo / ".luminary/luminary.db").read_text() == "library"
+    assert not test_models.exists()
     assert "ollama rm qwen-test" in calls
     assert "brew uninstall node" in calls
     assert "brew uninstall ollama" not in calls  # not recorded, so not ours

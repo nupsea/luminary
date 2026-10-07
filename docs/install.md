@@ -45,6 +45,7 @@ make start     # http://localhost:7820
 | `~/.local/bin`, `~/.local/share/uv`, `~/.cache/uv` | uv and the Python 3.13 it manages, if uv was missing |
 | Homebrew (macOS) or `~/.local/share/luminary/node` (Linux) | Node, if missing or older than 20 |
 | Homebrew or Ollama's script | Ollama, if missing; then the default model in `~/.ollama` |
+| `~/.cache/luminary/test-models` | `install-dev` only: the 1.4 GB of weights the test suite embeds with |
 
 No system Python or global `site-packages` is modified. uv's installer appends one line to your
 shell profile so `uv` is on PATH in new terminals; make targets do not depend on it.

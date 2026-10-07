@@ -13,6 +13,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MANIFEST="$REPO_ROOT/.install-manifest"
+TEST_MODELS="${LUMINARY_TEST_MODEL_CACHE:-$HOME/.cache/luminary/test-models}"
 BACKEND_PORT=7820
 
 # Keys install.sh writes into backend/.env; any other line there is the user's.
@@ -150,6 +151,9 @@ _steps() {
     fi
     if _recorded node:local && [ -d "$HOME/.local/share/luminary/node" ]; then
         _act "Remove Node from ~/.local/share/luminary/node" _remove_local_node
+    fi
+    if _recorded test-models && [ -d "$TEST_MODELS" ]; then
+        _act "Remove the test suite's model cache $TEST_MODELS ($(_size "$TEST_MODELS"))" rm -rf "$TEST_MODELS"
     fi
     if _recorded uv && _have uv; then
         _act "Uninstall uv: binary, its cache ($(_size "$(uv cache dir)")) and its Pythons" _remove_uv
