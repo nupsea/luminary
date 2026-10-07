@@ -818,6 +818,20 @@ chunk, note, image and concept vector lives in that space. GLiNER is already mul
 measured how far the current stack degrades on non-English text; that number decides the rung.
 
 **A swap ships only through 0.17.0's rail.** A no-go is an allowed outcome and moves the swap to 1.1.
+
+**Candidate: EmbeddingGemma 2**, evaluated once 0.17.0's rail ships. It replaces the embedder only;
+it generates no text, so it is no substitute for the chat model. It is multilingual, takes 8K tokens
+against bge-small's 512, and embeds images and audio in the same space as text. It is ~270M
+text parameters against bge-small's ~33M, and its 768 dims truncate to 512/256/128, never 384.
+The decision needs:
+
+- `make eval` on both embedders over one corpus (recall@50, HR@5, MRR), plus a non-English set.
+- Ingestion time per document and resident RAM, on a CPU-only host as well as Apple Silicon.
+- Every bge-small-tuned similarity threshold re-derived from bracketing cases, not carried over:
+  `note_search.py`, `concept_nodes/_shared.py`, `build_hierarchy.py`, `tag_normalizer.py`.
+
+For English-only quality the reranker is the larger lever: the funnel loses relevant chunks between
+recall@50 and HR@5 (`retrieval-funnel.md`).
 Interface localisation is separate, seamed and unbuilt: every surface in `surface-manifest.json`
 carries `labels: {"en": ...}`.
 
