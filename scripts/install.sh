@@ -428,7 +428,7 @@ done
 
 
 # ---------------------------------------------------------------------------
-# Backend deps — public profile (no labs/dev groups)
+# Backend deps — public profile, or every default group with --dev
 # ---------------------------------------------------------------------------
 if [ "$DEV" = 1 ]; then
     # The default groups (dev, full, media) are what `make dev`, `make ci` and
@@ -463,8 +463,7 @@ fi
 _info "Building production SPA..."
 make build
 
-# Tools fetched into ~/.local/bin are on this script's PATH only. Without this,
-# the next `make luminary` died on "uv: command not found" behind a ready banner.
+# Tools fetched into ~/.local/bin are on this script's PATH only, not the user's.
 for _tool in uv node; do
     if ! PATH="$ORIG_PATH" command -v "$_tool" >/dev/null 2>&1; then
         _dir="$(dirname "$(command -v "$_tool")")"

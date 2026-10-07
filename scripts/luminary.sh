@@ -103,7 +103,7 @@ else
 fi
 BACKEND_PIPE_PID=$!
 
-# Tee Vite output so we can scrape the actual bound port
+# Copy Vite output to a file so we can scrape the actual bound port
 VITE_LOG=$(mktemp)
 (cd "$REPO_ROOT/frontend" && npm run dev 2>&1) \
     | awk -v vlog="$VITE_LOG" 'BEGIN{p="\033[0;32m[FRONTEND]\033[0m "}{print > vlog; fflush(vlog); print p $0; fflush()}' &
@@ -127,10 +127,9 @@ _stop() {
         # healthy shutdowns. See scripts/free_port.sh.
         docker stop -t 90 "$DOCKER_CONTAINER" 2>/dev/null || true
     fi
-    # npm, vite and uvicorn are grandchildren; killing the pipe PIDs alone left
-    # them running. The awk printers are spared: they end at EOF, once every
-    # writer has exited, so `wait` returns only after the ports are free and
-    # the backend's shutdown lines are printed.
+    # npm, vite and uvicorn are grandchildren, so kill the whole tree. The awk
+    # printers are spared: they end at EOF once every writer has exited, so
+    # `wait` returns only after the ports are free and shutdown is logged.
     local child
     for child in $(pgrep -P $$); do
         [ "$child" = "$BACKEND_PIPE_PID" ] || [ "$child" = "$FRONTEND_PIPE_PID" ] || _kill_tree "$child"
