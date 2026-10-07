@@ -77,6 +77,20 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1   # once
 Open http://localhost:7820 when the log settles. For audio and video, install ffmpeg on `PATH`
 (`winget install Gyan.FFmpeg`) and add **Speech to text** from Settings.
 
+`install.ps1` installs Python, Node, uv and Ollama only where they are missing, pulls the model,
+and sets four user environment variables for Ollama (`OLLAMA_KEEP_ALIVE`, `OLLAMA_NUM_PARALLEL`,
+`OLLAMA_MAX_LOADED_MODELS`, `LLAMA_ARG_CACHE_RAM`). It records each in `.install-manifest`,
+including a variable's earlier value. `uninstall.ps1` removes exactly those, restores the earlier
+values, and keeps `.luminary\`; unrecorded leftovers are listed with the command to remove them:
+
+```powershell
+.\scripts\uninstall.ps1 -DryRun      # list what would go
+.\scripts\uninstall.ps1              # asks first
+.\scripts\uninstall.ps1 -PurgeData   # also delete .luminary\ (documents, notes, flashcards)
+```
+
+A user variable changed since the install is kept.
+
 ### Intel Macs — not supported
 
 `lancedb` publishes no macOS x86_64 wheel and `torch` none past 2.2.2, so the native installs

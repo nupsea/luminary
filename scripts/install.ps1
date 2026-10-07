@@ -37,6 +37,27 @@ function Test-CommandExists($Command) {
     return (Get-Command $Command -ErrorAction SilentlyContinue) -ne $null
 }
 
+$RepoRoot = (Get-Item -Path $PSScriptRoot).Parent.FullName
+
+# uninstall.ps1 removes only what is recorded here, so a tool that was already
+# on the machine is never recorded and never removed.
+$Manifest = Join-Path $RepoRoot ".install-manifest"
+function Get-Records { @(if (Test-Path $Manifest) { Get-Content -Path $Manifest }) }
+function Add-Record($Line) {
+    if ((Get-Records) -notcontains $Line) { Add-Content -Path $Manifest -Value $Line -Encoding UTF8 }
+}
+
+# Records the user's own earlier value the first time, so uninstall can restore it.
+function Set-UserEnv($Name, $Value) {
+    $records = Get-Records
+    $ours = @($records | Where-Object { $_ -like "env:$Name=*" })
+    $before = [Environment]::GetEnvironmentVariable($Name, "User")
+    if ($before -and $ours.Count -eq 0) { $records += "prev:$Name=$before" }
+    $records = @($records | Where-Object { $_ -notlike "env:$Name=*" }) + "env:$Name=$Value"
+    Set-Content -Path $Manifest -Value $records -Encoding UTF8
+    [Environment]::SetEnvironmentVariable($Name, "$Value", "User")
+}
+
 # Persist a directory onto the *user* PATH (no admin needed) and the live session.
 function Add-UserPath($Dir) {
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -44,6 +65,7 @@ function Add-UserPath($Dir) {
     if (($userPath -split ';') -notcontains $Dir) {
         $newPath = if ($userPath) { "$Dir;$userPath" } else { $Dir }
         [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+        Add-Record "path:$Dir"
     }
     if (($env:PATH -split ';') -notcontains $Dir) {
         $env:PATH = "$Dir;$env:PATH"
@@ -59,8 +81,9 @@ if (Test-CommandExists "python") {
 } else {
     Write-Host "[install] Python not found. Installing Python 3.13 (per-user, no admin)..." -ForegroundColor Yellow
     # Pinned release — bump periodically as new 3.13.x patch releases land.
-    $pyUrl = "https://www.python.org/ftp/python/3.13.0/python-3.13.0-amd64.exe"
-    $pyPath = "$env:TEMP\python-3.13.0.exe"
+    $pyVer = "3.13.0"
+    $pyUrl = "https://www.python.org/ftp/python/$pyVer/python-$pyVer-amd64.exe"
+    $pyPath = "$env:TEMP\python-$pyVer.exe"
 
     Write-Host "[install] Downloading Python installer..." -ForegroundColor Gray
     Invoke-WebRequest -Uri $pyUrl -OutFile $pyPath -UseBasicParsing
@@ -71,7 +94,9 @@ if (Test-CommandExists "python") {
     # Per-user install location; PrependPath=1 persists it to the user PATH.
     $pyBase = "$env:LOCALAPPDATA\Programs\Python\Python313"
     $env:PATH = "$pyBase\;$pyBase\Scripts\;$env:PATH"
-    
+    # Its own uninstaller removes the PATH entries PrependPath added.
+    if (Test-Path "$pyBase\python.exe") { Add-Record "python:$pyVer" }
+
     if (Test-CommandExists "python") {
         Write-Host "[install] Python installed successfully!" -ForegroundColor Green
     } else {
@@ -168,6 +193,7 @@ if ($installNode) {
     if (-not (Test-Path $nodeParent)) { New-Item -ItemType Directory -Path $nodeParent -Force | Out-Null }
     Move-Item -Path "$nodeStage\$nodeDist" -Destination $nodeHome -Force
     Remove-Item -Recurse -Force $nodeStage -ErrorAction SilentlyContinue
+    Add-Record "node:local"
 
     Add-UserPath $nodeHome
 
@@ -201,9 +227,17 @@ if (Test-CommandExists "uv") {
     Write-Host "[install] uv is already installed: $uvVersion" -ForegroundColor Green
 } else {
     Write-Host "[install] Installing uv (Python package manager)..." -ForegroundColor Yellow
+    $uvBin = "$env:USERPROFILE\.local\bin"
+    # uv's installer adds its bin dir to the user PATH itself, so Add-UserPath
+    # would find it already there and record nothing.
+    $uvBinOnPath = ([Environment]::GetEnvironmentVariable("Path", "User") -split ';') -contains $uvBin
     powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+    if (Test-Path "$uvBin\uv.exe") {
+        Add-Record "uv"
+        if (-not $uvBinOnPath) { Add-Record "path:$uvBin" }
+    }
 
-    Add-UserPath "$env:USERPROFILE\.local\bin"
+    Add-UserPath $uvBin
 
     if (Test-CommandExists "uv") {
         Write-Host "[install] uv installed successfully!" -ForegroundColor Green
@@ -257,6 +291,7 @@ if (Test-CommandExists "ollama") {
         }
     }
 
+    if (Test-Path $ollamaExe) { Add-Record "ollama:app" }
     Add-UserPath "$env:LOCALAPPDATA\Programs\Ollama"
 
     if (Test-CommandExists "ollama") {
@@ -367,11 +402,20 @@ if (-not $chatModel) {
 if ((-not $visionModel) -and $MaxLoaded -gt 1 -and $chatModel -ne $PublicGeneralist) {
     $visionModel = $PublicGeneralist
 }
+# A model already on the machine is the user's; only a fresh pull is recorded.
+function Test-ModelPulled($Model) {
+    $names = @(ollama list | Select-Object -Skip 1 | ForEach-Object { ($_ -split '\s+')[0] })
+    return ($names -contains $Model) -or ($names -contains "${Model}:latest")
+}
+
 if (Test-CommandExists "ollama") {
     Write-Host "[install] Pulling chat model $chatModel (this can take a few minutes)..." -ForegroundColor Yellow
+    $hadChatModel = Test-ModelPulled $chatModel
     ollama pull $chatModel
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[WARNING] Failed to pull $chatModel. If you are behind a corporate VPN/Proxy, disconnect or configure your system proxy settings, then run 'ollama pull $chatModel' manually." -ForegroundColor Red
+    } elseif (-not $hadChatModel) {
+        Add-Record "model:$chatModel"
     }
 } else {
     Write-Warning "ollama is not on the PATH in this session. Open a new PowerShell window and run: ollama pull $chatModel"
@@ -382,17 +426,18 @@ if (Test-CommandExists "ollama") {
 # left the pull disabled on every machine that had not set the variable.
 if ($visionModel -and (Test-CommandExists "ollama")) {
     Write-Host "[install] Pulling vision model $visionModel (this can take several minutes)..." -ForegroundColor Yellow
+    $hadVisionModel = Test-ModelPulled $visionModel
     ollama pull $visionModel
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[WARNING] Failed to pull vision model $visionModel. Add it later with: ollama pull $visionModel" -ForegroundColor Red
+    } elseif (-not $hadVisionModel) {
+        Add-Record "model:$visionModel"
     }
 }
 
 # ---------------------------------------------------------------------------
 # 6. Install Backend & Frontend dependencies
 # ---------------------------------------------------------------------------
-$RepoRoot = (Get-Item -Path $PSScriptRoot).Parent.FullName
-
 # Backend sync
 Write-Host "[install] Installing backend dependencies..." -ForegroundColor Yellow
 Set-Location -Path "$RepoRoot\backend"
@@ -484,17 +529,17 @@ Set-Content -Path $EnvFile -Value $EnvLines -Encoding UTF8
 
 # Ollama on Windows reads its own knobs from the user environment, and the
 # already-running server does not pick them up until it restarts.
-[Environment]::SetEnvironmentVariable("OLLAMA_MAX_LOADED_MODELS", "$MaxLoaded", "User")
-[Environment]::SetEnvironmentVariable("OLLAMA_NUM_PARALLEL", "$NumParallel", "User")
+Set-UserEnv "OLLAMA_MAX_LOADED_MODELS" "$MaxLoaded"
+Set-UserEnv "OLLAMA_NUM_PARALLEL" "$NumParallel"
 # llama.cpp's prompt cache is left at 8192MB by default on every host, which is
 # more than most machines can spare. A saved prompt state measures 105-206MB, so
 # 512MB holds the two or three recent prompts reuse actually draws on.
-[Environment]::SetEnvironmentVariable("LLAMA_ARG_CACHE_RAM", "512", "User")
+Set-UserEnv "LLAMA_ARG_CACHE_RAM" "512"
 # Residency must be set on the server: LiteLLM's `ollama/` completion path folds
 # a per-call keep_alive into `options`, where Ollama rejects it, so the backend
 # cannot ask for this. Without it the model unloads on Ollama's 5-minute default
 # and the next question pays a full reload.
-[Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "30m", "User")
+Set-UserEnv "OLLAMA_KEEP_ALIVE" "30m"
 Write-Host "[install] Restart Ollama for the server-side profile to take effect." -ForegroundColor Gray
 
 # ---------------------------------------------------------------------------
