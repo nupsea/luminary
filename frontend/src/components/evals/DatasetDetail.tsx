@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Play, Trash2 } from "lucide-react"
 import {
   Sheet,
@@ -61,6 +62,8 @@ export function DatasetDetail({
   deleting,
 }: DatasetDetailProps) {
   const isFile = source === "file" || detail?.source === "file"
+  // Two clicks, not confirm(): a WKWebView answers native dialogs with false.
+  const [armed, setArmed] = useState(false)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -96,10 +99,11 @@ export function DatasetDetail({
                   type="button"
                   className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
                   disabled={deleting}
-                  onClick={onDelete}
+                  onClick={() => (armed ? onDelete() : setArmed(true))}
+                  onBlur={() => setArmed(false)}
                 >
                   <Trash2 className="h-4 w-4" />
-                  Delete
+                  {armed ? "Click again to delete" : "Delete"}
                 </button>
               )}
               <button

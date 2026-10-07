@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Highlights could not be removed in the desktop app.** Its webview answers every confirm() with no, so removal is now confirmed in the highlights panel; a test keeps native dialogs out of the app.
+- **The reader's crash screen could only reload the whole app.** It now offers Try again, resets when another document is opened, and shows the component stack for a bug report.
+
 ## [0.15.4] - 2026-10-07
 
 ### Fixed

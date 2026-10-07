@@ -596,10 +596,7 @@ export default function Quality() {
         }}
         deleting={deleteMutation.isPending}
         onDelete={() => {
-          if (!selectedId) return
-          if (window.confirm("Delete this evaluation dataset?")) {
-            deleteMutation.mutate(selectedId)
-          }
+          if (selectedId) deleteMutation.mutate(selectedId)
         }}
       />
 
