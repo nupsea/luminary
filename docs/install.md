@@ -59,7 +59,8 @@ make uninstall                      # asks first
 make uninstall ARGS=--purge-data    # also delete .luminary/ (documents, notes, flashcards)
 ```
 
-An install made before the manifest existed has none, so its global tools stay; the uninstaller says so.
+Anything global it finds but has no record of (an install made before the manifest existed, or a
+tool that was already there) is kept, and listed at the end with the command to remove it by hand.
 
 Node is fetched into `~/.local` because apt carries Node 18 and the build needs 20+. Audio, video
 and dictation need **Speech to text** from Settings, and `ffmpeg` from apt for video.

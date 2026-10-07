@@ -35,12 +35,14 @@ def _checkout(tmp_path: Path, manifest: str | None) -> Path:
         "backend/.venv/bin",
         "backend/app/__pycache__",
         "backend/.pytest_cache",
+        "scripts/__pycache__",
         "frontend/node_modules/x",
         "frontend/dist",
         ".luminary",
     ):
         (repo / d).mkdir(parents=True)
     (repo / ".luminary/luminary.db").write_text("library")
+    (repo / "backend/.coverage").write_text("coverage")
     (repo / "backend/.env").write_text(
         f"{USER_ENV_LINE}\nLITELLM_DEFAULT_MODEL=ollama/qwen3.5:4b\nVISION_MODEL=ollama/qwen3.5:4b\n"
     )
@@ -82,6 +84,8 @@ def test_removes_the_checkout_env_and_only_what_the_manifest_recorded(tmp_path):
         "backend/.venv",
         "backend/app/__pycache__",
         "backend/.pytest_cache",
+        "backend/.coverage",
+        "scripts/__pycache__",
         "frontend/node_modules",
         "frontend/dist",
         ".install-manifest",
@@ -101,8 +105,34 @@ def test_without_a_manifest_no_global_tool_is_touched(tmp_path):
 
     assert proc.returncode == 0, proc.stderr
     assert not (repo / "backend/.venv").exists()
-    assert not re.search(r"^(ollama rm|brew )", calls, re.M), calls
-    assert "No install record" in proc.stdout
+    assert not re.search(r"^(ollama rm|brew (uninstall|services))", calls, re.M), calls
+
+
+def test_unrecorded_leftovers_are_listed_for_the_user_not_removed(tmp_path):
+    repo = _checkout(tmp_path, None)
+    (repo / "backend/.env").write_text("LITELLM_DEFAULT_MODEL=ollama/qwen-test\n")
+    test_models = tmp_path / "home/.cache/luminary/test-models"
+    (test_models / "bge-small").mkdir(parents=True)
+    proc, calls = _run(tmp_path, repo, "--yes")
+
+    assert proc.returncode == 0, proc.stderr
+    by_hand = proc.stdout.split("Not removed:", 1)[1]
+    assert "ollama rm qwen-test" in by_hand
+    assert "brew uninstall node" in by_hand
+    assert f"rm -rf {test_models}" in by_hand
+    assert test_models.exists()
+    assert not re.search(r"^(ollama rm|brew (uninstall|services))", calls, re.M), calls
+
+
+def test_recorded_items_are_not_listed_as_leftovers(tmp_path):
+    repo = _checkout(tmp_path, "model:qwen-test\nnode:brew\n")
+    (repo / "backend/.env").write_text("LITELLM_DEFAULT_MODEL=ollama/qwen-test\n")
+    proc, _ = _run(tmp_path, repo, "--dry-run")
+
+    assert proc.returncode == 0, proc.stderr
+    by_hand = proc.stdout.split("Not removed:", 1)[1]
+    assert "qwen-test" not in by_hand
+    assert "brew uninstall node" not in by_hand
 
 
 def test_dry_run_lists_the_plan_and_removes_nothing(tmp_path):

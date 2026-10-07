@@ -4,8 +4,9 @@
 # Removes what lives in the checkout (backend/.venv, frontend/node_modules,
 # frontend/dist, the installer's keys in backend/.env) and whatever install.sh
 # recorded in .install-manifest as installed by it. A tool that was already on
-# the machine is never recorded, so it is never removed. The library
-# (.luminary/) is kept unless --purge-data.
+# the machine is never recorded, so it is never removed; unrecorded leftovers
+# Luminary may have added are listed at the end for the user to check. The
+# library (.luminary/) is kept unless --purge-data.
 #
 # Usage: bash scripts/uninstall.sh [--dry-run] [--yes] [--purge-data]
 
@@ -38,7 +39,7 @@ _info() { printf '\033[0;36m[uninstall]\033[0m %s\n' "$*"; }
 _warn() { printf '\033[0;33m[uninstall]\033[0m %s\n' "$*"; }
 _err()  { printf '\033[0;31m[uninstall]\033[0m %s\n' "$*" >&2; }
 _have() { command -v "$1" >/dev/null 2>&1; }
-_size() { du -sh "$1" 2>/dev/null | cut -f1; }
+_size() { du -sh "$1" 2>/dev/null | awk '{print $1}'; }
 _recorded() { [ -f "$MANIFEST" ] && grep -qxF "$1" "$MANIFEST"; }
 
 # Deleting the venv under a running backend leaves it half-dead holding the DB.
@@ -87,8 +88,9 @@ _has_installer_env() {
 }
 
 _python_caches() {
-    find "$REPO_ROOT/backend" -path "$REPO_ROOT/backend/.venv" -prune -o \
+    find "$REPO_ROOT" \( -name .git -o -name .venv -o -name node_modules -o -name .luminary \) -prune -o \
         \( -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache \) -type d -print -prune
+    if [ -f "$REPO_ROOT/backend/.coverage" ]; then echo "$REPO_ROOT/backend/.coverage"; fi
 }
 _remove_python_caches() { _python_caches | while IFS= read -r d; do rm -rf "$d"; done; }
 
@@ -125,7 +127,7 @@ _steps() {
         fi
     done
     if [ -n "$(_python_caches | head -1)" ]; then
-        _act "Remove Python caches under backend/ (__pycache__, .pytest_cache, .ruff_cache)" _remove_python_caches
+        _act "Remove Python caches and coverage data (__pycache__, .pytest_cache, .ruff_cache, .coverage)" _remove_python_caches
     fi
     if _has_installer_env; then
         _act "Remove the installer's settings from backend/.env (other lines are kept)" _strip_installer_env
@@ -161,6 +163,52 @@ _steps() {
     _act "Forget the install record (.install-manifest)" rm -f "$MANIFEST"
 }
 
+# Models this checkout used, read before backend/.env is stripped, plus the
+# installer's defaults: an install that predates the manifest pulled one of these.
+_candidate_models() {
+    sed -n -E 's/^(LITELLM_DEFAULT_MODEL|VISION_MODEL)=ollama\///p' "$REPO_ROOT/backend/.env" 2>/dev/null || true
+    sed -n -E 's/^(DEFAULT_CHAT_MODEL|PUBLIC_GENERALIST|LARGE_TEXT_MODEL)="([^"]+)"/\2/p' \
+        "$REPO_ROOT/scripts/install.sh" 2>/dev/null || true
+}
+
+_hand() { printf '  - %s\n      %s\n' "$1" "$2"; }
+
+# Listed, never run: without a record these may be the user's own.
+_by_hand() {
+    local model pulled
+    if _have ollama; then
+        pulled="$(ollama list 2>/dev/null | awk 'NR>1 {print $1}')"
+        for model in $(_candidate_models | sort -u); do
+            _recorded "model:$model" && continue
+            if printf '%s\n' "$pulled" | grep -qxF -e "$model" -e "$model:latest"; then
+                _hand "Ollama model $model" "ollama rm $model"
+            fi
+        done
+    fi
+    if _have brew && ! _recorded node:brew && brew list --formula node >/dev/null 2>&1; then
+        _hand "Node (brew), if nothing else of yours uses it" "brew uninstall node && brew autoremove"
+    fi
+    if _have brew && ! _recorded ollama:brew && brew list --formula ollama >/dev/null 2>&1; then
+        _hand "Ollama (brew), if nothing else of yours uses it" "brew uninstall ollama"
+    fi
+    if ! _recorded node:local && [ -d "$HOME/.local/share/luminary/node" ]; then
+        _hand "Node in ~/.local/share/luminary/node" "rm -rf ~/.local/share/luminary/node"
+    fi
+    if ! _recorded test-models && [ -d "$TEST_MODELS" ]; then
+        _hand "Test suite model cache ($(_size "$TEST_MODELS")), shared by every checkout" "rm -rf $TEST_MODELS"
+    fi
+    if ! _recorded uv && _have uv; then
+        _hand "uv's download cache ($(_size "$(uv cache dir)"))" "uv cache clean"
+        _hand "Pythons uv manages ($(_size "$(uv python dir)")), if no other project uses them" "uv python uninstall --all"
+    fi
+}
+
+_print_by_hand() {
+    [ -n "$BY_HAND" ] || return 0
+    printf '\nNot removed: no install record says this checkout added these. Check each,\nand remove it by hand if Luminary installed it:\n%s\n' "$BY_HAND"
+}
+
+BY_HAND="$(_by_hand)"
 _steps >/dev/null
 if [ "$STEPS" = 0 ]; then
     _info "Nothing to remove."
@@ -174,17 +222,14 @@ fi
 if [ "$PURGE_DATA" = 0 ] && [ -e "$REPO_ROOT/.luminary" ]; then
     _info "Keeping the dev library at $REPO_ROOT/.luminary (pass --purge-data to delete it)."
 fi
-if [ ! -f "$MANIFEST" ]; then
-    _info "No install record, so uv, Node, Ollama and models are left as they are."
-    _info "They predate this uninstaller or were already on the machine; remove them by hand if unwanted."
-fi
 if _recorded ollama:script; then
     _warn "Ollama was installed by its Linux script; removing it needs root: https://github.com/ollama/ollama/blob/main/docs/linux.md#uninstall"
 fi
 
-[ "$STEPS" = 0 ] && exit 0
+if [ "$STEPS" = 0 ]; then _print_by_hand; exit 0; fi
 if [ "$DRY_RUN" = 1 ]; then
     _info "Dry run: nothing was removed."
+    _print_by_hand
     exit 0
 fi
 if [ "$YES" = 0 ]; then
@@ -203,3 +248,4 @@ fi
 MODE=run
 _steps
 _info "Done. Reinstall with: make install-dev   (or make install)"
+_print_by_hand
