@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **On Windows, the first setting in `backend\.env` was silently ignored.** `install.ps1` wrote the file with a byte-order mark that the backend read as part of the key; the backend now accepts the mark and the installer no longer writes it.
 - **`make luminary` printed "Luminary is ready" when the backend never started**, e.g. right after `make install` in a shell without `~/.local/bin` on PATH. Make targets now find uv there, and the launcher exits with the backend's error instead.
+- **Highlights could not be removed in the desktop app.** Its webview answers every confirm() with no, so removal is now confirmed in the highlights panel; a test keeps native dialogs out of the app.
+- **The reader's crash screen could only reload the whole app.** It now offers Try again, resets when another document is opened, and shows the component stack for a bug report.
 
 ### Added
 - **`make install-dev`** sets up the contributor workspace (`backend/.venv` with the dev groups); **`make uninstall`** removes what an install added and keeps the library. Global tools and models it has no record of installing are listed with the command to remove them, never removed.

@@ -10,6 +10,7 @@ import type { ContentType } from "@/components/library/types"
 import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
 import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
+import { logger } from "@/lib/logger"
 import { toggleDocumentFavorite } from "@/pages/Learning/api"
 import { useTimeOnTask } from "@/lib/useTimeOnTask"
 import type { Chapter } from "@/lib/chapterApi"
@@ -80,27 +81,28 @@ import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
 // Gated on content type alone, the button shipped in public builds and answered 404.
 const FEYNMAN_VISIBLE = isSurfaceVisible("feynman")
 
-// Error Boundary
-
+// Shows the component stack on screen: the desktop webview keeps no console, so a
+// screenshot of this panel is the only crash report a user can send.
 class DocumentReaderErrorBoundary extends React.Component<
   { children: React.ReactNode },
-  { hasError: boolean; error: Error | null }
+  { error: Error | null; componentStack: string }
 > {
   constructor(props: { children: React.ReactNode }) {
     super(props)
-    this.state = { hasError: false, error: null }
+    this.state = { error: null, componentStack: "" }
   }
 
   static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error }
+    return { error }
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error("DocumentReader Error Boundary caught:", error, errorInfo)
+    logger.error("[Reader] render error", { error: String(error), componentStack: errorInfo.componentStack ?? "" })
+    this.setState({ componentStack: errorInfo.componentStack ?? "" })
   }
 
   render() {
-    if (this.state.hasError) {
+    if (this.state.error) {
       return (
         <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-background text-foreground">
           <div className="p-4 rounded-full bg-destructive/10 text-destructive mb-4">
@@ -108,14 +110,27 @@ class DocumentReaderErrorBoundary extends React.Component<
           </div>
           <h2 className="text-xl font-bold mb-2">Something went wrong</h2>
           <p className="text-sm text-muted-foreground mb-4 max-w-md">
-            The document reader encountered a runtime error. Details: {this.state.error?.message}
+            The document reader encountered a runtime error. Details: {this.state.error.message}
           </p>
-          <button
-            onClick={() => window.location.reload()}
-            className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-          >
-            Reload application
-          </button>
+          {this.state.componentStack && (
+            <pre className="mb-4 max-h-48 max-w-xl overflow-auto rounded border border-border bg-muted/40 p-2 text-left font-mono text-[10px] text-muted-foreground">
+              {this.state.componentStack.trim().split("\n").slice(0, 12).join("\n")}
+            </pre>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => this.setState({ error: null, componentStack: "" })}
+              className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Try again
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="rounded px-4 py-2 text-sm text-muted-foreground hover:text-foreground"
+            >
+              Reload application
+            </button>
+          </div>
         </div>
       )
     }
@@ -171,7 +186,7 @@ interface DocumentReaderProps {
 
 export function DocumentReader(props: DocumentReaderProps) {
   return (
-    <DocumentReaderErrorBoundary>
+    <DocumentReaderErrorBoundary key={props.documentId}>
       <DocumentReaderBase {...props} />
     </DocumentReaderErrorBoundary>
   )
@@ -258,6 +273,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const [openNoteId, setOpenNoteId] = useState<string | null>(initialNoteId ?? null)
   const [highlightsVisible, setHighlightsVisible] = useState(true)
   const [highlightsPanelOpen, setHighlightsPanelOpen] = useState(false)
+  const [confirmingHighlightId, setConfirmingHighlightId] = useState<string | null>(null)
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
   const pageTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
   
@@ -1121,8 +1137,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setHighlightsPanelOpen(false)
   }, [doc, pushHistory])
 
+  // Confirmed inline, not with confirm(): the desktop webview answers every
+  // native dialog with false, so the delete never ran there.
   const handleDeleteHighlight = useCallback(async (id: string) => {
-    if (!confirm("Remove this highlight?")) return
+    setConfirmingHighlightId(null)
     try {
       await apiDelete(`/annotations/${id}`)
       void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })
@@ -1142,7 +1160,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       setHighlightsPanelOpen(false)
     }
     document.addEventListener("mousedown", handleClick)
-    return () => document.removeEventListener("mousedown", handleClick)
+    return () => {
+      document.removeEventListener("mousedown", handleClick)
+      setConfirmingHighlightId(null)
+    }
   }, [highlightsPanelOpen])
 
 
@@ -1291,13 +1312,31 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             <p className="truncate text-[10px] text-muted-foreground">{sectionHeading}</p>
           )}
         </button>
-        <button
-          onClick={() => void handleDeleteHighlight(ann.id)}
-          title="Remove highlight"
-          className="shrink-0 mt-0.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
-        >
-          <Trash2 size={12} />
-        </button>
+        {confirmingHighlightId === ann.id ? (
+          <span className="flex shrink-0 items-center gap-1">
+            <button
+              onClick={() => setConfirmingHighlightId(null)}
+              className="rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-accent"
+            >
+              Keep
+            </button>
+            <button
+              onClick={() => void handleDeleteHighlight(ann.id)}
+              className="rounded bg-destructive px-1.5 py-0.5 text-[10px] font-medium text-destructive-foreground hover:bg-destructive/90"
+            >
+              Remove
+            </button>
+          </span>
+        ) : (
+          <button
+            onClick={() => setConfirmingHighlightId(ann.id)}
+            title="Remove highlight"
+            aria-label="Remove highlight"
+            className="shrink-0 mt-0.5 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-destructive transition-opacity"
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
       </li>
     )
   })
