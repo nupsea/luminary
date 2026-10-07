@@ -647,16 +647,38 @@ when it passes, or named in the release notes as not exercised:
 
 ### 5. Device auth and pairing — 0.16.0
 
-**The backend is unauthenticated on localhost, and CSRF is deliberately open.** Any page in any tab
-can already POST to :7820. This rung closes that, because authentication is what makes it possible.
 The gate is that an unpaired origin or a revoked device is refused, proven by a test that fails when
 pairing is removed.
 
 **Pairing is per device, not per origin.** A one-time code shown by the desktop app is exchanged for a
 named, revocable token that is stored hashed. 0.18.0's server, 0.20.0's phone and 0.21.0's extension
-all reuse it; an origin allowlist would serve the extension and nothing after it. The app's own origin
-stays tokenless on loopback, and any other origin needs a token. `TrustedHostMiddleware` in `main.py`
-pins loopback against DNS rebinding, and that pin may only widen when authentication is on.
+all reuse it; an origin allowlist would serve the extension and nothing after it. `TrustedHostMiddleware`
+in `main.py` pins loopback against DNS rebinding, and that pin may only widen when authentication is on.
+
+*Built (branch `feature/device-auth`):* `RequestAuthMiddleware` (`runtime/request_auth.py`) resolves
+every API request to a `Principal` (`types.py`): `local` for the app, `device` for a bearer token.
+
+| Request | Answer |
+|---|---|
+| `Origin` equal to the request's own origin, or Vite's (full mode only) | `local`, no token |
+| No `Origin`, `Sec-Fetch-Site` absent, `none`, `same-origin` or `same-site` | `local`: the shell, smoke, evals, same-origin reads |
+| Any other `Origin` (including `null`), or `Sec-Fetch-Site: cross-site` | 401 without a valid token |
+| `Authorization` present | a valid unrevoked token or 401, whatever the origin |
+
+The same-origin rule reads `Host`, so the desktop shell's random port and a remapped Docker port need
+no configuration. In public mode only `/api/*` is guarded; the SPA's files and the root probes are not.
+Codes (`services/devices.py`) are 8 characters, live 5 minutes in process memory, are spent on use,
+and die after 5 wrong guesses; a new code replaces the last. Tokens are `lum_` plus 256 random bits,
+stored as SHA-256 in `devices`, and a revoked row stays listed. `POST /devices/pair` is the one
+unguarded route; minting codes, listing and revoking are `local` only (Settings > Devices).
+`tests/test_device_auth.py` and `scripts/smoke/S255.sh` (run in both modes) are the gate.
+
+*Open:*
+- The gate test was not run with the middleware removed; it should fail there and that was not shown.
+- A paired browser origin cannot read responses yet: `Authorization` forces a CORS preflight, and
+  public mode has no CORS. That lands with the first browser consumer (0.20.0 or 0.21.0).
+- A headless 0.18.0 server has no `local` caller to show the first code.
+- Not run in the desktop shell, and the Settings panel was not driven in a browser.
 
 A token resolves to a principal. 0.17.0 hangs the request context off that principal, so the token
 shape is decided with the tenant seam in view, not retrofitted to it.
