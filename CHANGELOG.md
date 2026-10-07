@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`make luminary` printed "Luminary is ready" when the backend never started**, e.g. right after `make install` in a shell without `~/.local/bin` on PATH. Make targets now find uv there, and the launcher exits with the backend's error instead.
+
+### Added
+- **`make install-dev`** sets up the contributor workspace (`backend/.venv` with the dev groups); **`make uninstall`** removes what an install added and keeps the library.
+
 ## [0.15.4] - 2026-10-07
 
 ### Fixed

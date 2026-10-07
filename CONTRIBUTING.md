@@ -21,10 +21,8 @@ We welcome all kinds of contributions! Whether you write code, refine search eva
 
 ## Quickstart Local Setup
 
-Before getting started, make sure you have:
-1. **Python 3.13** installed (with `uv` package manager recommended).
-2. **Node.js** (v20+) and `npm`.
-3. **Ollama** running locally (if testing local LLM features).
+You need `git`, `make` and `curl`. `make install-dev` installs whatever else is missing (uv, Node 20+,
+Ollama, a model); Python 3.13 comes from uv, not from your system.
 
 ### Development Workflow
 
@@ -35,9 +33,11 @@ Before getting started, make sure you have:
    ```
 2. **Install Dependencies**:
    ```bash
-   make install
+   make install-dev
    ```
-   *This sets up both frontend and backend virtual environments and downloads base models.*
+   *Creates `backend/.venv` with the `dev`, `full` and `media` groups, installs `frontend/node_modules`,
+   and pulls the default model. Run it from any shell: make targets find `~/.local/bin/uv` even before
+   your shell does. `make uninstall` reverses it (see [docs/install.md](docs/install.md#what-a-source-install-changes)).*
 3. **Run Dev Servers**:
    ```bash
    make dev
@@ -53,6 +53,7 @@ Before getting started, make sure you have:
 | `make test` | Run pytest suite |
 | `make lint` | Run `ruff` check and frontend typecheck (`tsc`) |
 | `make stop` | Stop all Luminary processes on ports `7820` and `5173` |
+| `make uninstall` | Remove what `make install-dev` added; `ARGS=--dry-run` lists it first |
 
 ---
 

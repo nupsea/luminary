@@ -4,11 +4,12 @@
 # Usage: bash scripts/luminary.sh
 #
 # Behaviour:
-#   1. Backend (uvicorn :8000) and frontend (Vite :5173) start in parallel.
+#   1. Backend (uvicorn :7820) and frontend (Vite :5173) start in parallel.
 #   2. All logs stream to stdout: [BACKEND] lines in cyan, [FRONTEND] in green.
 #   3. The script polls /health, then the Vite port, then /documents.
-#   4. Once the backend is up and at least one document is in the library
-#      (or 30 s have elapsed with 0 docs), a ready banner + clickable URL is printed.
+#   4. Once the library API answers, a ready banner + clickable URL is printed.
+#      A backend that exits first stops the script with status 1; one still
+#      starting after 120 s gets a "not ready" banner, never a ready one.
 #   5. Backend logs continue until Ctrl-C, which cleanly stops both processes.
 
 set -uo pipefail
@@ -19,6 +20,11 @@ BACKEND_PORT=7820
 FRONTEND_PORT=5173  # default; actual port detected from Vite output below
 
 _info() { echo -e "\033[0;33m[LUMINARY]\033[0m $*"; }
+_err()  { echo -e "\033[0;31m[LUMINARY]\033[0m $*" >&2; }
+
+# Where install.sh puts uv (and Node on Linux); a shell opened before the
+# install, or one whose profile never sources it, does not have it on PATH.
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
 # ---------------------------------------------------------------------------
 # Pre-flight checks
@@ -41,6 +47,12 @@ if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "x86_64" ]]; then
         exit 1
     fi
     USE_DOCKER_BACKEND=true
+fi
+
+if [[ "$USE_DOCKER_BACKEND" == "false" ]] && ! command -v uv &>/dev/null; then
+    _err "uv not found, so the backend cannot start. Install the dev workspace first:"
+    _err "  make install-dev"
+    exit 1
 fi
 
 # ---------------------------------------------------------------------------
@@ -94,14 +106,20 @@ BACKEND_PIPE_PID=$!
 # Tee Vite output so we can scrape the actual bound port
 VITE_LOG=$(mktemp)
 (cd "$REPO_ROOT/frontend" && npm run dev 2>&1) \
-    | tee "$VITE_LOG" \
-    | awk 'BEGIN{p="\033[0;32m[FRONTEND]\033[0m "}{print p $0; fflush()}' &
+    | awk -v vlog="$VITE_LOG" 'BEGIN{p="\033[0;32m[FRONTEND]\033[0m "}{print > vlog; fflush(vlog); print p $0; fflush()}' &
 FRONTEND_PIPE_PID=$!
 
 # ---------------------------------------------------------------------------
 # Cleanup on Ctrl-C / SIGTERM
 # ---------------------------------------------------------------------------
+_kill_tree() {
+    local child
+    for child in $(pgrep -P "$1" 2>/dev/null); do _kill_tree "$child"; done
+    kill "$1" 2>/dev/null || true
+}
+
 _stop() {
+    local status="${1:-0}"
     if [[ -n "$DOCKER_CONTAINER" ]]; then
         _info "Stopping Docker container ($DOCKER_CONTAINER)..."
         # -t 90, a ceiling not a wait. Shutdown is variable (10.8s settled, over
@@ -109,10 +127,17 @@ _stop() {
         # healthy shutdowns. See scripts/free_port.sh.
         docker stop -t 90 "$DOCKER_CONTAINER" 2>/dev/null || true
     fi
-    kill "$BACKEND_PIPE_PID" "$FRONTEND_PIPE_PID" 2>/dev/null || true
-    wait "$BACKEND_PIPE_PID" "$FRONTEND_PIPE_PID" 2>/dev/null || true
+    # npm, vite and uvicorn are grandchildren; killing the pipe PIDs alone left
+    # them running. The awk printers are spared: they end at EOF, once every
+    # writer has exited, so `wait` returns only after the ports are free and
+    # the backend's shutdown lines are printed.
+    local child
+    for child in $(pgrep -P $$); do
+        [ "$child" = "$BACKEND_PIPE_PID" ] || [ "$child" = "$FRONTEND_PIPE_PID" ] || _kill_tree "$child"
+    done
+    wait 2>/dev/null || true
     rm -f "$VITE_LOG"
-    exit 0
+    exit "$status"
 }
 trap _stop INT TERM
 
@@ -121,10 +146,12 @@ trap _stop INT TERM
 # ---------------------------------------------------------------------------
 
 # Poll a URL until it returns HTTP 200 or max_attempts seconds elapse.
+# Returns 1 on timeout, 2 as soon as the optional watched PID has exited.
 _wait_http() {
-    local url="$1" label="$2" max="${3:-60}"
+    local url="$1" label="$2" max="${3:-60}" pid="${4:-}"
     local i=0
     while ! curl -sf --max-time 2 "$url" > /dev/null 2>&1; do
+        [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && return 2
         i=$((i + 1))
         [ "$i" -ge "$max" ] && { _info "$label not ready after ${max}s — continuing"; return 1; }
         sleep 1
@@ -167,15 +194,24 @@ _wait_http "http://localhost:${FRONTEND_PORT}" "frontend" 60
 # /health returns 200 early during lifespan, but /documents only succeeds once
 # the DB is initialised and all startup hooks have completed.
 _info "Waiting for backend library API on :${BACKEND_PORT}..."
-_wait_http "http://localhost:${BACKEND_PORT}/documents?page=1&page_size=1" "library API" 120
+_wait_http "http://localhost:${BACKEND_PORT}/documents?page=1&page_size=1" "library API" 120 "$BACKEND_PIPE_PID"
+BACKEND_STATUS=$?
 
-DOC_COUNT=$(_doc_count)
+if [ "$BACKEND_STATUS" -eq 2 ]; then
+    echo
+    _err "The backend exited before it was ready -- see the [BACKEND] lines above."
+    _stop 1
+fi
 
 # ---------------------------------------------------------------------------
 # Ready banner
 # ---------------------------------------------------------------------------
 echo
-echo -e "\033[1;32m  Luminary is ready\033[0m  --  ${DOC_COUNT} document(s) in library"
+if [ "$BACKEND_STATUS" -eq 0 ]; then
+    echo -e "\033[1;32m  Luminary is ready\033[0m  --  $(_doc_count) document(s) in library"
+else
+    echo -e "\033[1;33m  Backend not ready yet\033[0m  --  still starting on :${BACKEND_PORT}; the app will error until it is"
+fi
 echo -e "\033[1;32m  http://localhost:${FRONTEND_PORT}\033[0m"
 echo
 

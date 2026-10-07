@@ -1,4 +1,12 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-reader-switch luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-reader-switch luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
+
+# install.sh puts uv (and Node on Linux) in ~/.local/bin, which a shell opened
+# before the install does not have on PATH.
+SHELL_PATH := $(PATH)
+export PATH := $(HOME)/.local/bin:$(HOME)/.cargo/bin:$(PATH)
+# Make 3.81 (macOS) execs a recipe with no shell syntax itself, using the PATH
+# it started with; recipes that start with uv use $(UV) for that reason.
+UV := $(or $(shell PATH="$(PATH)" command -v uv),uv)
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -49,7 +57,13 @@ frontend:
 	cd frontend && npm run dev
 
 install:
-	bash scripts/install.sh
+	LUMINARY_SHELL_PATH="$(SHELL_PATH)" bash scripts/install.sh
+
+install-dev:  ## contributor setup: backend/.venv with the dev, full and media groups
+	LUMINARY_SHELL_PATH="$(SHELL_PATH)" bash scripts/install.sh --dev
+
+uninstall:  ## remove what install/install-dev added; keeps .luminary/ (ARGS="--dry-run", "--purge-data")
+	bash scripts/uninstall.sh $(ARGS)
 
 # --- desktop bundle -------------------------------------------------------
 # Stage the payload, the relocatable Python runtime and the bundled inference
@@ -490,12 +504,12 @@ ner-compare:
 # generation, just classification.
 eval-intent:
 	@echo "Intent routing accuracy (backend must be running)..."
-	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py --backend-url $(BACKEND_URL) --assert-thresholds
+	$(UV) run --project $(CURDIR)/backend python evals/run_intent_eval.py --backend-url $(BACKEND_URL) --assert-thresholds
 	@echo "Adversarial phrasing, heuristic only -- the floor, and the routing on a slow host..."
-	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py \
+	$(UV) run --project $(CURDIR)/backend python evals/run_intent_eval.py \
 		--dataset intents_adversarial --backend-url $(BACKEND_URL)
 	@echo "Adversarial phrasing, heuristic + LLM fallback -- what a user gets..."
-	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py \
+	$(UV) run --project $(CURDIR)/backend python evals/run_intent_eval.py \
 		--dataset intents_adversarial --backend-url $(BACKEND_URL) --llm-fallback
 
 # Note search: does /notes/search find the note, and only the note. No golden --
@@ -503,14 +517,14 @@ eval-intent:
 # corpus-coupled and comparable only against your own previous run.
 eval-notes:
 	@echo "Note search eval (backend must be running)..."
-	uv run --project $(CURDIR)/backend python evals/run_note_search_eval.py \
+	$(UV) run --project $(CURDIR)/backend python evals/run_note_search_eval.py \
 		--backend-url $(BACKEND_URL) --assert-thresholds
 
 # Adds paraphrase recall: a local Ollama model writes each query with no word from the note.
 PARAPHRASE_MODEL ?= qwen2.5:14b-instruct
 eval-notes-paraphrase:
 	@echo "Note search eval with paraphrase recall (backend + Ollama must be running)..."
-	uv run --project $(CURDIR)/backend python evals/run_note_search_eval.py \
+	$(UV) run --project $(CURDIR)/backend python evals/run_note_search_eval.py \
 		--backend-url $(BACKEND_URL) --assert-thresholds --paraphrase $(PARAPHRASE_MODEL)
 
 # Ingestion fidelity: how much of each source document survives into chunks.
@@ -523,7 +537,7 @@ eval-notes-paraphrase:
 # path, and the 12 manifest documents cover only txt, md and one PDF.
 eval-ingest:
 	@echo "Ingestion fidelity across every manifest document..."
-	uv run --project $(CURDIR)/backend python evals/run_ingest_eval.py --assert-thresholds \
+	$(UV) run --project $(CURDIR)/backend python evals/run_ingest_eval.py --assert-thresholds \
 		$(if $(ALL),--all-documents,)
 
 # Every document kind under DATA. `thoughts` is deliberately absent: 4 rows over a
@@ -613,7 +627,7 @@ eval-models:
 # arms. MODELS is required -- there is no default worth guessing.
 eval-matrix:
 	@echo "Model matrix over $(MODELS) (arm=$(or $(ARM),shipped))..."
-	uv run --project $(CURDIR)/backend python evals/run_model_matrix.py \
+	$(UV) run --project $(CURDIR)/backend python evals/run_model_matrix.py \
 		--models $(MODELS) --backend-url $(BACKEND_URL) \
 		$(if $(TASKS),--tasks $(TASKS),) $(if $(ARM),--arm $(ARM),) \
 		$(if $(ASSERT_SEPARATION),--assert-separation,)
@@ -633,7 +647,7 @@ eval-flashcards:
 # seed, balanced across content types; no model authors anything, because the
 # passage is the ground truth the cards are judged against.
 golden-flashcards:
-	uv run --project $(CURDIR)/backend python evals/build_flashcard_golden.py \
+	$(UV) run --project $(CURDIR)/backend python evals/build_flashcard_golden.py \
 		--per-kind $(or $(PER_KIND),7)
 
 # Cross-document routing: does retrieval pick the right DOCUMENT, unscoped, the
@@ -643,7 +657,7 @@ golden-flashcards:
 ROUTING_DATASETS ?= book,paper,legal,play,study
 eval-routing:
 	@echo "Corpus-wide routing (unscoped) on $(ROUTING_DATASETS)..."
-	uv run --project $(CURDIR)/backend python evals/run_corpus_routing.py \
+	$(UV) run --project $(CURDIR)/backend python evals/run_corpus_routing.py \
 		--datasets $(ROUTING_DATASETS) --backend-url $(BACKEND_URL) $(if $(TYPO),--typo,)
 
 # Summary quality. `summary_grounding` (HHEM) needs no LLM; `no_hallucination`
@@ -692,7 +706,7 @@ eval-d2l-gen:
 # Topic-generation eval (precision/recall/F1 + junk-rate). Uses the backend venv.
 eval-topics:
 	@echo "Topic-generation eval on d2l..."
-	uv run --project $(CURDIR)/backend python evals/run_topic_eval.py --dataset d2l --backend-url $(BACKEND_URL) --assert-thresholds
+	$(UV) run --project $(CURDIR)/backend python evals/run_topic_eval.py --dataset d2l --backend-url $(BACKEND_URL) --assert-thresholds
 
 # Regenerate the d2l golden Q&A (ONE-TIME, needs OPENAI_API_KEY + Ollama). Overwrites d2l.jsonl.
 golden-d2l:

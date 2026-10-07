@@ -35,6 +35,31 @@ make install   # uv, Node, Ollama, models, build; needs sudo once for Ollama
 make start     # http://localhost:7820
 ```
 
+### What a source install changes
+
+`make install` (users) and `make install-dev` (contributors) touch only these:
+
+| Where | What |
+|---|---|
+| The checkout | `backend/.venv`, `frontend/node_modules`, `frontend/dist`, five keys in `backend/.env` |
+| `~/.local/bin`, `~/.local/share/uv`, `~/.cache/uv` | uv and the Python 3.13 it manages, if uv was missing |
+| Homebrew (macOS) or `~/.local/share/luminary/node` (Linux) | Node, if missing or older than 20 |
+| Homebrew or Ollama's script | Ollama, if missing; then the default model in `~/.ollama` |
+
+No system Python or global `site-packages` is modified. uv's installer appends one line to your
+shell profile so `uv` is on PATH in new terminals; make targets do not depend on it.
+
+`.install-manifest` records which of the global items this checkout installed. `make uninstall`
+removes the checkout's items and exactly those, and keeps the dev library `.luminary/`:
+
+```bash
+make uninstall ARGS=--dry-run       # list what would go
+make uninstall                      # asks first
+make uninstall ARGS=--purge-data    # also delete .luminary/ (documents, notes, flashcards)
+```
+
+An install made before the manifest existed has none, so its global tools stay; the uninstaller says so.
+
 Node is fetched into `~/.local` because apt carries Node 18 and the build needs 20+. Audio, video
 and dictation need **Speech to text** from Settings, and `ffmpeg` from apt for video.
 

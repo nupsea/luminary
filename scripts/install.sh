@@ -5,13 +5,31 @@
 # optional vision model on request), syncs backend deps (public profile), builds
 # the frontend SPA. Safe to re-run.
 #
-# Usage:   bash scripts/install.sh
-# Then:    make start
+# Usage:   bash scripts/install.sh          then  make start
+#          bash scripts/install.sh --dev    then  make dev   (contributors)
+# Undo:    bash scripts/uninstall.sh
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+
+DEV=0
+for _arg in "$@"; do
+    case "$_arg" in
+        --dev) DEV=1 ;;
+        *) printf 'usage: bash scripts/install.sh [--dev]\n' >&2; exit 2 ;;
+    esac
+done
+
+# The PATH the user's shell will have after this exits; ours gains ~/.local/bin,
+# and so does make's, which passes the shell's own as LUMINARY_SHELL_PATH.
+ORIG_PATH="${LUMINARY_SHELL_PATH:-$PATH}"
+
+# What this run installed, as opposed to what it found. uninstall.sh removes
+# only what is listed here, so a tool already on the machine is never touched.
+MANIFEST="$REPO_ROOT/.install-manifest"
+_record() { grep -qxF "$1" "$MANIFEST" 2>/dev/null || printf '%s\n' "$1" >> "$MANIFEST"; }
 
 # Resolved after the profile is known: on a host that may keep only ONE model
 # loaded, the chat model has to be the one that also reads figures, or vision has
@@ -91,6 +109,7 @@ else
     # uv installs to ~/.local/bin or ~/.cargo/bin depending on platform
     export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
     _have uv || { _err "uv install completed but binary not on PATH. Open a new shell and re-run."; exit 1; }
+    _record uv
 fi
 
 # ---------------------------------------------------------------------------
@@ -136,12 +155,14 @@ if _have node && ! _node_too_old; then
 elif [ "$OS" = "Darwin" ] && _have brew; then
     _info "Installing node via brew..."
     brew install node
+    _record node:brew
 elif _have fnm; then
     _info "Installing node $NODE_MIN via fnm..."
     fnm install "$NODE_MIN" && fnm use "$NODE_MIN"
 elif [ "$OS" = "Linux" ]; then
     _have node && _warn "Node $(node --version) is older than $NODE_MIN; installing a private LTS build."
     _install_node_linux || exit 1
+    _record node:local
     _info "node ready: $(node --version)"
 else
     _err "Node not found and no brew/fnm available. Install Node $NODE_MIN+ (https://nodejs.org/) and re-run."
@@ -157,6 +178,7 @@ else
     if [ "$OS" = "Darwin" ] && _have brew; then
         _info "Installing ollama via brew..."
         brew install ollama
+        _record ollama:brew
     elif [ "$OS" = "Linux" ]; then
         # Ollama's installer extracts a zstd archive, and a stock Ubuntu image
         # has no zstd -- it fails with "requires zstd for extraction" after the
@@ -185,6 +207,7 @@ else
         fi
         _info "Installing ollama via official script..."
         curl -fsSL https://ollama.com/install.sh | sh
+        _record ollama:script
     else
         _err "Could not auto-install ollama. Install from https://ollama.com/ and re-run."
         exit 1
@@ -399,6 +422,7 @@ for model in "$CHAT_MODEL" "$VISION_MODEL"; do
     else
         _info "Pulling $model (this can take several minutes)..."
         ollama pull "$model"
+        _record "model:$model"
     fi
 done
 
@@ -406,12 +430,20 @@ done
 # ---------------------------------------------------------------------------
 # Backend deps — public profile (no labs/dev groups)
 # ---------------------------------------------------------------------------
-_info "Syncing backend deps (public profile)..."
-# `full` adds yt-dlp and the tree-sitter grammars. The article path
-# (trafilatura, cloudscraper) moved to base dependencies, because web_ingest is
-# a `public` surface and the Docker image installs base only -- it was shipping
-# without the libraries its own manifest advertised.
-(cd backend && uv sync --no-default-groups --group full)
+if [ "$DEV" = 1 ]; then
+    # The default groups (dev, full, media) are what `make dev`, `make ci` and
+    # luminary.sh resolve on every `uv run`; syncing them here keeps the first
+    # launch from downloading them silently before the backend can start.
+    _info "Syncing backend deps into backend/.venv (dev: all default groups)..."
+    (cd backend && uv sync)
+else
+    _info "Syncing backend deps into backend/.venv (public profile)..."
+    # `full` adds yt-dlp and the tree-sitter grammars. The article path
+    # (trafilatura, cloudscraper) moved to base dependencies, because web_ingest is
+    # a `public` surface and the Docker image installs base only -- it was shipping
+    # without the libraries its own manifest advertised.
+    (cd backend && uv sync --no-default-groups --group full)
+fi
 
 # ---------------------------------------------------------------------------
 # Frontend build — public tier, /api base
@@ -425,13 +457,36 @@ fi
 _info "Building production SPA..."
 make build
 
-if [ "$OLLAMA_MAX_LOADED_MODELS" -le 1 ]; then
+# Tools fetched into ~/.local/bin are on this script's PATH only. Without this,
+# the next `make luminary` died on "uv: command not found" behind a ready banner.
+for _tool in uv node; do
+    if ! PATH="$ORIG_PATH" command -v "$_tool" >/dev/null 2>&1; then
+        _dir="$(dirname "$(command -v "$_tool")")"
+        _warn "$_tool is installed in $_dir, which your shell's PATH does not include."
+        _warn "  make targets find it. To run $_tool yourself, open a new terminal or run:"
+        _warn "  export PATH=\"$_dir:\$PATH\""
+    fi
+done
+
+if [ "$DEV" = 1 ]; then
+cat <<EOF
+
+[install] Done (dev workspace).
+
+  Backend venv:  backend/.venv  (uv sync: groups dev, full, media)
+  Next:          make dev   or   make luminary
+  Before a PR:   make ci
+  Undo:          make uninstall
+
+EOF
+elif [ "$OLLAMA_MAX_LOADED_MODELS" -le 1 ]; then
 cat <<EOF
 
 [install] Done.
 
   Next:  make start
   Open:  http://localhost:7820
+  Undo:  make uninstall
 
   $CHAT_MODEL answers questions and reads figures, so image analysis works
   already. This profile keeps one model loaded: adding a second one does not
@@ -445,6 +500,7 @@ cat <<EOF
 
   Next:  make start
   Open:  http://localhost:7820
+  Undo:  make uninstall
 
   Models pulled: $CHAT_MODEL${VISION_MODEL:+ and $VISION_MODEL}.
   ${VISION_MODEL:-$CHAT_MODEL} reads figures.
