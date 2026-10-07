@@ -439,7 +439,9 @@ class Settings(BaseSettings):
     # default makes a key from another version a refuse-to-start.
     model_config = {
         "env_file": _env_files(),
-        "env_file_encoding": "utf-8",
+        # -sig: Windows PowerShell 5.1 writes UTF-8 with a BOM, which glued itself
+        # to the first key and silently dropped that setting.
+        "env_file_encoding": "utf-8-sig",
         "extra": "ignore",
     }
 

@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **On Windows, the first setting in `backend\.env` was silently ignored.** `install.ps1` wrote the file with a byte-order mark that the backend read as part of the key; the backend now accepts the mark and the installer no longer writes it.
 - **`make luminary` printed "Luminary is ready" when the backend never started**, e.g. right after `make install` in a shell without `~/.local/bin` on PATH. Make targets now find uv there, and the launcher exits with the backend's error instead.
 
 ### Added
 - **`make install-dev`** sets up the contributor workspace (`backend/.venv` with the dev groups); **`make uninstall`** removes what an install added and keeps the library. Global tools and models it has no record of installing are listed with the command to remove them, never removed.
+- **`scripts\uninstall.ps1`** does the same on Windows. `install.ps1` now records what it adds, including the four Ollama user variables and their earlier values, which uninstall restores.
 
 ## [0.15.4] - 2026-10-07
 

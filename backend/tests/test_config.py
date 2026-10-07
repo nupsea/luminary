@@ -66,3 +66,13 @@ def test_an_env_key_from_another_version_does_not_block_startup(tmp_path, monkey
     settings = Settings()
 
     assert settings.ENRICHMENT_VISION_CONCURRENCY == 2
+
+
+def test_a_bom_written_env_keeps_its_first_key(tmp_path, monkeypatch):
+    """Windows PowerShell 5.1 writes UTF-8 with a BOM. Read as plain utf-8 the
+    first key became "\\ufeffOLLAMA_NUM_PARALLEL" and fell back to its default."""
+    (tmp_path / ".env").write_bytes(b"\xef\xbb\xbfOLLAMA_NUM_PARALLEL=2\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OLLAMA_NUM_PARALLEL", raising=False)
+
+    assert Settings().OLLAMA_NUM_PARALLEL == 2
