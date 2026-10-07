@@ -29,6 +29,8 @@ Prose versions in this repo have drifted before.
 
 | Command | Does |
 |---|---|
+| `make install-dev` | contributor setup: `backend/.venv` (dev, full, media groups), node_modules, models, test-suite weights |
+| `make uninstall` | remove what an install added; keeps `.luminary/` (`ARGS=--dry-run`, `ARGS=--purge-data`) |
 | `make dev` | backend (:7820, reload) + frontend (:5173) |
 | `make luminary` | full app the way a user runs it |
 | `make ci` | **the gate.** ruff, layer_linter, boundary_checker, quality ratchet, pytest (coverage floor), manifest checks, frontend build, tsc, eslint, knip, vitest (coverage floor) |
