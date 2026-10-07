@@ -57,6 +57,7 @@ def _run(tmp_path: Path, repo: Path, *args: str, listening: bool = False, stdin=
     _stub(bin_dir, "ollama", '[ "$1" = list ] && printf "NAME ID\\nqwen-test abc\\n"; exit 0')
     _stub(bin_dir, "brew", "exit 0")
     _stub(bin_dir, "lsof", "exit 0" if listening else "exit 1")
+    _stub(bin_dir, "uv", 'echo "$HOME/uv"')
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     log = tmp_path / "calls.log"
@@ -120,6 +121,7 @@ def test_unrecorded_leftovers_are_listed_for_the_user_not_removed(tmp_path):
     assert "ollama rm qwen-test" in by_hand
     assert "brew uninstall node" in by_hand
     assert f"rm -rf {test_models}" in by_hand
+    assert f"{tmp_path}/bin/uv cache clean" in by_hand  # full path: the user's PATH may lack uv
     assert test_models.exists()
     assert not re.search(r"^(ollama rm|brew (uninstall|services))", calls, re.M), calls
 

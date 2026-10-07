@@ -197,9 +197,12 @@ _by_hand() {
     if ! _recorded test-models && [ -d "$TEST_MODELS" ]; then
         _hand "Test suite model cache ($(_size "$TEST_MODELS")), shared by every checkout" "rm -rf $TEST_MODELS"
     fi
+    # Full path: this script adds ~/.local/bin to PATH; the user's shell may not.
     if ! _recorded uv && _have uv; then
-        _hand "uv's download cache ($(_size "$(uv cache dir)"))" "uv cache clean"
-        _hand "Pythons uv manages ($(_size "$(uv python dir)")), if no other project uses them" "uv python uninstall --all"
+        local uv_bin
+        uv_bin="$(command -v uv)"
+        _hand "uv's download cache ($(_size "$(uv cache dir)"))" "$uv_bin cache clean"
+        _hand "Pythons uv manages ($(_size "$(uv python dir)")), if no other project uses them" "$uv_bin python uninstall --all"
     fi
 }
 
