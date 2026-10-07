@@ -85,6 +85,12 @@ _has_installer_env() {
     return 1
 }
 
+_python_caches() {
+    find "$REPO_ROOT/backend" -path "$REPO_ROOT/backend/.venv" -prune -o \
+        \( -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache \) -type d -print -prune
+}
+_remove_python_caches() { _python_caches | while IFS= read -r d; do rm -rf "$d"; done; }
+
 _remove_model() { ollama rm "$1" >/dev/null; }
 
 _remove_brew_ollama() {
@@ -117,6 +123,9 @@ _steps() {
             _act "Remove $dir ($(_size "$REPO_ROOT/$dir"))" rm -rf "${REPO_ROOT:?}/$dir"
         fi
     done
+    if [ -n "$(_python_caches | head -1)" ]; then
+        _act "Remove Python caches under backend/ (__pycache__, .pytest_cache, .ruff_cache)" _remove_python_caches
+    fi
     if _has_installer_env; then
         _act "Remove the installer's settings from backend/.env (other lines are kept)" _strip_installer_env
     fi
