@@ -525,7 +525,9 @@ $EnvLines = Set-EnvLine $EnvLines "LUMINARY_MEMORY_PROFILE" $BackendProfile
 $EnvLines = Set-EnvLine $EnvLines "LITELLM_DEFAULT_MODEL" "ollama/$chatModel"
 $visionModelForEnv = if ($visionModel) { $visionModel } else { $chatModel }
 $EnvLines = Set-EnvLine $EnvLines "VISION_MODEL" "ollama/$visionModelForEnv"
-Set-Content -Path $EnvFile -Value $EnvLines -Encoding UTF8
+# Not Set-Content -Encoding UTF8: PowerShell 5.1 prepends a BOM, which older
+# python-dotenv reads as part of the first key.
+[IO.File]::WriteAllLines($EnvFile, [string[]]$EnvLines)
 
 # Ollama on Windows reads its own knobs from the user environment, and the
 # already-running server does not pick them up until it restarts.

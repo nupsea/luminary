@@ -655,3 +655,10 @@ def test_install_sh_pulls_the_large_text_model_only_on_apple_silicon(sh):
     """Off Apple Silicon a RAM-only gate pulled 9.67GB onto a machine with no card,
     and every answer ran on the processor for 2-4 minutes."""
     assert '&& [ "$OS" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then' in sh
+
+
+def test_install_ps1_writes_env_without_a_bom(ps1):
+    """PowerShell 5.1's `Set-Content -Encoding UTF8` prepends a BOM, which
+    python-dotenv 1.2.1 reads as part of the first key."""
+    assert not re.search(r"Set-Content[^\n]*\$EnvFile", ps1)
+    assert "[IO.File]::WriteAllLines($EnvFile" in ps1
