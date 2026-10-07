@@ -1151,10 +1151,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   }, [documentId, qc])
 
   useEffect(() => {
-    if (!highlightsPanelOpen) {
-      setConfirmingHighlightId(null)
-      return
-    }
+    if (!highlightsPanelOpen) return
     function handleClick(e: MouseEvent) {
       if (
         highlightsPanelRef.current?.contains(e.target as Node) ||
@@ -1163,7 +1160,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       setHighlightsPanelOpen(false)
     }
     document.addEventListener("mousedown", handleClick)
-    return () => document.removeEventListener("mousedown", handleClick)
+    return () => {
+      document.removeEventListener("mousedown", handleClick)
+      setConfirmingHighlightId(null)
+    }
   }, [highlightsPanelOpen])
 
 
