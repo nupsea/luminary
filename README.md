@@ -95,6 +95,9 @@ set (`$env:LUMINARY_UNINSTALL = "1"` in PowerShell): it lists what it will remov
 Your library — documents, notes, flashcards, settings and models — is kept and its location
 printed.
 
+A source checkout is removed with `make uninstall`, which lists what it will remove and keeps the
+checkout's library; see [docs/install.md](docs/install.md#what-a-source-install-changes).
+
 ---
 
 ## Why this and not a chatbot
@@ -177,7 +180,7 @@ you submit it.
 ## Contributing
 
 Contributions are welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**. Fork, branch from
-`master`, and run `make ci` before opening a PR.
+`master`, set up with `make install-dev`, and run `make ci` before opening a PR.
 
 | Read | For |
 |---|---|

@@ -21,8 +21,8 @@ We welcome all kinds of contributions! Whether you write code, refine search eva
 
 ## Quickstart Local Setup
 
-You need `git`, `make` and `curl`. `make install-dev` installs whatever else is missing (uv, Node 20+,
-Ollama, a model); Python 3.13 comes from uv, not from your system.
+You need `git`, `make` and `curl`. `make install-dev` installs whatever else is missing (uv, Node,
+Ollama, a model); Python comes from uv (`backend/pyproject.toml` pins it), not from your system.
 
 ### Development Workflow
 

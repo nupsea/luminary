@@ -629,15 +629,13 @@ User's machine
   +-- Luminary Frontend (Vite on 5173 in dev; served by FastAPI in a build)
 ```
 
-**Prerequisites:**
-- Python 3.13 with uv (package manager)
-- Node 20+
-- Ollama with at least one model pulled. `make install` pulls what your RAM
-  band needs; by hand, `ollama pull qwen3.5:4b` covers every role.
+**Setup:** `make install-dev` installs whatever is missing (uv and the Python it manages,
+Node, Ollama, the model your RAM band needs), creates `backend/.venv` with every dependency
+group, and fetches the weights the test suite embeds with. `make uninstall` reverses it.
 
 **Startup:**
 ```bash
-ollama serve        # Terminal 1
+ollama serve        # Terminal 1, unless Ollama already runs as a service
 make dev            # Terminal 2 (starts both backend and frontend)
 ```
 
