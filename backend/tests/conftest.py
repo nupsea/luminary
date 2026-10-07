@@ -31,6 +31,11 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from task_drain import dispose_engine
 
+# litellm's import calls load_dotenv() unless LITELLM_MODE=PRODUCTION, copying the
+# CWD's backend/.env (which install.sh writes) into os.environ, where it outranks
+# every .env a test writes. Must precede any import that reaches litellm.
+os.environ["LITELLM_MODE"] = "PRODUCTION"
+
 # Filter aiosqlite DeprecationWarning for Python 3.12+ datetime adapter
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="aiosqlite")
 

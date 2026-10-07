@@ -112,3 +112,6 @@ frontend/.citation-verify/
 
 # Written by make ci (pytest --cov).
 backend/.coverage
+
+# Written by scripts/install.sh; read by scripts/uninstall.sh
+.install-manifest
