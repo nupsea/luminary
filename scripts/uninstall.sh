@@ -43,7 +43,15 @@ _size() { du -sh "$1" 2>/dev/null | awk '{print $1}'; }
 _recorded() { [ -f "$MANIFEST" ] && grep -qxF "$1" "$MANIFEST"; }
 
 # Deleting the venv under a running backend leaves it half-dead holding the DB.
-if _have lsof && lsof -nP -iTCP:"$BACKEND_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+# Minimal Linux images ship no lsof; bash's /dev/tcp connect needs nothing.
+_listening() {
+    if _have lsof; then
+        lsof -nP -iTCP:"$BACKEND_PORT" -sTCP:LISTEN >/dev/null 2>&1
+    else
+        (exec 3<>"/dev/tcp/127.0.0.1/$BACKEND_PORT") 2>/dev/null
+    fi
+}
+if _listening; then
     _err "Something is listening on :$BACKEND_PORT -- stop Luminary first (make clean), then re-run."
     exit 1
 fi

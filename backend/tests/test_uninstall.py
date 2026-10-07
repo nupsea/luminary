@@ -8,6 +8,7 @@ removal is observable in a call log.
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -51,12 +52,15 @@ def _checkout(tmp_path: Path, manifest: str | None) -> Path:
     return repo
 
 
-def _run(tmp_path: Path, repo: Path, *args: str, listening: bool = False, stdin=subprocess.DEVNULL):
+def _run(
+    tmp_path: Path, repo: Path, *args: str, listening: bool | None = False, stdin=subprocess.DEVNULL
+):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     _stub(bin_dir, "ollama", '[ "$1" = list ] && printf "NAME ID\\nqwen-test abc\\n"; exit 0')
     _stub(bin_dir, "brew", "exit 0")
-    _stub(bin_dir, "lsof", "exit 0" if listening else "exit 1")
+    if listening is not None:  # None: no lsof on PATH, as on a minimal Linux
+        _stub(bin_dir, "lsof", "exit 0" if listening else "exit 1")
     _stub(bin_dir, "uv", 'echo "$HOME/uv"')
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
@@ -169,6 +173,21 @@ def test_refuses_without_confirmation_when_not_a_terminal(tmp_path):
 def test_refuses_while_the_backend_is_running(tmp_path):
     repo = _checkout(tmp_path, None)
     proc, _ = _run(tmp_path, repo, "--yes", listening=True)
+
+    assert proc.returncode == 1
+    assert "stop Luminary first" in proc.stderr
+    assert (repo / "backend/.venv").exists()
+
+
+def test_refuses_while_the_backend_is_running_without_lsof(tmp_path):
+    repo = _checkout(tmp_path, None)
+    with socket.socket() as server:
+        try:
+            server.bind(("127.0.0.1", 7820))
+        except OSError:
+            pytest.skip(":7820 is in use on this host")
+        server.listen()
+        proc, _ = _run(tmp_path, repo, "--yes", listening=None)
 
     assert proc.returncode == 1
     assert "stop Luminary first" in proc.stderr
