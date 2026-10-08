@@ -93,6 +93,17 @@ export function resolvePdfFallback(
 
 
 /**
+ * The PDF page a node sits on. The PDF view stacks every page in one scroll, so
+ * the page in view is not necessarily the page a selection was made on.
+ */
+export function resolvePdfPageFromDom(startContainer: Node): number | undefined {
+  if (typeof Element === "undefined") return undefined
+  const el = startContainer instanceof Element ? startContainer : startContainer.parentElement
+  const page = el?.closest<HTMLElement>("[data-pdf-page]")?.dataset.pdfPage
+  return page ? Number(page) : undefined
+}
+
+/**
  * The chunk a selection sits in, when the view renders chunk by chunk.
  *
  * Only a transcript does: prose is rendered from the section body and never

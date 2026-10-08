@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useRef, useState } from "react"
-import { explainModeFor, placeBar, type Placement } from "./selectionBarLogic"
+import { explainModeFor, placeBar, selectionBox, type Placement } from "./selectionBarLogic"
 
 export type ExplainMode = "define" | "plain" | "eli5" | "analogy"
 
@@ -81,11 +81,9 @@ export function SelectionActionBar({
 
     function place() {
       if (!range) return
-      const rect = range.getBoundingClientRect()
-      // PDF text-layer spans can yield an empty rect; the release point stands in.
-      const box = rect.width > 0 && rect.height > 0
-        ? rect
-        : { top: pointer.y - 8, bottom: pointer.y + 8, left: pointer.x, right: pointer.x }
+      // PDF text-layer spans can yield no line boxes; the release point stands in.
+      const box = selectionBox(Array.from(range.getClientRects()))
+        ?? { top: pointer.y - 8, bottom: pointer.y + 8, left: pointer.x, right: pointer.x }
       setPlacement(placeBar(box, container!.getBoundingClientRect(), {
         width: window.innerWidth,
         height: window.innerHeight,

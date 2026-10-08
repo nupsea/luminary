@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The PDF view scrolls continuously.** Pages stack in one scroll, so the wheel, the paging keys and a text selection all run across page breaks; only the pages near the view are drawn.
+- **Selected text offers Define for a term and Simplify for a passage**, both answered from the document's own passages rather than the selection alone.
+
+### Fixed
+- **Selecting text in the PDF painted a bar in the page margin.**
+- **A highlight made near a page break was saved to the page in view** rather than the page it was made on.
+
 ## [0.15.5] - 2026-10-07
 
 ### Fixed

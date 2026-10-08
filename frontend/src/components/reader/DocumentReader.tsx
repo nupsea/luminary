@@ -63,7 +63,7 @@ import { AudioMiniPlayer, VideoPlayer } from "./MediaPlayers"
 import { NoteComposer } from "@/components/notes/NoteComposer"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
 import { ReadView } from "./ReadView"
-import { resolveChunkFromDom, resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
+import { resolveChunkFromDom, resolveFromDom, resolvePdfFallback, resolvePdfPageFromDom } from "./resolveSourceRefUtils"
 import { ResumeBanner, type ReadingPosition } from "./ResumeBanner"
 import { SectionListItem, type SectionHeatmapItem } from "./SectionListItem"
 import { SelectionActionBar } from "./SelectionActionBar"
@@ -1028,8 +1028,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       const fromDom = resolveFromDom(node)
       if (fromDom) return { sectionId: fromDom, documentId, documentTitle: doc?.title ?? "", chunkId }
       if (doc?.format === "pdf" && doc.sections.length > 0) {
-        const fromPdf = resolvePdfFallback(doc.sections, pdfCurrentPage)
-        if (fromPdf) return { sectionId: fromPdf, documentId, documentTitle: doc?.title ?? "", pageNumber: pdfCurrentPage }
+        const page = resolvePdfPageFromDom(node) ?? pdfCurrentPage
+        const fromPdf = resolvePdfFallback(doc.sections, page)
+        if (fromPdf) return { sectionId: fromPdf, documentId, documentTitle: doc?.title ?? "", pageNumber: page }
       }
       return { sectionId: undefined, documentId, documentTitle: doc?.title ?? "" }
     },

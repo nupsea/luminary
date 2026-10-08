@@ -1,7 +1,6 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react"
 import * as pdfjsLib from "pdfjs-dist"
-import { AnnotationLayer, TextLayer } from "pdfjs-dist"
-import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist"
+import type { PDFDocumentProxy } from "pdfjs-dist"
 import "pdfjs-dist/web/pdf_viewer.css"
 import { ChevronLeft, ChevronRight, Minus, Moon, PanelLeftClose, PanelLeftOpen, Plus, Search, Sun } from "lucide-react"
 import { API_BASE, PDFJS_WORKER_URL } from "@/lib/config"
@@ -21,244 +20,25 @@ import {
   shouldUseOutline,
 } from "./pdfTocUtils"
 import { usableSections } from "./sectionTitle"
-import { createLinkService } from "./pdfLinkService"
 import { PdfSearchBar } from "./PdfSearchBar"
-import { usePdfEdgePaging } from "./pdfEdgePaging"
-import { ZOOM_PRESETS, ZOOM_STOPS, type PageMatch, activeMatchIndexForPage, buildGlobalMatches, findMatchIndices, formatMatchCounts, parsePageEntry, printedPageLabel, sheetForPrintedLabel, stepZoom } from "./pdfSearchUtils"
-import { clearOverlays, computeHighlightRects, renderOverlayDivs } from "./pdfHighlightOverlay"
+import { PdfPage, type ScrollMarks } from "./PdfPage"
+import { resolvePdfPageFromDom } from "./resolveSourceRefUtils"
 import {
-  CITATION_OVERLAY_ATTR,
-  CITATION_OVERLAY_COLOR,
-  findRunOffsets,
-  locateCitationPage,
-  longestPresentRun,
-} from "@/lib/citation"
+  PAGE_PAD,
+  type ScrollAnchor,
+  anchorAt,
+  layoutPages,
+  pageInView,
+  pagesNear,
+  scrollTopFor,
+  usePdfKeyScroll,
+} from "./pdfScrollLayout"
+import { ZOOM_PRESETS, ZOOM_STOPS, type PageMatch, activeMatchIndexForPage, buildGlobalMatches, formatMatchCounts, parsePageEntry, printedPageLabel, sheetForPrintedLabel, stepZoom } from "./pdfSearchUtils"
+import { locateCitationPage } from "@/lib/citation"
 import { bodyTextHeight, readableScale } from "@/lib/pdf/readableScale"
 
 // Set worker once at module load
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL
-
-/**
- * Build span-offset parts from the text layer for highlight rect computation.
- * Reused by both annotation and search highlight functions.
- */
-function buildTextParts(textLayerDiv: HTMLDivElement) {
-  const spans = Array.from(textLayerDiv.querySelectorAll("span")) as HTMLSpanElement[]
-  if (spans.length === 0) return null
-  const parts: { span: HTMLSpanElement; start: number; end: number }[] = []
-  let offset = 0
-  for (let i = 0; i < spans.length; i++) {
-    if (i > 0) offset += 1 // space separator (matches browser selection toString())
-    const text = spans[i].textContent ?? ""
-    parts.push({ span: spans[i], start: offset, end: offset + text.length })
-    offset += text.length
-  }
-  const fullText = spans.map((s) => s.textContent ?? "").join(" ")
-  return { spans, parts, fullText }
-}
-
-/**
- * Build a whitespace-stripped view of the text plus a map from each compact
- * index back to its offset in the original text.
- */
-function buildWhitespaceMap(fullText: string): { compact: string; map: number[] } {
-  let compact = ""
-  const map: number[] = []
-  for (let i = 0; i < fullText.length; i++) {
-    if (!/\s/.test(fullText[i])) {
-      compact += fullText[i]
-      map.push(i)
-    }
-  }
-  return { compact, map }
-}
-
-/** Apply annotation highlight overlays using absolutely-positioned divs. */
-function applyPdfHighlights(
-  textLayerDiv: HTMLDivElement,
-  overlayContainer: HTMLDivElement,
-  annotations: AnnotationItem[],
-  currentPage: number,
-  sections: SectionItem[],
-) {
-  clearOverlays(overlayContainer, "data-pdf-highlight")
-
-  if (annotations.length === 0) return
-
-  // 1. Filter annotations for current page efficiently
-  const sectionMap = new Map<string, SectionItem>()
-  for (const s of sections) sectionMap.set(s.id, s)
-
-  const pageAnnotations = annotations.filter((ann) => {
-    if (ann.page_number != null) return ann.page_number === currentPage
-    const sec = sectionMap.get(ann.section_id)
-    if (sec) {
-      const start = sec.page_start || 1
-      const end = sec.page_end || start
-      return currentPage >= start && currentPage <= end
-    }
-    return true
-  })
-
-  if (pageAnnotations.length === 0) return
-
-  // Sort by start_offset so we find occurrences in document order.
-  // This is critical for the "find next occurrence" strategy to work.
-  const sortedAnnotations = [...pageAnnotations].sort((a, b) => (a.start_offset || 0) - (b.start_offset || 0))
-
-  const textData = buildTextParts(textLayerDiv)
-  if (!textData) return
-  const { spans, parts, fullText } = textData
-
-  const containerRect = overlayContainer.getBoundingClientRect()
-
-  // Whitespace-insensitive view of the text layer, computed once. The text
-  // layer joins spans with single spaces, but a selection captured via
-  // selection.toString() may differ in spacing around bullets, line breaks,
-  // and punctuation (e.g. "data. •" in the layer vs "data.•" in the
-  // selection). Matching on whitespace-stripped text and mapping back to the
-  // full offset tolerates those differences.
-  const { compact: compactFull, map: compactMap } = buildWhitespaceMap(fullText)
-
-  const usedFullOffsets = new Set<number>()
-  const usedCompactOffsets = new Set<number>()
-
-  for (const ann of sortedAnnotations) {
-    const searchVal = ann.selected_text
-    if (!searchVal) continue
-
-    let idx = -1
-    let matchEnd = -1
-    let searchStart = 0
-
-    // Fast path: next unused exact occurrence in the joined text.
-    while (true) {
-      idx = fullText.indexOf(searchVal, searchStart)
-      if (idx < 0) break
-      if (!usedFullOffsets.has(idx)) {
-        usedFullOffsets.add(idx)
-        break
-      }
-      searchStart = idx + 1
-    }
-
-    if (idx >= 0) {
-      matchEnd = idx + searchVal.length
-    } else {
-      // Fallback: whitespace-insensitive next-occurrence search.
-      const compactSearch = searchVal.replace(/\s+/g, "")
-      if (!compactSearch) continue
-
-      let cIdx = -1
-      let cStart = 0
-      while (true) {
-        cIdx = compactFull.indexOf(compactSearch, cStart)
-        if (cIdx < 0) break
-        if (!usedCompactOffsets.has(cIdx)) {
-          usedCompactOffsets.add(cIdx)
-          break
-        }
-        cStart = cIdx + 1
-      }
-
-      if (cIdx < 0) continue
-
-      idx = compactMap[cIdx]
-      matchEnd = compactMap[cIdx + compactSearch.length - 1] + 1
-    }
-
-    const bgColor = PDF_HIGHLIGHT_COLORS[ann.color] ?? PDF_HIGHLIGHT_COLORS.yellow
-
-    const rects = computeHighlightRects(spans, parts, idx, matchEnd, containerRect)
-    renderOverlayDivs(overlayContainer, rects, bgColor, "data-pdf-highlight", ann.id)
-  }
-}
-
-/** Apply search-match highlights as overlay divs. Returns count of matches found. */
-function applySearchHighlights(
-  textLayerDiv: HTMLDivElement,
-  overlayContainer: HTMLDivElement,
-  query: string,
-  activeMatchIndex: number,
-): number {
-  clearOverlays(overlayContainer, "data-search-highlight")
-
-  if (!query) return 0
-
-  const textData = buildTextParts(textLayerDiv)
-  if (!textData) return 0
-  const { spans, parts, fullText } = textData
-
-  const matchIndices = findMatchIndices(fullText, query)
-  if (matchIndices.length === 0) return 0
-
-  const containerRect = overlayContainer.getBoundingClientRect()
-  const queryLen = query.length
-
-  for (let mi = 0; mi < matchIndices.length; mi++) {
-    const matchStart = matchIndices[mi]
-    const matchEnd = matchStart + queryLen
-    const isActive = mi === activeMatchIndex
-
-    const color = isActive ? "rgba(249, 115, 22, 0.6)" : "rgba(250, 204, 21, 0.4)"
-    const rects = computeHighlightRects(spans, parts, matchStart, matchEnd, containerRect)
-    renderOverlayDivs(overlayContainer, rects, color, "data-search-highlight", undefined, isActive)
-  }
-
-  // Scroll active match into view
-  const activeMark = overlayContainer.querySelector("[data-active-search-match]")
-  if (activeMark) {
-    activeMark.scrollIntoView({ behavior: "smooth", block: "center" })
-  }
-
-  return matchIndices.length
-}
-
-/**
- * Draw the cited passage on the page, and say whether it was found.
- *
- * The PDF renders the source itself, so a citation belongs on the page rather
- * than on the extracted text beside it. The words are located in the text layer's
- * concatenated span text, which joins spans with single spaces -- the same
- * whitespace tolerance the prose view needs, for the same reason: the stored
- * chunk collapsed the source's own spacing.
- */
-function applyCitationHighlight(
-  textLayerDiv: HTMLDivElement,
-  overlayContainer: HTMLDivElement,
-  words: string[],
-): boolean {
-  clearOverlays(overlayContainer, CITATION_OVERLAY_ATTR)
-  if (words.length === 0) return false
-
-  const textData = buildTextParts(textLayerDiv)
-  if (!textData) return false
-  const { spans, parts, fullText } = textData
-
-  // Narrow first, then locate -- the same two steps the prose view takes, for the
-  // same reason. A citation's words include material this page does not hold
-  // contiguously (a section heading the chunk was stored with, a tail that runs
-  // onto the next page), so demanding the whole sequence finds nothing even on the
-  // right page.
-  const run = longestPresentRun(words, fullText)
-  if (run.length === 0) return false
-
-  const at = findRunOffsets(fullText, run)
-  if (!at) return false
-
-  const rects = computeHighlightRects(
-    spans, parts, at.start, at.end, overlayContainer.getBoundingClientRect(),
-  )
-  renderOverlayDivs(overlayContainer, rects, CITATION_OVERLAY_COLOR, CITATION_OVERLAY_ATTR)
-  return rects.length > 0
-}
-
-const PDF_HIGHLIGHT_COLORS: Record<string, string> = {
-  yellow: "rgba(250, 204, 21, 0.4)",  // yellow-400
-  green: "rgba(74, 222, 128, 0.4)",   // green-400
-  blue: "rgba(96, 165, 250, 0.4)",    // blue-400
-  pink: "rgba(244, 114, 182, 0.4)",   // pink-400
-}
 
 interface PDFViewerProps {
   documentId: string
@@ -302,17 +82,21 @@ export interface PDFViewerHandle {
 type LoadStatus = "loading" | "error" | "ready"
 
 const EMPTY_WORDS: string[] = []
+const EMPTY_ANNOTATIONS: AnnotationItem[] = []
 
 export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
-  function PDFViewer({ documentId, sections, pageLabels, initialPage, initialSearch, citationWords = EMPTY_WORDS, citationPage = null, annotations = [], highlightsVisible = true, onPageChange }, ref) {
+  function PDFViewer({ documentId, sections, pageLabels, initialPage, initialSearch, citationWords = EMPTY_WORDS, citationPage = null, annotations = EMPTY_ANNOTATIONS, highlightsVisible = true, onPageChange }, ref) {
     const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null)
-    // Read inside the page-render closure, which is not re-created per prop change.
-    const citationWordsRef = useRef<string[]>(citationWords)
-    citationWordsRef.current = citationWords
-    // Scroll to the citation once, on the first page that actually shows it.
-    const citationScrolledRef = useRef(false)
+    // The citation and the active search match are each scrolled to once, by the
+    // first page that draws them.
+    const scrollMarksRef = useRef<ScrollMarks>({ citation: false, searchKey: "" })
 
     const [currentPage, setCurrentPage] = useState(1)
+    const currentPageRef = useRef(1)
+    currentPageRef.current = currentPage
+    // Each page's size at scale 1. Seeded from page 1 and corrected as pages render.
+    const [naturalSizes, setNaturalSizes] = useState<{ width: number; height: number }[]>([])
+    const [liveRange, setLiveRange] = useState<[number, number]>([1, 0])
     const [totalPages, setTotalPages] = useState(0)
     const [zoom, setZoom] = useState(1.0)
     const [loadStatus, setLoadStatus] = useState<LoadStatus>("loading")
@@ -336,11 +120,6 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const canvasFilter = darkPage ? "invert(0.9) hue-rotate(180deg)" : undefined
 
     const pageCommitTimer = useRef<number | null>(null)
-    const canvasRef = useRef<HTMLCanvasElement>(null)
-    const textLayerRef = useRef<HTMLDivElement>(null)
-    const highlightOverlayRef = useRef<HTMLDivElement>(null)
-    const annotationLayerRef = useRef<HTMLDivElement>(null)
-    const nextCanvasRef = useRef<HTMLCanvasElement>(null)
     const scrollAreaRef = useRef<HTMLDivElement>(null)
     // Fit-width is a mode, not a one-off calculation.
     //
@@ -351,20 +130,12 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     // to read, and no way back except the zoom menu. Staying in the mode means
     // the fit follows the pane until the reader picks a zoom themselves.
     const [zoomMode, setZoomMode] = useState<"readable" | "manual">("readable")
-    // Bumped after each text layer render to trigger highlight application
-    const [textLayerVersion, setTextLayerVersion] = useState(0)
     // PDF built-in outline (bookmarks) -- preferred over backend sections when available
     const [pdfOutline, setPdfOutline] = useState<OutlineEntry[]>([])
-    // Refs for annotations/visibility so the render effect can apply highlights inline
-    const annotationsRef = useRef(annotations)
-    annotationsRef.current = annotations
-    const highlightsVisibleRef = useRef(highlightsVisible)
-    highlightsVisibleRef.current = highlightsVisible
+    const shownAnnotations = highlightsVisible ? annotations : EMPTY_ANNOTATIONS
     // Relabel rather than drop: an anchor-id heading still navigates, and
     // filtering these out emptied the contents panel entirely.
     const tocSections = useMemo(() => usableSections(sections), [sections])
-    const sectionsRef = useRef(sections)
-    sectionsRef.current = sections
 
     // ── Search state ──────────────────────────────────────────────────
     const [searchOpen, setSearchOpen] = useState(() => Boolean(initialSearch?.trim()))
@@ -395,33 +166,111 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     // The numbers printed on the sheets, when the PDF says they differ from
     // the sheets' positions. Null on a document that defines none.
     const [declaredLabels, setDeclaredLabels] = useState<string[] | null>(null)
-    // What the overlay currently shows, so an identical redraw is skipped.
-    const lastHighlightRef = useRef("")
+
+    const layout = useMemo(
+      () => layoutPages(naturalSizes.map((s) => Math.floor(s.height * zoom))),
+      [naturalSizes, zoom],
+    )
+    const layoutRef = useRef(layout)
+    layoutRef.current = layout
+    const maxPageWidth = useMemo(
+      () => naturalSizes.reduce((widest, s) => Math.max(widest, Math.floor(s.width * zoom)), 0),
+      [naturalSizes, zoom],
+    )
+    // Where the view is, so a re-layout (zoom, a page's true size arriving) keeps the place.
+    // Null until the reader has scrolled: the view stays at the top.
+    const anchorRef = useRef<ScrollAnchor | null>(null)
+    // A page asked for before the pages are laid out.
+    const pendingPageRef = useRef<number | null>(null)
+
+    // Reads the viewport: which pages to render, and which page the reader is on.
+    const syncToScroll = useCallback(() => {
+      const el = scrollAreaRef.current
+      const current = layoutRef.current
+      if (!el || current.tops.length === 0) return
+      anchorRef.current = anchorAt(current, el.scrollTop)
+      let [first, last] = pagesNear(current, el.scrollTop, el.clientHeight)
+      // The pages a selection runs between stay rendered, or scrolling on would drop it.
+      const selection = document.getSelection()
+      if (selection && !selection.isCollapsed) {
+        for (const node of [selection.anchorNode, selection.focusNode]) {
+          const page = node && resolvePdfPageFromDom(node)
+          if (!page) continue
+          first = Math.min(first, page)
+          last = Math.max(last, page)
+        }
+      }
+      setLiveRange((prev) => (prev[0] === first && prev[1] === last ? prev : [first, last]))
+      const page = pageInView(current, el)
+      if (page !== currentPageRef.current) {
+        currentPageRef.current = page
+        setCurrentPage(page)
+        setPageInput(String(page))
+      }
+    }, [])
 
     // Memoized: the search effects depend on it, and a new identity per render
     // re-ran them every render -- an update loop that starved route changes.
     const goToPage = useCallback((n: number) => {
-      const clamped = Math.max(1, Math.min(n, totalPages))
-      setCurrentPage(clamped)
-      setPageInput(String(clamped))
-    }, [totalPages])
+      const el = scrollAreaRef.current
+      const current = layoutRef.current
+      if (!el || current.tops.length === 0) {
+        pendingPageRef.current = n
+        return
+      }
+      const page = Math.max(1, Math.min(n, current.tops.length))
+      el.scrollTop = Math.max(0, current.tops[page - 1] - PAGE_PAD)
+      syncToScroll()
+    }, [syncToScroll])
 
-    const landingRef = usePdfEdgePaging(scrollAreaRef, currentPage, totalPages, goToPage, loadStatus === "ready")
-    const landedPageRef = useRef(0)
+    const handleNaturalSize = useCallback((pageNum: number, width: number, height: number) => {
+      setNaturalSizes((prev) => {
+        const known = prev[pageNum - 1]
+        if (!known || (known.width === width && known.height === height)) return prev
+        const next = prev.slice()
+        next[pageNum - 1] = { width, height }
+        return next
+      })
+    }, [])
+
+    // Re-place the view whenever the layout changes: a jump that was waiting for
+    // the pages, or else the same spot on the same page.
+    useLayoutEffect(() => {
+      const el = scrollAreaRef.current
+      if (!el || layout.tops.length === 0) return
+      const pending = pendingPageRef.current
+      if (pending !== null) {
+        pendingPageRef.current = null
+        const page = Math.max(1, Math.min(pending, layout.tops.length))
+        el.scrollTop = Math.max(0, layout.tops[page - 1] - PAGE_PAD)
+      } else if (anchorRef.current) {
+        el.scrollTop = scrollTopFor(layout, anchorRef.current)
+      }
+      syncToScroll()
+    }, [layout, loadStatus, syncToScroll])
+
+    useEffect(() => {
+      const el = scrollAreaRef.current
+      if (!el || loadStatus !== "ready") return
+      let frame = 0
+      const schedule = () => {
+        cancelAnimationFrame(frame)
+        frame = requestAnimationFrame(syncToScroll)
+      }
+      el.addEventListener("scroll", schedule, { passive: true })
+      const observer = new ResizeObserver(schedule)
+      observer.observe(el)
+      return () => {
+        cancelAnimationFrame(frame)
+        el.removeEventListener("scroll", schedule)
+        observer.disconnect()
+      }
+    }, [loadStatus, syncToScroll])
+
+    usePdfKeyScroll(scrollAreaRef, loadStatus === "ready")
 
     // Expose goToPage for parent (section list page-jump badges)
-    useImperativeHandle(
-      ref,
-      () => ({
-        goToPage(n: number) {
-          if (!pdfDoc) return
-          const clamped = Math.max(1, Math.min(n, totalPages))
-          setCurrentPage(clamped)
-          setPageInput(String(clamped))
-        },
-      }),
-      [pdfDoc, totalPages],
-    )
+    useImperativeHandle(ref, () => ({ goToPage }), [goToPage])
 
     // Load the PDF document
     useEffect(() => {
@@ -432,6 +281,9 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       setCurrentPage(1)
       setPageInput("1")
       setTotalPages(0)
+      setNaturalSizes([])
+      setLiveRange([1, 0])
+      anchorRef.current = null
       setDeclaredLabels(null)
       // Clear search state and text cache for new document
       pageTextCacheRef.current = new Map()
@@ -451,9 +303,15 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       task.promise
         .then(async (doc) => {
           if (cancelled) return
+          // Every page is laid out at page 1's size until it renders: a book's
+          // pages are almost always one size, and fetching each up front is slow.
+          const first = await doc.getPage(1)
+          const firstSize = first.getViewport({ scale: 1.0 })
+          first.cleanup()
+          if (cancelled) return
+          setNaturalSizes(Array.from({ length: doc.numPages }, () => ({ width: firstSize.width, height: firstSize.height })))
           setPdfDoc(doc)
           setTotalPages(doc.numPages)
-          // Set ready immediately so the page render effect fires right away.
           // Auto-fit and TOC scan are deferred so they don't delay first paint.
           setLoadStatus("ready")
 
@@ -472,16 +330,9 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             }
 
             // Auto-fit: compute zoom so the first page fills the scroll area width
-            try {
-              const page = await doc.getPage(1)
-              const naturalVp = page.getViewport({ scale: 1.0 })
-              page.cleanup()
-              if (scrollAreaRef.current && naturalVp.width > 0) {
-                const available = scrollAreaRef.current.clientWidth - 32 // 2 x p-4
-                if (available > 0) setZoom(available / naturalVp.width)
-              }
-            } catch {
-              // non-fatal; zoom stays at 1.0
+            if (scrollAreaRef.current && firstSize.width > 0) {
+              const available = scrollAreaRef.current.clientWidth - 2 * PAGE_PAD
+              if (available > 0) setZoom(available / firstSize.width)
             }
 
             if (cancelled) return
@@ -520,265 +371,13 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     // navigate to initialPage once the PDF is loaded or when initialPage changes
     useEffect(() => {
       if (!initialPage || loadStatus !== "ready" || !totalPages) return
-      if (initialPage >= 1 && initialPage <= totalPages) {
-        setCurrentPage(initialPage)
-        setPageInput(String(initialPage))
-      }
-    }, [initialPage, loadStatus, totalPages])
-
-    // Render the current page + pre-render next for fast navigation
-    useEffect(() => {
-      if (!pdfDoc || loadStatus !== "ready") return
-
-      let cancelled = false
-      let activeTextLayer: TextLayer | null = null
-      // Track active render tasks so cleanup can cancel them and avoid the
-      // "Cannot use the same canvas during multiple render() operations" error.
-      const activeRenderTasks: Array<{ cancel: () => void }> = []
-
-      async function renderPage(
-        pageNum: number,
-        canvas: HTMLCanvasElement | null,
-        textLayerDiv: HTMLDivElement | null,
-        annotationLayerDiv: HTMLDivElement | null,
-      ): Promise<void> {
-        if (!canvas || !pdfDoc) return
-        let page: PDFPageProxy | null = null
-        try {
-          page = await pdfDoc.getPage(pageNum)
-          if (cancelled) return
-
-          const viewport = page.getViewport({ scale: zoom })
-
-          // The backing store must be sized in DEVICE pixels and then scaled
-          // back down via CSS, or a retina display upscales a 1x bitmap and
-          // every glyph renders soft. The text and annotation layers keep
-          // using `viewport` because they position in CSS pixels.
-          const outputScale = window.devicePixelRatio || 1
-          canvas.width = Math.floor(viewport.width * outputScale)
-          canvas.height = Math.floor(viewport.height * outputScale)
-          canvas.style.width = `${Math.floor(viewport.width)}px`
-          canvas.style.height = `${Math.floor(viewport.height)}px`
-
-          // A new page starts at its top, or at its bottom when it was entered
-          // scrolling upward; a re-render of the same page (zoom) keeps the place.
-          if (textLayerDiv && landedPageRef.current !== pageNum) {
-            landedPageRef.current = pageNum
-            const area = scrollAreaRef.current
-            if (area) area.scrollTop = landingRef.current === "bottom" ? area.scrollHeight : 0
-            landingRef.current = "top"
-          }
-
-          const ctx = canvas.getContext("2d")
-          if (!ctx || cancelled) return
-
-          const renderTask = page.render({
-            canvasContext: ctx,
-            viewport,
-            transform: outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0],
-          })
-          activeRenderTasks.push(renderTask)
-          try {
-            await renderTask.promise
-          } catch (e: unknown) {
-            // RenderingCancelledException is expected when the effect is cleaned up
-            if (e instanceof Error && e.name === "RenderingCancelledException") return
-            throw e
-          }
-          if (cancelled) return
-
-          // Yield to browser so the canvas paints immediately before we do expensive text extraction
-          await new Promise(resolve => setTimeout(resolve, 0))
-          if (cancelled) return
-
-          // Official pdfjs TextLayer -- supports proper drag-to-select across spans.
-          // We set --scale-factor CSS var on the container so TextLayer's
-          // setLayerDimensions() can compute width/height correctly.
-          if (textLayerDiv) {
-            // Cancel any previous text layer
-            activeTextLayer?.cancel()
-
-            // Clear previous content
-            textLayerDiv.replaceChildren()
-
-            // Set the CSS variable that TextLayer needs for sizing
-            textLayerDiv.style.setProperty("--scale-factor", String(viewport.scale))
-
-            // Set explicit dimensions and absolute positioning for text layer
-            textLayerDiv.style.position = "absolute"
-            textLayerDiv.style.top = "0"
-            textLayerDiv.style.left = "0"
-            textLayerDiv.style.width = `${viewport.width}px`
-            textLayerDiv.style.height = `${viewport.height}px`
-            textLayerDiv.style.pointerEvents = "auto"
-            textLayerDiv.style.zIndex = "10"
-
-            try {
-              const textContent = await page.getTextContent()
-              if (cancelled) return
-
-              const tl = new TextLayer({
-                textContentSource: textContent,
-                container: textLayerDiv,
-                viewport,
-              })
-              activeTextLayer = tl
-
-              await tl.render()
-              if (!cancelled) {
-                // Size the highlight overlay to match the text layer
-                const overlayDiv = highlightOverlayRef.current
-                if (overlayDiv) {
-                  overlayDiv.style.width = `${viewport.width}px`
-                  overlayDiv.style.height = `${viewport.height}px`
-                  overlayDiv.replaceChildren() // clear stale overlays
-                }
-                // Apply highlights immediately after text layer is ready
-                if (highlightsVisibleRef.current && annotationsRef.current.length > 0 && overlayDiv) {
-                  applyPdfHighlights(textLayerDiv, overlayDiv, annotationsRef.current, pageNum, sectionsRef.current)
-                }
-                // The cited passage, drawn on the page that holds it. Tried on
-                // every rendered page rather than only the one the citation names:
-                // a chunk can straddle a page break, and the sheet a citation
-                // carries is the one its first line fell on.
-                if (overlayDiv && citationWordsRef.current.length > 0) {
-                  const drawn = applyCitationHighlight(textLayerDiv, overlayDiv, citationWordsRef.current)
-                  if (drawn && !citationScrolledRef.current) {
-                    citationScrolledRef.current = true
-                    overlayDiv
-                      .querySelector(`[${CITATION_OVERLAY_ATTR}]`)
-                      ?.scrollIntoView({ behavior: "smooth", block: "center" })
-                  }
-                }
-                setTextLayerVersion((v) => v + 1)
-              }
-            } catch (err) {
-              console.warn("Text layer rendering cancelled/failed", err)
-            }
-          }
-
-          // Annotation Layer -- handles links (external browser links and internal page jumps)
-          if (annotationLayerDiv && !cancelled) {
-            annotationLayerDiv.replaceChildren()
-            annotationLayerDiv.style.width = `${viewport.width}px`
-            annotationLayerDiv.style.height = `${viewport.height}px`
-            annotationLayerDiv.style.position = "absolute"
-            annotationLayerDiv.style.top = "0"
-            annotationLayerDiv.style.left = "0"
-            annotationLayerDiv.style.zIndex = "20"
-            annotationLayerDiv.style.pointerEvents = "none"
-            annotationLayerDiv.style.display = "block"
-            annotationLayerDiv.style.setProperty("--scale-factor", String(viewport.scale))
-            annotationLayerDiv.setAttribute("data-page-num", String(pageNum))
-
-            // Global styles for standard pdfjs annotation layer appearance
-            if (!document.getElementById("pdf-annotation-style")) {
-              const style = document.createElement("style")
-              style.id = "pdf-annotation-style"
-              style.textContent = `
-                .annotationLayer {
-                  position: absolute !important;
-                  top: 0 !important;
-                  left: 0 !important;
-                  opacity: 1 !important;
-                  pointer-events: none !important;
-                }
-                .annotationLayer section {
-                  display: block !important;
-                  position: absolute !important;
-                  box-sizing: border-box !important;
-                  pointer-events: none !important;
-                }
-                .annotationLayer .linkAnnotation > a {
-                  display: block !important;
-                  width: 100% !important;
-                  height: 100% !important;
-                  background-color: rgba(59, 130, 246, 0.05) !important; /* Very subtle blue tint */
-                  cursor: pointer !important;
-                  pointer-events: auto !important;
-                }
-                .annotationLayer .linkAnnotation > a:hover {
-                  background-color: rgba(59, 130, 246, 0.15) !important; /* Slightly stronger blue on hover */
-                }
-              `
-              document.head.appendChild(style)
-            }
-
-            try {
-              const annotationsData = await page.getAnnotations()
-              if (cancelled) return
-
-              const linkService = createLinkService(pdfDoc, goToPage)
-
-              const al = new AnnotationLayer({
-                div: annotationLayerDiv,
-                accessibilityManager: null,
-                annotationCanvasMap: null,
-                annotationEditorUIManager: null,
-                page,
-                viewport,
-                l10n: {
-                  async getLanguage() { return "en-US" },
-                  async getDirection() { return "ltr" },
-                  async get(_key: string, _args: unknown, fallback: string) { return fallback }, // pdf.js l10n args type is untyped
-                  async translate(_element: HTMLElement) { /* no-op */ },
-                } as any, // pdf.js IL10n interface not exported from pdfjs-dist types
-              } as any) // pdf.js AnnotationLayerParameters not fully typed in pdfjs-dist
-
-              await al.render({
-                annotations: annotationsData,
-                viewport,
-                linkService,
-                intent: "display",
-              } as any)
-            } catch (err) {
-              console.error("[PDFViewer] failed to render annotation layer", err)
-            }
-          }
-        } finally {
-          page?.cleanup()
-        }
-      }
-
-      void renderPage(currentPage, canvasRef.current, textLayerRef.current, annotationLayerRef.current)
-      // Defer pre-rendering next page by 300ms so current page renders first.
-      // This makes highlight navigation feel instant — the current page appears
-      // right away instead of waiting for two pages to render in parallel.
-      const nextPageTimer = currentPage < totalPages
-        ? setTimeout(() => {
-            if (!cancelled) void renderPage(currentPage + 1, nextCanvasRef.current, null, null)
-          }, 300)
-        : null
-
-      return () => {
-        cancelled = true
-        if (nextPageTimer) clearTimeout(nextPageTimer)
-        activeTextLayer?.cancel()
-        // Cancel all in-progress pdfjs render tasks so the canvas is free
-        // for the next effect run. Without this, rapid page/zoom changes cause
-        // "Cannot use the same canvas during multiple render() operations".
-        for (const task of activeRenderTasks) task.cancel()
-      }
-    }, [pdfDoc, currentPage, zoom, totalPages, loadStatus, goToPage, landingRef])
+      if (initialPage >= 1 && initialPage <= totalPages) goToPage(initialPage)
+    }, [initialPage, loadStatus, totalPages, goToPage])
 
     // Notify parent of page changes
     useEffect(() => {
       onPageChange?.(currentPage)
     }, [currentPage, onPageChange])
-
-    // Apply annotation highlight overlays after the text layer renders.
-    // Only depends on textLayerVersion (bumped after each page render) so it
-    // doesn't re-run on unrelated parent re-renders.
-    useEffect(() => {
-      const textDiv = textLayerRef.current
-      const overlayDiv = highlightOverlayRef.current
-      if (!textDiv || !overlayDiv || textLayerVersion === 0) return
-      if (!highlightsVisible || annotations.length === 0) {
-        clearOverlays(overlayDiv, "data-pdf-highlight")
-        return
-      }
-      applyPdfHighlights(textDiv, overlayDiv, annotations, currentPage, sections)
-    }, [textLayerVersion, currentPage, annotations, highlightsVisible, sections])
 
     // Go to the page holding the cited passage.
     //
@@ -803,9 +402,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         if (!cancelled && page !== null) goToPage(page)
       })
       return () => { cancelled = true }
-    // goToPage changes when the page count arrives; that must not re-run the scan.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pdfDoc, citationWords, citationPage, initialPage])
+    }, [pdfDoc, citationWords, citationPage, initialPage, goToPage])
 
     /** The sheet a typed entry names, or null if it names nothing.
      *
@@ -826,7 +423,9 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         setPageInput(String(currentPage))
         return
       }
-      goToPage(sheet)
+      // The field commits on blur, and it already shows the page in view: re-going
+      // there would snap the view to that page's top on the first click into the text.
+      if (sheet !== currentPage) goToPage(sheet)
     }
 
     // The page field only committed on blur/Enter, so the spinner arrows (and any
@@ -837,9 +436,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       if (pageCommitTimer.current) window.clearTimeout(pageCommitTimer.current)
       const sheet = resolvePageEntry(value)
       if (sheet === null) return
-      pageCommitTimer.current = window.setTimeout(() => {
-        setCurrentPage(Math.max(1, Math.min(sheet, totalPages)))
-      }, 250)
+      pageCommitTimer.current = window.setTimeout(() => goToPage(sheet), 250)
     }
     function commitPageInputNow() {
       if (pageCommitTimer.current) window.clearTimeout(pageCommitTimer.current)
@@ -968,10 +565,10 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       async (mode: "readable" | "width" | "page") => {
         if (!pdfDoc || !scrollAreaRef.current) return
         try {
-          const page = await pdfDoc.getPage(currentPage)
+          const page = await pdfDoc.getPage(currentPageRef.current)
           const viewport = page.getViewport({ scale: 1.0 })
-          const availableWidth = scrollAreaRef.current.clientWidth - 32 // 2 x p-4
-          const availableHeight = scrollAreaRef.current.clientHeight - 32
+          const availableWidth = scrollAreaRef.current.clientWidth - 2 * PAGE_PAD
+          const availableHeight = scrollAreaRef.current.clientHeight - 2 * PAGE_PAD
           if (viewport.width <= 0 || availableWidth <= 0) {
             page.cleanup()
             return
@@ -993,7 +590,9 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           // Non-fatal: the zoom simply stays where it is.
         }
       },
-      [pdfDoc, currentPage],
+      // Not on the page in view: scrolling must not refit, or the zoom would
+      // change under the reader as each page's type size differs.
+      [pdfDoc],
     )
     const fitToWidth = useCallback(() => void fitTo("width"), [fitTo])
 
@@ -1053,9 +652,6 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       })
     }, [fitTo])
 
-    // Which match on this page is the active one. Derived here so the effect
-    // below depends on a number rather than on the identity of `globalMatches`,
-    // which progressive extraction replaces once per ten-page batch.
     // What the sheet in view is printed as, when that differs from its position.
     const printedLabel = useMemo(() => {
       // The derived map wins: it covers books that print a number without
@@ -1066,54 +662,34 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       return printedPageLabel(declaredLabels, currentPage)
     }, [pageLabels, declaredLabels, currentPage])
 
-    const activePageMatchIndex = useMemo(
-      () => activeMatchIndexForPage(globalMatches, globalMatchIndex, currentPage),
-      [globalMatches, globalMatchIndex, currentPage],
+    // Pages get numbers, not `globalMatches`: progressive extraction replaces the
+    // array once per ten-page batch, and each new identity redrew every page's
+    // highlights -- the flicker.
+    const activeMatchPage = globalMatches[globalMatchIndex]?.page ?? 0
+    const activeMatchOnPage = useMemo(
+      () => activeMatchIndexForPage(globalMatches, globalMatchIndex, activeMatchPage),
+      [globalMatches, globalMatchIndex, activeMatchPage],
     )
+    const shownQuery = searchOpen ? searchQuery : ""
+    const searchKey = `${shownQuery}|${globalMatchIndex}`
 
-    // Apply search highlights as overlays whenever the page renders or the
-    // active match changes.
-    //
-    // The dependency list is the fix for the flicker: this effect does not read
-    // the match list -- applySearchHighlights re-derives matches from the text
-    // layer -- it only needs to know which one is active. Depending on the array
-    // re-ran it 62 times on a 600-page book as extraction progressed, and every
-    // run clears all overlays before drawing the same highlights back.
-    useEffect(() => {
-      const textDiv = textLayerRef.current
-      const overlayDiv = highlightOverlayRef.current
-      if (!textDiv || !overlayDiv || textLayerVersion === 0) return
-      if (!searchOpen || !searchQuery) {
-        clearOverlays(overlayDiv, "data-search-highlight")
-        lastHighlightRef.current = ""
-        return
-      }
-
-      // Redrawing identical highlights is invisible work with a visible cost:
-      // every application clears the overlay first, and that gap is the flicker.
-      // React re-runs an effect whenever any dependency is merely recreated, so
-      // the guard is on what was actually drawn.
-      const signature = `${textLayerVersion}|${searchQuery}|${activePageMatchIndex}`
-      if (lastHighlightRef.current === signature) return
-      lastHighlightRef.current = signature
-
-      applySearchHighlights(textDiv, overlayDiv, searchQuery, activePageMatchIndex)
-    }, [textLayerVersion, searchOpen, searchQuery, activePageMatchIndex])
+    /** A match on a rendered page is scrolled to by that page; any other needs its page first. */
+    function showMatch(match: PageMatch) {
+      if (match.page < liveRange[0] || match.page > liveRange[1]) goToPage(match.page)
+    }
 
     function handleSearchNext() {
       if (globalMatches.length === 0) return
       const next = (globalMatchIndex + 1) % globalMatches.length
       setGlobalMatchIndex(next)
-      const match = globalMatches[next]
-      if (match.page !== currentPage) goToPage(match.page)
+      showMatch(globalMatches[next])
     }
 
     function handleSearchPrev() {
       if (globalMatches.length === 0) return
       const prev = (globalMatchIndex - 1 + globalMatches.length) % globalMatches.length
       setGlobalMatchIndex(prev)
-      const match = globalMatches[prev]
-      if (match.page !== currentPage) goToPage(match.page)
+      showMatch(globalMatches[prev])
     }
 
     function closeSearch() {
@@ -1309,33 +885,36 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               onClose={closeSearch}
             />
           )}
-          {/* Canvas scroll area */}
           {/* Stable gutter: the width a page is fitted to must not depend on whether
-              that page then needs a vertical scrollbar. */}
-          <div ref={scrollAreaRef} className="flex-1 overflow-auto p-4 [scrollbar-gutter:stable]">
-            <div className="relative" style={{ width: "fit-content", marginInline: "auto" }}>
-              {/* Canvas: pointer-events:none so the text layer receives all mouse events.
-                  The filter lives on the canvas alone -- putting it on the parent would
-                  invert the highlight/annotation overlays too. */}
-              <canvas
-                ref={canvasRef}
-                className="shadow-md block"
-                style={{ pointerEvents: "none", filter: canvasFilter }}
-              />
-              {/* Highlight overlay: absolutely-positioned colored divs between canvas and text layer.
-                  z-index 5 sits above canvas (0) but below text layer (10), so text selection works
-                  through the overlay while highlights are visible underneath. */}
-              <div
-                ref={highlightOverlayRef}
-                style={{ position: "absolute", top: 0, left: 0, zIndex: 5, pointerEvents: "none" }}
-              />
-              {/* Official pdfjs textLayer -- supports drag-to-select, endOfContent marker,
-                  and ::selection styling. Class "textLayer" matches pdf_viewer.css. */}
-              <div ref={textLayerRef} className="textLayer" />
-              {/* Official pdfjs annotationLayer -- handles links and form fields. */}
-              <div ref={annotationLayerRef} className="annotationLayer" style={{ zIndex: 20, pointerEvents: "none" }} />
+              the pages then need a vertical scrollbar. */}
+          <div ref={scrollAreaRef} className="flex-1 overflow-auto [scrollbar-gutter:stable]">
+            <div className="relative" style={{ height: layout.totalHeight, minWidth: maxPageWidth + 2 * PAGE_PAD }}>
+              {pdfDoc && layout.tops.map((top, i) => {
+                const pageNum = i + 1
+                return (
+                  <PdfPage
+                    key={pageNum}
+                    pdfDoc={pdfDoc}
+                    pageNum={pageNum}
+                    zoom={zoom}
+                    top={top}
+                    width={Math.floor(naturalSizes[i].width * zoom)}
+                    height={layout.heights[i]}
+                    live={pageNum >= liveRange[0] && pageNum <= liveRange[1]}
+                    canvasFilter={canvasFilter}
+                    annotations={shownAnnotations}
+                    sections={sections}
+                    searchQuery={shownQuery}
+                    activeMatch={pageNum === activeMatchPage ? activeMatchOnPage : -1}
+                    searchKey={searchKey}
+                    citationWords={citationWords}
+                    scrollMarks={scrollMarksRef}
+                    goToPage={goToPage}
+                    onNaturalSize={handleNaturalSize}
+                  />
+                )
+              })}
             </div>
-            <canvas ref={nextCanvasRef} className="hidden" />
           </div>
 
           {/* Toolbar (moved to bottom) */}
