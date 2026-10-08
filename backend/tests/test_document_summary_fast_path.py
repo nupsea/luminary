@@ -19,8 +19,9 @@
     10 real SectionModel rows, no chunks → generate_progressive() seeds
     FAST_PATH_MIN_UNITS section summaries, pregenerate() derives one_sentence/
     executive from those (2 calls), generate_progressive_rest() finishes the
-    remaining sections (7 calls), and the final pregenerate() assembles
-    'detailed' for free. 9 total LLM calls, never chunk map-reduce -- there are
+    remaining sections (7 calls), one_sentence/executive are regenerated from
+    all ten (2 calls), and the final pregenerate() assembles 'detailed' for
+    free. 11 total LLM calls, never chunk map-reduce -- there are
     no chunks to map-reduce over, so a fallback to it would fail loudly instead
     of silently passing.
 """
@@ -349,7 +350,11 @@ async def test_progressive_summarization_never_falls_back_to_map_reduce(test_db)
 
     mock_llm = _make_mock_llm()
     mock_llm.generate = AsyncMock(return_value="Executive summary of the document.")
-    mock_llm.complete = AsyncMock(return_value="Section summary text.")
+    # Each section summary names its section, so a document summary's input shows
+    # which sections it was built from.
+    mock_llm.complete = AsyncMock(
+        side_effect=lambda messages, **_: f"Summary of {messages[1]['content'][:10].strip()}."
+    )
 
     from app.workflows.ingestion_nodes.finalize import _run_progressive_summarization
 
@@ -389,9 +394,16 @@ async def test_progressive_summarization_never_falls_back_to_map_reduce(test_db)
     assert "_map_reduce" not in modes, "map-reduce ran despite real section summaries existing"
     assert section_count == 10, "every section must get a summary, not just the seed batch"
 
-    # 2 mode calls (one_sentence, executive; detailed is assembled) + 1 per section.
-    assert mock_llm.generate.call_count == 2, (
-        f"expected exactly one_sentence + executive, got {mock_llm.generate.call_count}"
+    # one_sentence + executive from the seed, the same two again once every
+    # section is summarised (detailed is assembled) + 1 per section.
+    assert mock_llm.generate.call_count == 4, (
+        f"expected one_sentence + executive twice, got {mock_llm.generate.call_count}"
+    )
+    seed_input = mock_llm.generate.call_args_list[0].args[0]
+    final_input = mock_llm.generate.call_args_list[-1].args[0]
+    assert "Section 9" not in seed_input
+    assert "Section 9" in final_input, (
+        "the stored key points were built from the seed sections only, never the whole document"
     )
     assert mock_llm.complete.call_count == 10, (
         f"expected one call per section, got {mock_llm.complete.call_count}"

@@ -15,6 +15,7 @@ from sqlalchemy import delete, func, select
 
 from app.database import get_session_factory
 from app.models import EnrichmentJobModel, SectionModel, SectionSummaryModel
+from app.repos.summary_repo import SummaryRepo
 from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -248,7 +249,10 @@ class SectionSummarizerService:
 
         try:
             await asyncio.gather(
-                *[_summarize_unit(start_index + i, unit) for i, unit in enumerate(units)]
+                *[
+                    _summarize_unit(unit.get("unit_index", start_index + i), unit)
+                    for i, unit in enumerate(units)
+                ]
             )
         except LLMUnavailableError:
             logger.warning(
@@ -377,6 +381,36 @@ class SectionSummarizerService:
             await self._enqueue_web_refs(document_id)
         return inserted
 
+    async def resume(self, document_id: str) -> int:
+        """Summarise the qualifying sections that have no summary yet, keeping the rest.
+
+        Each resumed unit keeps its section's position as `unit_index`, since
+        summaries are read back in that order.
+        """
+        async with get_session_factory()() as session:
+            done = await SummaryRepo(session).summarised_section_ids(document_id)
+        if not done:
+            return await self.generate(document_id, per_section=True)
+
+        qualifying = await self._fetch_qualifying_sections(document_id)
+        missing = [
+            {**unit, "unit_index": i}
+            for i, unit in enumerate(self._as_units(qualifying))
+            if unit["section_id"] not in done
+        ]
+        if not missing:
+            return 0
+        logger.info(
+            "section_summarizer: resuming %d of %d sections",
+            len(missing),
+            len(qualifying),
+            extra={"doc_id": document_id},
+        )
+        inserted = await self._summarize_units(document_id, missing, 0, 3, TEXT_HARD_CAP)
+        if inserted > 0:
+            await self._enqueue_web_refs(document_id)
+        return inserted
+
     async def _enqueue_web_refs(self, document_id: str) -> None:
         """Enqueue a web_refs enrichment job for document_id.
 
@@ -457,12 +491,12 @@ def get_section_summarizer_service() -> SectionSummarizerService:
 
 
 async def resummarize_documents_missing_summaries(limit: int = 20) -> int:
-    """Regenerate summaries for completed documents that have none.
+    """Finish section summaries for completed documents that are missing some.
 
-    Deferred summarisation runs as a background task, so a shutdown between
-    `stage='complete'` and the task finishing loses the work with nothing
-    recording that it was owed. This is the repair: a completed document that
-    has qualifying sections and no summary rows gets another pass.
+    Deferred summarisation runs as a background task, so a shutdown before it
+    finishes loses the work with nothing recording that it was owed. The
+    progressive path always stores its seed rows first, so "has no rows" missed
+    most of those documents; `resume` decides against the qualifying sections.
 
     Bounded per boot, because each document is one LLM call per section and a
     library that has never been summarised must not turn startup into an hours
@@ -472,29 +506,24 @@ async def resummarize_documents_missing_summaries(limit: int = 20) -> int:
     mode: every call would be refused, and a mode change that lifts the refusal
     runs this again.
     """
-    from app.models import DocumentModel  # noqa: PLC0415
     from app.services.llm_routing import refusal  # noqa: PLC0415
+    from app.services.summarizer import get_summarization_service  # noqa: PLC0415
 
     if refusal("background") is not None:
         return 0
 
     async with get_session_factory()() as session:
-        summarised = select(SectionSummaryModel.document_id).distinct().scalar_subquery()
-        result = await session.execute(
-            select(DocumentModel.id)
-            .join(SectionModel, SectionModel.document_id == DocumentModel.id)
-            .where(DocumentModel.stage == "complete")
-            .where(DocumentModel.id.notin_(summarised))
-            .group_by(DocumentModel.id)
-            .limit(limit)
-        )
-        doc_ids = [row[0] for row in result.all()]
+        doc_ids = await SummaryRepo(session).documents_short_of_section_summaries()
 
     repaired = 0
     for doc_id in doc_ids:
+        if repaired >= limit:
+            break
         try:
-            if await get_section_summarizer_service().generate(doc_id, per_section=True):
+            if await get_section_summarizer_service().resume(doc_id):
                 repaired += 1
+                # Key points built before the repair saw only the sections then done.
+                await get_summarization_service().pregenerate(doc_id, refresh=True)
         except Exception as exc:
             logger.warning(
                 "section summary repair failed (non-fatal): %s", exc, extra={"doc_id": doc_id}

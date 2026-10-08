@@ -12,6 +12,7 @@ from app.models import (
     ChunkModel,
     DocumentModel,
     LibrarySummaryModel,
+    SectionModel,
     SectionSummaryModel,
     SummaryModel,
 )
@@ -48,6 +49,45 @@ class SummaryRepo:
             .order_by(SectionSummaryModel.unit_index)
         )
         return list(result.scalars().all())
+
+    async def summarised_section_ids(self, document_id: str) -> set[str | None]:
+        result = await self.session.execute(
+            select(SectionSummaryModel.section_id).where(
+                SectionSummaryModel.document_id == document_id
+            )
+        )
+        return set(result.scalars())
+
+    async def documents_short_of_section_summaries(self) -> list[str]:
+        """Completed documents with fewer summaries than sections, all of them per-section.
+
+        A necessary condition only: short or metadata sections never get a summary.
+        Grouped summaries carry no section_id and are fewer than the sections by design.
+        """
+        sections = (
+            select(SectionModel.document_id, func.count().label("n"))
+            .group_by(SectionModel.document_id)
+            .subquery()
+        )
+        summaries = (
+            select(
+                SectionSummaryModel.document_id,
+                func.count().label("rows"),
+                func.count(SectionSummaryModel.section_id).label("per_section"),
+            )
+            .group_by(SectionSummaryModel.document_id)
+            .subquery()
+        )
+        rows = func.coalesce(summaries.c.rows, 0)
+        result = await self.session.execute(
+            select(DocumentModel.id)
+            .join(sections, sections.c.document_id == DocumentModel.id)
+            .outerjoin(summaries, summaries.c.document_id == DocumentModel.id)
+            .where(DocumentModel.stage == "complete")
+            .where(rows < sections.c.n)
+            .where(rows == func.coalesce(summaries.c.per_section, 0))
+        )
+        return list(result.scalars())
 
     async def latest(self, document_id: str, mode: str) -> SummaryModel | None:
         result = await self.session.execute(
