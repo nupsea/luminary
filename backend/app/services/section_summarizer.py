@@ -15,6 +15,7 @@ from sqlalchemy import delete, func, select
 
 from app.database import get_session_factory
 from app.models import EnrichmentJobModel, SectionModel, SectionSummaryModel
+from app.repos.summary_repo import SummaryRepo
 from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -387,15 +388,7 @@ class SectionSummarizerService:
         summaries are read back in that order.
         """
         async with get_session_factory()() as session:
-            done = set(
-                (
-                    await session.execute(
-                        select(SectionSummaryModel.section_id).where(
-                            SectionSummaryModel.document_id == document_id
-                        )
-                    )
-                ).scalars()
-            )
+            done = await SummaryRepo(session).summarised_section_ids(document_id)
         if not done:
             return await self.generate(document_id, per_section=True)
 
@@ -503,9 +496,7 @@ async def resummarize_documents_missing_summaries(limit: int = 20) -> int:
     Deferred summarisation runs as a background task, so a shutdown before it
     finishes loses the work with nothing recording that it was owed. The
     progressive path always stores its seed rows first, so "has no rows" missed
-    most of those documents: candidates are those with fewer rows than sections,
-    and `resume` decides against the qualifying ones. A document summarised in
-    groups (rows without a section_id) is complete by construction and skipped.
+    most of those documents; `resume` decides against the qualifying sections.
 
     Bounded per boot, because each document is one LLM call per section and a
     library that has never been summarised must not turn startup into an hours
@@ -515,38 +506,14 @@ async def resummarize_documents_missing_summaries(limit: int = 20) -> int:
     mode: every call would be refused, and a mode change that lifts the refusal
     runs this again.
     """
-    from app.models import DocumentModel  # noqa: PLC0415
     from app.services.llm_routing import refusal  # noqa: PLC0415
     from app.services.summarizer import get_summarization_service  # noqa: PLC0415
 
     if refusal("background") is not None:
         return 0
 
-    sections = (
-        select(SectionModel.document_id, func.count().label("n"))
-        .group_by(SectionModel.document_id)
-        .subquery()
-    )
-    summaries = (
-        select(
-            SectionSummaryModel.document_id,
-            func.count().label("rows"),
-            func.count(SectionSummaryModel.section_id).label("per_section"),
-        )
-        .group_by(SectionSummaryModel.document_id)
-        .subquery()
-    )
-    rows = func.coalesce(summaries.c.rows, 0)
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel.id)
-            .join(sections, sections.c.document_id == DocumentModel.id)
-            .outerjoin(summaries, summaries.c.document_id == DocumentModel.id)
-            .where(DocumentModel.stage == "complete")
-            .where(rows < sections.c.n)
-            .where(rows == func.coalesce(summaries.c.per_section, 0))
-        )
-        doc_ids = [row[0] for row in result.all()]
+        doc_ids = await SummaryRepo(session).documents_short_of_section_summaries()
 
     repaired = 0
     for doc_id in doc_ids:
