@@ -294,19 +294,15 @@ _RELATIONAL_KWS: frozenset[str] = frozenset(
         "ties between",
         "bond between",
         "interaction between",
-        # How-phrased relational queries. These are question openers rather than
-        # relationship words, and they carry graph queries that name no relation
-        # word ("how are the Eloi and the Morlocks connected" is caught by
-        # "connected to", but many are not). Removing them cost graph recall
-        # 0.9231 -> 0.6154, so they stay: the defect was never that they exist,
-        # only that first-match-wins let "how do" outrank the longer, more
-        # specific "how do they differ".
-        "how are",
-        "how is",
-        "how do",
-        "how does",
-        "how did",
     }
+)
+
+# Question openers, not relationship words. They carry graph queries that name no
+# relation word, and removing them cost graph recall 0.9231 -> 0.6154, so they still
+# route to relational -- but below LLM_FALLBACK_BELOW, and below any keyword or shape:
+# "How does X compare with Y" is a comparison, and "How does the filter work?" a lookup.
+_RELATIONAL_OPENERS: frozenset[str] = frozenset(
+    {"how are", "how is", "how do", "how does", "how did"}
 )
 
 # Some intents are a sentence shape, not a phrase. These carry the questions that
@@ -590,18 +586,16 @@ def _best_match(question: str, keywords: frozenset[str]) -> str | None:
 def classify_intent_heuristic(question: str) -> tuple[str, float]:
     """Pure function — no imports from other app layers.
 
-    Keyword-match rules in priority order (first match wins):
-      teach_back  confidence=0.95 — bypasses LLM classifier (threshold=0.9)
-      socratic    confidence=0.95 — bypasses LLM classifier
-      notes_gap   confidence=0.95 — bypasses LLM classifier
-      notes       confidence=0.95 — bypasses LLM classifier
-      summary     confidence=0.9  — bypasses LLM classifier
-      relational  confidence=0.85 — falls through to LLM classifier as a hint
-      comparative confidence=0.85 — falls through to LLM classifier as a hint
-      factual     confidence=0.8  — falls through to LLM classifier as a hint
-      generative  confidence=0.75 — "write a story based on ..." → search_node,
-                                     bypasses the LLM (which mislabels these)
-      exploratory confidence=0.5 (catch-all) — falls through to LLM classifier
+    Rules in priority order (first match wins). At or above LLM_FALLBACK_BELOW
+    the heuristic decides; below it the LLM does, where the host can afford it.
+      teach_back / socratic / notes_gap / notes  0.95
+      summary                                    0.9
+      relational / comparative keyword           0.85
+      comparative / relational shape             0.8
+      relational opener ("how does ...")         0.6
+      generative ("write a story based on ...")  0.75 — the LLM mislabels these
+      factual opener ("what is", "which", ...)   0.6
+      exploratory catch-all                      0.5
 
     Returns:
         (intent_str, confidence_float)
@@ -618,10 +612,8 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
         return ("notes", 0.95)
     if matches_summary_request(question):
         return ("summary", 0.9)
-    # Relational and comparative share a confidence, so set order was deciding
-    # between them: "how do" (relational) outranked "how do they differ"
-    # (comparative) purely by being checked first. The more specific keyword wins
-    # instead, which is order-independent and survives either set growing.
+    # Relational and comparative share a confidence; the more specific keyword wins,
+    # so set order never decides between them.
     relational = _best_match(q, _RELATIONAL_KWS)
     comparative = _best_match(q, _COMPARATIVE_KWS)
     # A shape decides only when neither family matched a keyword: a keyword names
@@ -637,16 +629,26 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
         # Comparative first: "which of X and Y" is also "between X and Y" read
         # loosely, and choosing between two things is the narrower reading.
         return ("comparative" if comparative_shape else "relational", 0.8)
-    if any(kw in q for kw in _FACTUAL_KWS):
-        return ("factual", 0.8)
+    # An opener says a question was asked, not which kind, so it ranks below every
+    # keyword and shape and leaves the decision to the LLM where one may run.
+    if _best_match(q, _RELATIONAL_OPENERS):
+        return ("relational", OPENER_CONFIDENCE)
+    # Before factual, so a generative request keeps bypassing the LLM.
     if any(kw in q for kw in _GENERATIVE_KWS):
         return ("exploratory", 0.75)
+    if any(kw in q for kw in _FACTUAL_KWS):
+        return ("factual", OPENER_CONFIDENCE)
     return ("exploratory", 0.5)
 
 
 # Below this the heuristic is guessing and the LLM decides. Shared so the chat
 # graph and anything measuring it cannot drift apart.
 LLM_FALLBACK_BELOW = 0.7
+
+# A route guessed from a question opener. Below the threshold so the LLM decides
+# wherever it may run: "Which is cheaper, the salt tax or the window tax?" opens
+# like "Which chapter introduces the filter?".
+OPENER_CONFIDENCE = 0.6
 
 
 def should_use_llm_fallback(confidence: float) -> tuple[bool, str]:
@@ -668,13 +670,9 @@ def should_use_llm_fallback(confidence: float) -> tuple[bool, str]:
     heuristic had already returned at 0.50.
 
     The cost is real and is NOT hidden: below the threshold the heuristic is
-    guessing, and on a slow host the guess now stands. On the model the app ships
-    (`ollama/qwen3.5:4b`) that is `intents_adversarial` 0.8966 -> 0.8276, two of
-    29 rows, and zero on `intents`, which is the set carrying the committed
-    threshold. `QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST` buys those rescues back.
-    The arm is strongly model-dependent -- 0.9655 on `qwen2.5:14b-instruct`,
-    0.8276 on `qwen3.5:0.8b` -- so price it on the model in `chat_model`, never
-    across two.
+    guessing, and on a slow host the guess stands. Both arms, priced on the model
+    in `chat_model`, are in `docs/eval-coverage.md`;
+    `QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST` buys the rescues back.
     """
     if confidence >= LLM_FALLBACK_BELOW:
         return (False, "heuristic confident")
