@@ -23,6 +23,7 @@ import {
 import { usableSections } from "./sectionTitle"
 import { createLinkService } from "./pdfLinkService"
 import { PdfSearchBar } from "./PdfSearchBar"
+import { usePdfEdgePaging } from "./pdfEdgePaging"
 import { ZOOM_PRESETS, ZOOM_STOPS, type PageMatch, activeMatchIndexForPage, buildGlobalMatches, findMatchIndices, formatMatchCounts, parsePageEntry, printedPageLabel, sheetForPrintedLabel, stepZoom } from "./pdfSearchUtils"
 import { clearOverlays, computeHighlightRects, renderOverlayDivs } from "./pdfHighlightOverlay"
 import {
@@ -405,6 +406,9 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       setPageInput(String(clamped))
     }, [totalPages])
 
+    const landingRef = usePdfEdgePaging(scrollAreaRef, currentPage, totalPages, goToPage, loadStatus === "ready")
+    const landedPageRef = useRef(0)
+
     // Expose goToPage for parent (section list page-jump badges)
     useImperativeHandle(
       ref,
@@ -555,6 +559,15 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           canvas.height = Math.floor(viewport.height * outputScale)
           canvas.style.width = `${Math.floor(viewport.width)}px`
           canvas.style.height = `${Math.floor(viewport.height)}px`
+
+          // A new page starts at its top, or at its bottom when it was entered
+          // scrolling upward; a re-render of the same page (zoom) keeps the place.
+          if (textLayerDiv && landedPageRef.current !== pageNum) {
+            landedPageRef.current = pageNum
+            const area = scrollAreaRef.current
+            if (area) area.scrollTop = landingRef.current === "bottom" ? area.scrollHeight : 0
+            landingRef.current = "top"
+          }
 
           const ctx = canvas.getContext("2d")
           if (!ctx || cancelled) return
@@ -746,7 +759,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         // "Cannot use the same canvas during multiple render() operations".
         for (const task of activeRenderTasks) task.cancel()
       }
-    }, [pdfDoc, currentPage, zoom, totalPages, loadStatus, goToPage])
+    }, [pdfDoc, currentPage, zoom, totalPages, loadStatus, goToPage, landingRef])
 
     // Notify parent of page changes
     useEffect(() => {

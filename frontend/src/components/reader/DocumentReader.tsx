@@ -2021,8 +2021,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             ) : (
               <div className="p-4">
                 <p className="text-xs text-muted-foreground">
-                  Select a passage and choose Explain. The explanation streams here, beside the
-                  text it is about.
+                  Select a term and choose Define, or a passage and choose Simplify. The answer
+                  streams here, beside the text it is about.
                 </p>
               </div>
             )}

@@ -17,7 +17,7 @@ router = APIRouter(prefix="/explain", tags=["explain"])
 class ExplainRequest(BaseModel):
     text: str
     document_id: str
-    mode: Literal["plain", "eli5", "analogy", "formal"] = "plain"
+    mode: Literal["define", "plain", "eli5", "analogy", "formal"] = "plain"
 
 
 @router.post("")

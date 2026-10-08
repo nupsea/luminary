@@ -13,36 +13,81 @@ from app.services.explain import (
 )
 
 
+def _capturing_llm(calls: list[tuple[str, str]]) -> MagicMock:
+    async def capturing_generate(prompt, system="", **kwargs):
+        calls.append((prompt, system))
+
+        async def gen():
+            yield "token"
+
+        return gen()
+
+    llm = MagicMock()
+    llm.generate = AsyncMock(side_effect=capturing_generate)
+    return llm
+
+
+def _retriever_returning(*texts: str) -> MagicMock:
+    retriever = MagicMock()
+    retriever.keyword_search = AsyncMock(return_value=[MagicMock(text=t) for t in texts])
+    return retriever
+
+
 @pytest.mark.asyncio
 async def test_each_mode_uses_different_instruction():
     """Each explain mode injects a distinct instruction into the system prompt."""
     captured: dict[str, str] = {}
 
-    for mode in ["plain", "eli5", "analogy", "formal"]:
-        system_calls: list[str] = []
-        llm = MagicMock()
-
-        async def capturing_generate(prompt, system="", **kwargs):
-            system_calls.append(system)
-
-            async def gen():
-                yield "token"
-
-            return gen()
-
-        llm.generate = AsyncMock(side_effect=capturing_generate)
-
-        with patch("app.services.explain.get_llm_service", return_value=llm):
-            svc = ExplainService()
-            async for _ in svc.stream_explain("quantum", "doc-1", mode):
+    for mode in MODE_INSTRUCTIONS:
+        calls: list[tuple[str, str]] = []
+        with (
+            patch("app.services.explain.get_llm_service", return_value=_capturing_llm(calls)),
+            patch("app.services.explain.get_retriever", return_value=_retriever_returning()),
+        ):
+            async for _ in ExplainService().stream_explain("quantum", "doc-1", mode):
                 pass
-
-        captured[mode] = system_calls[0] if system_calls else ""
+        captured[mode] = calls[0][1]
 
     for mode, expected in MODE_INSTRUCTIONS.items():
         assert expected in captured[mode], f"Mode {mode!r} missing its instruction"
 
-    assert len(set(captured.values())) == 4
+    assert len(set(captured.values())) == len(MODE_INSTRUCTIONS)
+
+
+@pytest.mark.asyncio
+async def test_define_grounds_a_bare_term_in_document_passages():
+    """A one-word selection is sent with passages from its own document, not alone."""
+    calls: list[tuple[str, str]] = []
+    retriever = _retriever_returning("A lakehouse combines a data lake with warehouse tables.")
+
+    with (
+        patch("app.services.explain.get_llm_service", return_value=_capturing_llm(calls)),
+        patch("app.services.explain.get_retriever", return_value=retriever),
+    ):
+        async for _ in ExplainService().stream_explain("lakehouse", "doc-7", "define"):
+            pass
+
+    retriever.keyword_search.assert_awaited_once_with("lakehouse", ["doc-7"], k=4)
+    prompt = calls[0][0]
+    assert "A lakehouse combines a data lake with warehouse tables." in prompt
+    assert "Define the selected term." in prompt
+
+
+@pytest.mark.asyncio
+async def test_failed_context_lookup_still_explains():
+    """A retrieval error degrades to the selection alone rather than failing the stream."""
+    calls: list[tuple[str, str]] = []
+    retriever = MagicMock()
+    retriever.keyword_search = AsyncMock(side_effect=RuntimeError("fts down"))
+
+    with (
+        patch("app.services.explain.get_llm_service", return_value=_capturing_llm(calls)),
+        patch("app.services.explain.get_retriever", return_value=retriever),
+    ):
+        events = [e async for e in ExplainService().stream_explain("lakehouse", "d", "define")]
+
+    assert "Document excerpts" not in calls[0][0]
+    assert any('"done"' in e for e in events)
 
 
 @pytest.mark.asyncio
@@ -56,9 +101,11 @@ async def test_stream_explain_yields_token_events_then_done():
     llm = MagicMock()
     llm.generate = AsyncMock(return_value=make_gen())
 
-    with patch("app.services.explain.get_llm_service", return_value=llm):
-        svc = ExplainService()
-        events = [e async for e in svc.stream_explain("text", "doc-1", "plain")]
+    with (
+        patch("app.services.explain.get_llm_service", return_value=llm),
+        patch("app.services.explain.get_retriever", return_value=_retriever_returning()),
+    ):
+        events = [e async for e in ExplainService().stream_explain("text", "doc-1", "plain")]
 
     token_events = [e for e in events if '"token"' in e]
     done_events = [e for e in events if '"done"' in e]
@@ -67,7 +114,8 @@ async def test_stream_explain_yields_token_events_then_done():
     assert json.loads(done_events[0].removeprefix("data: ").strip())["done"] is True
 
 
-def test_explain_endpoint_streams_sse():
+@pytest.mark.parametrize("mode", ["define", "plain"])
+def test_explain_endpoint_streams_sse(mode):
     """POST /explain returns text/event-stream with token and done events."""
 
     async def fake_stream(text, doc_id, mode):
@@ -81,7 +129,7 @@ def test_explain_endpoint_streams_sse():
         with TestClient(app) as client:
             resp = client.post(
                 "/explain",
-                json={"text": "quantum", "document_id": "doc-1", "mode": "plain"},
+                json={"text": "quantum", "document_id": "doc-1", "mode": mode},
             )
 
     assert resp.status_code == 200
