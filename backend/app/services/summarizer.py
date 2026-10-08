@@ -441,11 +441,14 @@ class SummarizationService:
         document_id: str,
         model: str | None = None,
         modes: tuple[str, ...] | None = None,
+        *,
+        refresh: bool = False,
     ) -> None:
         """Pre-generate and store summaries for PREGENERATE_MODES.
 
         Called during ingestion so summaries are ready when the user first opens
-        a document.  Skips any mode that already has a cached summary.
+        a document.  Skips any mode that already has a cached summary, unless
+        `refresh`: then a new version replaces it, as when more sections exist.
         Failures are logged and suppressed — a missing pre-generated summary is
         not a reason to fail ingestion.
 
@@ -465,7 +468,7 @@ class SummarizationService:
             target_modes = modes if modes is not None else PREGENERATE_MODES
             modes_needed = []
             for mode in target_modes:
-                cached = await self._fetch_cached(document_id, mode)
+                cached = None if refresh else await self._fetch_cached(document_id, mode)
                 if cached is not None:
                     logger.debug(
                         "pregenerate: mode=%s already cached, skipping",
