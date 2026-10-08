@@ -1,0 +1,18 @@
+{
+  "name": "intents_heldout",
+  "generated_at": "2026-10-08T00:00:00+00:00",
+  "generator_model": null,
+  "rows": 160,
+  "authored_by": "hand (Claude, one labeller)",
+  "why": "intents.jsonl measures 1.0000 and the heuristic's phrasing shapes were tuned against intents_adversarial, so neither shows how routing does on phrasings nobody tuned for. These rows were written without reference to the keyword lists: varied openers, intents stated without their keyword, and questions that open like a lookup but are not one.",
+  "subjects": "Invented and absent from every corpus and from the other intent goldens (Harlow Accord, Teskel pump, Lindqvist, Kessel bridge, Okafor, ...).",
+  "provenance": "Rows 1-120 were frozen (sha256 5338007d...) before any measurement and then used to diagnose the opener-confidence change, so they no longer test it. Rows 121-160 were frozen (sha256 c49caacd...) before that change was written and are what confirmed it. Both are now ordinary regression rows.",
+  "labelling": "One labeller. Multi-intent rows were excluded, as in intents_adversarial. A second labeller has not checked them.",
+  "by_route": {
+    "summary": 40,
+    "comparative": 40,
+    "graph": 40,
+    "search": 40
+  },
+  "row_provenance": "hand"
+}

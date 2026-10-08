@@ -17,7 +17,7 @@ whatever retrieval returned.
 | Ingestion | `make eval-ingest` — retention, duplication | all 12 manifest documents | yes |
 | Retrieval | `make eval` — HR@5, MRR, nDCG@10 | book, paper, legal, play, study | yes |
 | Generation | `make eval-gen` — faithfulness, answer relevance, citation support, citation coverage, answer rate | book, paper | yes |
-| Intent routing | `make eval-intent` — routing accuracy, per-route P/R | `golden/intents.jsonl` 50 rows (gated) + `intents_adversarial.jsonl` 29 rows (report-only) | yes / report-only |
+| Intent routing | `make eval-intent` — routing accuracy, per-route P/R | `golden/intents.jsonl` 50 rows (gated) + `intents_adversarial.jsonl` 29 + `intents_heldout.jsonl` 160 rows (report-only); the heuristic's confident claims on all three are gated in pytest | yes / report-only |
 | Topics | `make eval-topics` | d2l | yes |
 | Summaries | `make eval-summary` — theme coverage, grounding (HHEM), conciseness, hallucination. Regenerates each summary and fails any row the stream does not report as `generated`; `MODE=detailed` is assembled from section summaries, so it runs only with `SCORE_STORED=1` and is filed as `stored`, never under a model | `golden/summaries.jsonl` | yes |
 | Flashcards | `make eval-flashcards` — generation rate, repairs, factuality/atomicity/clarity | `golden/flashcards.jsonl`, 35 rows over 5 content types | yes |
@@ -139,15 +139,20 @@ this and cannot be compared to one that has it.
 and the classifier runs at temperature 0, so a single run is a valid measurement here and a small
 delta is real, unlike generation. Measured 1.0000 on all four routes.
 
-**The 1.0000 is on easy rows.** The same classifier scores **0.8276** on 29 adversarial
-phrasings with the heuristic alone, and **0.8966** with the LLM fallback that fires below
-confidence 0.7. Search absorbs all five heuristic misroutes: `graph` and `comparative` fire on
-their keyword and nothing else. Read the gated golden as a regression check, never as evidence
-that routing is solved.
+**The 1.0000 is on easy rows.** On phrasings nobody tuned for, `intents_heldout`, the heuristic
+alone scores **0.5312** and the LLM fallback lifts it to **0.8750**. Search absorbs most heuristic
+misroutes. Read the gated golden as a regression check, never as evidence that routing is solved.
+
+**A route the heuristic claims at or above 0.7 has no recourse on any host**, so a confident
+claim has to be a right one. Question openers ("which…", "what does…", "how does…") used to claim
+0.8-0.85 and misrouted 31 of 168 such claims across the three goldens; they now sit at
+`OPENER_CONFIDENCE` (0.6), keeping their route but leaving the decision to the LLM, and the
+heuristic's 93 remaining claims are all right. `tests/test_intent_confidence_is_earned.py` gates
+that precision (and that the heuristic still claims a quarter of rows) in CI, without a backend.
 
 **The fallback arm is a number about the model, not about the router.** The same 29 rows score
 0.9655 on `qwen2.5:14b-instruct`, 0.8966 on the shipped `qwen3.5:4b` and 0.8276 on
-`qwen3.5:0.8b` (`scores_history.jsonl` records `chat_model` per run). Quote it against the model
+`qwen3.5:0.8b`, all on backend 0.7.9 (`scores_history.jsonl` records `chat_model` per run). Quote it against the model
 in `chat_model`, and never subtract one model's arm from another's.
 
 **Which of those two arms a user gets depends on the host.** `should_use_llm_fallback` drops the
@@ -158,13 +163,16 @@ not a floor, it is the routing:
 | dataset | heuristic alone | + LLM fallback |
 |---|---|---|
 | `intents` (50, gated) | 1.0000 | 1.0000 |
-| `intents_adversarial` (29, report-only) | 0.8276 | 0.8966 |
+| `intents_adversarial` (29, report-only) | 0.8276 | 0.9310 |
+| `intents_heldout` (160, report-only) | 0.5312 | 0.8750 |
 
-Measured 2026-08-27 on `ollama/qwen3.5:4b`, backend 0.7.9. The gated golden does not move,
-because the 2 of 50 rows that reach the LLM there are ones the heuristic already routes
-correctly. The cost is two adversarial rescues (26/29 → 24/29), and
-`QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST=true` buys them back at ~17s per affected question. The
-fallback fires on 4% of `intents` and 28% of `intents_adversarial`.
+Measured 2026-10-08 on `ollama/qwen3.5:4b`, backend 0.15.5. The fallback fires on 30% of
+`intents`, 45% of `intents_adversarial` and 74% of `intents_heldout` (about 110ms a call on an
+M5 Max; unmeasured on a 16GB desktop). Before openers dropped below 0.7 it fired on 4% and 28%,
+and `intents_heldout` with the fallback scored 0.7438; the heuristic-alone arm did not move
+except for two comparisons that "how does" had outranked. The gated golden does not move.
+`QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST=true` buys a slow host the rescues at ~17s per affected
+question.
 
 `/qa/classify-only` is deliberately NOT gated the same way: an eval must be able to measure both
 arms on whatever machine it runs on, and the numbers above were taken on a host where the graph

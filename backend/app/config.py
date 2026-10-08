@@ -219,22 +219,13 @@ class Settings(BaseSettings):
     # spent 17.02s of a 50.12s question deciding `summary` -- the label the
     # heuristic had already returned. ~8s of that is this host's floor for
     # issuing any local call at all (the keep-warm ping measures the same floor),
-    # which no prompt or output bound reaches. It fires on 4% of `intents` and
-    # 28% of `intents_adversarial`.
+    # which no prompt or output bound reaches.
     #
-    # What it costs, measured 2026-08-27 against a live backend on the model the
-    # app ships (`ollama/qwen3.5:4b`), fallback on -> fallback off:
-    #   intents (50)              1.0000 -> 1.0000   the LLM changes nothing
-    #   intents_adversarial (29)  0.8966 -> 0.8276   2 rescues lost (26/29 -> 24/29)
-    # Read the model, not just the number: `scores_history.jsonl` has this arm at
-    # 0.9655 on `qwen2.5:14b-instruct` and 0.8276 on `qwen3.5:0.8b`, so a delta
-    # taken across two models prices this gate at something no user pays. The
-    # 0.8966 figure is eight recorded runs on the shipped model, all identical.
-    # The committed threshold (routing_accuracy >= 0.85, `intents`) is untouched;
-    # the adversarial set is report-only. Below 0.7 the heuristic is guessing,
-    # and on a slow host that guess now stands.
+    # What it costs is the gap between the two arms in `docs/eval-coverage.md`,
+    # priced on the model in `chat_model`. Below 0.7 the heuristic is guessing,
+    # and on a slow host that guess stands.
     #
-    # Set this True to buy those 2 rescues back at ~17s per affected question.
+    # Set this True to buy those rescues back at ~17s per affected question.
     QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST: bool = False
     # Alarm level for everything the synthesis prompt carries, not just the chunk
     # context. QA_CONTEXT_TOKEN_BUDGET bounds `chunks_context` only; section

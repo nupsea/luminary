@@ -13,7 +13,7 @@ same way even though the exact string appears in no golden.
 
 import pytest
 
-from app.services.intent import classify_intent_heuristic
+from app.services.intent import LLM_FALLBACK_BELOW, classify_intent_heuristic
 
 # Deliberately alien to the dev corpus: two invented technical subjects, two
 # invented people, two ordinary objects. If a route depends on the subject rather
@@ -279,3 +279,41 @@ def test_a_keyword_outranks_a_shape_from_the_other_family():
     and Y' carries both, and the statement wins over the inference."""
     question = "What is the difference between the Vantari protocol and the Ostrek cipher?"
     assert classify_intent_heuristic(question)[0] == "comparative"
+
+
+# An opener says a question was asked, not which kind. Each template below opens
+# like a lookup and is not one; claimed at 0.8 they never reached the LLM.
+OPENER_TEMPLATES = [
+    ("Which is cheaper according to the text, {a} or {b}?", "factual"),
+    ("Which ideas trace back to {a}?", "factual"),
+    ("What does the author conclude about {a}, overall?", "factual"),
+    ("How does {a} work?", "relational"),
+    ("How did {a} affect {b}?", "relational"),
+]
+
+
+@pytest.mark.parametrize("template,intent", OPENER_TEMPLATES)
+def test_a_question_opener_is_left_to_the_llm_and_keeps_its_route(template, intent):
+    """Below the threshold, so the LLM decides where it may run; the same route as
+    before, so a host with the fallback gated off routes exactly as it did."""
+    for question in _instantiate(template):
+        got, confidence = classify_intent_heuristic(question)
+        assert got == intent, question
+        assert confidence < LLM_FALLBACK_BELOW, f"{question} -> {got} {confidence}"
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "How does {a} compare with {b}?",
+        "How do {a} and {b} disagree?",
+        "How is {a} different from {b}?",
+    ],
+)
+def test_a_comparison_outranks_the_opener_it_starts_with(template):
+    """'how does' outranked 'compare' by being one character longer, so the
+    longest-keyword rule sent these to the graph route at 0.85 on every host."""
+    for question in _instantiate(template):
+        got, confidence = classify_intent_heuristic(question)
+        assert got == "comparative", question
+        assert confidence >= LLM_FALLBACK_BELOW, question
