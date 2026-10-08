@@ -22,10 +22,18 @@ import { chromium } from "playwright-core"
 const APP = process.env.LUMINARY_URL ?? "http://localhost:5173"
 
 async function launch() {
+  const tried = []
   for (const channel of [undefined, "chrome", "msedge", "chromium"]) {
-    try { return await chromium.launch(channel ? { channel } : {}) } catch { /* try next */ }
+    try {
+      return await chromium.launch(channel ? { channel } : {})
+    } catch (err) {
+      tried.push(`  ${channel ?? "bundled"}: ${String(err.message).split("\n")[0]}`)
+    }
   }
-  throw new Error("No Chromium-family browser. Install one with `npx playwright install chromium`.")
+  throw new Error(
+    "No Chromium-family browser launched. Install one with `npx playwright install chromium`.\n"
+      + tried.join("\n"),
+  )
 }
 
 const failures = []
@@ -288,10 +296,21 @@ if (paraCount) {
       url: location.href,
     }), TAB_LABELS)
 
-    // The panel's own tab is also called Explain; only the action bar's button
-    // carries no aria-pressed.
-    const explainAction = page.locator("button:not([aria-pressed])").filter({ hasText: /^Explain$/ })
-    check("the selection offers Explain", await selectAgain(explainAction))
+    // A single word is a term to define, not a passage to simplify.
+    const bar = page.locator('[data-testid="selection-action-bar"]')
+    await page.mouse.dblclick(boxRect.x + 20, lineY)
+    let wordActions = []
+    for (let i = 0; i < 8 && !wordActions.length; i++) {
+      await page.waitForTimeout(250)
+      wordActions = await bar.locator("button").evaluateAll((els) =>
+        els.map((e) => e.textContent?.trim()).filter(Boolean))
+    }
+    check("a double-clicked word offers Define", wordActions.includes("Define"),
+      wordActions.join(" | ") || "<no bar>")
+    await page.keyboard.press("Escape")
+
+    const explainAction = bar.locator("button").filter({ hasText: /^Simplify$/ })
+    check("the selected passage offers Simplify", await selectAgain(explainAction))
     if (await explainAction.count()) {
       await explainAction.first().click()
       await page.waitForTimeout(1500)
@@ -318,15 +337,14 @@ if (paraCount) {
     // carries a Note control too, and counting those would pass this check
     // while the bar still offered one. The swatches carry no text, so a bar
     // with only them would read as empty here; the count guards that.
-    await selectAgain(page.locator('[data-testid="selection-action-bar"]'))
-    const bar = page.locator('[data-testid="selection-action-bar"]')
+    await selectAgain(bar)
     const barActions = await bar.locator("button")
       .evaluateAll((els) => els.map((e) => e.textContent?.trim()).filter(Boolean))
     check("the selection bar is the one the reader asked for",
       barActions.length > 0 && !["Note", "Flashcard", "Clip"].some((a) => barActions.includes(a)),
       barActions.join(" | ") || "<no bar>")
-    check("the selection still offers Explain and Ask",
-      ["Explain", "Ask"].every((a) => barActions.includes(a)), barActions.join(" | "))
+    check("the selection still offers Simplify and Ask",
+      ["Simplify", "Ask"].every((a) => barActions.includes(a)), barActions.join(" | "))
     // Highlighting is the only passage-capture the bar has left, so its
     // swatches are load-bearing rather than decoration.
     const swatches = await bar.locator('button[title^="Highlight"]').count()

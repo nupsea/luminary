@@ -13,7 +13,8 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { API_BASE } from "@/lib/config"
 
 const MODE_LABELS: Record<ExplainMode | "formal", string> = {
-  plain: "Explanation",
+  define: "Definition",
+  plain: "Simplified",
   eli5: "ELI5",
   analogy: "Analogy",
   formal: "Formal definition",

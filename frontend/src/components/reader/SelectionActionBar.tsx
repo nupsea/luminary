@@ -1,14 +1,16 @@
 /**
  * SelectionActionBar -- unified text-selection popup for DocumentReader
  *
- * Listens on document for mousedown/mouseup to track drag selections.
- * Uses the mouseup event coordinates for positioning (not range.getBoundingClientRect,
- * which can return zero-size rects for PDF text layer transparent spans).
+ * Driven by `selectionchange`, so a drag, double-click, Shift+arrows or a touch
+ * selection all raise it. It waits for a drag to be released, follows the
+ * selection while the reader scrolls, and flips below when there is no room above.
  * Fixed positioning avoids clipping by overflow:hidden ancestors.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
-export type ExplainMode = "plain" | "eli5" | "analogy"
+import { useEffect, useRef, useState } from "react"
+import { explainModeFor, placeBar, type Placement } from "./selectionBarLogic"
+
+export type ExplainMode = "define" | "plain" | "eli5" | "analogy"
 
 export type HighlightColor = "yellow" | "green" | "blue" | "pink"
 
@@ -31,10 +33,8 @@ export interface SourceRef {
 /** Maximum character count for highlights. Longer selections can still use other actions. */
 const HIGHLIGHT_CHAR_LIMIT = 10_000
 
-/** Approximate height of the bar in pixels (for viewport clamping). */
-const BAR_HEIGHT = 44
-/** Approximate half-width of the bar in pixels (for viewport clamping). */
-const BAR_HALF_WIDTH = 160
+/** Long enough that Shift+arrow extension doesn't flash the bar on every keystroke. */
+const SETTLE_MS = 180
 
 export interface SelectionActionBarProps {
   containerRef: React.RefObject<HTMLElement | null>
@@ -44,9 +44,9 @@ export interface SelectionActionBarProps {
   onHighlight: (text: string, sourceRef: SourceRef, color: HighlightColor) => void
 }
 
-interface Position {
-  top: number
-  left: number
+interface Captured {
+  text: string
+  sourceRef: SourceRef
 }
 
 export function SelectionActionBar({
@@ -56,125 +56,170 @@ export function SelectionActionBar({
   onAskInChat,
   onHighlight,
 }: SelectionActionBarProps) {
-  const [position, setPosition] = useState<Position | null>(null)
-  const [selectedText, setSelectedText] = useState("")
-  const [pendingSourceRef, setPendingSourceRef] = useState<SourceRef | null>(null)
+  const [captured, setCaptured] = useState<Captured | null>(null)
+  const [placement, setPlacement] = useState<Placement | null>(null)
   const barRef = useRef<HTMLDivElement>(null)
-  const isDragging = useRef(false)
-  const mouseUpCoords = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
-
-  const reset = useCallback(() => {
-    setPosition(null)
-    setSelectedText("")
-    setPendingSourceRef(null)
-  }, [])
+  const dismissRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
 
-    function handleMouseDown(e: MouseEvent) {
-      // Clicking on the bar itself -- don't dismiss
-      if (barRef.current?.contains(e.target as Node)) return
+    let range: Range | null = null
+    let pointerHeld = false
+    let pointer = { x: 0, y: 0 }
+    let settleTimer = 0
+    let frame = 0
 
-      // Dismiss any existing bar
-      reset()
+    function hide() {
+      window.clearTimeout(settleTimer)
+      range = null
+      setCaptured(null)
+      setPlacement(null)
+    }
+    dismissRef.current = hide
 
-      // Track if drag started inside our container
-      isDragging.current = container!.contains(e.target as Node)
+    function place() {
+      if (!range) return
+      const rect = range.getBoundingClientRect()
+      // PDF text-layer spans can yield an empty rect; the release point stands in.
+      const box = rect.width > 0 && rect.height > 0
+        ? rect
+        : { top: pointer.y - 8, bottom: pointer.y + 8, left: pointer.x, right: pointer.x }
+      setPlacement(placeBar(box, container!.getBoundingClientRect(), {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }))
     }
 
-    function handleMouseUp(e: MouseEvent) {
-      if (!isDragging.current) return
-      isDragging.current = false
+    function capture() {
+      const selection = window.getSelection()
+      const text = selection?.toString().trim() ?? ""
+      if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !text) {
+        hide()
+        return
+      }
+      const current = selection.getRangeAt(0)
+      if (!container!.contains(current.commonAncestorContainer)) {
+        hide()
+        return
+      }
+      range = current.cloneRange()
+      setCaptured({ text, sourceRef: resolveSourceRef(current.startContainer) })
+      place()
+    }
 
-      // Save mouse coordinates for positioning the bar
-      mouseUpCoords.current = { x: e.clientX, y: e.clientY }
+    function settle(delay: number) {
+      window.clearTimeout(settleTimer)
+      settleTimer = window.setTimeout(capture, delay)
+    }
 
-      // Wait for browser to finalize the selection
-      requestAnimationFrame(() => {
-        const selection = window.getSelection()
-        if (!selection || selection.rangeCount === 0) return
+    function handleSelectionChange() {
+      if (window.getSelection()?.isCollapsed ?? true) {
+        hide()
+        return
+      }
+      // Mid-drag the selection is still moving; the release shows the bar.
+      if (!pointerHeld) settle(SETTLE_MS)
+    }
 
-        const text = selection.toString().trim()
-        if (!text) return
+    function handlePointerDown(e: PointerEvent) {
+      if (barRef.current?.contains(e.target as Node)) return
+      pointerHeld = true
+      setPlacement(null)
+    }
 
-        // Verify selection is inside our container
-        const anchorNode = selection.anchorNode
-        if (!anchorNode || !container!.contains(anchorNode)) return
+    function handlePointerUp(e: PointerEvent) {
+      if (!pointerHeld) return
+      pointerHeld = false
+      pointer = { x: e.clientX, y: e.clientY }
+      settle(0)
+    }
 
-        const range = selection.getRangeAt(0)
+    // A touch long-press hands over to the browser's own selection handles.
+    function handlePointerCancel() {
+      pointerHeld = false
+      settle(SETTLE_MS)
+    }
 
-        // Try range rect first; fall back to mouse coordinates if rect is degenerate
-        const rect = range.getBoundingClientRect()
-        let top: number
-        let left: number
-        if (rect.width > 0 && rect.height > 0) {
-          top = rect.top - 8
-          left = rect.left + rect.width / 2
-        } else {
-          // Fallback: position above where the user released the mouse
-          top = mouseUpCoords.current.y - 16
-          left = mouseUpCoords.current.x
-        }
-
-        // clamp to viewport bounds so bar is never offscreen
-        top = Math.max(8, Math.min(top, window.innerHeight - BAR_HEIGHT - 8))
-        left = Math.max(BAR_HALF_WIDTH, Math.min(left, window.innerWidth - BAR_HALF_WIDTH))
-
-        const sourceRef = resolveSourceRef(range.startContainer)
-        setPendingSourceRef(sourceRef)
-        setSelectedText(text)
-        setPosition({ top, left })
-      })
+    function handleViewportChange() {
+      if (!range) return
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(place)
     }
 
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") reset()
+      if (e.key === "Escape") hide()
     }
 
-    document.addEventListener("mousedown", handleMouseDown, true)
-    document.addEventListener("mouseup", handleMouseUp, true)
+    document.addEventListener("selectionchange", handleSelectionChange)
+    document.addEventListener("pointerdown", handlePointerDown, true)
+    document.addEventListener("pointerup", handlePointerUp, true)
+    document.addEventListener("pointercancel", handlePointerCancel, true)
+    // Capture phase: the reader scrolls inside its own panes, and scroll doesn't bubble.
+    document.addEventListener("scroll", handleViewportChange, true)
+    window.addEventListener("resize", handleViewportChange)
     document.addEventListener("keydown", handleKeyDown)
     return () => {
-      document.removeEventListener("mousedown", handleMouseDown, true)
-      document.removeEventListener("mouseup", handleMouseUp, true)
+      window.clearTimeout(settleTimer)
+      cancelAnimationFrame(frame)
+      document.removeEventListener("selectionchange", handleSelectionChange)
+      document.removeEventListener("pointerdown", handlePointerDown, true)
+      document.removeEventListener("pointerup", handlePointerUp, true)
+      document.removeEventListener("pointercancel", handlePointerCancel, true)
+      document.removeEventListener("scroll", handleViewportChange, true)
+      window.removeEventListener("resize", handleViewportChange)
       document.removeEventListener("keydown", handleKeyDown)
     }
-  }, [containerRef, resolveSourceRef, reset])
+  }, [containerRef, resolveSourceRef])
 
-  if (!position || !selectedText || !pendingSourceRef) return null
+  if (!captured || !placement) return null
 
-  const canHighlight = pendingSourceRef.sectionId !== undefined
-  const isOversized = selectedText.length > HIGHLIGHT_CHAR_LIMIT
+  const { text, sourceRef } = captured
+  const mode = explainModeFor(text)
+  const canHighlight = sourceRef.sectionId !== undefined
+  const isOversized = text.length > HIGHLIGHT_CHAR_LIMIT
+  // preventDefault on mousedown keeps the selection alive under the click.
+  const act = (run: () => void) => (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    run()
+    dismissRef.current()
+  }
 
   return (
     <div
+      // Re-keyed per selection so the fade plays on a new one, not on every scroll.
+      key={text}
       ref={barRef}
       data-testid="selection-action-bar"
-      className="fixed z-[100] flex -translate-x-1/2 -translate-y-full gap-1 rounded-2xl border border-border/50 bg-background/80 backdrop-blur-xl p-1.5 shadow-2xl transition-all duration-200 ease-out"
-      style={{ top: position.top, left: position.left }}
+      data-side={placement.side}
+      className={`fixed z-[100] flex -translate-x-1/2 ${placement.side === "above" ? "-translate-y-full" : ""} gap-1 rounded-2xl border border-border/50 bg-background/80 p-1.5 shadow-2xl backdrop-blur-xl animate-in fade-in-0 duration-150`}
+      style={{ top: placement.top, left: placement.left }}
     >
       <button
-        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onExplain(selectedText, "plain"); reset() }}
-        className="rounded-xl px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent/80 transition-colors"
+        onMouseDown={act(() => onExplain(text, mode))}
+        title={mode === "define" ? "Define this term as the document uses it" : "Rewrite this passage in plain English"}
+        className="rounded-xl px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent/80"
       >
-        Explain
+        {mode === "define" ? "Define" : "Simplify"}
       </button>
       <button
-        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onAskInChat(selectedText, pendingSourceRef); reset() }}
-        className="rounded px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
+        onMouseDown={act(() => onAskInChat(text, sourceRef))}
+        className="rounded-xl px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent/80"
       >
         Ask
       </button>
-      <div className="flex items-center gap-0.5 border-l border-border pl-1.5 ml-0.5">
+      <div className="ml-0.5 flex items-center gap-0.5 border-l border-border pl-1.5">
         {HIGHLIGHT_SWATCHES.map((swatch) => (
           <button
             key={swatch.color}
             onMouseDown={(e) => {
-              e.preventDefault(); e.stopPropagation()
-              if (!canHighlight || isOversized) return
-              onHighlight(selectedText, pendingSourceRef, swatch.color); reset()
+              if (!canHighlight || isOversized) {
+                e.preventDefault()
+                return
+              }
+              act(() => onHighlight(text, sourceRef, swatch.color))(e)
             }}
             disabled={!canHighlight || isOversized}
             title={isOversized ? "Selection too long to highlight (max 10,000 chars)" : canHighlight ? `Highlight ${swatch.color}` : "Highlight not available without section mapping"}

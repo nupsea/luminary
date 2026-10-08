@@ -15,8 +15,10 @@ faces. The document's delete confirmation is a popover and needs no exception.
 - Every face stays mounted and hidden, and collapsing the panel hides it rather than unmounting. A
   layout change may not cost a streaming answer or an unsaved draft. One ref records where a
   transient face returns, so closing lands on whatever opened it.
-- The selection bar carries Explain, Ask and four highlight swatches. A highlight is the whole of
-  passage capture; it resolves to a section or page, not a `chunk_id`.
+- The selection bar carries Define (a term of up to four words) or Simplify (a passage), Ask and
+  four highlight swatches. Both answers go to the Explain face, grounded in passages `/explain`
+  retrieves from the same document: a bare term carries no context of its own. A highlight is the
+  whole of passage capture; it resolves to a section or page, not a `chunk_id`.
 - The reader header carries no panel tab. A goal's Study button in `ChapterGoalsPanel` scopes
   Practice to that goal's section instead of leaving.
 - Each face wears its feature's icon elsewhere (`Brain`, `MessageSquare`, `StickyNote`); Insights is
