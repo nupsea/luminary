@@ -166,6 +166,17 @@ class TestCardGenre:
     def test_a_technical_prose_book_asks_for_rules(self) -> None:
         """What the title regex was reaching for, stated as a fact on the row."""
         assert DocumentProfile(form="prose", domain="technical").card_genre == "technical"
+        assert (
+            DocumentProfile(form="prose", domain="technical", register="expository").card_genre
+            == "technical"
+        )
+
+    def test_a_story_is_narrative_whatever_its_domain(self) -> None:
+        """The Odyssey read `domain=technical` from its preface and got technical cards (#253)."""
+        assert (
+            DocumentProfile(form="prose", domain="technical", register="narrative").card_genre
+            == "narrative"
+        )
 
 
 def test_tag_entity_types_follow_the_form() -> None:

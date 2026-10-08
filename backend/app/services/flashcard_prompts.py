@@ -456,7 +456,8 @@ _GENRE_STRATEGY = {
     "technical": (
         "Ask the invariant, the failure mode, when one option beats another, and what a "
         "parameter controls. Where the text gives syntax, a signature or a formula, quote "
-        "its exact form in the answer rather than describing it."
+        "its exact form in the answer rather than describing it. Never ask who wrote, built "
+        "or said something."
     ),
     "academic": (
         "Ask what was claimed, how it was measured, what the evidence was, and what "
@@ -582,6 +583,41 @@ CHAPTER_NOTES_SYSTEM = (
     "You write study notes for a student. Each note states one important idea from the "
     "passage as a complete sentence the student could learn and be tested on."
 )
+
+# What is worth a note in each kind of book (#253): without it a person named in a programming
+# book reads as an important idea.
+_CHAPTER_NOTE_FOCUS = {
+    "narrative": (
+        "This is a story. Note the events, decisions and revelations that move it forward, "
+        "naming the characters, and why they act where the story says why."
+    ),
+    "non-fiction": "Note what each claim asserts, why it holds, and what it rules out.",
+    "technical": (
+        "This is a technical book. Note what a concept or construct is, how it behaves, when to "
+        "use it over an alternative, and what goes wrong when it is misused. A note is about "
+        "the subject, never about a person: not who wrote, built, said or contributed something."
+    ),
+    "academic": (
+        "This is a research work. Note the claim, the method that tested it, the result, and "
+        "the limitation it states. Never note who wrote it or where it was published."
+    ),
+    "conversation": (
+        "This is a conversation. Note what was decided, who owns it, and why the alternative "
+        "was rejected."
+    ),
+}
+
+
+def chapter_notes_system(genre: str) -> str:
+    focus = _CHAPTER_NOTE_FOCUS.get(genre)
+    return f"{CHAPTER_NOTES_SYSTEM}\n{focus}" if focus else CHAPTER_NOTES_SYSTEM
+
+
+def chapter_card_system(genre: str) -> str:
+    strategy = _GENRE_STRATEGY.get(genre)
+    return f"{CHAPTER_CARD_SYSTEM}\n{strategy}" if strategy else CHAPTER_CARD_SYSTEM
+
+
 CHAPTER_NOTES_USER_TMPL = (
     "Book: {book}\n"
     "Section: {heading}\n"
@@ -599,8 +635,6 @@ CHAPTER_NOTES_USER_TMPL = (
     " claims. Skip anecdotes, asides, illustrations and numbers that are not the point.\n"
     '- Each note must say something specific. Skip general remarks such as "there are '
     'many uses" or "this is important" that a reader could write without the passage.\n'
-    "- In a story, note the events, decisions and revelations that move it forward, "
-    "naming the characters.\n"
     'Return JSON: {{"notes": ["...", "..."]}}'
 )
 

@@ -27,9 +27,10 @@ from app.repos.flashcard_repo import FlashcardRepo
 from app.repos.graph_entity_repo import GraphEntityRepo
 from app.services.chapters import Chapter, chapters_for_document
 from app.services.embedder import get_embedding_service
-from app.services.flashcard_chapter import ChapterCard, Passage, write_chapter_cards
+from app.services.flashcard_chapter import Book, ChapterCard, Passage, write_chapter_cards
 from app.services.flashcard_factuality import FACTUALITY_UNCHECKED
 from app.services.flashcard_parsers import grounding_state
+from app.services.flashcard_prompts import _infer_genre
 from app.services.flashcard_search import _sync_flashcard_fts
 from app.services.llm_admission import unattended
 from app.types import CARD_HELD
@@ -69,10 +70,16 @@ def writing_any() -> bool:
     return bool(_writing)
 
 
-async def _known_names(document_id: str, session: AsyncSession) -> str:
+async def book_for(document_id: str, session: AsyncSession) -> Book:
+    doc = await DocumentRepo(session).get_or_404(document_id)
     entities = await GraphEntityRepo(session).entities_for_document(document_id)
     top = sorted(entities, key=lambda e: e.mention_count or 0, reverse=True)[:KNOWN_NAMES]
-    return " ".join(e.name for e in top)
+    return Book(
+        title=doc.title,
+        genre=_infer_genre(doc),
+        known_names=" ".join(e.name for e in top),
+        people=tuple(e.name for e in entities if e.type == "PERSON" and len(e.name.split()) > 1),
+    )
 
 
 def _card_row(document_id: str, chapter: Chapter, card: ChapterCard, now: datetime):
@@ -96,7 +103,7 @@ def _card_row(document_id: str, chapter: Chapter, card: ChapterCard, now: dateti
 
 
 async def write_chapter(
-    document_id: str, book: str, chapter: Chapter, known_names: str, session: AsyncSession
+    document_id: str, book: Book, chapter: Chapter, session: AsyncSession
 ) -> int | None:
     """The number of cards written, or None when this process is already writing the chapter."""
     key = (document_id, chapter.id)
@@ -105,13 +112,13 @@ async def write_chapter(
     _writing.add(key)
     try:
         async with _one_writer():
-            return await _write_chapter(document_id, book, chapter, known_names, session)
+            return await _write_chapter(document_id, book, chapter, session)
     finally:
         _writing.discard(key)
 
 
 async def _write_chapter(
-    document_id: str, book: str, chapter: Chapter, known_names: str, session: AsyncSession
+    document_id: str, book: Book, chapter: Chapter, session: AsyncSession
 ) -> int:
     from app.services.flashcard import get_llm_service  # noqa: PLC0415
 
@@ -123,7 +130,6 @@ async def _write_chapter(
         get_embedding_service().encode,
         book=book,
         passages=passages,
-        known_names=known_names,
         document_id=document_id,
     )
     now = datetime.now(UTC)
@@ -147,15 +153,14 @@ async def _write_chapter(
 async def chapter_cards_handler(document_id: str, job_id: str) -> None:
     """Enrichment handler for job_type='chapter_cards': the document's first chapters."""
     async with get_session_factory()() as session:
-        doc = await DocumentRepo(session).get_or_404(document_id)
-        chapters = await chapters_for_document(document_id, doc.title, session)
-        known_names = await _known_names(document_id, session)
+        book = await book_for(document_id, session)
+        chapters = await chapters_for_document(document_id, book.title, session)
         # The reader offers these at the end of chapter one, so they are not paced.
         with unattended(False):
             for chapter in chapters[:INGEST_CHAPTERS]:
                 # Read per chapter: the backfill may have written one while this job wrote another.
                 if chapter.id not in await FlashcardRepo(session).chapters_written(document_id):
-                    await write_chapter(document_id, doc.title, chapter, known_names, session)
+                    await write_chapter(document_id, book, chapter, session)
 
 
 @dataclass(frozen=True)
