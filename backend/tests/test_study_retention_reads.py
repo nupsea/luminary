@@ -42,7 +42,8 @@ def _card(document_id, stability, due_in_days, chunk_id=None) -> FlashcardModel:
         fsrs_state="review",
         fsrs_stability=stability,
         fsrs_difficulty=0.5,
-        due_date=None if due_in_days is None else _NOW + timedelta(days=due_in_days),
+        # Dated now, not at import: a slow suite reaches this test long after _NOW (0.951 -> 0.950).
+        due_date=None if due_in_days is None else datetime.now(UTC) + timedelta(days=due_in_days),
     )
 
 
