@@ -15,6 +15,7 @@ import type { Ref } from "react"
 
 import NotePreviewPanel from "@/components/NotePreviewPanel"
 import TagGraph from "@/components/TagGraph"
+import type { GraphEmptyReason } from "@/lib/vizUtils"
 
 import { CameraControls } from "./CameraControls"
 import { CanvasOverlays } from "./CanvasOverlays"
@@ -39,6 +40,8 @@ interface VizCanvasProps {
   kgIsLoading: boolean
   kgIsError: boolean
   showEmpty: boolean
+  emptyReason: GraphEmptyReason
+  emptyScope: "document" | "all"
   showAllHidden: boolean
   entityNodeCount: number
   onKgRetry: () => void
@@ -72,6 +75,8 @@ export function VizCanvas(props: VizCanvasProps) {
     kgIsLoading,
     kgIsError,
     showEmpty,
+    emptyReason,
+    emptyScope,
     showAllHidden,
     entityNodeCount,
     onKgRetry,
@@ -118,6 +123,8 @@ export function VizCanvas(props: VizCanvasProps) {
         kgShowLoading={!noDocSelected && kgIsLoading && viewMode !== "tags"}
         kgShowError={!noDocSelected && !kgIsLoading && kgIsError && viewMode !== "tags"}
         showEmpty={showEmpty}
+        emptyReason={emptyReason}
+        emptyScope={emptyScope}
         showAllHidden={showAllHidden}
         entityNodeCount={entityNodeCount}
         onKgRetry={onKgRetry}
