@@ -115,9 +115,10 @@ async def _run_progressive_summarization(doc_id: str) -> None:
     1. generate_progressive() summarises the first FAST_PATH_MIN_UNITS sections.
     2. pregenerate() derives one_sentence/executive from those seed summaries via
        the existing section-summary fast path -- one short call each, no map-reduce.
-    3. generate_progressive_rest() finishes the remaining sections.
+    3. generate_progressive_rest() finishes the remaining sections, then
+       one_sentence/executive are regenerated from all of them.
     4. A final pregenerate() picks up 'detailed', assembled for free once every
-       section has a summary -- one_sentence/executive are already cached.
+       section has a summary.
     """
     if _background_refusal(doc_id, "progressive summarize"):
         return
@@ -163,6 +164,13 @@ async def _run_progressive_summarization(doc_id: str) -> None:
             rest_inserted,
             extra={"doc_id": doc_id},
         )
+        if rest_inserted:
+            # The fast summaries saw only the seed sections: key points about a
+            # book's opening chapters, never its middle or end.
+            with unattended():
+                await get_summarization_service().pregenerate(
+                    doc_id, modes=("one_sentence", "executive"), refresh=True
+                )
     except Exception as exc:
         logger.warning(
             "progressive summarize: remaining section summaries failed (non-fatal): %s",

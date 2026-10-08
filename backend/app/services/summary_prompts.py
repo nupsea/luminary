@@ -13,12 +13,20 @@ _MARKDOWN_INSTRUCTION = (
 # Mode-specific instructions appended after the grounding prefix
 MODE_INSTRUCTIONS: dict[str, str] = {
     "one_sentence": "Summarize in a single sentence of at most 30 words.",
+    # Written for a reader deciding to start the work: abstract "themes" alone
+    # told them neither what it is about nor who and what it involves.
     "executive": (
-        "Identify the 3 to 5 most important ideas that run through the entire work. "
-        "Write each as a concise bullet point. "
-        "Do NOT list individual chapter or passage summaries — synthesise across them. "
+        "Write the key points a curious reader needs before starting this work. "
+        "Open with one or two plain sentences saying what the work is about: its "
+        "subject, premise or central question. "
+        "Then give 5 to 8 bullet points covering its main events, ideas or arguments, "
+        "drawn from the beginning, middle and end of the work, not only its opening. "
+        "Name the specific people, places, concepts and terms the work is built on. "
+        "State only what the text says; do not interpret beyond it. "
+        "Do NOT list chapter or passage summaries one by one — synthesise across them. "
         "Ignore copyright notices, licensing terms, and distribution metadata. "
-        f"{_MARKDOWN_INSTRUCTION}"
+        "Format your response using Markdown: a short paragraph, then a bullet list "
+        "with **bold** for names and terms. No headings."
     ),
     "detailed": (
         "Summarize each section separately, preserving the heading structure. "

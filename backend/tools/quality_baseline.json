@@ -180,7 +180,7 @@
     "app/services/retriever.py": 4,
     "app/services/retriever_strategies.py": 2,
     "app/services/scope_resolver.py": 8,
-    "app/services/section_summarizer.py": 10,
+    "app/services/section_summarizer.py": 7,
     "app/services/settings_service.py": 2,
     "app/services/study_assembler.py": 10,
     "app/services/study_path_service.py": 8,
