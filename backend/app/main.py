@@ -32,6 +32,7 @@ from app.routers.chat_sessions import router as chat_sessions_router
 from app.routers.clips import router as clips_router
 from app.routers.collections import router as collections_router
 from app.routers.concepts import router as concepts_router
+from app.routers.devices import router as devices_router
 from app.routers.documents import router as documents_router
 from app.routers.engagement import router as engagement_router
 from app.routers.evals import router as evals_router
@@ -59,6 +60,7 @@ from app.routers.setup import router as setup_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
+from app.runtime.request_auth import DEV_APP_ORIGINS, RequestAuthMiddleware
 from app.services.background import all_pending, clear_registries, task_registry
 from app.services.background_prefs import load_background_prefs
 from app.services.chapter_backfill import ChapterBackfill
@@ -489,11 +491,24 @@ async def _domain_error_handler(_request: Request, exc: LuminaryError) -> JSONRe
 
 _mode = get_settings().LUMINARY_MODE
 
-# Load-bearing against DNS rebinding. The server binds loopback and has no
-# authentication, so it trusts the network boundary entirely -- but a hostile
-# page can rebind its own domain to 127.0.0.1 and become same-origin, which
-# turns every endpoint into a readable, writable, same-origin resource. Pinning
-# Host to loopback names rejects those requests before routing.
+# In public mode the whole API lives under /api so SPA client routes (/notes,
+# /study, /collections/:id, ...) never collide with router paths. full/test keep
+# routers at root, so no test paths change.
+_API_PREFIX = "/api" if _mode == "public" else ""
+
+# Innermost of the middlewares: Host is pinned and CORS preflights are answered
+# before a request is asked who it acts for.
+app.add_middleware(
+    RequestAuthMiddleware,
+    api_prefix=_API_PREFIX,
+    app_origins=DEV_APP_ORIGINS if _mode == "full" else frozenset(),
+    pair_path=f"{_API_PREFIX}/devices/pair",
+)
+
+# Load-bearing against DNS rebinding. The app's own origin is trusted without a
+# token, and a hostile page can rebind its own domain to 127.0.0.1 and become
+# same-origin. Pinning Host to loopback names rejects those requests before
+# routing; it may only widen behind authentication (roadmap, 0.18.0).
 # Starlette strips the port before matching, so bare hostnames are correct here
 # (a "host:*" pattern would fail its wildcard assertion at import). Skipped under
 # pytest, where the ASGI transport invents its own Host values.
@@ -510,11 +525,6 @@ if _mode == "full":
         allow_headers=["*"],
     )
 
-# In public mode the whole API lives under /api so SPA client routes (/notes,
-# /study, /collections/:id, ...) never collide with router paths. full/test keep
-# routers at root, so no test paths change.
-_API_PREFIX = "/api" if _mode == "public" else ""
-
 
 ROUTER_REGISTRY = {
     "admin": admin_router,
@@ -524,6 +534,7 @@ ROUTER_REGISTRY = {
     "clips": clips_router,
     "collections": collections_router,
     "concepts": concepts_router,
+    "devices": devices_router,
     "chat_meta": chat_meta_router,
     "chat_sessions": chat_sessions_router,
     "documents": documents_router,
@@ -556,8 +567,9 @@ ROUTER_REGISTRY = {
 }
 
 # settings and setup are always registered: the Settings drawer needs one, and
-# the other is what a user with an incomplete install has to reach.
-_enabled = enabled_routers(_mode) | {"settings", "setup"}
+# the other is what a user with an incomplete install has to reach. devices is
+# how any caller but the app gets in.
+_enabled = enabled_routers(_mode) | {"settings", "setup", "devices"}
 for _name, _router in ROUTER_REGISTRY.items():
     if _name in _enabled:
         app.include_router(_router, prefix=_API_PREFIX)

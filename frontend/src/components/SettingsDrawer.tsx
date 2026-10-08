@@ -10,6 +10,7 @@ import { apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 import { RoutingTable } from "@/components/settings/RoutingTable"
 import { API_BASE } from "@/lib/config"
 import { getTheme, setTheme, type Theme } from "@/lib/theme"
+import { DevicesSettings } from "@/components/settings/DevicesSettings"
 import { ModelsAndComponents } from "@/components/settings/ModelsAndComponents"
 import { type ModelDrift } from "@/components/settings/ModelDriftNotice"
 import { OreillySettings } from "@/components/settings/OreillySettings"
@@ -746,6 +747,13 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
           <div className="border-t border-border" />
 
           <BackgroundControl />
+
+          <div className="border-t border-border" />
+
+          <section>
+            <h3 className="mb-1 text-sm font-semibold text-foreground">Devices</h3>
+            <DevicesSettings />
+          </section>
 
           <div className="border-t border-border" />
 
