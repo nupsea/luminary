@@ -66,7 +66,6 @@ from app.services.background_prefs import load_background_prefs
 from app.services.chapter_backfill import ChapterBackfill
 from app.services.chapter_cards import chapter_cards_handler
 from app.services.components import (
-    activate_extras,
     install_ollama_model,
     resolve_tool,
     running_in_container,
@@ -81,6 +80,7 @@ from app.services.image_extractor import image_extract_handler
 from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.llm_admission import unattended
 from app.services.prereq_extractor import prereq_extract_handler
+from app.services.python_extras import activate_extras
 from app.services.reference_enricher import web_refs_handler
 from app.services.settings_service import _cache as _llm_cache
 from app.services.settings_service import load_llm_settings
