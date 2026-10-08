@@ -30,7 +30,7 @@ from app.database import get_session_factory
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
 from app.services.background_prefs import chapter_backfill
-from app.services.chapter_cards import _known_names, being_written, write_chapter, writing_any
+from app.services.chapter_cards import being_written, book_for, write_chapter, writing_any
 from app.services.chapters import Chapter, chapters_for_document
 from app.services.llm_admission import unattended
 
@@ -207,8 +207,8 @@ async def run_once() -> tuple[bool, str | None]:
     name = choice.model.removeprefix("ollama/") if choice else None
     loaded = name if name and not await _resident(name) else None
     async with get_session_factory()() as session:
-        names = await _known_names(pick.document_id, session)
-        cards = await write_chapter(pick.document_id, pick.title, pick.chapter, names, session)
+        book = await book_for(pick.document_id, session)
+        cards = await write_chapter(pick.document_id, book, pick.chapter, session)
     return cards is not None, loaded
 
 

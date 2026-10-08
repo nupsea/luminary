@@ -20,6 +20,7 @@ from app.repos.study_repo import DueScope, StudyRepo
 from app.services import chapter_backfill, chapter_cards
 from app.services.flashcard_chapter import (
     MAX_CHAPTER_WINDOWS,
+    Book,
     Passage,
     Window,
     build_windows,
@@ -27,6 +28,8 @@ from app.services.flashcard_chapter import (
 )
 from app.services.flashcard_prompts import CHAPTER_NOTES_SYSTEM
 from app.services.flashcard_units import split_units
+
+DDIA = Book(title="DDIA", genre="technical")
 
 LOG = (
     "A log is an append-only sequence of records stored on disk. "
@@ -47,7 +50,7 @@ def _reply(question: str, answer: str) -> str:
     return json.dumps({"question": question, "answer": answer})
 
 
-def _gate(question: str, answer: str, text: str = LOG, book: str = "DDIA") -> str:
+def _gate(question: str, answer: str, text: str = LOG, book: Book = DDIA) -> str:
     evidence = split_units(text)[0]
     _, why = card_from_reply(
         _reply(question, answer),
@@ -55,7 +58,6 @@ def _gate(question: str, answer: str, text: str = LOG, book: str = "DDIA") -> st
         window=_window(text),
         shown=evidence,
         evidence=evidence,
-        known_names="",
         document_id="d",
     )
     return why
@@ -82,8 +84,44 @@ def test_the_narrator_passes_only_when_the_question_names_the_book():
     answer = "On metal bars made for smaller creatures"
     named = "How does the narrator of The Time Machine descend the well?"
     unnamed = "How does the narrator descend the well?"
-    assert _gate(named, answer, text, book="The Time Machine") == "ok"
-    assert _gate(unnamed, answer, text, book="The Time Machine") != "ok"
+    story = Book(title="The Time Machine", genre="narrative")
+    assert _gate(named, answer, text, book=story) == "ok"
+    assert _gate(unnamed, answer, text, book=story) != "ok"
+
+
+def test_a_technical_book_has_no_narrator_to_name():
+    """Only a story has one; elsewhere it is "the author" restated (#253)."""
+    text = "The narrator explains that a function is a named sequence of statements."
+    question = "According to the narrator of Think Python, what is a function?"
+    answer = "A named sequence of statements"
+    assert _gate(question, answer, text, Book("Think Python", "narrative")) == "ok"
+    assert _gate(question, answer, text, Book("Think Python", "technical")) != "ok"
+
+
+PIKE = (
+    "Rob Pike says that you cannot tell where a program is going to spend its time. "
+    "Bottlenecks occur in surprising places, so do not guess until you have measured."
+)
+
+
+@pytest.mark.parametrize(
+    ("genre", "question", "answer", "why"),
+    [
+        ("technical", "Who says you cannot tell where a program spends its time?", "Rob Pike",
+         "asks who"),
+        ("technical", "Where does Rob Pike say bottlenecks occur?", "In surprising places",
+         "names a person (rob pike)"),
+        ("academic", "Who says you cannot tell where a program spends its time?", "Rob Pike",
+         "asks who"),
+        # A person is a story's subject, and in a technical book a question on the rule passes.
+        ("narrative", "Who says you cannot tell where a program spends its time?", "Rob Pike",
+         "ok"),
+        ("technical", "Where do bottlenecks occur in a program?", "In surprising places", "ok"),
+    ],
+)  # fmt: skip
+def test_a_technical_card_about_a_person_is_refused(genre, question, answer, why):
+    book = Book(title="The Art of Unix", genre=genre, known_names="rob pike", people=("rob pike",))
+    assert _gate(question, answer, PIKE, book) == why
 
 
 def test_windows_drop_reference_lists_and_chunk_overlap():
@@ -130,11 +168,13 @@ class _FakeLLM:
     def __init__(self) -> None:
         self.calls = 0
         self.foreground = 0
+        self.systems: list[str] = []
 
     async def generate(self, prompt: str, *, system: str, **kw) -> str:
         self.calls += 1
         self.foreground += not kw.get("background")
-        if system == CHAPTER_NOTES_SYSTEM:
+        self.systems.append(system)
+        if system.startswith(CHAPTER_NOTES_SYSTEM):
             return json.dumps({"notes": ["A log is an append-only sequence of records."]})
         evidence = prompt.split("Evidence from the book:\n", 1)[1].split("\n")[0]
         return _reply("What is a log in a storage engine?", " ".join(evidence.split()[:8]))
@@ -186,6 +226,38 @@ async def test_the_job_writes_held_cards_outside_the_review_queue(book, fakes):
         assert card.source_chunk_ids == ["c1"]
         assert card.grounding == "verified"
         assert await StudyRepo(session).count_due(DueScope(document_ids=["doc"])) == 0
+
+
+async def test_the_prompts_follow_the_kind_of_book(book, fakes):
+    """Both steps carry the document's card genre: a technical book is never asked who (#253)."""
+    from sqlalchemy import update
+
+    async with book.factory() as session:
+        await session.execute(
+            update(DocumentModel)
+            .where(DocumentModel.id == "doc")
+            .values(form="prose", domain="technical", register="expository")
+        )
+        await session.commit()
+    await chapter_cards.chapter_cards_handler("doc", "job")
+
+    notes, card = fakes.systems
+    assert "This is a technical book" in notes and "never about a person" in notes
+    assert "Never ask who wrote, built or said something" in card
+
+
+async def test_the_book_holds_only_multi_word_people(book):
+    from app.models import GraphEntityModel
+
+    async with book.factory() as session:
+        entities = [("rob pike", "PERSON"), ("flink", "PERSON"), ("rob pike's rule", "CONCEPT")]
+        for name, kind in entities:
+            session.add(GraphEntityModel(id=name, document_id="doc", name=name, type=kind))
+        await session.commit()
+        built = await chapter_cards.book_for("doc", session)
+
+    assert built.people == ("rob pike",)
+    assert set(built.known_names.split(" ")) >= {"flink", "rob", "pike"}
 
 
 async def test_a_rerun_skips_chapters_that_already_have_cards(book, fakes):
@@ -348,7 +420,7 @@ async def test_a_chapter_is_never_written_twice_at_once(long_book, fakes, monkey
     assert await chapter_backfill.not_now(pick) == "a chapter is being written"
     async with long_book.factory() as session:
         chapters = await chapter_cards.chapters_for_document("bk", "DDIA", session)
-        assert await chapter_cards.write_chapter("bk", "DDIA", chapters[0], "", session) is None
+        assert await chapter_cards.write_chapter("bk", DDIA, chapters[0], session) is None
 
     release.set()
     await first
@@ -399,7 +471,7 @@ async def test_two_chapters_are_written_one_after_the_other(long_book, fakes, mo
 
     async def write(chapter):
         async with long_book.factory() as session:
-            return await chapter_cards.write_chapter("bk", "DDIA", chapter, "", session)
+            return await chapter_cards.write_chapter("bk", DDIA, chapter, session)
 
     tasks = [asyncio.create_task(write(c)) for c in chapters[2:4]]
     while not entered:

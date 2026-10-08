@@ -23,10 +23,10 @@ from app.services.enrichment_concurrency import get_enrichment_llm_semaphore
 from app.services.flashcard import _is_reference_chunk
 from app.services.flashcard_parsers import _parse_llm_response, card_field, card_rejection
 from app.services.flashcard_prompts import (
-    CHAPTER_CARD_SYSTEM,
     CHAPTER_CARD_USER_TMPL,
-    CHAPTER_NOTES_SYSTEM,
     CHAPTER_NOTES_USER_TMPL,
+    chapter_card_system,
+    chapter_notes_system,
 )
 from app.services.flashcard_units import (
     MIN_ANSWER_COVERAGE,
@@ -50,6 +50,19 @@ _MAX_OVERLAP = 800
 _MIN_OVERLAP = 40
 
 Embed = Callable[[list[str]], list[list[float]]]
+
+
+@dataclass(frozen=True)
+class Book:
+    """What the chapter prompts and gates know of the document."""
+
+    title: str
+    genre: str
+    # Names the entity graph holds, allowed in a question its window does not show.
+    known_names: str = ""
+    # PERSON entities of two or more words; one-word ones are noise on technical books
+    # ("users", "flink" on apache-iceberg would refuse 33 of its 278 cards).
+    people: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -173,6 +186,9 @@ _UNNAMED_WORK = re.compile(
     re.I,
 )
 _NARRATOR = re.compile(r"\bthe\s+(?:narrator|protagonist)\b", re.I)
+_ASKS_WHO = re.compile(r"^\W*(?:who|whom|whose)\b", re.I)
+# Kinds of book whose cards are about the subject, never a person (#253).
+_SUBJECT_GENRES = frozenset({"technical", "academic"})
 _WORDS = re.compile(r"[a-z0-9]+")
 _TITLE_FILLER = {"the", "a", "an", "of"}
 
@@ -183,6 +199,17 @@ def _names_the_work(question: str, book: str) -> bool:
 
 
 _CLOSERS = " \"'\u201d\u2019)]"
+
+
+def _person_asked(question: str, book: Book) -> str | None:
+    """Why a technical or research card is about a person rather than its subject, or None."""
+    if book.genre not in _SUBJECT_GENRES:
+        return None
+    if _ASKS_WHO.search(question):
+        return "asks who"
+    low = question.lower()
+    named = next((p for p in book.people if re.search(rf"\b{re.escape(p)}\b", low)), None)
+    return f"names a person ({named})" if named else None
 
 
 def _question_and_answer(raw: str, document_id: str) -> tuple[str, str] | None:
@@ -203,11 +230,10 @@ def _answer_coverage(answer: str, shown: str, units: Sequence[str]) -> float:
 def card_from_reply(
     raw: str,
     *,
-    book: str,
+    book: Book,
     window: Window,
     shown: str,
     evidence: str,
-    known_names: str,
     document_id: str,
 ) -> tuple[dict[str, str] | None, str]:
     """The card in *raw* if it passes every gate, else (None, why it was dropped)."""
@@ -220,11 +246,16 @@ def card_from_reply(
     coverage = _answer_coverage(a, shown, window.units)
     if coverage < MIN_ANSWER_COVERAGE:
         return None, f"answer in no sentence ({coverage:.2f})"
-    unshown = names_not_in(q, f"{book} {window.heading} {known_names} {window.text}")
+    unshown = names_not_in(q, f"{book.title} {window.heading} {book.known_names} {window.text}")
     if unshown:
         return None, f"names someone unshown {unshown}"
-    # "the narrator" is unresolvable alone, resolvable once the question names the book.
-    gated = _NARRATOR.sub("Narrator", q) if _names_the_work(q, book) else q
+    person = _person_asked(q, book)
+    if person:
+        return None, person
+    # "the narrator" is unresolvable alone, resolvable once the question names the book. Only a
+    # story has one: elsewhere it is "the author" restated ("the narrator of ThinkPython2").
+    named = book.genre == "narrative" and _names_the_work(q, book.title)
+    gated = _NARRATOR.sub("Narrator", q) if named else q
     rejected = card_rejection(gated, a, evidence, " ".join(window.units))
     if rejected:
         return None, rejected[1]
@@ -252,12 +283,12 @@ async def write_chapter_cards(
     model: str | None,
     embed: Embed,
     *,
-    book: str,
+    book: Book,
     passages: Sequence[Passage],
-    known_names: str,
     document_id: str,
 ) -> list[ChapterCard]:
     """One card per study note, in reading order, each through the product's card gates."""
+    notes_system, card_system = chapter_notes_system(book.genre), chapter_card_system(book.genre)
     cards: list[ChapterCard] = []
     seen: list[set[str]] = []
     for window in build_windows(passages):
@@ -266,9 +297,12 @@ async def write_chapter_cards(
                 llm,
                 model,
                 CHAPTER_NOTES_USER_TMPL.format(
-                    book=book, heading=window.heading, text=window.text, k=_notes_wanted(window)
+                    book=book.title,
+                    heading=window.heading,
+                    text=window.text,
+                    k=_notes_wanted(window),
                 ),
-                CHAPTER_NOTES_SYSTEM,
+                notes_system,
             )
         )
         if not notes:
@@ -283,9 +317,9 @@ async def write_chapter_cards(
                 llm,
                 model,
                 CHAPTER_CARD_USER_TMPL.format(
-                    book=book, heading=window.heading, note=note, evidence=shown
+                    book=book.title, heading=window.heading, note=note, evidence=shown
                 ),
-                CHAPTER_CARD_SYSTEM,
+                card_system,
             )
             card, why = card_from_reply(
                 raw,
@@ -293,7 +327,6 @@ async def write_chapter_cards(
                 window=window,
                 shown=shown,
                 evidence=evidence,
-                known_names=known_names,
                 document_id=document_id,
             )
             if card is None:
