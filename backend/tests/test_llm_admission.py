@@ -483,7 +483,8 @@ async def test_status_endpoint_reports_the_pause_the_ui_shows(tmp_path, monkeypa
     from app.models import DocumentModel
 
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    # One slot leaves no background reserve, so the background call must wait; env beats a local .env.
+    # One slot leaves no background reserve, so the background call must wait.
+    # Set in the env, which beats a local .env.
     monkeypatch.setenv("OLLAMA_NUM_PARALLEL", "1")
     get_settings.cache_clear()
 
