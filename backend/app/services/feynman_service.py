@@ -29,6 +29,7 @@ from app.models import (
     SectionModel,
     SectionSummaryModel,
 )
+from app.repos.document_repo import DocumentRepo
 from app.services.feynman_strategies import (
     _FEYNMAN_OPENING_TMPL,
     _FEYNMAN_SYSTEM_TMPL,
@@ -299,7 +300,10 @@ class FeynmanService:
 
         flashcard_ids: list[str] = []
 
-        if all_gaps:
+        # The session outlives its document (a learner record); cards for a deleted one would
+        # fail the flashcards foreign key, and would have been deleted with it anyway.
+        document_gone = not await DocumentRepo(db_session).exists(feynman_session.document_id)
+        if all_gaps and not document_gone:
             from app.services.flashcard import get_flashcard_service  # noqa: PLC0415
 
             fc_svc = get_flashcard_service()

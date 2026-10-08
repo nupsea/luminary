@@ -27,6 +27,8 @@ from app.models import (
 )
 from app.services.document_deletion_service import DocumentDeletionService
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 
 @pytest.fixture()
 async def test_db(tmp_path, monkeypatch):

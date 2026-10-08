@@ -9,6 +9,8 @@ from httpx import ASGITransport, AsyncClient
 from app.main import app
 from app.models import FlashcardModel, ReviewEventModel, StudySessionModel
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 # Test DB fixture
 
 

@@ -30,6 +30,8 @@ from app.models import (
 from app.repos.study_repo import StudyRepo
 from app.services.flashcard import FlashcardService
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 _T0 = datetime(2026, 9, 10, 9, 0, tzinfo=UTC)
 
 

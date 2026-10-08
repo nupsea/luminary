@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Selecting text in the PDF painted a bar in the page margin.**
 - **A highlight made near a page break was saved to the page in view** rather than the page it was made on.
+- **Deleting a document while its cards were generating could leave cards behind for a document that no longer exists.** Deleting now stops the generation, and the database refuses such a card; the upgrade removes any already left behind.
 
 ## [0.15.5] - 2026-10-07
 

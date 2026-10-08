@@ -19,6 +19,8 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import ConceptModel, FlashcardModel, NoteModel, StudyEventModel
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 
 @pytest.fixture
 async def test_db(tmp_path, monkeypatch):

@@ -12,6 +12,8 @@ from httpx import ASGITransport, AsyncClient
 from app.main import app
 from app.models import CollectionMemberModel, CollectionModel, FlashcardModel
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 
 @pytest.fixture
 def test_db(memory_db):

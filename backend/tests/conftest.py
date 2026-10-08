@@ -526,3 +526,32 @@ def single_prompt(monkeypatch):
 def test_db(memory_db):
     """(engine, factory, tmp_path). A file needing a different shape overrides this."""
     return memory_db
+
+
+@pytest.fixture
+def card_documents():
+    """Give each flushed flashcard a stand-in document row, for files whose subject is the card.
+
+    flashcards.document_id is a foreign key (#242). Opt in per file with
+    `pytestmark = pytest.mark.usefixtures("card_documents")`; a test of the key itself must not.
+    """
+    from sqlalchemy import event
+    from sqlalchemy.dialects.sqlite import insert
+    from sqlalchemy.orm import Session
+
+    from app.models import DocumentModel, FlashcardModel
+
+    def _before_flush(session, _context, _instances):
+        new = session.new
+        doc_ids = {o.document_id for o in new if isinstance(o, FlashcardModel) and o.document_id}
+        doc_ids -= {o.id for o in new if isinstance(o, DocumentModel)}
+        if doc_ids:
+            rows = [
+                {"id": d, "title": d, "format": "txt", "content_type": "notes", "file_path": "/x"}
+                for d in sorted(doc_ids)
+            ]
+            session.connection().execute(insert(DocumentModel).on_conflict_do_nothing(), rows)
+
+    event.listen(Session, "before_flush", _before_flush)
+    yield
+    event.remove(Session, "before_flush", _before_flush)

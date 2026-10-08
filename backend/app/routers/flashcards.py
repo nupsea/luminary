@@ -99,6 +99,7 @@ from app.services.flashcards_router_service import (
     to_response as _to_response,
 )
 from app.services.fsrs_service import FSRSService, get_fsrs_service
+from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.llm import LLMUnavailableError
 from app.services.objective_tracker import get_objective_tracker_service
 from app.services.settings_service import get_llm_error_message
@@ -655,6 +656,9 @@ async def fill_uncovered_sections(
     task = asyncio.create_task(_run())
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+    # Deleting the document cancels the generation rather than spending model time on cards
+    # the foreign key would refuse (#242).
+    get_ingestion_jobs().track_followup(document_id, task)
     return FillUncoveredResponse(queued=len(req.section_ids))
 
 

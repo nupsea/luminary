@@ -28,6 +28,8 @@ from app.services.teachback_service import (
     _score_from_dimensions,
 )
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 # Pure function tests for _rubric_from_evaluation
 
 EVIDENCE = "Events are immutable records."

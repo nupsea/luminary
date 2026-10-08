@@ -16,6 +16,8 @@ from app.main import app
 from app.models import ConceptModel, FlashcardModel, NoteModel, OverrideModel
 from app.services.concept_service import get_concept_service
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 
 @pytest.fixture
 async def test_db(tmp_path, monkeypatch):

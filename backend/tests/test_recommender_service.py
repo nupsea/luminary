@@ -22,6 +22,8 @@ from app.models import (
 )
 from app.services import recommender_service as svc
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 
 @pytest.fixture
 async def session_factory():

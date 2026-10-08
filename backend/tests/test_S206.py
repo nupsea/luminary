@@ -11,6 +11,8 @@ from app.main import app
 from app.models import FlashcardModel
 from app.services.flashcard import _sanitize_fts5_query, _sync_flashcard_fts
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 # Isolated test DB fixture
 
 

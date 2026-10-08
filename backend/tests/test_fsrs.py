@@ -10,6 +10,8 @@ from app.main import app
 from app.models import FlashcardModel
 from app.services.fsrs_service import FSRSService
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 # Shared test DB fixture
 
 

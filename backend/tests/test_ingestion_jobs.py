@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from unittest.mock import MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.main import app
-from app.models import DocumentModel
+from app.models import DocumentModel, FlashcardModel, SectionModel
 from app.services.ingestion_jobs import IngestionJobRegistry, get_ingestion_jobs
 
 # Registry unit tests (no DB, no FastAPI)
@@ -156,6 +157,69 @@ async def test_delete_cancels_in_flight_ingestion(test_db):
     async with factory() as session:
         result = await session.execute(select(DocumentModel).where(DocumentModel.id == doc_id))
         assert result.scalar_one_or_none() is None
+
+
+async def test_delete_cancels_card_generation_for_uncovered_sections(test_db):
+    """#242: fill-uncovered outlived the delete and wrote cards for a document that was gone."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Doc",
+                format="txt",
+                content_type="notes",
+                file_path=str(tmp_path / "doc.txt"),
+                stage="complete",
+            )
+        )
+        session.add(
+            SectionModel(id="sec", document_id=doc_id, heading="One", level=1, section_order=0)
+        )
+        await session.commit()
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def generate(*, document_id, session, **_kwargs):
+        started.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        card = FlashcardModel(
+            id=str(uuid.uuid4()),
+            document_id=document_id,
+            question="Q",
+            answer="A",
+            source_excerpt="",
+        )
+        session.add(card)
+        await session.commit()
+        return [card]
+
+    svc = MagicMock(generate=generate)
+    transport = ASGITransport(app=app)
+    with patch("app.services.flashcard.get_flashcard_service", return_value=svc):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                f"/flashcards/health/{doc_id}/fill-uncovered", json={"section_ids": ["sec"]}
+            )
+            assert resp.status_code == 202
+            await started.wait()
+            resp = await client.delete(f"/documents/{doc_id}")
+            assert resp.status_code == 204
+        release.set()
+        await asyncio.sleep(0.1)
+
+    # The cancel, not only the foreign key: an uncancelled task spends model time per section.
+    assert cancelled.is_set()
+    async with factory() as session:
+        cards = (await session.execute(select(FlashcardModel))).scalars().all()
+    assert cards == []
 
 
 async def test_delete_without_running_ingestion_still_succeeds(test_db):

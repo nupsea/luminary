@@ -15,6 +15,8 @@ from app.main import app
 from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
 from app.services.flashcard import FlashcardService
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 # Isolated test DB fixture
 
 

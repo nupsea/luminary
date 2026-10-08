@@ -15,6 +15,8 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 
 @pytest.fixture()
 def client():

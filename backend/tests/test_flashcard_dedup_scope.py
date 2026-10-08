@@ -15,6 +15,8 @@ from app.db_init import create_all_tables
 from app.models import CollectionMemberModel, CollectionModel, FlashcardModel
 from app.services.flashcard import _study_scope_member_ids
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 
 @pytest.fixture
 async def session():
