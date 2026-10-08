@@ -24,6 +24,29 @@ export interface Box {
   right: number
 }
 
+/**
+ * Taller than any line of text: a display heading at high zoom is under 200px,
+ * while pdf.js's end-of-content marker, placed inside a selection that crosses
+ * pages, is a whole page tall (900px at reading zoom).
+ */
+const LINE_MAX_HEIGHT = 200
+
+/**
+ * The selection's extent, from its line boxes. A range's bounding rect also
+ * covers that marker, which put the bar a page away from the selection.
+ */
+export function selectionBox(rects: Box[]): Box | null {
+  let box: Box | null = null
+  for (const r of rects) {
+    const height = r.bottom - r.top
+    if (height <= 0 || r.right <= r.left || height > LINE_MAX_HEIGHT) continue
+    box = box
+      ? { top: Math.min(box.top, r.top), bottom: Math.max(box.bottom, r.bottom), left: Math.min(box.left, r.left), right: Math.max(box.right, r.right) }
+      : { top: r.top, bottom: r.bottom, left: r.left, right: r.right }
+  }
+  return box
+}
+
 export interface Placement {
   top: number
   left: number

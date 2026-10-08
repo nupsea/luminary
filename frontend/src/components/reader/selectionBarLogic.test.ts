@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { BAR_HALF_WIDTH, BAR_HEIGHT, explainModeFor, placeBar } from "./selectionBarLogic"
+import { BAR_HALF_WIDTH, BAR_HEIGHT, explainModeFor, placeBar, selectionBox } from "./selectionBarLogic"
 
 describe("explainModeFor", () => {
   it("defines a word or a short term", () => {
@@ -13,6 +13,20 @@ describe("explainModeFor", () => {
     expect(explainModeFor("The lakehouse stores tables. It is open.")).toBe("plain")
     expect(explainModeFor("Spark reads it; Trino queries it")).toBe("plain")
     expect(explainModeFor("a format that combines the lake and the warehouse")).toBe("plain")
+  })
+})
+
+describe("selectionBox", () => {
+  it("spans the selected lines and ignores the page-tall end-of-content marker", () => {
+    const lineOnPage40 = { top: 436, bottom: 446, left: 823, right: 920 }
+    const lineOnPage41 = { top: 660, bottom: 676, left: 417, right: 486 }
+    const endOfContent41 = { top: 521, bottom: 1445, left: 316, right: 1020 }
+    expect(selectionBox([lineOnPage40, endOfContent41, lineOnPage41])).toEqual({ top: 436, bottom: 676, left: 417, right: 920 })
+  })
+
+  it("has no box when nothing has extent", () => {
+    expect(selectionBox([{ top: 10, bottom: 10, left: 5, right: 5 }])).toBeNull()
+    expect(selectionBox([])).toBeNull()
   })
 })
 
