@@ -4,6 +4,7 @@ import { Component, useCallback, useEffect, useMemo, useRef, useState } from "re
 import type { ErrorInfo, ReactNode } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
+import { useComponents } from "@/hooks/useSetup"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "../store"
 import { useEffectiveActiveDocument } from "@/hooks/useEffectiveActiveDocument"
@@ -11,6 +12,7 @@ import { hasGraphData, isDocumentReady } from "@/lib/documentReadiness"
 import { useVizStore } from "../vizStore"
 import {
   ALL_ENTITY_TYPES,
+  graphEmptyReason,
   isCodeDocument,
   shouldShowClusterView,
   buildClusterNodes,
@@ -136,6 +138,7 @@ export default function Viz() {
     queryFn: fetchDocList,
     staleTime: 30_000,
   })
+  const { data: components } = useComponents()
 
   // Filtered doc list for the searchable picker. In-progress docs are
   // intentionally hidden -- their graph is empty and selecting them would do
@@ -311,6 +314,7 @@ export default function Viz() {
     !isError &&
     (!data || data.nodes.length === 0) &&
     viewMode !== "tags"
+  const emptyReason = graphEmptyReason(docList ? allDocIds.length : undefined, components)
   // showAllHidden: only considers entity/diagram nodes; note nodes are separate
   const entityNodeCount = data ? data.nodes.filter((n) => n.type !== "note").length : 0
   const showAllHidden =
@@ -421,6 +425,8 @@ export default function Viz() {
             kgIsLoading={isLoading}
             kgIsError={isError}
             showEmpty={showEmpty}
+            emptyReason={emptyReason}
+            emptyScope={scope}
             showAllHidden={showAllHidden}
             entityNodeCount={entityNodeCount}
             onKgRetry={() => void refetch()}

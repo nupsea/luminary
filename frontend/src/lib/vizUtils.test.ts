@@ -1,6 +1,31 @@
 import { describe, it, expect } from "vitest"
-import { isCodeDocument, shouldShowClusterView, buildClusterNodes } from "./vizUtils"
+import { isCodeDocument, shouldShowClusterView, buildClusterNodes, graphEmptyReason } from "./vizUtils"
 import type { VizNodeBase } from "./vizUtils"
+
+describe("graphEmptyReason", () => {
+  const ner = (installed: boolean) => [{ id: "reranker", installed: true }, { id: "ner", installed }]
+
+  it("an empty library is the cause, whatever is installed", () => {
+    expect(graphEmptyReason(0, ner(false))).toBe("no_documents")
+  })
+
+  it("documents ingested without the entity model", () => {
+    expect(graphEmptyReason(7, ner(false))).toBe("model_missing")
+  })
+
+  it("the entity model is absent from the list when extraction is turned off", () => {
+    expect(graphEmptyReason(7, [{ id: "reranker", installed: true }])).toBe("extraction_off")
+  })
+
+  it("model installed and documents present: nothing was extracted", () => {
+    expect(graphEmptyReason(7, ner(true))).toBe("no_entities")
+  })
+
+  it("names no cause while either input is still loading", () => {
+    expect(graphEmptyReason(undefined, undefined)).toBe("no_entities")
+    expect(graphEmptyReason(7, undefined)).toBe("no_entities")
+  })
+})
 
 describe("isCodeDocument", () => {
   it("returns true for canonical code format", () => {

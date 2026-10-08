@@ -55,6 +55,28 @@ export function isCodeDocument(format: string, contentType?: string): boolean {
   return false
 }
 
+export type GraphEmptyReason = "no_documents" | "model_missing" | "extraction_off" | "no_entities"
+
+/**
+ * Why a loaded knowledge graph has no nodes. Ingest skips entity extraction without
+ * failing the document when the entity model is not installed, so a full library can
+ * have an empty graph; "ingest a document" was the wrong advice there.
+ *
+ * `readyDocCount` and `components` are undefined while still loading. Neither may be
+ * read as a cause until it has loaded; the fallback names no cause.
+ */
+export function graphEmptyReason(
+  readyDocCount: number | undefined,
+  components: { id: string; installed: boolean }[] | undefined,
+): GraphEmptyReason {
+  if (readyDocCount === 0) return "no_documents"
+  if (!components) return "no_entities"
+  const ner = components.find((c) => c.id === "ner")
+  // The component list omits the entity model when GLINER_ENABLED is false.
+  if (!ner) return "extraction_off"
+  return ner.installed ? "no_entities" : "model_missing"
+}
+
 // Cluster view helpers
 
 /**

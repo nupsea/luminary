@@ -6,13 +6,45 @@
 
 import { Filter, Network } from "lucide-react"
 
+import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import { Skeleton } from "@/components/ui/skeleton"
+import type { GraphEmptyReason } from "@/lib/vizUtils"
+
+// No in-app rebuild exists for documents ingested without the entity model, so the
+// copy says so rather than implying an install fills the graph.
+function emptyCopy(reason: GraphEmptyReason, scope: "document" | "all") {
+  const where = scope === "document" ? "this document" : "your documents"
+  switch (reason) {
+    case "no_documents":
+      return {
+        title: "No knowledge graph yet",
+        body: "Add a document to the library. The people, places and ideas in it will appear here.",
+      }
+    case "model_missing":
+      return {
+        title: "Concept extraction is not installed",
+        body: `Without it, no entities were extracted from ${where}. Documents you add after installing it get a graph; documents already in the library are not rebuilt.`,
+      }
+    case "extraction_off":
+      return {
+        title: "Concept extraction is turned off",
+        body: "GLINER_ENABLED is false in this install's settings, so documents are added without a knowledge graph.",
+      }
+    case "no_entities":
+      return {
+        title: "No entities found",
+        body: `Nothing was extracted from ${where}. A document added before concept extraction was installed has no graph.`,
+      }
+  }
+}
 
 interface CanvasOverlaysProps {
   // Knowledge graph states
   kgShowLoading: boolean
   kgShowError: boolean
   showEmpty: boolean
+  emptyReason: GraphEmptyReason
+  emptyScope: "document" | "all"
   showAllHidden: boolean
   entityNodeCount: number
   onKgRetry: () => void
@@ -23,6 +55,8 @@ export function CanvasOverlays(props: CanvasOverlaysProps) {
     kgShowLoading,
     kgShowError,
     showEmpty,
+    emptyReason,
+    emptyScope,
     showAllHidden,
     entityNodeCount,
     onKgRetry,
@@ -54,15 +88,17 @@ export function CanvasOverlays(props: CanvasOverlaysProps) {
   }
 
   if (showEmpty) {
+    const { title, body } = emptyCopy(emptyReason, emptyScope)
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center p-6">
         <div className="rounded-2xl bg-muted/30 p-6">
           <Network size={48} className="text-muted-foreground/30" />
         </div>
-        <p className="text-lg font-semibold text-foreground">No knowledge graph yet</p>
-        <p className="text-sm text-muted-foreground max-w-xs">
-          Ingest a document first -- entities and relationships will appear here.
-        </p>
+        <p className="text-lg font-semibold text-foreground">{title}</p>
+        <p className="text-sm text-muted-foreground max-w-sm">{body}</p>
+        {emptyReason === "model_missing" && (
+          <InstallComponentButton componentId="ner" className="items-center" />
+        )}
       </div>
     )
   }
