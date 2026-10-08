@@ -7,7 +7,6 @@
 
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
-smoke_require_mode full
 
 # 1. Health
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")

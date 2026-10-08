@@ -377,7 +377,7 @@
     },
     {
       "id": "pomodoro",
-      "mode": "full",
+      "mode": "public",
       "kind": "feature",
       "frontend": {
         "components": [
