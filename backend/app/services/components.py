@@ -20,14 +20,11 @@ so the setup screen and the installer disagreed about what the app runs.
 """
 
 import asyncio
-import importlib
-import importlib.metadata
 import importlib.util
 import json
 import logging
 import os
 import shutil
-import site
 import sys
 import time
 from collections.abc import AsyncIterator
@@ -49,7 +46,7 @@ from app.model_registry import (
     profile_for,
 )
 from app.paths import engine_source_path
-from app.services import model_prefetch, network_errors, storage_errors
+from app.services import model_prefetch, network_errors, python_extras, storage_errors
 from app.services.component_download import install_archive_subset
 
 logger = logging.getLogger(__name__)
@@ -274,23 +271,6 @@ def _encoder_components() -> tuple[Component, ...]:
 _MODEL_ID_PREFIX = "model:"
 
 
-def _whisper_cached() -> bool:
-    from app.services.audio_transcriber import weights_cached  # noqa: PLC0415
-
-    return weights_cached()
-
-
-def _whisper_fetch() -> None:
-    from app.services.audio_transcriber import fetch_weights  # noqa: PLC0415
-
-    fetch_weights()
-
-
-# A python_extra whose package runs a model: (weights on disk?, download them).
-# The install downloads; the loader never does.
-_EXTRA_WEIGHTS = {"transcription": (_whisper_cached, _whisper_fetch)}
-
-
 def get_component(component_id: str) -> Component | None:
     for comp in catalogue():
         if comp.id == component_id:
@@ -360,29 +340,6 @@ def component_for_model(model: str) -> Component | None:
 def tool_bin_dir() -> Path:
     """Where user-installed executables live: writable, and outside the bundle."""
     return Path(get_settings().DATA_DIR).expanduser() / "bin"
-
-
-def extras_dir() -> Path:
-    """Where user-installed Python packages live.
-
-    Outside the bundle, which is read-only and code-signed -- writing into it
-    would break the signature even if the permissions allowed it.
-    """
-    return Path(get_settings().DATA_DIR).expanduser() / "extras"
-
-
-def activate_extras() -> bool:
-    """Put user-installed packages on sys.path. Safe to call more than once."""
-    target = extras_dir()
-    if not target.is_dir():
-        return False
-    path = str(target)
-    if path not in sys.path:
-        site.addsitedir(path)
-        # addsitedir appends, so a stale copy of something already bundled
-        # cannot shadow it -- extras only ever add, never override.
-        importlib.invalidate_caches()
-    return True
 
 
 # Where the package managers put things, searched after PATH.
@@ -461,28 +418,9 @@ async def _installed_ollama_models() -> set[str]:
     return {m.get("name", "") for m in data.get("models", [])}
 
 
-def _pins_met(comp: Component) -> bool:
-    """Every `name==version` in *comp.packages* is the version that imports."""
-    for requirement in comp.packages:
-        name, _, version = requirement.partition("==")
-        if not version:
-            continue
-        try:
-            if importlib.metadata.version(name) != version:
-                return False
-        except importlib.metadata.PackageNotFoundError:
-            return False
-    return True
-
-
 def _installed_locally(comp) -> bool:
     if comp.kind == "python_extra":
-        activate_extras()
-        # A mismatched version reads as not installed, so the install is offered and replaces it.
-        installed = importlib.util.find_spec(comp.ref) is not None and _pins_met(comp)
-        if installed and (weights := _EXTRA_WEIGHTS.get(comp.id)):
-            installed = weights[0]()
-        return installed
+        return python_extras.extra_installed(comp)
     if comp.kind == "engine_runner":
         return (engine_lib_dir() / comp.ref).is_dir()
     if comp.kind == "hf_model":
@@ -863,79 +801,6 @@ async def remove_ollama_model(model: str) -> None:
         resp.raise_for_status()
 
 
-def _drop_stale_metadata(target: Path, packages: tuple[str, ...]) -> None:
-    """Remove other versions' dist-info of pinned packages.
-
-    `pip --target --upgrade` replaces package folders but keeps an old dist-info,
-    which `importlib.metadata` may still read, so the pin check would never pass.
-    """
-    for requirement in packages:
-        name, _, version = requirement.partition("==")
-        if not version:
-            continue
-        stem = name.replace("-", "_").lower()
-        for info in target.glob("*.dist-info"):
-            dist, _, rest = info.name[: -len(".dist-info")].partition("-")
-            if dist.lower() == stem and rest != version:
-                shutil.rmtree(info, ignore_errors=True)
-
-
-async def install_python_extra(comp: Component) -> AsyncIterator[dict]:
-    """Install packages into the extras directory using the bundled interpreter.
-
-    ``--target`` rather than the bundle's own site-packages: that tree is
-    read-only and code-signed, and writing to it would invalidate the signature.
-    """
-    target = extras_dir()
-    target.mkdir(parents=True, exist_ok=True)
-    _drop_stale_metadata(target, comp.packages)
-
-    cmd = [
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "--upgrade",
-        "--target",
-        str(target),
-        "--no-input",
-        "--disable-pip-version-check",
-        *comp.packages,
-    ]
-    yield {"state": "downloading", "detail": f"Installing {', '.join(comp.packages)}"}
-
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
-    )
-    tail: list[str] = []
-    assert proc.stdout is not None  # noqa: S101
-    async for raw in proc.stdout:
-        line = raw.decode(errors="replace").rstrip()
-        if not line:
-            continue
-        tail = [*tail[-4:], line]
-        yield {"state": "downloading", "detail": line[:160]}
-    await proc.wait()
-
-    if proc.returncode != 0:
-        yield {"state": "failed", "detail": " / ".join(tail)[:400] or "pip failed"}
-        return
-
-    activate_extras()
-    if importlib.util.find_spec(comp.ref) is None:
-        yield {"state": "failed", "detail": f"{comp.ref} still not importable after install"}
-        return
-
-    if weights := _EXTRA_WEIGHTS.get(comp.id):
-        yield {"state": "downloading", "detail": f"Downloading the {comp.label} model"}
-        try:
-            await asyncio.to_thread(weights[1])
-        except Exception as exc:
-            yield {"state": "failed", "detail": f"model download failed: {str(exc)[:300]}"}
-            return
-    yield {"state": "ready", "detail": comp.label}
-
-
 async def install_encoder_model(comp: Component) -> AsyncIterator[dict]:
     """Download an encoder into the cache its loader reads (I-57), reporting bytes."""
     spec = model_prefetch.spec_for(comp.id)
@@ -1020,7 +885,7 @@ async def install_component(component_id: str) -> AsyncIterator[dict]:
         return
 
     if comp.kind == "python_extra":
-        async for event in install_python_extra(comp):
+        async for event in python_extras.install_python_extra(comp):
             yield event
         return
 
@@ -1063,7 +928,7 @@ async def remove_component(component_id: str) -> None:
         # would take unrelated components with it.
         raise ValueError(
             f"{comp.label} cannot be removed automatically. "
-            f"Delete {extras_dir()} to remove all installed extras."
+            f"Delete {python_extras.extras_dir()} to remove all installed extras."
         )
     path = tool_bin_dir() / comp.ref
     await asyncio.to_thread(path.unlink, True)

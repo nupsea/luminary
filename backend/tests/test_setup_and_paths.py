@@ -13,6 +13,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.services import components as components_module
+from app.services import python_extras
 from app.services.components import catalogue, get_component, resolve_tool, tool_bin_dir
 from app.services.startup_status import StartupStatus
 
@@ -554,10 +555,16 @@ def test_python_extra_installs_outside_the_bundle(tmp_path, monkeypatch):
         return proc
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
-    # The install then downloads the Whisper weights; this test is about where pip writes.
-    monkeypatch.setitem(
-        components_module._EXTRA_WEIGHTS, "transcription", (lambda: True, lambda: None)
+    # CI's venv already holds the pinned packages, which would skip pip altogether.
+    monkeypatch.setattr(python_extras, "pins_met", lambda comp: False)
+    real_find_spec = components_module.importlib.util.find_spec
+    monkeypatch.setattr(
+        components_module.importlib.util,
+        "find_spec",
+        lambda name, *a: object() if name == "pip" else real_find_spec(name, *a),
     )
+    # The install then downloads the Whisper weights; this test is about where pip writes.
+    monkeypatch.setitem(python_extras.EXTRA_WEIGHTS, "transcription", (lambda: True, lambda: None))
 
     async def _run():
         return [e async for e in components_module.install_component("transcription")]
@@ -711,7 +718,7 @@ async def test_component_probes_run_off_the_event_loop(monkeypatch):
 
     monkeypatch.setattr(components_module, "_installed_ollama_models", no_models)
     monkeypatch.setattr(components_module.importlib.util, "find_spec", lambda name: object())
-    monkeypatch.setattr(components_module, "_EXTRA_WEIGHTS", {"transcription": (probe, None)})
+    monkeypatch.setattr(python_extras, "EXTRA_WEIGHTS", {"transcription": (probe, None)})
 
     status = await components_module.component_status()
 
@@ -827,3 +834,48 @@ def test_a_tool_is_not_offered_an_installer_it_does_not_have(monkeypatch):
     assert ffmpeg["installable"] is False
     assert "brew install ffmpeg" in ffmpeg["advice"]
     assert all(c["installable"] for c in statuses if c["kind"] != "tool")
+
+
+def _install_transcription(monkeypatch, *, pins_met: bool, has_pip: bool) -> tuple:
+    spawned: list = []
+    fetched: list = []
+
+    async def _fake_exec(*cmd, **kwargs):
+        spawned.append(cmd)
+        raise AssertionError("pip must not run")
+
+    real_find_spec = components_module.importlib.util.find_spec
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr(python_extras, "pins_met", lambda comp: pins_met)
+    monkeypatch.setattr(
+        components_module.importlib.util,
+        "find_spec",
+        lambda name, *a: None if name == "pip" and not has_pip else real_find_spec(name, *a),
+    )
+    monkeypatch.setitem(
+        python_extras.EXTRA_WEIGHTS,
+        "transcription",
+        (lambda: False, lambda: fetched.append(True)),
+    )
+
+    async def _run():
+        return [e async for e in components_module.install_component("transcription")]
+
+    return asyncio.run(_run()), spawned, fetched
+
+
+def test_a_source_install_with_the_packages_only_fetches_the_weights(monkeypatch):
+    """A uv venv has no pip; with the pins already met the install must not reach for it."""
+    events, spawned, fetched = _install_transcription(monkeypatch, pins_met=True, has_pip=False)
+
+    assert spawned == []
+    assert fetched == [True]
+    assert events[-1]["state"] == "ready"
+
+
+def test_missing_packages_without_pip_say_how_to_get_them(monkeypatch):
+    events, spawned, fetched = _install_transcription(monkeypatch, pins_met=False, has_pip=False)
+
+    assert spawned == [] and fetched == []
+    assert events[-1]["state"] == "failed"
+    assert "uv sync --group media" in events[-1]["detail"]

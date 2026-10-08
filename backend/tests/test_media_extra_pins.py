@@ -4,7 +4,7 @@ import importlib.metadata
 import tomllib
 from pathlib import Path
 
-from app.services import components
+from app.services import components, python_extras
 
 _LOCK = tomllib.loads((Path(__file__).parents[1] / "uv.lock").read_text())
 _PACKAGES = {p["name"]: p for p in _LOCK["package"]}
@@ -47,21 +47,21 @@ def test_a_drifted_version_reads_as_not_installed(monkeypatch):
     comp = components.get_component("transcription")
     real = importlib.metadata.version
     monkeypatch.setattr(
-        components.importlib.metadata,
+        python_extras.importlib.metadata,
         "version",
         lambda name: "99.0.0" if name == "av" else real(name),
     )
-    assert components._pins_met(comp) is False
+    assert python_extras.pins_met(comp) is False
 
 
 def test_the_locked_versions_read_as_installed():
-    assert components._pins_met(components.get_component("transcription")) is True
+    assert python_extras.pins_met(components.get_component("transcription")) is True
 
 
 def test_a_reinstall_drops_the_old_versions_metadata(tmp_path):
     for stale in ("av-17.0.0.dist-info", "faster_whisper-1.2.1.dist-info", "numpy-2.0.0.dist-info"):
         (tmp_path / stale).mkdir()
-    components._drop_stale_metadata(tmp_path, _comp_packages())
+    python_extras.drop_stale_metadata(tmp_path, _comp_packages())
     left = sorted(p.name for p in tmp_path.iterdir())
     assert left == ["faster_whisper-1.2.1.dist-info", "numpy-2.0.0.dist-info"]
 
