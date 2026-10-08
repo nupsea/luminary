@@ -13,6 +13,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.services import components as components_module
+from app.services import python_extras
 from app.services.components import catalogue, get_component, resolve_tool, tool_bin_dir
 from app.services.startup_status import StartupStatus
 
@@ -555,7 +556,7 @@ def test_python_extra_installs_outside_the_bundle(tmp_path, monkeypatch):
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
     # CI's venv already holds the pinned packages, which would skip pip altogether.
-    monkeypatch.setattr(components_module, "_pins_met", lambda comp: False)
+    monkeypatch.setattr(python_extras, "pins_met", lambda comp: False)
     real_find_spec = components_module.importlib.util.find_spec
     monkeypatch.setattr(
         components_module.importlib.util,
@@ -563,9 +564,7 @@ def test_python_extra_installs_outside_the_bundle(tmp_path, monkeypatch):
         lambda name, *a: object() if name == "pip" else real_find_spec(name, *a),
     )
     # The install then downloads the Whisper weights; this test is about where pip writes.
-    monkeypatch.setitem(
-        components_module._EXTRA_WEIGHTS, "transcription", (lambda: True, lambda: None)
-    )
+    monkeypatch.setitem(python_extras.EXTRA_WEIGHTS, "transcription", (lambda: True, lambda: None))
 
     async def _run():
         return [e async for e in components_module.install_component("transcription")]
@@ -719,7 +718,7 @@ async def test_component_probes_run_off_the_event_loop(monkeypatch):
 
     monkeypatch.setattr(components_module, "_installed_ollama_models", no_models)
     monkeypatch.setattr(components_module.importlib.util, "find_spec", lambda name: object())
-    monkeypatch.setattr(components_module, "_EXTRA_WEIGHTS", {"transcription": (probe, None)})
+    monkeypatch.setattr(python_extras, "EXTRA_WEIGHTS", {"transcription": (probe, None)})
 
     status = await components_module.component_status()
 
@@ -847,14 +846,14 @@ def _install_transcription(monkeypatch, *, pins_met: bool, has_pip: bool) -> tup
 
     real_find_spec = components_module.importlib.util.find_spec
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
-    monkeypatch.setattr(components_module, "_pins_met", lambda comp: pins_met)
+    monkeypatch.setattr(python_extras, "pins_met", lambda comp: pins_met)
     monkeypatch.setattr(
         components_module.importlib.util,
         "find_spec",
         lambda name, *a: None if name == "pip" and not has_pip else real_find_spec(name, *a),
     )
     monkeypatch.setitem(
-        components_module._EXTRA_WEIGHTS,
+        python_extras.EXTRA_WEIGHTS,
         "transcription",
         (lambda: False, lambda: fetched.append(True)),
     )

@@ -20,9 +20,9 @@ from app.services.youtube_downloader import is_youtube_url
 def _transcription_installed(monkeypatch):
     """Pin Speech to text as installed, weights included, so these tests exercise
     yt-dlp and ffmpeg rather than whatever this machine has downloaded."""
-    from app.services import components
+    from app.services import python_extras
 
-    monkeypatch.setitem(components._EXTRA_WEIGHTS, "transcription", (lambda: True, lambda: None))
+    monkeypatch.setitem(python_extras.EXTRA_WEIGHTS, "transcription", (lambda: True, lambda: None))
 
 
 # Shared DB fixture
