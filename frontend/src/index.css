@@ -160,6 +160,12 @@
     color: transparent !important;
   }
 
+  /* The text layer's <br>s sit in normal flow at its top-left corner; painted, they
+     show as a stray bar in the left margin. The rules above outrank pdf.js's own reset. */
+  .textLayer br::selection {
+    background-color: transparent !important;
+  }
+
   /* Minimalist modern scrollbars */
   ::-webkit-scrollbar {
     width: 7px;
