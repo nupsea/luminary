@@ -886,6 +886,32 @@ async def install_python_extra(comp: Component) -> AsyncIterator[dict]:
     ``--target`` rather than the bundle's own site-packages: that tree is
     read-only and code-signed, and writing to it would invalidate the signature.
     """
+    activate_extras()
+    # A source install has the packages from `uv sync` and no pip; only the weights may be missing.
+    if importlib.util.find_spec(comp.ref) is None or not _pins_met(comp):
+        async for event in _pip_install_extra(comp):
+            yield event
+            if event["state"] == "failed":
+                return
+
+    if weights := _EXTRA_WEIGHTS.get(comp.id):
+        yield {"state": "downloading", "detail": f"Downloading the {comp.label} model"}
+        try:
+            await asyncio.to_thread(weights[1])
+        except Exception as exc:
+            yield {"state": "failed", "detail": f"model download failed: {str(exc)[:300]}"}
+            return
+    yield {"state": "ready", "detail": comp.label}
+
+
+async def _pip_install_extra(comp: Component) -> AsyncIterator[dict]:
+    if importlib.util.find_spec("pip") is None:
+        yield {
+            "state": "failed",
+            "detail": "This Python has no pip. In a source checkout, run "
+            "`uv sync --group media` in backend/, then restart Luminary.",
+        }
+        return
     target = extras_dir()
     target.mkdir(parents=True, exist_ok=True)
     _drop_stale_metadata(target, comp.packages)
@@ -924,16 +950,6 @@ async def install_python_extra(comp: Component) -> AsyncIterator[dict]:
     activate_extras()
     if importlib.util.find_spec(comp.ref) is None:
         yield {"state": "failed", "detail": f"{comp.ref} still not importable after install"}
-        return
-
-    if weights := _EXTRA_WEIGHTS.get(comp.id):
-        yield {"state": "downloading", "detail": f"Downloading the {comp.label} model"}
-        try:
-            await asyncio.to_thread(weights[1])
-        except Exception as exc:
-            yield {"state": "failed", "detail": f"model download failed: {str(exc)[:300]}"}
-            return
-    yield {"state": "ready", "detail": comp.label}
 
 
 async def install_encoder_model(comp: Component) -> AsyncIterator[dict]:
