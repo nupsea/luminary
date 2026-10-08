@@ -1,0 +1,160 @@
+{"question": "Summarize the Harlow Accord chapter.", "expected_route": "summary"}
+{"question": "Give me an overview of the whole collection.", "expected_route": "summary"}
+{"question": "What's this book about, in a nutshell?", "expected_route": "summary"}
+{"question": "Boil it down for me.", "expected_route": "summary"}
+{"question": "Recap?", "expected_route": "summary"}
+{"question": "If you had to explain this entire report to my manager in a paragraph, what would you say?", "expected_route": "summary"}
+{"question": "What are the key takeaways from everything I've uploaded?", "expected_route": "summary"}
+{"question": "Walk me through the big ideas of the paper, start to finish.", "expected_route": "summary"}
+{"question": "I skipped the reading. What's the short version?", "expected_route": "summary"}
+{"question": "Main points of the Brennig chapter please", "expected_route": "summary"}
+{"question": "Could you condense this into a few bullet points?", "expected_route": "summary"}
+{"question": "What's the overarching story told across these documents?", "expected_route": "summary"}
+{"question": "high-level summary pls", "expected_route": "summary"}
+{"question": "Not looking for detail, just the broad strokes of the whole thing.", "expected_route": "summary"}
+{"question": "What ground does this textbook cover overall?", "expected_route": "summary"}
+{"question": "Outline the argument of the essay from beginning to end.", "expected_route": "summary"}
+{"question": "I need the executive summary of this report.", "expected_route": "summary"}
+{"question": "What does the paper conclude overall, in brief?", "expected_route": "summary"}
+{"question": "Remind me what the whole of part two was about.", "expected_route": "summary"}
+{"question": "Can you give me the CliffsNotes version?", "expected_route": "summary"}
+{"question": "Synopsis of the novel?", "expected_route": "summary"}
+{"question": "What would a one-page brief of this look like?", "expected_route": "summary"}
+{"question": "So what is the author's thesis across the whole book, roughly?", "expected_route": "summary"}
+{"question": "Catch me up on everything in this folder.", "expected_route": "summary"}
+{"question": "Big picture: what is this collection trying to teach me?", "expected_route": "summary"}
+{"question": "Run me through the highlights of the lecture.", "expected_route": "summary"}
+{"question": "What are the headline findings of the study?", "expected_route": "summary"}
+{"question": "Distill the report for me.", "expected_route": "summary"}
+{"question": "Short overview of chapters one to four?", "expected_route": "summary"}
+{"question": "Explain the whole document like I'm twelve.", "expected_route": "summary"}
+{"question": "Compare gradient checkpointing and speculative decoding.", "expected_route": "comparative"}
+{"question": "What are the differences between the Harlow Accord and the Brennig treaty?", "expected_route": "comparative"}
+{"question": "Ada Lindqvist or Captain Oyelaran: who had the stronger case?", "expected_route": "comparative"}
+{"question": "Morrow valve vs Teskel pump", "expected_route": "comparative"}
+{"question": "Which is cheaper according to the text, the salt tax or the window tax?", "expected_route": "comparative"}
+{"question": "How do the two authors' views on mycorrhizal networks diverge?", "expected_route": "comparative"}
+{"question": "Pros and cons of speculative decoding versus beam search?", "expected_route": "comparative"}
+{"question": "Should I use gradient checkpointing or just a smaller batch, going by this?", "expected_route": "comparative"}
+{"question": "In what ways is the Brennig treaty stricter than the Harlow Accord?", "expected_route": "comparative"}
+{"question": "Is the Morrow valve an improvement on the Teskel pump?", "expected_route": "comparative"}
+{"question": "Contrast Lindqvist's method with Oyelaran's.", "expected_route": "comparative"}
+{"question": "Which approach does the book rank higher: rotation or fallow?", "expected_route": "comparative"}
+{"question": "What makes the window tax different from the salt tax?", "expected_route": "comparative"}
+{"question": "Are the 1820 and 1846 editions basically the same, or did much change?", "expected_route": "comparative"}
+{"question": "Weigh the two proposals against each other for me.", "expected_route": "comparative"}
+{"question": "Who comes out better in chapter 9, Lindqvist or Oyelaran?", "expected_route": "comparative"}
+{"question": "salt tax versus window tax: fairer?", "expected_route": "comparative"}
+{"question": "How does the Teskel pump stack up against the Morrow valve on efficiency?", "expected_route": "comparative"}
+{"question": "I keep mixing up speculative decoding and beam search. What separates them?", "expected_route": "comparative"}
+{"question": "Is crop rotation more or less effective than fallowing here?", "expected_route": "comparative"}
+{"question": "Which of the three treaties gave the most land back?", "expected_route": "comparative"}
+{"question": "Similarities and differences between the two experiments?", "expected_route": "comparative"}
+{"question": "Do the 2019 and 2023 surveys agree, or not?", "expected_route": "comparative"}
+{"question": "Which would the author pick, the valve or the pump?", "expected_route": "comparative"}
+{"question": "Between the Harlow Accord and the Brennig treaty, which lasted longer?", "expected_route": "comparative"}
+{"question": "Where do the two reviewers part ways?", "expected_route": "comparative"}
+{"question": "Is Oyelaran's estimate higher or lower than Lindqvist's?", "expected_route": "comparative"}
+{"question": "Tell me which method wins and why: checkpointing or recomputation.", "expected_route": "comparative"}
+{"question": "How is the second draft better than the first?", "expected_route": "comparative"}
+{"question": "Rank the four tax schemes from fairest to least fair.", "expected_route": "comparative"}
+{"question": "How is Ada Lindqvist connected to Captain Oyelaran?", "expected_route": "graph"}
+{"question": "What's the relationship between the salt tax and the 1848 riots?", "expected_route": "graph"}
+{"question": "How did the Harlow Accord lead to the Brennig treaty?", "expected_route": "graph"}
+{"question": "What links the Morrow valve to the Teskel pump?", "expected_route": "graph"}
+{"question": "Who influenced Lindqvist?", "expected_route": "graph"}
+{"question": "What depends on gradient checkpointing in this pipeline?", "expected_route": "graph"}
+{"question": "Map out how these characters are tied to each other.", "expected_route": "graph"}
+{"question": "What chain of events runs from the salt tax to the revolt?", "expected_route": "graph"}
+{"question": "Which concepts build on speculative decoding?", "expected_route": "graph"}
+{"question": "How does mycorrhizal networking feed into soil carbon?", "expected_route": "graph"}
+{"question": "Who else was involved with Oyelaran on the expedition?", "expected_route": "graph"}
+{"question": "What caused what, between the drought and the treaty?", "expected_route": "graph"}
+{"question": "Show me what the Teskel pump is connected to.", "expected_route": "graph"}
+{"question": "Is there any link between Lindqvist's paper and the 1846 edition?", "expected_route": "graph"}
+{"question": "What came out of the Harlow Accord downstream?", "expected_route": "graph"}
+{"question": "Which ideas in the book trace back to the window tax?", "expected_route": "graph"}
+{"question": "How do the valve, the pump and the boiler fit together?", "expected_route": "graph"}
+{"question": "What's the dependency between beam search and speculative decoding here?", "expected_route": "graph"}
+{"question": "Lindqvist to Oyelaran: what's the connection?", "expected_route": "graph"}
+{"question": "Who worked with whom on the survey?", "expected_route": "graph"}
+{"question": "What does the Brennig treaty rest on?", "expected_route": "graph"}
+{"question": "How does one step of the process hand off to the next?", "expected_route": "graph"}
+{"question": "Which people are associated with the Morrow valve?", "expected_route": "graph"}
+{"question": "Explain how fallowing ties into the salt tax story.", "expected_route": "graph"}
+{"question": "What role did Oyelaran play in Lindqvist's career?", "expected_route": "graph"}
+{"question": "What led up to the Brennig treaty?", "expected_route": "graph"}
+{"question": "Trace Lindqvist's influence through the later chapters.", "expected_route": "graph"}
+{"question": "Is the drought upstream of the famine in the author's account?", "expected_route": "graph"}
+{"question": "How are mycorrhizal networks and tree communication related?", "expected_route": "graph"}
+{"question": "Which events are tied to the window tax?", "expected_route": "graph"}
+{"question": "What year was the Brennig treaty signed?", "expected_route": "search"}
+{"question": "Define speculative decoding.", "expected_route": "search"}
+{"question": "What does the author mean by 'soft fallowing'?", "expected_route": "search"}
+{"question": "Where is the Morrow valve described?", "expected_route": "search"}
+{"question": "Who was Captain Oyelaran?", "expected_route": "search"}
+{"question": "How many people died in the 1848 riots, per the text?", "expected_route": "search"}
+{"question": "What does Lindqvist say about soil acidity?", "expected_route": "search"}
+{"question": "Quote the opening line of chapter 3.", "expected_route": "search"}
+{"question": "Teskel pump", "expected_route": "search"}
+{"question": "speculative decoding?", "expected_route": "search"}
+{"question": "Why did the Harlow Accord fail?", "expected_route": "search"}
+{"question": "How does gradient checkpointing work?", "expected_route": "search"}
+{"question": "What is the formula for the salt tax rate?", "expected_route": "search"}
+{"question": "Find where the text mentions the drought.", "expected_route": "search"}
+{"question": "Which chapter introduces mycorrhizal networks?", "expected_route": "search"}
+{"question": "What did the survey find about rural households?", "expected_route": "search"}
+{"question": "Can you pull up the passage on the boiler explosion?", "expected_route": "search"}
+{"question": "Not the whole chapter, just: what temperature does the valve fail at?", "expected_route": "search"}
+{"question": "What are the steps of the Teskel procedure?", "expected_route": "search"}
+{"question": "What's an example the author gives of beam search?", "expected_route": "search"}
+{"question": "Is there a definition of 'window tax' anywhere?", "expected_route": "search"}
+{"question": "What does the book say happens when the pump overheats?", "expected_route": "search"}
+{"question": "Who wrote the 1846 edition?", "expected_route": "search"}
+{"question": "Give me the exact wording of Article 4 of the Brennig treaty.", "expected_route": "search"}
+{"question": "What evidence does Lindqvist offer for her claim?", "expected_route": "search"}
+{"question": "Tell me about the Morrow valve.", "expected_route": "search"}
+{"question": "What is the main limitation of speculative decoding that the paper mentions?", "expected_route": "search"}
+{"question": "Ok so what's 'recomputation' in this context?", "expected_route": "search"}
+{"question": "Which page has the table of tax rates?", "expected_route": "search"}
+{"question": "What problem was the Teskel pump designed to solve?", "expected_route": "search"}
+{"question": "Give me the short version of the Marwick reforms report.", "expected_route": "summary"}
+{"question": "What's this whole collection of field notes about, broadly?", "expected_route": "summary"}
+{"question": "Sum up the lecture series in five bullets.", "expected_route": "summary"}
+{"question": "I only have a minute: what does the Okafor paper say, overall?", "expected_route": "summary"}
+{"question": "Recap chapters one through four for me.", "expected_route": "summary"}
+{"question": "Which themes run through the entire book?", "expected_route": "summary"}
+{"question": "Explain the whole Quill protocol spec at a high level.", "expected_route": "summary"}
+{"question": "What are the main conclusions of the copper tariff study?", "expected_route": "summary"}
+{"question": "Pull together the key points from all my uploaded documents.", "expected_route": "summary"}
+{"question": "What does the Tovan alloy handbook cover, start to finish?", "expected_route": "summary"}
+{"question": "Which is stronger in tension, the Tovan alloy or plain steel?", "expected_route": "comparative"}
+{"question": "Which reform did more for farmers, Marwick's or Ellery's?", "expected_route": "comparative"}
+{"question": "How does the Kessel bridge design compare with the Arno span?", "expected_route": "comparative"}
+{"question": "What's the difference in approach between Brandt and Okafor?", "expected_route": "comparative"}
+{"question": "Was the 1903 strike bigger or smaller than the 1911 one?", "expected_route": "comparative"}
+{"question": "Pros and cons of the lattice filter versus the Ferro cache?", "expected_route": "comparative"}
+{"question": "How do Brandt's and Okafor's accounts of the outbreak disagree?", "expected_route": "comparative"}
+{"question": "Which of the two tariffs hurt exporters more?", "expected_route": "comparative"}
+{"question": "Is the Quill protocol faster than the older handshake it replaced?", "expected_route": "comparative"}
+{"question": "What does the Kessel bridge do better than the Arno span?", "expected_route": "comparative"}
+{"question": "How is Ilse Brandt connected to the Marwick reforms?", "expected_route": "graph"}
+{"question": "Which people did Dr. Okafor collaborate with?", "expected_route": "graph"}
+{"question": "What led to the 1903 strike?", "expected_route": "graph"}
+{"question": "How did the copper tariff affect the rinderpest response?", "expected_route": "graph"}
+{"question": "What does the Ferro cache depend on?", "expected_route": "graph"}
+{"question": "Which events followed from the Marwick reforms?", "expected_route": "graph"}
+{"question": "How are the Quill protocol and the lattice filter linked?", "expected_route": "graph"}
+{"question": "Who was Brandt's mentor, and who did she mentor in turn?", "expected_route": "graph"}
+{"question": "What came about because of the rinderpest outbreak?", "expected_route": "graph"}
+{"question": "How does the Tovan alloy tie into the Kessel bridge story?", "expected_route": "graph"}
+{"question": "What year was the Kessel bridge finished?", "expected_route": "search"}
+{"question": "Which chapter introduces the lattice filter?", "expected_route": "search"}
+{"question": "What is the Ferro cache?", "expected_route": "search"}
+{"question": "How does the lattice filter work?", "expected_route": "search"}
+{"question": "Who was Ilse Brandt?", "expected_route": "search"}
+{"question": "How many workers joined the 1903 strike?", "expected_route": "search"}
+{"question": "Explain the handshake step in the Quill protocol.", "expected_route": "search"}
+{"question": "Where does the author define the copper tariff rate?", "expected_route": "search"}
+{"question": "What does Okafor say about vaccine storage?", "expected_route": "search"}
+{"question": "Rinderpest", "expected_route": "search"}

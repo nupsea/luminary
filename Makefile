@@ -513,6 +513,12 @@ eval-intent:
 	@echo "Adversarial phrasing, heuristic + LLM fallback -- what a user gets..."
 	$(UV) run --project $(CURDIR)/backend python evals/run_intent_eval.py \
 		--dataset intents_adversarial --backend-url $(BACKEND_URL) --llm-fallback
+	@echo "Unseen phrasing, heuristic only..."
+	$(UV) run --project $(CURDIR)/backend python evals/run_intent_eval.py \
+		--dataset intents_heldout --backend-url $(BACKEND_URL)
+	@echo "Unseen phrasing, heuristic + LLM fallback..."
+	$(UV) run --project $(CURDIR)/backend python evals/run_intent_eval.py \
+		--dataset intents_heldout --backend-url $(BACKEND_URL) --llm-fallback
 
 # Note search: does /notes/search find the note, and only the note. No golden --
 # queries are derived from whatever notes the machine has, so the numbers are
