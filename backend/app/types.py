@@ -589,3 +589,15 @@ def is_technical_content(content_type: str | None, is_technical: bool | None) ->
     if is_technical is not None:
         return is_technical
     return content_type in TECHNICAL_CONTENT_TYPES
+
+
+@dataclass(frozen=True)
+class Principal:
+    """Who a request acts for. `local` is the app's own origin on loopback;
+    `device` carries a paired device's token. 0.17.0 hangs the library off this."""
+
+    kind: Literal["local", "device"]
+    device_id: str | None = None
+
+
+LOCAL_PRINCIPAL = Principal(kind="local")
