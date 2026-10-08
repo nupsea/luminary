@@ -1613,3 +1613,21 @@ class ContentActivityModel(Base):
     last_meaningful_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC), index=True
     )
+
+
+class DeviceModel(Base):
+    """A paired device. Only the token's SHA-256 is stored; the token is shown once.
+
+    Revoking keeps the row, so the list says which device was cut off and when.
+    """
+
+    __tablename__ = "devices"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
