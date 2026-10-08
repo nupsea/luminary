@@ -214,6 +214,10 @@ Kuzu had no foreign keys, so deleting a document left its entities and edges beh
 `concepts` or `graph_entities` with `ON DELETE CASCADE`; a graph write for a row deleted mid-run fails
 the foreign key and is dropped, never stored. Never add a graph table, or a column standing in for a
 reference, without the cascade. `test_graph.py`, `test_note_graph.py` and `test_documents.py` guard it.
+Flashcards follow the same rule: card generation outlives the request that started it, so
+`flashcards.document_id` cascades from `documents` and a card for a deleted document is refused
+(#242, `test_flashcard_document_key.py`). Tests whose subject is the card opt into stand-in
+documents with the `card_documents` fixture.
 
 ## Ingestion
 

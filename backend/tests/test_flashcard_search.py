@@ -10,6 +10,8 @@ from sqlalchemy import text
 from app.main import app
 from app.models import FlashcardModel
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 # Isolated test DB fixture (same pattern as test_flashcards.py)
 
 

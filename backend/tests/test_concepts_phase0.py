@@ -19,6 +19,8 @@ from app.services.concept_service import get_concept_service
 from app.services.scope_resolver import resolve_daily, resolve_scope
 from app.services.vector_store import get_lancedb_service
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 
 @pytest.fixture
 async def test_db(tmp_path, monkeypatch):

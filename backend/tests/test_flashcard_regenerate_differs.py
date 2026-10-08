@@ -29,6 +29,8 @@ from app.models import ChunkModel, FlashcardModel, NoteModel
 from app.services.flashcard import FlashcardService
 from app.services.flashcard_generators import _drop_near_duplicates, _passage_not_yet_used
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 
 def _chunk(index: int, text: str = "passage text") -> ChunkModel:
     return ChunkModel(

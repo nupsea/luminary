@@ -47,6 +47,12 @@ class DocumentRepo:
     async def get_or_404(self, document_id: str) -> DocumentModel:
         return await get_or_404(self.session, DocumentModel, document_id, name="Document")
 
+    async def exists(self, document_id: str) -> bool:
+        result = await self.session.execute(
+            select(DocumentModel.id).where(DocumentModel.id == document_id)
+        )
+        return result.first() is not None
+
     async def corpus_counts(self) -> tuple[int, int]:
         """(documents, chunks) across the whole library.
 

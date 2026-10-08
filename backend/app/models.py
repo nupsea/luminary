@@ -182,7 +182,15 @@ class FlashcardModel(Base):
     __table_args__ = (Index("idx_flashcards_concept_id", "concept_id"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    document_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    # A card written for a document deleted mid-generation fails the key, never orphans (#242).
+    document_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey(
+            "documents.id", name="fk_flashcards_document_id_documents", ondelete="CASCADE"
+        ),
+        nullable=True,
+        index=True,
+    )
     chunk_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # 'document' for book-chunk cards, 'note' for note-sourced cards, 'gap' for gap-bridge cards
     source: Mapped[str] = mapped_column(String, nullable=False, default="document")

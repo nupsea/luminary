@@ -28,6 +28,8 @@ from app.models import (
 )
 from app.services.teachback_service import _latest_attempt_per_card, teachback_tally
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 _T0 = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
 
 

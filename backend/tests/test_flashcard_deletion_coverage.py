@@ -19,6 +19,8 @@ from app.db_init import create_all_tables
 from app.models import Base, FlashcardModel, MisconceptionModel, ReviewEventModel
 from app.repos.flashcard_repo import _CARD_CHILD_TABLES, FlashcardRepo
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 # Records what the learner did rather than what the card said. Deleting a card
 # must not rewrite the history of the days it was studied.
 _CARD_LEARNER_RECORD_TABLES = (ReviewEventModel,)

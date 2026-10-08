@@ -26,6 +26,7 @@ from app.services.feynman_service import (
     _strip_gaps_block,
     _strip_key_points_block,
 )
+from tests.graph_seed import add_documents
 
 # Test DB fixture
 
@@ -62,18 +63,11 @@ def test_strip_gaps_block():
 # AC3: complete_session() with 2 gaps generates >= 2 feynman flashcards
 
 
-@pytest.mark.asyncio
-async def test_complete_session_generates_feynman_flashcards(test_db):
-    """AC3: complete_session with 2 gaps creates >= 2 flashcards with source='feynman'."""
-    _engine, factory, _tmp = test_db
-    doc_id = str(uuid.uuid4())
+_GAP_CARD = '{"front": "What is lexical scope?", "back": "Scope defined at definition time."}'
+
+
+async def _complete_with_two_gaps(factory, doc_id: str) -> dict:
     session_id = str(uuid.uuid4())
-
-    # Mock LLM response for flashcard generation
-    gap_flashcard_response = (
-        '{"front": "What is lexical scope?", "back": "Scope defined at definition time."}'
-    )
-
     async with factory() as session:
         # Create session row
         feynman_session = FeynmanSessionModel(
@@ -107,18 +101,20 @@ async def test_complete_session_generates_feynman_flashcards(test_db):
         await session.commit()
 
     svc = FeynmanService()
+    with patch("app.services.flashcard.get_llm_service") as mock_llm_factory:
+        mock_llm_factory.return_value.generate = AsyncMock(return_value=_GAP_CARD)
+        async with factory() as session:
+            return await svc.complete_session(session_id, session)
 
-    with patch(
-        "app.services.feynman_service.get_feynman_service",
-        return_value=svc,
-    ):
-        with patch("app.services.flashcard.get_llm_service") as mock_llm_factory:
-            mock_llm = AsyncMock()
-            mock_llm.generate = AsyncMock(return_value=gap_flashcard_response)
-            mock_llm_factory.return_value = mock_llm
 
-            async with factory() as session:
-                result = await svc.complete_session(session_id, session)
+@pytest.mark.asyncio
+async def test_complete_session_generates_feynman_flashcards(test_db):
+    """AC3: complete_session with 2 gaps creates >= 2 flashcards with source='feynman'."""
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await add_documents(test_db, doc_id)
+
+    result = await _complete_with_two_gaps(factory, doc_id)
 
     assert result["gap_count"] >= 2
     assert len(result["flashcard_ids"]) >= 2
@@ -143,6 +139,19 @@ async def test_complete_session_generates_feynman_flashcards(test_db):
         assert card.source == "feynman"
         assert card.flashcard_type == "concept_explanation"
         assert card.deck == "feynman"
+
+
+@pytest.mark.asyncio
+async def test_complete_session_of_a_deleted_document_writes_no_cards(test_db):
+    """The session outlives its document; completing it must not fail the flashcards key (#242)."""
+    _engine, factory, _tmp = test_db
+
+    result = await _complete_with_two_gaps(factory, "deleted-doc")
+
+    assert result["gap_count"] == 2
+    assert result["flashcard_ids"] == []
+    async with factory() as session:
+        assert (await session.execute(select(FlashcardModel))).first() is None
 
 
 # AC4: tutor prompt includes section summary content

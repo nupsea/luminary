@@ -8,10 +8,13 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import litellm
+import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import ChunkModel, DocumentModel, FlashcardModel
+
+pytestmark = pytest.mark.usefixtures("card_documents")
 
 # Isolated test DB fixture
 

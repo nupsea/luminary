@@ -13,6 +13,8 @@ from app.exceptions import NotFound
 from app.models import ChunkModel, FlashcardModel
 from app.repos.flashcard_repo import FlashcardRepo
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 
 @pytest.fixture
 async def repo():

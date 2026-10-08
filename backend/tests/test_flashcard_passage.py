@@ -21,6 +21,8 @@ from app.models import ChunkModel, FlashcardModel
 from app.services.flashcard import _CHUNK_CHAR_LIMIT, _build_text
 from app.services.flashcard_grounding import passage_for_card
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 
 def _chunk(index: int, text: str) -> ChunkModel:
     return ChunkModel(

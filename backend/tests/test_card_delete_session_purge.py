@@ -32,6 +32,8 @@ from app.models import (
     StudySessionModel,
 )
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 _T0 = datetime(2026, 9, 10, 9, 0, tzinfo=UTC)
 
 

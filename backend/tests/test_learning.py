@@ -12,6 +12,8 @@ from app.main import app
 from app.models import FlashcardModel, MisconceptionModel, TeachbackResultModel
 from app.services.teachback_service import _parse_teachback_response
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 # Test DB fixture
 
 

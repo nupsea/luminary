@@ -9,6 +9,8 @@ from httpx import ASGITransport, AsyncClient
 from app.main import app
 from app.models import FlashcardModel
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 
 def _card(due_date: datetime | None = None) -> FlashcardModel:
     return FlashcardModel(

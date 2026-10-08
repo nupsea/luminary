@@ -19,6 +19,8 @@ from app.db_init import create_all_tables
 from app.models import ConceptModel, FlashcardModel
 from app.workflows.concept_nodes.persist import _sig_slug, persist_concepts
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 _ENTITIES = ["data modeling", "normalization"]
 
 

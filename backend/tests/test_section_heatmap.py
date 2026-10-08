@@ -11,6 +11,8 @@ from app.main import app
 from app.models import ChunkModel, FlashcardModel, SectionModel
 from app.routers.study import SectionHeatmapItem, _compute_section_heatmap
 
+pytestmark = pytest.mark.usefixtures("card_documents")
+
 # Test DB fixture
 
 
