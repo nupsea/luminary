@@ -101,7 +101,7 @@ hard-depends on a full-mode feature -- it degrades (constitution 9, 11; invarian
 | Within-collection concept linking | yes (after quality bar) | yes |
 | Cross-library concept linking | -- | yes |
 | Clustering / org-plan suggestions | -- | yes |
-| Pomodoro focus pill | -- | yes |
+| Pomodoro focus pill | yes | yes |
 | Teach-back / Feynman (4th session phase) | -- | yes |
 | Web/URL, YouTube, audio, image, tech-book ingest | -- | yes |
 | OKF export / grounding / import | yes (public router) | yes |
