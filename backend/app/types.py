@@ -167,10 +167,12 @@ class DocumentProfile:
             if self.domain == "technical":
                 return "technical"
             return "conversation" if self.domain == "general" else None
-        if self.domain == "technical":
-            return "technical"
+        # Register before domain: it is sampled from the body, the domain from the opening,
+        # which is a preface on a Gutenberg book (The Odyssey read technical, #253).
         if self.register == "narrative":
             return "narrative"
+        if self.domain == "technical":
+            return "technical"
         if self.register == "expository":
             return "non-fiction"
         return None
