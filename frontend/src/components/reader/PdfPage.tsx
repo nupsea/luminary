@@ -6,6 +6,7 @@ import type { AnnotationItem, SectionItem } from "./types"
 import { createLinkService } from "./pdfLinkService"
 import { clearOverlays } from "./pdfHighlightOverlay"
 import { applyCitationHighlight, applyPdfHighlights, applySearchHighlights } from "./pdfPageHighlights"
+import { bindTextLayerSelection } from "./pdfTextSelection"
 
 /** What has already been scrolled to, shared by every page so each target scrolls once. */
 export interface ScrollMarks {
@@ -113,6 +114,7 @@ export const PdfPage = memo(function PdfPage({
     let cancelled = false
     let renderTask: RenderTask | null = null
     let textLayer: TextLayer | null = null
+    let unbindSelection: (() => void) | null = null
 
     void (async () => {
       const page = await pdfDoc.getPage(pageNum)
@@ -150,6 +152,7 @@ export const PdfPage = memo(function PdfPage({
         textLayer = new TextLayer({ textContentSource: await page.getTextContent(), container: textDiv, viewport })
         await textLayer.render()
         if (cancelled) return
+        unbindSelection = bindTextLayerSelection(textDiv)
         overlay.style.width = `${viewport.width}px`
         overlay.style.height = `${viewport.height}px`
         overlay.replaceChildren()
@@ -191,6 +194,7 @@ export const PdfPage = memo(function PdfPage({
       cancelled = true
       renderTask?.cancel()
       textLayer?.cancel()
+      unbindSelection?.()
     }
   }, [pdfDoc, pageNum, zoom, live, goToPage, onNaturalSize])
 
