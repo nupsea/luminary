@@ -20,19 +20,19 @@ from app.services.universal_parser import UniversalParser
 def test_a_repeating_navigation_block_collapses_to_its_first_instance():
     source = "\n".join(
         [
-            "Prev",
-            "Up",
-            "Next",
+            "Site map",
+            "Search",
+            "Contact",
             "Chapter 1. Origins",
             "The first chapter opens here.",
-            "Prev",
-            "Up",
-            "Next",
+            "Site map",
+            "Search",
+            "Contact",
             "Chapter 2. Growth",
             "The second chapter opens here.",
-            "Prev",
-            "Up",
-            "Next",
+            "Site map",
+            "Search",
+            "Contact",
             "Chapter 3. Decline",
             "The third chapter opens here.",
         ]
@@ -40,9 +40,9 @@ def test_a_repeating_navigation_block_collapses_to_its_first_instance():
 
     assert normalise(source) == "\n".join(
         [
-            "Prev",
-            "Up",
-            "Next",
+            "Site map",
+            "Search",
+            "Contact",
             "Chapter 1. Origins",
             "The first chapter opens here.",
             "Chapter 2. Growth",
@@ -51,6 +51,45 @@ def test_a_repeating_navigation_block_collapses_to_its_first_instance():
             "The third chapter opens here.",
         ]
     )
+
+
+def test_docbook_nav_lines_are_dropped_not_collapsed():
+    """#240: the collapse left one copy of each nav line, and the header pair
+    ("Prev <page>" / "Next") never recurs verbatim, so it was not collapsed at all."""
+    source = "\n".join(
+        [
+            "Chapter 1. Philosophy",
+            "Prev Part I. Context",
+            "Next",
+            "Those who do not understand Unix are condemned to reinvent it.",
+            "Prev",
+            "Up",
+            "Next",
+            "Home",
+            "Culture? What Culture?",
+            "Prev Chapter 1. Philosophy",
+            "Next",
+            "This is a book about Unix programming.",
+            "Prev",
+            "Up",
+            "Next",
+            "Home",
+        ]
+    )
+
+    assert normalise(source) == "\n".join(
+        [
+            "Chapter 1. Philosophy",
+            "Those who do not understand Unix are condemned to reinvent it.",
+            "Culture? What Culture?",
+            "This is a book about Unix programming.",
+        ]
+    )
+
+
+def test_a_next_line_without_the_docbook_footer_is_prose():
+    source = "\n".join(["She turned the page.", "Next", "Up", "The hill rose before them."])
+    assert normalise(source) == source
 
 
 def test_a_heading_buried_in_furniture_survives_even_when_it_recurs_most():
@@ -254,11 +293,12 @@ def scraped_file(tmp_path):
     ids=["DocumentParser", "BookParser", "UniversalParser"],
 )
 def test_every_text_parser_reads_through_source_text(parser, scraped_file):
-    """The navigation reaches the document once, not once per chapter."""
+    """The DocBook navigation never reaches the document; a parser that skipped
+    source_text would carry it once per chapter (#240)."""
     parsed = parser.parse(scraped_file, "txt")
 
     for nav_line in ("Prev", "Up", "Next"):
-        assert parsed.raw_text.count(nav_line) == 1
+        assert parsed.raw_text.count(nav_line) == 0
 
 
 @pytest.mark.parametrize(

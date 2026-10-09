@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.services.source_text import is_nav_line as _is_nav_line
 from app.services.source_text import read_source_text
 from app.types import ParsedDocument, Section
 
@@ -73,17 +74,6 @@ _MARKER_MAX_SENTENCE_WORDS = 4
 # Markdown images and link targets, read past when judging whether text is prose.
 _MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
-
-# A scraped DocBook page's navigation: "Prev", "Up", "Next", "Home" alone, or
-# naming the neighbouring page ("Prev Part I. Context"). Never a subtitle (#229).
-_NAV_LINE = re.compile(
-    r"(?:Prev|Next|Up|Home)|Prev\s.+|(?:Next|Up)\s+(?:Part|Chapter|Appendix)\s.+"
-)
-
-
-def _is_nav_line(line: str) -> bool:
-    return _NAV_LINE.fullmatch(line) is not None
-
 
 def _drop_bodyless(sections: list[Section]) -> list[Section]:
     """Drop sections that carry a heading and no text.
