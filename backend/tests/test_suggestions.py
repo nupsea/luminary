@@ -321,9 +321,7 @@ async def test_suggestions_not_in_history(db_session):
     mock_llm_response.choices = [AsyncMock(message=AsyncMock(content=_json.dumps(llm_questions)))]
 
     with (
-        patch(
-            "app.routers.chat_meta.get_graph_service", return_value=AsyncMock()
-        ) as mock_graph,
+        patch("app.routers.chat_meta.get_graph_service", return_value=AsyncMock()) as mock_graph,
         patch(
             "app.services.llm.litellm.acompletion",
             return_value=mock_llm_response,
@@ -534,7 +532,9 @@ def test_parses_well_formed_json_array():
     from app.services.suggestion_service import _parse_questions
 
     raw = '[{"question": "What is dropout?", "depth": 4}]'
-    assert _parse_questions(raw) == [{"question": "What is dropout?", "bloom_level": 4}]
+    assert _parse_questions(raw) == [
+        {"question": "What is dropout?", "bloom_level": 4, "source": None, "evidence": None}
+    ]
 
 
 def test_history_reduced_to_topics_not_questions():
@@ -589,27 +589,85 @@ def test_prompts_carry_no_taxonomy_verb():
 
 
 @pytest.mark.asyncio
-async def test_grounding_passages_sample_across_document(db_session):
-    """Passages must span the document, not just its opening sections."""
-    from app.models import SectionSummaryModel
+async def test_grounding_passages_are_document_text_across_the_document(db_session):
+    """Passages are chunk text spanning the document, never summaries (#66)."""
+    from app.models import ChunkModel, SectionSummaryModel
 
+    db_session.add(
+        SectionSummaryModel(
+            id=str(uuid.uuid4()),
+            document_id="doc-passages",
+            section_id=None,
+            heading="Summary",
+            content="A paraphrase of the book.",
+            unit_index=0,
+        )
+    )
     for i in range(20):
         db_session.add(
-            SectionSummaryModel(
+            ChunkModel(
                 id=str(uuid.uuid4()),
                 document_id="doc-passages",
-                section_id=None,
-                heading=f"Section {i:02d}",
-                content=f"Body {i:02d}",
-                unit_index=i,
+                text=f"Chunk {i:02d} " + "body text " * 30,
+                chunk_index=i,
             )
         )
+    db_session.add(
+        ChunkModel(
+            id=str(uuid.uuid4()), document_id="doc-passages", text="Contents", chunk_index=20
+        )
+    )
     await db_session.commit()
 
     passages = await SuggestionService().get_grounding_passages("doc-passages", limit=4)
 
     assert len(passages) == 4
-    assert passages[0].startswith("Section 00")
+    assert all(p.startswith("Chunk ") for p in passages)
     # Taking the first N is what produced questions drawn entirely from the preface.
-    assert passages != [f"Section {i:02d}: Body {i:02d}" for i in range(4)]
-    assert passages[-1].startswith("Section 15")
+    assert passages[0].startswith("Chunk 00")
+    assert passages[-1].startswith("Chunk 15")
+
+
+_PASSAGES = [
+    "Iceberg keeps table state outside one warehouse, so any engine can read it.",
+    "A catalog can expose table locations and namespaces through open patterns.",
+]
+
+
+@pytest.mark.parametrize(
+    ("item", "kept"),
+    [
+        ({"source": "P2", "evidence": "expose table locations and namespaces"}, True),
+        ({"source": "[P1]", "evidence": "keeps table state outside one warehouse"}, True),
+        # Real words, wrong passage: the question names a passage that does not say it.
+        ({"source": "P1", "evidence": "expose table locations and namespaces"}, False),
+        # A paraphrase is not a quote.
+        ({"source": "P1", "evidence": "Iceberg stores state independently of warehouses"}, False),
+        # Under the floor: "the author" proves nothing.
+        ({"source": "P1", "evidence": "Iceberg"}, False),
+        ({"source": "P9", "evidence": "keeps table state outside one warehouse"}, False),
+        ({"evidence": "keeps table state outside one warehouse"}, False),
+    ],
+)
+def test_a_suggestion_is_kept_only_when_it_quotes_its_passage(item, kept):
+    from app.services.suggestion_service import _quoted_from
+
+    assert _quoted_from({"question": "q", **item}, _PASSAGES) is kept
+
+
+@pytest.mark.asyncio
+async def test_generation_drops_questions_that_do_not_quote_the_document(db_session):
+    raw = (
+        '[{"question": "Where does Iceberg keep table state?", "depth": 2, "source": "P1", '
+        '"evidence": "keeps table state outside one warehouse"}, '
+        '{"question": "How do Minerva\'s arguments lead to the ship journey?", "depth": 2, '
+        '"source": "P2", "evidence": "Minerva persuades the Phaeacians"}]'
+    )
+    llm = AsyncMock()
+    llm.complete = AsyncMock(return_value=raw)
+    with patch("app.services.suggestion_service.get_llm_service", return_value=llm):
+        out = await SuggestionService().generate_suggestions(
+            document_id="doc-q", summary="", entity_names=[], target_bloom=2, passages=_PASSAGES
+        )
+
+    assert [c["question"] for c in out] == ["Where does Iceberg keep table state?"]
