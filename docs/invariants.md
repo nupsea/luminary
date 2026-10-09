@@ -25,6 +25,13 @@ then detach); unbounded, the desktop supervisor SIGKILLs a mid-write thread. Fix
 The recurring `test_e2e_upload` timeout is a different class (aiosqlite workers waiting on a dead
 loop's future): a green run is not evidence there.
 
+**I-65. A streaming response stops at its generator's next yield on disconnect, never mid-await.**
+Uvicorn reports ASGI spec 2.3, so Starlette's `StreamingResponse` cancels the stream wherever it is.
+Cancelled mid-query, SQLAlchemy discards the connection from the cancelled task, the discard is
+cancelled too, and the connection is stranded until the GC terminates it (holding SQLite's write
+lock if it was writing). Every route streams through `app/streaming.py`; the cost is the work up to
+the next yield. `tests/test_streaming.py` fails CI otherwise.
+
 ## SQLite
 
 **I-23. Schema changes are Alembic revisions; the `ALTER TABLE` list in `db_init.py` is frozen.**

@@ -8,7 +8,7 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from pydantic import BaseModel, RootModel
 from pythonjsonlogger.json import JsonFormatter
@@ -85,6 +85,7 @@ from app.services.settings_service import _cache as _llm_cache
 from app.services.settings_service import load_llm_settings
 from app.services.startup_status import get_startup_status
 from app.services.warmup import run_warmup
+from app.streaming import StreamingResponse
 from app.surface_manifest import enabled_routers
 from app.telemetry import setup_tracing
 

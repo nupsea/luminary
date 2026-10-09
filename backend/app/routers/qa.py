@@ -4,7 +4,6 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +16,7 @@ from app.services.intent import (
 )
 from app.services.llm import get_llm_service
 from app.services.okf_context import get_okf_context_service
+from app.streaming import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
