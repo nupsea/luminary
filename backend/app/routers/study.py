@@ -65,13 +65,9 @@ from app.schemas.study import (
     SessionReviewResponse,
     SessionStartResponse,
     SessionSummary,
-    StartConceptItemResponse,
-    StartConceptsAPIResponse,
     StartSessionRequest,
     StrugglingCardItem,
     StudyCollectionDashboardResponse,
-    StudyPathAPIResponse,
-    StudyPathItemResponse,
     StudyStatsResponse,
     TeachbackRequest,
     TeachbackResponse,
@@ -86,7 +82,6 @@ from app.services.mastery_service import get_mastery_service
 from app.services.misconceptions import (
     get_stats as get_misconception_stats,
 )
-from app.services.study_path_service import StudyPathService
 from app.services.study_queue import due_scope
 from app.services.study_session_service import (
     build_session_plan as _build_session_plan,
@@ -973,50 +968,6 @@ async def get_section_heatmap(
         len(heatmap),
     )
     return SectionHeatmapResponse(heatmap=heatmap)
-
-
-# Study path endpoints
-
-
-@router.get("/path", response_model=StudyPathAPIResponse)
-async def get_study_path(
-    document_id: str = Query(...),
-    concept: str = Query(...),
-    session: AsyncSession = Depends(get_db),
-) -> StudyPathAPIResponse:
-    """Return FSRS-aware prerequisite study path for a concept in a document.
-
-    Path is ordered from earliest prerequisite to the requested concept.
-    Each item includes mastery (0-1), skip flag (avg_stability >= 14 days),
-    and reason string.
-
-    Returns empty path (not 404) when the concept has no PREREQUISITE_OF edges.
-    """
-    svc = StudyPathService()
-    result = await svc.get_study_path(document_id, concept, session)
-    return StudyPathAPIResponse(
-        concept=result["concept"],
-        document_id=result["document_id"],
-        path=[StudyPathItemResponse(**vars(item)) for item in result["path"]],
-    )
-
-
-@router.get("/start", response_model=StartConceptsAPIResponse)
-async def get_start_concepts(
-    document_id: str = Query(...),
-    session: AsyncSession = Depends(get_db),
-) -> StartConceptsAPIResponse:
-    """Return up to 3 entry-point concepts for a document with highest learning ROI.
-
-    Entry-point concepts are those with no unsatisfied prerequisites.
-    Returns empty concepts list (not 404) when no PREREQUISITE_OF edges exist.
-    """
-    svc = StudyPathService()
-    result = await svc.get_start_concepts(document_id, session)
-    return StartConceptsAPIResponse(
-        document_id=result["document_id"],
-        concepts=[StartConceptItemResponse(**vars(item)) for item in result["concepts"]],
-    )
 
 
 # Lightweight session API (stateless start + review)

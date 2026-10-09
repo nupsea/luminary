@@ -452,48 +452,6 @@ class SourceCitation(TypedDict):
     section_preview_snippet: str  # first 150 chars of chunk text for hover tooltip
 
 
-# Learning path
-
-
-@dataclass
-class LearningPathNode:
-    entity_id: str
-    name: str
-    entity_type: str
-    depth: int  # 0 = deepest prerequisite, increasing = closer to start (dependent)
-
-
-# Study path
-
-
-@dataclass
-class StudyPathItem:
-    concept: str
-    mastery: float  # 0.0 to 1.0 — avg(fsrs_stability / 21.0) capped at 1.0
-    skip: bool  # True when avg_stability_days >= 14
-    reason: str  # e.g. "avg_stability=18d" or "no flashcards"
-    avg_stability_days: float
-
-
-class StudyPathResponse(TypedDict):
-    concept: str
-    document_id: str
-    path: list[StudyPathItem]  # ordered from earliest prereq to start concept
-
-
-@dataclass
-class StartConceptItem:
-    concept: str
-    prereq_chain_length: int
-    flashcard_count: int
-    rationale: str  # e.g. "0 prerequisites unskipped; 3 flashcards"
-
-
-class StartConceptsResponse(TypedDict):
-    document_id: str
-    concepts: list[StartConceptItem]  # up to 3, sorted by shortest chain then fewest cards
-
-
 # Concept mastery
 
 

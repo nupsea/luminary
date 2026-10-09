@@ -574,8 +574,7 @@ ingest. Not measured: the chat `graph` node, which reads the graph directly.
 
 **The graph moves from Kuzu into SQLite tables; the graph features stay.** Decided 2026-10-01. Kuzu
 is used as an edge store: every Cypher statement is a one-hop pattern, with no variable-length path,
-and traversal already runs in Python (the learning path's BFS and topological sort,
-`graph_prereq.py`). What decides it is integrity, not speed. Measured on the dev library, 2026-10-01:
+and traversal already ran in Python (the learning path's BFS and topological sort). What decides it is integrity, not speed. Measured on the dev library, 2026-10-01:
 
 | | Kuzu today | Same data in SQLite |
 |---|---|---|
@@ -591,8 +590,8 @@ puts one store rather than two behind 0.17.0's library scope and snapshot. It do
 graph holds:
 - Entity `RELATED_TO` and `PROMOTED_FROM` had no writer. Their readers are removed, and the import
   counts their rows rather than copying them (#161).
-- Prerequisite edges have no producer: the `prerequisites` job is registered but never enqueued. So
-  the "Where to start" panel and `/study/path` are always empty (#227, 0.16.0).
+- The LLM prerequisite extractor had no producer; it and its readers are removed (#227, see
+  Abandoned).
 
 The port keeps the path to a hosted version open: foreign keys with `ON DELETE CASCADE`, a
 `library_id` column from the first revision, portable SQLAlchemy only (no FTS, no SQLite-only
@@ -982,6 +981,14 @@ something else.
   and 0.89 -> 0.78 (unsound cards 20 -> 33, 12 -> 31). It also makes the coverage check pass by
   construction: copied words satisfy a lexical gate whether or not they answer the question. Fewer
   wasted calls must come from asking fewer unanswerable questions, not from the answer's wording.
+- **LLM-extracted prerequisite edges, "Where to start" and `/study/path`** — removed 2026-10-09
+  (#227). The extractor was registered but never enqueued. Enqueued, it returned `[]` on 50 of 50
+  section summaries of a technical book on qwen3.5:4b, while a control prompt on the same model
+  answered. A redesign that required a verbatim quote per pair gave 46 pairs over 30 sections,
+  42 with the quote found, but most were not prerequisites ("amazon s3 -> employee table"). A
+  quote proves the sentence exists, not the dependency, so nothing structural could reject
+  them. Restoring it needs a check on the dependency itself, measured on a hand-graded sample.
+  The ingestion-time marker edges ("X requires Y", `prerequisite_detector.py`) are kept.
 - **Two Ollama services** — rejected on a single-GPU/8GB machine. See I-31: enrichment cost is
   call count, not concurrency, so the lever is fewer calls, never more parallelism.
 
