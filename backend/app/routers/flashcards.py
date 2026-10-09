@@ -31,7 +31,6 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -103,6 +102,7 @@ from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.llm import LLMUnavailableError
 from app.services.objective_tracker import get_objective_tracker_service
 from app.services.settings_service import get_llm_error_message
+from app.streaming import StreamingResponse
 
 logger = logging.getLogger(__name__)
 

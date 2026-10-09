@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The "Where to start" panel and `/study/start` and `/study/path`.** Nothing ever filled them: the prerequisite extractor behind them was never run, and run, the local model found no prerequisites or invented them. Prerequisite edges stated in the text ("X requires Y") still show on the Map.
 
 ### Fixed
+- **Closing a streamed answer early could strand a database connection**, logged as "Exception terminating connection" and held until garbage collection (with SQLite's write lock, if it was writing). A stream now stops at its next step instead of mid-query.
 - **Chapter cards on technical books asked who did something and why, as if the book were a story.** Chapter cards now ask what each kind of book is for, and a technical or research card about a person rather than its subject is refused. A story read as technical from its preface is now classed by how its body reads.
 - **Selecting text in the PDF painted a bar in the page margin.**
 - **Dragging a selection across a gap in PDF text jumped it to the end of the page.** The text layer now carries the end-of-content guard pdf.js's own viewer uses.

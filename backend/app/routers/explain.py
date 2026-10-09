@@ -4,10 +4,10 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.services.explain import get_explain_service
+from app.streaming import StreamingResponse
 
 logger = logging.getLogger(__name__)
 

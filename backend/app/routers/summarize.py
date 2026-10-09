@@ -4,7 +4,6 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -13,6 +12,7 @@ from app.models import DocumentModel, SectionSummaryModel, SummaryModel
 from app.repos._helpers import get_or_404
 from app.services.library_summary import get_library_summary_service
 from app.services.summarizer import get_summarization_service
+from app.streaming import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
