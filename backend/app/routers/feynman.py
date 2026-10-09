@@ -11,7 +11,6 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +21,7 @@ from app.schemas.study import (
     TeachbackRubricResponse,
 )
 from app.services.feynman_service import get_feynman_service
+from app.streaming import StreamingResponse
 
 logger = logging.getLogger(__name__)
 

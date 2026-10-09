@@ -1526,13 +1526,13 @@ def _extract_epub_cover_sync(fp: str, target: str) -> bool:
 
 
 @router.get("/{document_id}/cover")
-async def get_document_cover(document_id: str) -> FileResponse:
+async def get_document_cover(document_id: str) -> Response:
     """Serve or generate on-demand the cover / preview image for a document.
 
     - For EPUB: extracts the embedded cover image from the archive.
     - For PDF: renders page 0 via PyMuPDF (fitz) if not already cached.
     - If images exist (e.g. from article extraction), serves the first diagram/figure.
-    - Returns 404 if no image can be produced for this document.
+    - Returns 204 if no image can be produced for this document, 404 if it does not exist.
     """
     settings = get_settings()
     covers_dir = Path(settings.DATA_DIR).expanduser() / "covers"
@@ -1595,7 +1595,9 @@ async def get_document_cover(document_id: str) -> FileResponse:
                 media_type = f"image/{ext}" if ext in valid_exts else "image/png"
                 return FileResponse(str(first_img), media_type=media_type)
 
-    raise HTTPException(status_code=404, detail="Cover image not available")
+    # No cover is an expected answer, not a failure: the tile falls back on any empty
+    # response, and a 404 here was logged as a warning for every coverless document.
+    return Response(status_code=204)
 
 
 @router.get("/{document_id}/pdf-meta", response_model=PDFMetaResponse)

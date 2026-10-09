@@ -8,7 +8,6 @@ import json
 import logging
 
 from fastapi import APIRouter, Header, HTTPException
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.services.components import (
@@ -23,6 +22,7 @@ from app.services.enrichment_worker import requeue_skipped_jobs
 from app.services.lifecycle import request_shutdown
 from app.services.startup_status import get_startup_status
 from app.services.warmup import retry_failed
+from app.streaming import StreamingResponse
 
 logger = logging.getLogger(__name__)
 

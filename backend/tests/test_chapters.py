@@ -128,6 +128,46 @@ def test_back_matter_ends_the_last_chapter():
     assert chapters[-1].section_ids == ["s1"]
 
 
+_THINKPYTHON2_FRONT = (
+    ("", 1500),  # title page
+    ("", 1500),  # copyright
+    ("Preface", 4000),
+    ("The strange history of this book", 5000),
+    ("Acknowledgments", 2000),
+    ("Contributor List", 12000),
+)
+
+
+def test_an_unmarked_book_does_not_open_on_its_preface():
+    """#252: thinkpython2's chapter 1 was the title pages, preface and contributor list."""
+    body = [(f"Topic {i}", 6000) for i in range(30)]
+    sections = _sections(*_THINKPYTHON2_FRONT, *body, pages=True)
+    chapters = detect_chapters(sections, "thinkpython2")
+    assert chapters[0].id == "s6"
+    assert not {"s0", "s1", "s2", "s3", "s4", "s5"} & {s for c in chapters for s in c.section_ids}
+
+
+def test_front_matter_does_not_move_a_marked_book():
+    marks = [("Chapter 1. Introduction", BIG), ("Chapter 2. Foundation Models", BIG)]
+    plain = detect_chapters(_sections(*marks), "AI Engineering")
+    fronted = detect_chapters(_sections(*_THINKPYTHON2_FRONT, *marks), "AI Engineering")
+    assert [(c.title, c.chars) for c in fronted] == [(c.title, c.chars) for c in plain]
+
+
+def test_an_untitled_opening_alone_is_kept():
+    """A paper's abstract is parsed as an untitled preamble, and it is the paper."""
+    chapters = detect_chapters(_sections(("", 3000), ("1 Introduction", 9000)), "chexnet")
+    assert chapters[0].section_ids == ["s0", "s1"]
+
+
+def test_front_matter_names_past_the_opening_are_kept():
+    body = [(f"Topic {i}", 6000) for i in range(20)]
+    sections = _sections(("Preface", 3000), *body, ("Acknowledgments", 3000), *body[:2])
+    chapters = detect_chapters(sections, "book")
+    assert chapters[0].id == "s1"
+    assert "s21" in {s for c in chapters for s in c.section_ids}
+
+
 def test_sections_are_read_in_chunk_order_not_section_order():
     sections = [
         SectionExtent("late", "II — The Machine", 50, BIG),

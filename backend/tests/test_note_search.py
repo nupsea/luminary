@@ -10,6 +10,9 @@ Test plan:
   7. test_search_endpoint_422_empty_q — API: GET /notes/search?q= returns 422
 """
 
+import os
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -86,6 +89,10 @@ def test_rrf_merge_dedup_both_source():
 def client(tmp_path, monkeypatch):
     """Isolated TestClient with a fresh DATA_DIR per test."""
     data_dir = str(tmp_path)
+    # Keep the session's shared model cache (conftest), or every test re-downloads.
+    (tmp_path / "models").symlink_to(
+        Path(os.environ["DATA_DIR"]) / "models", target_is_directory=True
+    )
     monkeypatch.setenv("DATA_DIR", data_dir)
 
     # Reset singletons to use the new data_dir
@@ -211,7 +218,7 @@ def test_alice_note_search_slow(all_books_ingested):
 # which is why these tests inject one directly instead of hoping a delete fails.
 
 
-def _await_embedding(note_id: str, timeout: float = 120.0) -> None:
+def _await_embedding(note_id: str, timeout: float = 60.0) -> None:
     """Block until `POST /notes`'s background embed has written this note's vector.
 
     Waits for the app's own task rather than writing the vector here. Writing it
@@ -225,11 +232,18 @@ def _await_embedding(note_id: str, timeout: float = 120.0) -> None:
     """
     import time
 
-    from app.services.vector_store import get_lancedb_service
+    from app.services.vector_store import NOTE_TABLE_NAME, get_lancedb_service
 
+    svc = get_lancedb_service()
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        table = get_lancedb_service()._get_or_create_note_table()
+        # Never create the table from here: that races the task's own create, and
+        # on Windows the task lost ("not found") and never wrote its vector.
+        svc._connect()
+        if NOTE_TABLE_NAME not in svc._db.list_tables().tables:
+            time.sleep(0.5)
+            continue
+        table = svc._db.open_table(NOTE_TABLE_NAME)
         if table.count_rows() and any(
             r["note_id"] == note_id for r in table.search().limit(10_000).to_list()
         ):

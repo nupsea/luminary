@@ -173,7 +173,32 @@ async def test_get_document_cover_epub(test_db):
 
 
 async def test_get_document_cover_404(test_db):
-    """GET /documents/{id}/cover returns 404 when document does not exist or has no images."""
+    """GET /documents/{id}/cover returns 404 when the document does not exist."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{uuid.uuid4()}/cover")
         assert resp.status_code == 404
+
+
+async def test_get_document_cover_204_when_document_has_no_image(test_db):
+    """A coverless document answers 204, which the request log does not report as a failure."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Plain notes",
+                format="txt",
+                content_type="notes",
+                word_count=10,
+                page_count=1,
+                file_path="",
+                stage="ready",
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/documents/{doc_id}/cover")
+        assert resp.status_code == 204
+        assert resp.content == b""
