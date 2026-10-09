@@ -34,6 +34,7 @@ interface PdfPageProps {
   citationWords: string[]
   scrollMarks: React.RefObject<ScrollMarks>
   goToPage: (n: number) => void
+  bookmarked: boolean
   onNaturalSize: (pageNum: number, width: number, height: number) => void
 }
 
@@ -86,7 +87,7 @@ function sizeLayer(div: HTMLDivElement, width: number, height: number, scale: nu
 export const PdfPage = memo(function PdfPage({
   pdfDoc, pageNum, zoom, top, width, height, live, canvasFilter,
   annotations, sections, searchQuery, activeMatch, searchKey, citationWords,
-  scrollMarks, goToPage, onNaturalSize,
+  scrollMarks, goToPage, bookmarked, onNaturalSize,
 }: PdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
@@ -246,6 +247,12 @@ export const PdfPage = memo(function PdfPage({
       <div ref={overlayRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 5, pointerEvents: "none" }} />
       <div ref={textLayerRef} className="textLayer" />
       <div ref={annotationLayerRef} className="annotationLayer" style={{ zIndex: 20, pointerEvents: "none" }} />
+      {bookmarked && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute right-6 top-0 z-30 h-9 w-5 bg-red-600 shadow-md [clip-path:polygon(0_0,100%_0,100%_100%,50%_78%,0_100%)]"
+        />
+      )}
     </div>
   )
 })

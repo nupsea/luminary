@@ -14,8 +14,6 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import ChunkModel, DocumentModel
 from app.workflows.ingestion import ENTITY_TAIL_MAX, build_entity_tail
 
@@ -76,14 +74,13 @@ def test_build_entity_tail_skips_non_strings():
 
 
 @pytest.fixture
-async def fts_db(tmp_path, monkeypatch):
+async def fts_db(memory_db, tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from app.config import get_settings
 
     get_settings.cache_clear()
 
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     orig_engine = db_module._engine

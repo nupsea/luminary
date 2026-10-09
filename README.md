@@ -19,7 +19,7 @@ Nothing leaves your machine unless you give it an API key.
 </p>
 
 <p align="center">
-  <a href="assets/images/demo.mp4"><b>Full-quality video</b></a> · <a href="https://youtu.be/semZlbJde_Q"><b>Two-minute tour</b></a>
+  <a href="assets/images/demo.mp4"><b>Full-quality video</b></a> · <a href="https://youtu.be/JL6S5ObUeQQ"><b>Two-minute tour</b></a>
 </p>
 
 ---

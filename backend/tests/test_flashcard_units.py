@@ -441,8 +441,16 @@ async def test_generate_takes_the_unit_path_when_it_is_on(test_db, unit_first):
             patch("app.services.embedder.get_embedding_service", side_effect=RuntimeError),
         ):
             cards = await FlashcardService().generate(
-                document_id="d1", scope="full", section_heading=None, count=1, session=session
+                document_id="d1",
+                scope="full",
+                section_heading=None,
+                count=1,
+                session=session,
+                difficulty="hard",
             )
 
     assert llm.generate.call_args.kwargs["system"].startswith("You write flashcards")
     assert [c.source_excerpt for c in cards] == [text.splitlines()[0]]
+    # The prompt never saw "hard"; the card recalls one stated sentence and says so (#222).
+    assert "hard" not in llm.generate.call_args.args[0].lower()
+    assert [(c.difficulty, c.bloom_level) for c in cards] == [("easy", 1)]

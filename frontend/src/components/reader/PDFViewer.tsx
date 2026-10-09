@@ -2,7 +2,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import * as pdfjsLib from "pdfjs-dist"
 import type { PDFDocumentProxy } from "pdfjs-dist"
 import "pdfjs-dist/web/pdf_viewer.css"
-import { ChevronLeft, ChevronRight, Minus, Moon, PanelLeftClose, PanelLeftOpen, Plus, Search, Sun } from "lucide-react"
+import { Bookmark, ChevronLeft, ChevronRight, Minus, Moon, PanelLeftClose, PanelLeftOpen, Plus, Search, Sun } from "lucide-react"
 import { API_BASE, PDFJS_WORKER_URL } from "@/lib/config"
 import { useIsDark } from "@/hooks/useIsDark"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
@@ -73,6 +73,13 @@ interface PDFViewerProps {
   annotations?: AnnotationItem[]
   highlightsVisible?: boolean
   onPageChange?: (page: number) => void
+  /**
+   * The page the reader is on by their own scrolling or page turning. Jumps made
+   * for them (a citation, a search hit, a deep link) do not move it until they scroll on.
+   */
+  onReadingPageChange?: (page: number) => void
+  bookmarkPage?: number | null
+  onBookmarkChange?: (page: number | null) => void
 }
 
 export interface PDFViewerHandle {
@@ -85,7 +92,7 @@ const EMPTY_WORDS: string[] = []
 const EMPTY_ANNOTATIONS: AnnotationItem[] = []
 
 export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
-  function PDFViewer({ documentId, sections, pageLabels, initialPage, initialSearch, citationWords = EMPTY_WORDS, citationPage = null, annotations = EMPTY_ANNOTATIONS, highlightsVisible = true, onPageChange }, ref) {
+  function PDFViewer({ documentId, sections, pageLabels, initialPage, initialSearch, citationWords = EMPTY_WORDS, citationPage = null, annotations = EMPTY_ANNOTATIONS, highlightsVisible = true, onPageChange, onReadingPageChange, bookmarkPage = null, onBookmarkChange }, ref) {
     const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null)
     // The citation and the active search match are each scrolled to once, by the
     // first page that draws them.
@@ -182,6 +189,10 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const anchorRef = useRef<ScrollAnchor | null>(null)
     // A page asked for before the pages are laid out.
     const pendingPageRef = useRef<number | null>(null)
+    // Whether the view is where the reader put it, rather than where a jump took it.
+    const readingRef = useRef(false)
+    const onReadingPageRef = useRef(onReadingPageChange)
+    onReadingPageRef.current = onReadingPageChange
 
     // Reads the viewport: which pages to render, and which page the reader is on.
     const syncToScroll = useCallback(() => {
@@ -207,11 +218,14 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         setCurrentPage(page)
         setPageInput(String(page))
       }
+      // A hidden view measures zero height, which pageInView reads as the last page.
+      if (readingRef.current && el.clientHeight > 0) onReadingPageRef.current?.(page)
     }, [])
 
     // Memoized: the search effects depend on it, and a new identity per render
     // re-ran them every render -- an update loop that starved route changes.
-    const goToPage = useCallback((n: number) => {
+    const scrollToPage = useCallback((n: number, reading: boolean) => {
+      readingRef.current = reading
       const el = scrollAreaRef.current
       const current = layoutRef.current
       if (!el || current.tops.length === 0) {
@@ -222,6 +236,11 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       el.scrollTop = Math.max(0, current.tops[page - 1] - PAGE_PAD)
       syncToScroll()
     }, [syncToScroll])
+    /** A jump made for the reader: not where they are reading. */
+    const goToPage = useCallback((n: number) => scrollToPage(n, false), [scrollToPage])
+    /** A page the reader turned to themselves. */
+    const turnTo = useCallback((n: number) => scrollToPage(n, true), [scrollToPage])
+    const markReading = useCallback(() => { readingRef.current = true }, [])
 
     const handleNaturalSize = useCallback((pageNum: number, width: number, height: number) => {
       setNaturalSizes((prev) => {
@@ -257,17 +276,25 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         cancelAnimationFrame(frame)
         frame = requestAnimationFrame(syncToScroll)
       }
+      // The reader's own scrolling. A pointerdown on the scroller itself is its scrollbar.
+      const onPointerDown = (e: PointerEvent) => { if (e.target === el) markReading() }
       el.addEventListener("scroll", schedule, { passive: true })
+      el.addEventListener("wheel", markReading, { passive: true })
+      el.addEventListener("touchmove", markReading, { passive: true })
+      el.addEventListener("pointerdown", onPointerDown)
       const observer = new ResizeObserver(schedule)
       observer.observe(el)
       return () => {
         cancelAnimationFrame(frame)
         el.removeEventListener("scroll", schedule)
+        el.removeEventListener("wheel", markReading)
+        el.removeEventListener("touchmove", markReading)
+        el.removeEventListener("pointerdown", onPointerDown)
         observer.disconnect()
       }
-    }, [loadStatus, syncToScroll])
+    }, [loadStatus, syncToScroll, markReading])
 
-    usePdfKeyScroll(scrollAreaRef, loadStatus === "ready")
+    usePdfKeyScroll(scrollAreaRef, loadStatus === "ready", markReading)
 
     // Expose goToPage for parent (section list page-jump badges)
     useImperativeHandle(ref, () => ({ goToPage }), [goToPage])
@@ -425,7 +452,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       }
       // The field commits on blur, and it already shows the page in view: re-going
       // there would snap the view to that page's top on the first click into the text.
-      if (sheet !== currentPage) goToPage(sheet)
+      if (sheet !== currentPage) turnTo(sheet)
     }
 
     // The page field only committed on blur/Enter, so the spinner arrows (and any
@@ -436,7 +463,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       if (pageCommitTimer.current) window.clearTimeout(pageCommitTimer.current)
       const sheet = resolvePageEntry(value)
       if (sheet === null) return
-      pageCommitTimer.current = window.setTimeout(() => goToPage(sheet), 250)
+      pageCommitTimer.current = window.setTimeout(() => turnTo(sheet), 250)
     }
     function commitPageInputNow() {
       if (pageCommitTimer.current) window.clearTimeout(pageCommitTimer.current)
@@ -719,8 +746,8 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           e.target instanceof HTMLTextAreaElement ||
           (e.target as HTMLElement).isContentEditable
         ) return
-        if (e.key === "ArrowRight") goToPage(currentPage + 1)
-        if (e.key === "ArrowLeft") goToPage(currentPage - 1)
+        if (e.key === "ArrowRight") turnTo(currentPage + 1)
+        if (e.key === "ArrowLeft") turnTo(currentPage - 1)
       }
       window.addEventListener("keydown", onKey)
       return () => window.removeEventListener("keydown", onKey)
@@ -808,7 +835,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                             : "text-muted-foreground/50 cursor-default"
                         }`}
                       style={{ paddingLeft: `${(entry.level - 1) * 8 + 8}px` }}
-                      onClick={() => navigable && goToPage(entry.page)}
+                      onClick={() => navigable && turnTo(entry.page)}
                       title={navigable ? `p.${entry.page} — ${entry.title}` : entry.title}
                       disabled={!navigable}
                     >
@@ -844,7 +871,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                         className={`w-full text-left text-xs px-2 py-1 rounded hover:bg-accent truncate ${isActive ? "bg-accent text-foreground font-medium" : "text-muted-foreground"
                           }`}
                         style={{ paddingLeft: `${(displayLevel - 1) * 8 + 8}px` }}
-                        onClick={() => goToPage(targetPage)}
+                        onClick={() => turnTo(targetPage)}
                         title={hasPageNums ? `p.${targetPage} -- ${sec.heading}` : `~p.${targetPage} -- ${sec.heading}`}
                       >
                         {sec.heading}
@@ -909,7 +936,8 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                     searchKey={searchKey}
                     citationWords={citationWords}
                     scrollMarks={scrollMarksRef}
-                    goToPage={goToPage}
+                    goToPage={turnTo}
+                    bookmarked={pageNum === bookmarkPage}
                     onNaturalSize={handleNaturalSize}
                   />
                 )
@@ -921,7 +949,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           <div className="flex items-center gap-1 px-3 py-1.5 border-t bg-background flex-shrink-0">
             <button
               className="p-1 rounded hover:bg-accent disabled:opacity-40"
-              onClick={() => goToPage(currentPage - 1)}
+              onClick={() => turnTo(currentPage - 1)}
               disabled={currentPage <= 1}
               title="Previous page (←)"
               aria-label="Previous page"
@@ -953,13 +981,37 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             )}
             <button
               className="p-1 rounded hover:bg-accent disabled:opacity-40"
-              onClick={() => goToPage(currentPage + 1)}
+              onClick={() => turnTo(currentPage + 1)}
               disabled={currentPage >= totalPages}
               title="Next page (→)"
               aria-label="Next page"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
+            {onBookmarkChange && (
+              <>
+                <button
+                  className={`p-1 rounded hover:bg-accent ml-1 ${bookmarkPage === currentPage ? "text-red-600" : ""}`}
+                  onClick={() => onBookmarkChange(bookmarkPage === currentPage ? null : currentPage)}
+                  title={bookmarkPage === currentPage ? "Remove bookmark" : bookmarkPage != null ? "Move bookmark to this page" : "Bookmark this page"}
+                  aria-label={bookmarkPage === currentPage ? "Remove bookmark" : "Bookmark this page"}
+                  aria-pressed={bookmarkPage === currentPage}
+                >
+                  <Bookmark className="h-4 w-4" fill={bookmarkPage === currentPage ? "currentColor" : "none"} />
+                </button>
+                {bookmarkPage != null && bookmarkPage !== currentPage && (
+                  <button
+                    className="flex items-center gap-0.5 rounded px-1 py-0.5 text-xs font-medium tabular-nums text-red-600 hover:bg-accent"
+                    onClick={() => turnTo(bookmarkPage)}
+                    title={`Go to your bookmark (sheet ${bookmarkPage})`}
+                    aria-label={`Go to your bookmark, sheet ${bookmarkPage}`}
+                  >
+                    <Bookmark className="h-3.5 w-3.5" fill="currentColor" />
+                    {bookmarkPage}
+                  </button>
+                )}
+              </>
+            )}
             <button
               className="p-1 rounded hover:bg-accent ml-1"
               onClick={() => setSearchOpen((v) => !v)}
