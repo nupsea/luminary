@@ -8,7 +8,7 @@ import type { ExplainMode } from "@/components/reader/SelectionActionBar"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import type { ContentType } from "@/components/library/types"
 import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
-import { ApiError, apiDelete, apiGet, apiPost, apiPut } from "@/lib/apiClient"
+import { ApiError, apiDelete, apiGet, apiPost, apiPut, request } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { logger } from "@/lib/logger"
 import { toggleDocumentFavorite } from "@/pages/Learning/api"
@@ -316,7 +316,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   // reading position — resume banner
   const [resumePosition, setResumePosition] = useState<ReadingPosition | null>(null)
-  // Saved PDF page from the position API (used for PDFViewer initialPage)
+  // The page the PDF opens on: the bookmark if there is one, else the last page read.
   const [savedPdfPage, setSavedPdfPage] = useState<number | null>(null)
   // ref tracking the last section_id we POSTed so we only POST when it changes
   const lastPostedSectionRef = useRef<string | null>(null)
@@ -927,8 +927,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           pdfReadPageRef.current ??= pos.last_pdf_page
           lastPostedPdfPageRef.current ??= pos.last_pdf_page
         }
+        const openOn = pos.pdf_bookmark_page ?? (dismissed ? null : pos.last_pdf_page)
+        if (openOn != null) setSavedPdfPage(openOn)
         if (dismissed) return
-        if (pos.last_pdf_page != null) setSavedPdfPage(pos.last_pdf_page)
         if (pos.last_section_id || pos.last_pdf_page != null) setResumePosition(pos)
       })
       .catch((err) => {
@@ -989,26 +990,43 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     }
   }, [documentId, doc?.sections.length])
 
-  // Persist PDF page turns (same 10s throttle as section position posts)
-  useEffect(() => {
-    if (!doc || doc.format !== "pdf" || pdfReadPage == null) return
-    if (pdfReadPage === lastPostedPdfPageRef.current) return
-    if (positionThrottleRef.current) clearTimeout(positionThrottleRef.current)
-    positionThrottleRef.current = setTimeout(() => {
-      const sectionId = lastPostedSectionRef.current
-      const section = sectionId ? doc.sections.find((s) => s.id === sectionId) : undefined
-      void apiPost(`/documents/${documentId}/position`, {
+  // Save the page read once it settles, and at once when the reader closes or the tab
+  // hides: a pending save cancelled on close lost the last pages read.
+  const pdfSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const docRef = useRef(doc)
+  useEffect(() => { docRef.current = doc }, [doc])
+  const savePdfPage = useCallback((keepalive: boolean) => {
+    if (pdfSaveTimerRef.current) clearTimeout(pdfSaveTimerRef.current)
+    pdfSaveTimerRef.current = null
+    const page = pdfReadPageRef.current
+    if (page == null || page === lastPostedPdfPageRef.current) return
+    lastPostedPdfPageRef.current = page
+    const sectionId = lastPostedSectionRef.current
+    const section = sectionId ? docRef.current?.sections.find((s) => s.id === sectionId) : undefined
+    void request(`/documents/${documentId}/position`, {
+      method: "POST",
+      keepalive,
+      body: {
         last_section_id: sectionId,
         last_section_heading: section?.heading ?? null,
-        last_pdf_page: pdfReadPage,
+        last_pdf_page: page,
         last_epub_chapter_index: null,
-      }).catch(() => {})
-      lastPostedPdfPageRef.current = pdfReadPage
-    }, 10_000)
+      },
+    }).catch(() => {})
+  }, [documentId])
+  useEffect(() => {
+    if (pdfReadPage == null) return
+    if (pdfSaveTimerRef.current) clearTimeout(pdfSaveTimerRef.current)
+    pdfSaveTimerRef.current = setTimeout(() => savePdfPage(false), 2_000)
+  }, [pdfReadPage, savePdfPage])
+  useEffect(() => {
+    const onVisibility = () => { if (document.visibilityState === "hidden") savePdfPage(true) }
+    document.addEventListener("visibilitychange", onVisibility)
     return () => {
-      if (positionThrottleRef.current) clearTimeout(positionThrottleRef.current)
+      document.removeEventListener("visibilitychange", onVisibility)
+      savePdfPage(true)
     }
-  }, [documentId, doc, pdfReadPage])
+  }, [savePdfPage])
 
   const handleBookmarkChange = useCallback((page: number | null) => {
     const previous = pdfBookmarkPage

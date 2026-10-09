@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **A red bookmark in the PDF view.** One per document, placed from the toolbar; a chip beside it jumps back from wherever citations or search took you.
+- **A red bookmark in the PDF view.** One per document, placed from the toolbar; the document opens on it, and a chip beside it jumps back from wherever citations or search took you.
 
 ### Changed
 - **The PDF view scrolls continuously.** Pages stack in one scroll, so the wheel, the paging keys and a text selection all run across page breaks; only the pages near the view are drawn.
