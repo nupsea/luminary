@@ -1,11 +1,14 @@
-"""Repository for `SettingsModel` rows that hold one flag each."""
+"""Repository for `SettingsModel` rows."""
 
 from __future__ import annotations
+
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import SettingsModel
+from app.repos._helpers import upsert_insert
 
 
 class SettingsRepo:
@@ -20,5 +23,15 @@ class SettingsRepo:
         return row.value if row is not None and isinstance(row.value, bool) else None
 
     async def set_flag(self, key: str, value: bool) -> None:
-        await self.session.merge(SettingsModel(key=key, value=bool(value)))
+        await self.put(key, bool(value))
         await self.session.commit()
+
+    async def put(self, key: str, value: Any) -> None:
+        """Write one setting. Not `session.merge`: that selects then inserts, so two
+        writers of an absent key both insert and one fails on the primary key (#251)."""
+        stmt = upsert_insert(self.session, SettingsModel).values(key=key, value=value)
+        await self.session.execute(
+            stmt.on_conflict_do_update(
+                index_elements=[SettingsModel.key], set_={"value": stmt.excluded.value}
+            )
+        )

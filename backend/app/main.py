@@ -19,9 +19,9 @@ from app.config import Settings, get_settings
 from app.database import get_db, get_engine, get_session_factory, optimize_database
 from app.db_init import init_database
 from app.exceptions import LuminaryError
-from app.models import SettingsModel
 from app.parent_watch import watch_parent
 from app.paths import app_version, spa_dist
+from app.repos.settings_repo import SettingsRepo
 from app.request_log import RequestLogMiddleware
 from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
@@ -637,14 +637,14 @@ async def patch_settings(
     request: SettingsUpdate,
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    # Writes straight to SettingsModel, so it does NOT reach the OS keyring.
+    # Writes straight to the settings table, so it does NOT reach the OS keyring.
     # Secrets must go through PATCH /settings/llm, which routes them via
     # settings_service (keyring where there is one, `__plain__:` in a container).
     # Never add an API key to whatever calls this.
     updates = request.root
+    repo = SettingsRepo(session)
     for key, value in updates.items():
-        setting = SettingsModel(key=key, value=value)
-        await session.merge(setting)
+        await repo.put(key, value)
     await session.commit()
     return {"updated": list(updates.keys())}
 

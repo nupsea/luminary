@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The "Where to start" panel and `/study/start` and `/study/path`.** Nothing ever filled them: the prerequisite extractor behind them was never run, and run, the local model found no prerequisites or invented them. Prerequisite edges stated in the text ("X requires Y") still show on the Map.
 
 ### Fixed
+- **A fresh library reported the first chat-model install as failed** (`UNIQUE constraint failed: settings.key`) although the model installed. Two writers of a setting no library had yet both inserted it; settings writes are now one upsert.
 - **A document deck generated as "Hard" was labelled hard and was not.** Document cards ask about one sentence the text states, so they are stored as recall, and the generate panel no longer offers a difficulty it cannot honour.
 - **A PDF reopened on a page you never read.** Every page shown was saved as the last read, citation and search jumps included; now only pages you scroll or turn to yourself are.
 - **Chapter cards on technical books asked who did something and why, as if the book were a story.** Chapter cards now ask what each kind of book is for, and a technical or research card about a person rather than its subject is refused. A story read as technical from its preface is now classed by how its body reads.

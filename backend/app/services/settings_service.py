@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import CloudKeyMissing
 from app.models import SettingsModel
+from app.repos.settings_repo import SettingsRepo
 
 logger = logging.getLogger(__name__)
 
@@ -208,8 +209,7 @@ async def load_llm_settings(db: AsyncSession) -> None:
             else:
                 new_db_value = _PLAINTEXT_PREFIX + plaintext
                 logger.debug("Migrated legacy XOR key %r to plaintext-prefix (no keyring)", key)
-            migrated_row = SettingsModel(key=key, value=new_db_value)
-            await db.merge(migrated_row)
+            await SettingsRepo(db).put(key, new_db_value)
             await db.commit()
             _cache[key] = plaintext
         else:
@@ -370,9 +370,9 @@ async def update_llm_settings(
             updates_db[field] = ""
             updates_cache[field] = ""
 
+    repo = SettingsRepo(db)
     for key, value in updates_db.items():
-        setting = SettingsModel(key=key, value=value)
-        await db.merge(setting)
+        await repo.put(key, value)
     await db.commit()
     if "llm_mode" in updates_db:
         global _mode_row_present
@@ -398,8 +398,7 @@ async def get_rerank_enabled(db: AsyncSession) -> bool:
 
 
 async def set_rerank_enabled(db: AsyncSession, enabled: bool) -> None:
-    await db.merge(SettingsModel(key=_RERANK_KEY, value=bool(enabled)))
-    await db.commit()
+    await SettingsRepo(db).set_flag(_RERANK_KEY, enabled)
 
 
 def get_llm_error_message(exc: BaseException | None = None) -> str:
