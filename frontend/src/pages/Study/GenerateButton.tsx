@@ -1,6 +1,6 @@
 // GenerateButton -- single "Generate Cards" button with a
 // chevron disclosure that reveals advanced options (mode, scope,
-// section, difficulty, count). Replaces the older GeneratePanel +
+// section, count). Replaces the older GeneratePanel +
 // SmartGeneratePanel split. The "smart" path picks a mode based on
 // the learner's mastery via buildSmartGenerateParams.
 
@@ -12,12 +12,6 @@ import { buildSmartGenerateParams, computeMasteryPct, selectSmartMode } from "@/
 import type { Flashcard, SectionItem } from "./types"
 
 const COUNT_OPTIONS = [5, 10, 20, 50]
-const DIFFICULTY_OPTIONS = [
-  { value: "easy", label: "Easy" },
-  { value: "medium", label: "Medium" },
-  { value: "hard", label: "Hard" },
-]
-
 const SMART_MODE_LABEL: Record<string, string> = {
   basic: "basic cards",
   feynman: "Feynman-style questions",
@@ -66,7 +60,6 @@ export function GenerateButton({
   const [optionsOpen, setOptionsOpen] = useState(false)
   const [scope, setScope] = useState<"full" | "section">("full")
   const [sectionHeading, setSectionHeading] = useState<string | null>(null)
-  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium")
   const [mode, setMode] = useState<"basic" | "graph" | "cloze" | "technical">("basic")
   const [count, setCount] = useState(10)
   const [clozeSectionId, setClozeSectionId] = useState<string | null>(null)
@@ -105,7 +98,9 @@ export function GenerateButton({
         onGenerateCloze(clozeSectionId, count)
       }
     } else {
-      onGenerate({ scope, section_heading: sectionHeading, count, difficulty })
+      // No difficulty choice: a document card asks about one sentence code chose, so it
+      // recalls what the text states whatever was asked for (#222).
+      onGenerate({ scope, section_heading: sectionHeading, count, difficulty: "medium" })
     }
   }
 
@@ -212,22 +207,6 @@ export function GenerateButton({
                   <option value="">Select a section...</option>
                   {sections.map((s) => (
                     <option key={s.id} value={s.id}>{s.heading}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* Difficulty (basic mode only) */}
-            {mode === "basic" && (
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-muted-foreground">Difficulty</label>
-                <select
-                  value={difficulty}
-                  onChange={(e) => setDifficulty(e.target.value as "easy" | "medium" | "hard")}
-                  className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                  {DIFFICULTY_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
               </div>

@@ -60,6 +60,7 @@ from app.services.flashcard_prompts import (
     _DIFFICULTY_GUIDELINES,
     CLOZE_SYSTEM,
     CLOZE_USER_TMPL,
+    DEPTH_TO_BLOOM,
     FLASHCARD_UNITS_SYSTEM,
     GRAPH_FLASHCARD_SYSTEM,
     GRAPH_FLASHCARD_USER_TMPL,
@@ -1214,7 +1215,10 @@ async def generate(
         question = str(item.get("question", "")).strip()
         answer = str(item.get("answer", "")).strip()
         source_excerpt = str(item.get("source_excerpt", "")).strip()
-        card_bloom_level = bloom_from(item)
+        # A unit card asks about one sentence code chose, so it recalls what the text
+        # states whatever difficulty was asked for; the stored level says so (#222).
+        card_bloom_level = DEPTH_TO_BLOOM["fact"] if unit_first else bloom_from(item)
+        card_difficulty = "easy" if unit_first else difficulty
 
         card = FlashcardModel(
             id=str(uuid.uuid4()),
@@ -1223,7 +1227,7 @@ async def generate(
             question=question,
             answer=answer,
             source_excerpt=source_excerpt,
-            difficulty=difficulty,
+            difficulty=card_difficulty,
             fsrs_state="new",
             fsrs_stability=0.0,
             fsrs_difficulty=0.0,
