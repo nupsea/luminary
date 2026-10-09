@@ -340,35 +340,6 @@ class SessionRemainingResponse(BaseModel):
     cards: list[FlashcardResponse]
 
 
-# Study path & start concepts
-
-
-class StudyPathItemResponse(BaseModel):
-    concept: str
-    mastery: float
-    skip: bool
-    reason: str
-    avg_stability_days: float
-
-
-class StudyPathAPIResponse(BaseModel):
-    concept: str
-    document_id: str
-    path: list[StudyPathItemResponse]
-
-
-class StartConceptItemResponse(BaseModel):
-    concept: str
-    prereq_chain_length: int
-    flashcard_count: int
-    rationale: str
-
-
-class StartConceptsAPIResponse(BaseModel):
-    document_id: str
-    concepts: list[StartConceptItemResponse]
-
-
 # Study Launcher / assemble (docs/study-launcher.md)
 
 ScopeType = Literal[

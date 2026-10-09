@@ -5,16 +5,13 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.exceptions import NotFound
 from app.repos.annotation_repo import AnnotationRepo
 
 
 @pytest.fixture
-async def repo():
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+async def repo(memory_db):
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
         yield AnnotationRepo(session)

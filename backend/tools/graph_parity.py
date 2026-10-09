@@ -153,7 +153,6 @@ async def _facade_timings(document_ids: list[str]) -> dict[str, float]:
     reads = {
         "graph_for_document": lambda d: svc.get_graph_for_document(d, include_notes=True),
         "co_occurring_pairs": lambda d: svc.get_co_occurring_pairs_for_document(d, limit=10),
-        "learning_path_entry": lambda d: svc.get_entry_point_concepts(d),
         "entities_by_type": svc.get_entities_by_type_for_document,
     }
     worst: dict[str, float] = {}

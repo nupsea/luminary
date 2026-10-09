@@ -100,7 +100,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 222,
+  "complexity_over_10": 219,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
@@ -171,7 +171,6 @@
     "app/services/objective_tracker.py": 8,
     "app/services/okf_context.py": 8,
     "app/services/pomodoro_service.py": 12,
-    "app/services/prereq_extractor.py": 3,
     "app/services/progress_service.py": 18,
     "app/services/recommender_service.py": 7,
     "app/services/reference_enricher.py": 8,
@@ -183,7 +182,6 @@
     "app/services/section_summarizer.py": 7,
     "app/services/settings_service.py": 2,
     "app/services/study_assembler.py": 10,
-    "app/services/study_path_service.py": 8,
     "app/services/suggestion_service.py": 13,
     "app/services/tag_graph.py": 2,
     "app/services/tag_merge_service.py": 9,

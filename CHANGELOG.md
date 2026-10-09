@@ -6,13 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A red bookmark in the PDF view.** One per document, placed from the toolbar; the document opens on it, and a chip beside it jumps back from wherever citations or search took you.
+
 ### Changed
 - **The PDF view scrolls continuously.** Pages stack in one scroll, so the wheel, the paging keys and a text selection all run across page breaks; only the pages near the view are drawn.
 - **Selected text offers Define for a term and Simplify for a passage**, both answered from the document's own passages rather than the selection alone.
 
+### Removed
+- **The "Where to start" panel and `/study/start` and `/study/path`.** Nothing ever filled them: the prerequisite extractor behind them was never run, and run, the local model found no prerequisites or invented them. Prerequisite edges stated in the text ("X requires Y") still show on the Map.
+
 ### Fixed
+- **A document deck generated as "Hard" was labelled hard and was not.** Document cards ask about one sentence the text states, so they are stored as recall, and the generate panel no longer offers a difficulty it cannot honour.
+- **A PDF reopened on a page you never read.** Every page shown was saved as the last read, citation and search jumps included; now only pages you scroll or turn to yourself are.
 - **Chapter cards on technical books asked who did something and why, as if the book were a story.** Chapter cards now ask what each kind of book is for, and a technical or research card about a person rather than its subject is refused. A story read as technical from its preface is now classed by how its body reads.
 - **Selecting text in the PDF painted a bar in the page margin.**
+- **Dragging a selection across a gap in PDF text jumped it to the end of the page.** The text layer now carries the end-of-content guard pdf.js's own viewer uses.
 - **A highlight made near a page break was saved to the page in view** rather than the page it was made on.
 - **Deleting a document while its cards were generating could leave cards behind for a document that no longer exists.** Deleting now stops the generation, and the database refuses such a card; the upgrade removes any already left behind.
 

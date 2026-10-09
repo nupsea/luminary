@@ -22,8 +22,6 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import ChunkModel, FlashcardModel
 from app.services.teachback_service import _card_scope_passage, _source_passage
 
@@ -37,9 +35,8 @@ _QUOTE = "It will go and actually check code."
 
 
 @pytest.fixture
-async def db():
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+async def db(memory_db):
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
     yield factory
     await engine.dispose()

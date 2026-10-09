@@ -43,7 +43,6 @@ import { LibraryStatsBar } from "./Learning/LibraryStatsBar"
 import { LibraryTable } from "./Learning/LibraryTable"
 import { SearchPanel } from "./Learning/SearchPanel"
 import { TodayHero } from "./Learning/TodayHero"
-import { WhereToStartPanel } from "./Learning/WhereToStartPanel"
 import { libraryRefetchInterval } from "@/lib/libraryPolling"
 import {
   arrivalFor,
@@ -408,7 +407,6 @@ export default function Learning() {
       ...(recentItems ?? []),
     ]
     const activeDoc = allKnownDocs.find((d) => d.id === activeDocumentId)
-    const activeContentType = activeDoc?.content_type ?? ""
     const here = arrivalFor(arrival, activeDocumentId)
 
     function returnToLibrary() {
@@ -440,10 +438,6 @@ export default function Learning() {
 
     return (
       <div className="flex h-full flex-col">
-        <WhereToStartPanel
-          documentId={activeDocumentId}
-          contentType={activeContentType}
-        />
         <div className="flex-1 min-h-0">
           <DocumentReader
             documentId={activeDocumentId}

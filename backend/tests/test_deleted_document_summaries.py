@@ -18,8 +18,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel, LibrarySummaryModel, SummaryModel
 from app.services.document_deletion_service import DocumentDeletionService
@@ -29,13 +27,12 @@ from app.workflows.ingestion_nodes.finalize import _run_pregenerate, launch_foll
 
 
 @pytest.fixture
-async def factory(tmp_path, monkeypatch):
+async def factory(memory_db, tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from app.config import get_settings
 
     get_settings.cache_clear()
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+    engine = memory_db.engine
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     orig = db_module._engine, db_module._session_factory
     db_module._engine, db_module._session_factory = engine, session_factory
@@ -200,9 +197,7 @@ async def test_library_input_ignores_summaries_of_deleted_documents(factory):
         )
         await session.commit()
 
-    assert await LibrarySummaryService()._fetch_all_executive_summaries() == {
-        live: "Live summary."
-    }
+    assert await LibrarySummaryService()._fetch_all_executive_summaries() == {live: "Live summary."}
 
 
 @pytest.mark.real_library_summary

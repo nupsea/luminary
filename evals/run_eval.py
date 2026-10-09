@@ -51,7 +51,6 @@ from evals.lib.environment import (  # noqa: E402
 )
 from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.loader import load_golden as _lib_load_golden  # noqa: E402
-from evals.lib.search import ranked_matches  # noqa: E402
 from evals.lib.manifest import (  # noqa: E402
     GOLDEN_DIR,
     MANIFEST_PATH,
@@ -80,6 +79,7 @@ from evals.lib.runners import GenerationEval, NliFaithfulnessEval  # noqa: E402
 from evals.lib.schemas import RetrievalGoldenEntry  # noqa: E402
 from evals.lib.scoring_history import SCORES_HISTORY_PATH  # noqa: E402
 from evals.lib.scoring_history import append_history as _lib_append_history  # noqa: E402
+from evals.lib.search import ranked_matches  # noqa: E402
 from evals.lib.split import refuse_if_holdout, split_of  # noqa: E402
 from evals.lib.store import store_results as _lib_store_results  # noqa: E402
 
@@ -183,6 +183,13 @@ THRESHOLDS = {
 #   play      HR@5 0.8000  MRR 0.6267  nDCG 0.6906   60 rows
 #   study     HR@5 0.7000  MRR 0.4692  nDCG 0.5370   60 rows (PDF)
 #   d2l       HR@5 0.9200  MRR 0.7170  nDCG 0.7876   (unreranked arm: .8400/.6347/.7184)
+#
+# `paper` after #240 (DocBook nav lines dropped), 2026-10-09, a 7-document / ~4080-chunk
+# library, art_of_unix re-ingested in each arm, book unchanged at .6750/.5396/.5989:
+#   before    HR@5 0.8250  MRR 0.6467  nDCG 0.7074
+#   after     HR@5 0.8250  MRR 0.6592  nDCG 0.7166
+# Not comparable to the table above: master already reads 0.8250, not 0.9000, in this
+# library, and that gap is unexplained.
 #
 # The 2026-08-12 table these replace was measured with rerank OFF, because
 # `/search` defaults `rerank=false` and the arm never asked -- while `/qa`, which

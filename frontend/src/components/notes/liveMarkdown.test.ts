@@ -3,6 +3,8 @@ import React from "react"
 import ReactDOMServer from "react-dom/server"
 import { EditorState } from "@codemirror/state"
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown"
+import { defaultKeymap } from "@codemirror/commands"
+import { keymap } from "@codemirror/view"
 import { liveMarkdown } from "./liveMarkdown"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 
@@ -500,6 +502,34 @@ List
     expect(bulletWidgets.length).toBe(1)
     const line3 = state.doc.line(3)
     expect(bulletWidgets[0].from).toBeGreaterThanOrEqual(line3.from)
+  })
+})
+
+describe("live editor wiring", () => {
+  // CodeMirror measures a block widget by its border box; a margin shifts every
+  // click and arrow below the block (16px per diagram put clicks a line low).
+  it("gives a rendered block no vertical margin", async () => {
+    const { BLOCK_HOST_CLASS, liveThemeSpec } = await import("./liveMarkdown")
+    expect(BLOCK_HOST_CLASS.split(/\s+/).filter((c) => /^-?m[ytb]?-/.test(c))).toEqual([])
+    const hostRule = liveThemeSpec[".cm-md-block"] as Record<string, string>
+    const margins = Object.entries(hostRule).filter(
+      ([prop, value]) => /^margin(Top|Bottom)?$/.test(prop) && !/^0(px)?( 0(px)?)?$/.test(value),
+    )
+    expect(margins).toEqual([])
+  })
+
+  // The stepInto tests above call it directly; this guards that the mounted
+  // editor's own ArrowUp/ArrowDown actually reach it.
+  it("lets the live arrow bindings outrank CodeMirror's defaults", async () => {
+    const { noteEditorKeymaps } = await import("./MarkdownCodeEditor")
+    const state = EditorState.create({
+      extensions: [markdown({ base: markdownLanguage }), ...noteEditorKeymaps({ current: {} }), liveMarkdown()],
+    })
+    const bindings = state.facet(keymap).flat()
+    for (const key of ["ArrowUp", "ArrowDown"]) {
+      const stock = defaultKeymap.find((b) => b.key === key)!.run
+      expect(bindings.find((b) => b.key === key)!.run, key).not.toBe(stock)
+    }
   })
 })
 

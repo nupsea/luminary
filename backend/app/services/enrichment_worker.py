@@ -31,7 +31,6 @@ JOB_MODEL_ROLE: dict[str, str] = {
     "image_analyze": "vision",
     "diagram_extract": "background",
     "web_refs": "background",
-    "prerequisites": "background",
     "concept_link": "background",
     "chapter_cards": "background",
 }

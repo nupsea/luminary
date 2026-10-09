@@ -8,7 +8,7 @@ via `__all__` so existing imports keep working.
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.membership import CollectionRef
 from app.types import ContentType
@@ -296,6 +296,11 @@ class ReadingPositionResponse(BaseModel):
     last_section_heading: str | None
     last_pdf_page: int | None
     last_epub_chapter_index: int | None
+    pdf_bookmark_page: int | None = None
+
+
+class SetBookmarkRequest(BaseModel):
+    pdf_page: int = Field(ge=1)
 
 
 # Doc overview (docs/02-ingest-and-doc-overview.md) -- read aggregation

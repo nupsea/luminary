@@ -41,12 +41,16 @@ The rule is a collapse, never a delete: a line is dropped only where the
 document still holds it elsewhere. That makes losing content impossible by
 construction rather than by threshold, at the cost of leaving one instance of
 each furniture line behind.
+
+One exception deletes: a page carrying the DocBook "Prev / Up / Next" footer has its
+nav-only lines dropped, since a pager line is never an authored label (#240).
 """
 
 from __future__ import annotations
 
 import html
 import logging
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -59,6 +63,29 @@ _MIN_REPEATS = 3
 # ...and that many must sit consecutively. One repeated line is a refrain; a
 # block of them is a template.
 _MIN_RUN = 3
+
+# A scraped DocBook page's navigation: "Prev", "Up", "Next", "Home" alone, or
+# naming the neighbouring page ("Prev Part I. Context"). Never a subtitle (#229).
+_NAV_LINE = re.compile(
+    r"(?:Prev|Next|Up|Home)|Prev\s.+|(?:Next|Up)\s+(?:Part|Chapter|Appendix)\s.+"
+)
+# The footer every DocBook page repeats. The collapse above keeps one copy of each nav
+# line, so they are dropped outright, but only where this footer shows the pattern:
+# a novel's lone "Next" line is prose (#240).
+_NAV_FOOTER = ("Prev", "Up", "Next")
+_MIN_NAV_FOOTERS = 2
+
+
+def is_nav_line(line: str) -> bool:
+    return _NAV_LINE.fullmatch(line) is not None
+
+
+def _has_page_nav(lines: list[str]) -> bool:
+    stripped = [ln.strip() for ln in lines]
+    footers = sum(
+        tuple(stripped[i : i + 3]) == _NAV_FOOTER for i in range(len(stripped) - 2)
+    )
+    return footers >= _MIN_NAV_FOOTERS
 
 
 def _collapse_repeated_furniture(lines: list[str]) -> list[str]:
@@ -140,6 +167,8 @@ def normalise(text: str) -> str:
     unescaped = html.unescape(text).replace("\xa0", " ")
     lines = unescaped.splitlines()
     kept = _collapse_repeated_furniture(lines)
+    if _has_page_nav(lines):
+        kept = [ln for ln in kept if not is_nav_line(ln.strip())]
     if len(kept) != len(lines):
         logger.info(
             "source_text: removed %d furniture lines of %d", len(lines) - len(kept), len(lines)
@@ -158,4 +187,4 @@ def read_source_text(file_path: Path) -> str:
     return normalise(decode(Path(file_path).read_bytes()))
 
 
-__all__ = ["decode", "normalise", "read_source_text"]
+__all__ = ["decode", "is_nav_line", "normalise", "read_source_text"]

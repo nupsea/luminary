@@ -10,8 +10,6 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import CollectionMemberModel, CollectionModel, FlashcardModel
 from app.services.flashcard import _study_scope_member_ids
 
@@ -19,9 +17,8 @@ pytestmark = pytest.mark.usefixtures("card_documents")
 
 
 @pytest.fixture
-async def session():
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+async def session(memory_db):
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as s:
         yield s

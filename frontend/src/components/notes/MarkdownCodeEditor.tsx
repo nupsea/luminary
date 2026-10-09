@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react"
 import { acceptCompletion, autocompletion, closeCompletion, completionStatus, startCompletion } from "@codemirror/autocomplete"
-import { Compartment, EditorState, Prec } from "@codemirror/state"
+import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state"
 import {
   EditorView,
   drawSelection,
@@ -255,6 +255,262 @@ function extractImageFile(dataTransfer: DataTransfer | null): File | null {
   return null
 }
 
+/** The editor's key bindings, in precedence order (tested in liveMarkdown.test.ts). */
+// eslint-disable-next-line react-refresh/only-export-components
+export function noteEditorKeymaps(latest: {
+  current: { linkCompletion?: NoteLinkCompletionConfig; onOpenShortcuts?: () => void }
+}): Extension[] {
+  return [
+    Prec.highest(
+      keymap.of([
+        {
+          key: "Enter",
+          run: (v) => {
+            const spec = smartEnterSpec(v.state)
+            if (spec) {
+              v.dispatch(spec)
+              return true
+            }
+            return insertNewlineContinueMarkup(v)
+          },
+        },
+        {
+          key: "Backspace",
+          run: (v) => {
+            const spec = smartBackspaceSpec(v.state)
+            if (spec) {
+              v.dispatch(spec)
+              return true
+            }
+            return deleteMarkupBackward(v)
+          },
+        },
+        {
+          key: "Delete",
+          run: (v) => {
+            const spec = smartDeleteSpec(v.state)
+            if (spec) {
+              v.dispatch(spec)
+              return true
+            }
+            return false
+          },
+        },
+        {
+          key: "Tab",
+          run: (v) => {
+            if (completionStatus(v.state) === "active") {
+              return acceptCompletion(v)
+            }
+            const spec = indentMarkdownSpec(v.state)
+            if (spec) {
+              v.dispatch(spec)
+            }
+            return true
+          },
+          preventDefault: true,
+        },
+        {
+          key: "Shift-Tab",
+          run: (v) => {
+            const spec = dedentMarkdownSpec(v.state)
+            if (spec) {
+              v.dispatch(spec)
+            }
+            return true
+          },
+          preventDefault: true,
+        },
+      // Line boundary navigation: End / Home (Windows, Linux, and external keyboards on Mac)
+      {
+        key: "End",
+        run: (v) => {
+          const line = v.state.doc.lineAt(v.state.selection.main.head)
+          v.dispatch({ selection: { anchor: line.to }, scrollIntoView: true })
+          return true
+        },
+        shift: (v) => {
+          const { anchor } = v.state.selection.main
+          const line = v.state.doc.lineAt(v.state.selection.main.head)
+          v.dispatch({ selection: { anchor, head: line.to }, scrollIntoView: true })
+          return true
+        },
+        preventDefault: true,
+      },
+      {
+        key: "Cmd-ArrowRight",
+        mac: "Cmd-ArrowRight",
+        run: (v) => {
+          const line = v.state.doc.lineAt(v.state.selection.main.head)
+          v.dispatch({ selection: { anchor: line.to }, scrollIntoView: true })
+          return true
+        },
+        shift: (v) => {
+          const { anchor } = v.state.selection.main
+          const line = v.state.doc.lineAt(v.state.selection.main.head)
+          v.dispatch({ selection: { anchor, head: line.to }, scrollIntoView: true })
+          return true
+        },
+        preventDefault: true,
+      },
+      {
+        key: "Home",
+        run: (v) => {
+          const head = v.state.selection.main.head
+          const line = v.state.doc.lineAt(head)
+          const firstNonWs = line.text.search(/\S/)
+          const indentPos = firstNonWs === -1 ? line.from : line.from + firstNonWs
+          const target = head === indentPos ? line.from : indentPos
+          v.dispatch({ selection: { anchor: target }, scrollIntoView: true })
+          return true
+        },
+        shift: (v) => {
+          const { anchor, head } = v.state.selection.main
+          const line = v.state.doc.lineAt(head)
+          const firstNonWs = line.text.search(/\S/)
+          const indentPos = firstNonWs === -1 ? line.from : line.from + firstNonWs
+          const target = head === indentPos ? line.from : indentPos
+          v.dispatch({ selection: { anchor, head: target }, scrollIntoView: true })
+          return true
+        },
+        preventDefault: true,
+      },
+      {
+        key: "Cmd-ArrowLeft",
+        mac: "Cmd-ArrowLeft",
+        run: (v) => {
+          const head = v.state.selection.main.head
+          const line = v.state.doc.lineAt(head)
+          const firstNonWs = line.text.search(/\S/)
+          const indentPos = firstNonWs === -1 ? line.from : line.from + firstNonWs
+          const target = head === indentPos ? line.from : indentPos
+          v.dispatch({ selection: { anchor: target }, scrollIntoView: true })
+          return true
+        },
+        shift: (v) => {
+          const { anchor, head } = v.state.selection.main
+          const line = v.state.doc.lineAt(head)
+          const firstNonWs = line.text.search(/\S/)
+          const indentPos = firstNonWs === -1 ? line.from : line.from + firstNonWs
+          const target = head === indentPos ? line.from : indentPos
+          v.dispatch({ selection: { anchor, head: target }, scrollIntoView: true })
+          return true
+        },
+        preventDefault: true,
+      },
+      {
+        key: "Alt-ArrowUp",
+        mac: "Alt-ArrowUp",
+        run: (v) => {
+          const spec = moveBlockOrLineSpec(v.state, -1)
+          if (spec) {
+            v.dispatch(spec)
+            return true
+          }
+          return false
+        },
+      },
+      {
+        key: "Alt-ArrowDown",
+        mac: "Alt-ArrowDown",
+        run: (v) => {
+          const spec = moveBlockOrLineSpec(v.state, 1)
+          if (spec) {
+            v.dispatch(spec)
+            return true
+          }
+          return false
+        },
+      },
+      {
+        key: "Mod-Enter",
+        run: (v) => {
+          const spec = insertBlockBreakSpec(v.state)
+          if (spec) {
+            v.dispatch(spec)
+            return true
+          }
+          return false
+        },
+      },
+      {
+        key: "Mod-b",
+        run: (v) => {
+          v.dispatch(toggleInlineMarkSpec(v.state, "**"))
+          return true
+        },
+      },
+      {
+        key: "Mod-i",
+        run: (v) => {
+          v.dispatch(toggleInlineMarkSpec(v.state, "*"))
+          return true
+        },
+      },
+      {
+        key: "Mod-k",
+        run: (v) => {
+          if (latest.current.linkCompletion) {
+            const sel = v.state.selection.main
+            if (!sel.empty) {
+              const selected = v.state.sliceDoc(sel.from, sel.to)
+              const insert = `[[${selected}`
+              v.dispatch({
+                changes: { from: sel.from, to: sel.to, insert },
+                selection: { anchor: sel.from + insert.length },
+              })
+            } else {
+              v.dispatch({
+                changes: { from: sel.from, to: sel.from, insert: "[[" },
+                selection: { anchor: sel.from + 2 },
+              })
+            }
+            startCompletion(v)
+            return true
+          }
+          v.dispatch(toggleLinkSpec(v.state))
+          return true
+        },
+      },
+      {
+        key: "Mod-Shift-s",
+        run: (v) => {
+          v.dispatch(toggleInlineMarkSpec(v.state, "~~"))
+          return true
+        },
+      },
+      {
+        key: "Mod-Shift-x",
+        run: (v) => {
+          v.dispatch(toggleInlineMarkSpec(v.state, "~~"))
+          return true
+        },
+      },
+      {
+        key: "Mod-`",
+        run: (v) => {
+          v.dispatch(toggleInlineMarkSpec(v.state, "`"))
+          return true
+        },
+      },
+      {
+        key: "Mod-/",
+        run: () => {
+          if (latest.current.onOpenShortcuts) {
+            latest.current.onOpenShortcuts()
+            return true
+          }
+          return false
+        },
+      },
+      ]),
+    ),
+    // Default precedence: at Prec.highest the stock arrow bindings
+    // shadow the live editor's widget-aware ArrowUp/ArrowDown.
+    keymap.of([...defaultKeymap, ...historyKeymap]),
+  ]
+}
+
 export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeEditorProps>(
   function MarkdownCodeEditor(
     { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live, onEditDiagram, onOpenShortcuts, onNoteLinkClick },
@@ -338,251 +594,7 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
                 }
               }
             }),
-            Prec.highest(
-              keymap.of([
-                {
-                  key: "Enter",
-                  run: (v) => {
-                    const spec = smartEnterSpec(v.state)
-                    if (spec) {
-                      v.dispatch(spec)
-                      return true
-                    }
-                    return insertNewlineContinueMarkup(v)
-                  },
-                },
-                {
-                  key: "Backspace",
-                  run: (v) => {
-                    const spec = smartBackspaceSpec(v.state)
-                    if (spec) {
-                      v.dispatch(spec)
-                      return true
-                    }
-                    return deleteMarkupBackward(v)
-                  },
-                },
-                {
-                  key: "Delete",
-                  run: (v) => {
-                    const spec = smartDeleteSpec(v.state)
-                    if (spec) {
-                      v.dispatch(spec)
-                      return true
-                    }
-                    return false
-                  },
-                },
-                {
-                  key: "Tab",
-                  run: (v) => {
-                    if (completionStatus(v.state) === "active") {
-                      return acceptCompletion(v)
-                    }
-                    const spec = indentMarkdownSpec(v.state)
-                    if (spec) {
-                      v.dispatch(spec)
-                    }
-                    return true
-                  },
-                  preventDefault: true,
-                },
-                {
-                  key: "Shift-Tab",
-                  run: (v) => {
-                    const spec = dedentMarkdownSpec(v.state)
-                    if (spec) {
-                      v.dispatch(spec)
-                    }
-                    return true
-                  },
-                  preventDefault: true,
-                },
-              // Line boundary navigation: End / Home (Windows, Linux, and external keyboards on Mac)
-              {
-                key: "End",
-                run: (v) => {
-                  const line = v.state.doc.lineAt(v.state.selection.main.head)
-                  v.dispatch({ selection: { anchor: line.to }, scrollIntoView: true })
-                  return true
-                },
-                shift: (v) => {
-                  const { anchor } = v.state.selection.main
-                  const line = v.state.doc.lineAt(v.state.selection.main.head)
-                  v.dispatch({ selection: { anchor, head: line.to }, scrollIntoView: true })
-                  return true
-                },
-                preventDefault: true,
-              },
-              {
-                key: "Cmd-ArrowRight",
-                mac: "Cmd-ArrowRight",
-                run: (v) => {
-                  const line = v.state.doc.lineAt(v.state.selection.main.head)
-                  v.dispatch({ selection: { anchor: line.to }, scrollIntoView: true })
-                  return true
-                },
-                shift: (v) => {
-                  const { anchor } = v.state.selection.main
-                  const line = v.state.doc.lineAt(v.state.selection.main.head)
-                  v.dispatch({ selection: { anchor, head: line.to }, scrollIntoView: true })
-                  return true
-                },
-                preventDefault: true,
-              },
-              {
-                key: "Home",
-                run: (v) => {
-                  const head = v.state.selection.main.head
-                  const line = v.state.doc.lineAt(head)
-                  const firstNonWs = line.text.search(/\S/)
-                  const indentPos = firstNonWs === -1 ? line.from : line.from + firstNonWs
-                  const target = head === indentPos ? line.from : indentPos
-                  v.dispatch({ selection: { anchor: target }, scrollIntoView: true })
-                  return true
-                },
-                shift: (v) => {
-                  const { anchor, head } = v.state.selection.main
-                  const line = v.state.doc.lineAt(head)
-                  const firstNonWs = line.text.search(/\S/)
-                  const indentPos = firstNonWs === -1 ? line.from : line.from + firstNonWs
-                  const target = head === indentPos ? line.from : indentPos
-                  v.dispatch({ selection: { anchor, head: target }, scrollIntoView: true })
-                  return true
-                },
-                preventDefault: true,
-              },
-              {
-                key: "Cmd-ArrowLeft",
-                mac: "Cmd-ArrowLeft",
-                run: (v) => {
-                  const head = v.state.selection.main.head
-                  const line = v.state.doc.lineAt(head)
-                  const firstNonWs = line.text.search(/\S/)
-                  const indentPos = firstNonWs === -1 ? line.from : line.from + firstNonWs
-                  const target = head === indentPos ? line.from : indentPos
-                  v.dispatch({ selection: { anchor: target }, scrollIntoView: true })
-                  return true
-                },
-                shift: (v) => {
-                  const { anchor, head } = v.state.selection.main
-                  const line = v.state.doc.lineAt(head)
-                  const firstNonWs = line.text.search(/\S/)
-                  const indentPos = firstNonWs === -1 ? line.from : line.from + firstNonWs
-                  const target = head === indentPos ? line.from : indentPos
-                  v.dispatch({ selection: { anchor, head: target }, scrollIntoView: true })
-                  return true
-                },
-                preventDefault: true,
-              },
-              {
-                key: "Alt-ArrowUp",
-                mac: "Alt-ArrowUp",
-                run: (v) => {
-                  const spec = moveBlockOrLineSpec(v.state, -1)
-                  if (spec) {
-                    v.dispatch(spec)
-                    return true
-                  }
-                  return false
-                },
-              },
-              {
-                key: "Alt-ArrowDown",
-                mac: "Alt-ArrowDown",
-                run: (v) => {
-                  const spec = moveBlockOrLineSpec(v.state, 1)
-                  if (spec) {
-                    v.dispatch(spec)
-                    return true
-                  }
-                  return false
-                },
-              },
-              {
-                key: "Mod-Enter",
-                run: (v) => {
-                  const spec = insertBlockBreakSpec(v.state)
-                  if (spec) {
-                    v.dispatch(spec)
-                    return true
-                  }
-                  return false
-                },
-              },
-              {
-                key: "Mod-b",
-                run: (v) => {
-                  v.dispatch(toggleInlineMarkSpec(v.state, "**"))
-                  return true
-                },
-              },
-              {
-                key: "Mod-i",
-                run: (v) => {
-                  v.dispatch(toggleInlineMarkSpec(v.state, "*"))
-                  return true
-                },
-              },
-              {
-                key: "Mod-k",
-                run: (v) => {
-                  if (latest.current.linkCompletion) {
-                    const sel = v.state.selection.main
-                    if (!sel.empty) {
-                      const selected = v.state.sliceDoc(sel.from, sel.to)
-                      const insert = `[[${selected}`
-                      v.dispatch({
-                        changes: { from: sel.from, to: sel.to, insert },
-                        selection: { anchor: sel.from + insert.length },
-                      })
-                    } else {
-                      v.dispatch({
-                        changes: { from: sel.from, to: sel.from, insert: "[[" },
-                        selection: { anchor: sel.from + 2 },
-                      })
-                    }
-                    startCompletion(v)
-                    return true
-                  }
-                  v.dispatch(toggleLinkSpec(v.state))
-                  return true
-                },
-              },
-              {
-                key: "Mod-Shift-s",
-                run: (v) => {
-                  v.dispatch(toggleInlineMarkSpec(v.state, "~~"))
-                  return true
-                },
-              },
-              {
-                key: "Mod-Shift-x",
-                run: (v) => {
-                  v.dispatch(toggleInlineMarkSpec(v.state, "~~"))
-                  return true
-                },
-              },
-              {
-                key: "Mod-`",
-                run: (v) => {
-                  v.dispatch(toggleInlineMarkSpec(v.state, "`"))
-                  return true
-                },
-              },
-              {
-                key: "Mod-/",
-                run: () => {
-                  if (latest.current.onOpenShortcuts) {
-                    latest.current.onOpenShortcuts()
-                    return true
-                  }
-                  return false
-                },
-              },
-              ...defaultKeymap,
-              ...historyKeymap,
-            ])),
+            ...noteEditorKeymaps(latest),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) latest.current.onChange(update.state.doc.toString())
             }),

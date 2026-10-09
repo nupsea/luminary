@@ -27,7 +27,7 @@ minted by *promoting* an Entity cluster (see [lifecycle](#lifecycle)) -- it is n
 Entity. `evidence_json.members` records the entities it was promoted from.
 
 > Why this matters in practice: mastery used to be faked by `chunk.text ILIKE '%name%'`
-> (`mastery_service.py`, `study_path_service.py`) -- a string match against an Entity label. That
+> (`mastery_service.py`) -- a string match against an Entity label. That
 > is ephemeral and lexical. A Concept makes mastery a **stored, stable scalar** you can route on.
 
 ## Representation -- two truths, two derived projections

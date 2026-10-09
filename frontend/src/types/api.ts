@@ -1866,6 +1866,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/bookmark": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Bookmark
+         * @description Place the document's one PDF bookmark, moving it if one exists.
+         *
+         *     Returns 404 if the document does not exist.
+         */
+        put: operations["set_bookmark_documents__document_id__bookmark_put"];
+        post?: never;
+        /**
+         * Clear Bookmark
+         * @description Remove the document's PDF bookmark. Removing an absent one succeeds.
+         *
+         *     Returns 404 if the document does not exist.
+         */
+        delete: operations["clear_bookmark_documents__document_id__bookmark_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/activity/read": {
         parameters: {
             query?: never;
@@ -5917,55 +5945,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/study/path": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Study Path
-         * @description Return FSRS-aware prerequisite study path for a concept in a document.
-         *
-         *     Path is ordered from earliest prerequisite to the requested concept.
-         *     Each item includes mastery (0-1), skip flag (avg_stability >= 14 days),
-         *     and reason string.
-         *
-         *     Returns empty path (not 404) when the concept has no PREREQUISITE_OF edges.
-         */
-        get: operations["get_study_path_study_path_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/study/start": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Start Concepts
-         * @description Return up to 3 entry-point concepts for a document with highest learning ROI.
-         *
-         *     Entry-point concepts are those with no unsatisfied prerequisites.
-         *     Returns empty concepts list (not 404) when no PREREQUISITE_OF edges exist.
-         */
-        get: operations["get_start_concepts_study_start_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/study/session/{document_id}/start": {
         parameters: {
             query?: never;
@@ -8560,7 +8539,7 @@ export interface components {
              * @default plain
              * @enum {string}
              */
-            mode: "plain" | "eli5" | "analogy" | "formal";
+            mode: "define" | "plain" | "eli5" | "analogy" | "formal";
         };
         /**
          * FactualityAuditRequest
@@ -10379,6 +10358,8 @@ export interface components {
             last_pdf_page: number | null;
             /** Last Epub Chapter Index */
             last_epub_chapter_index: number | null;
+            /** Pdf Bookmark Page */
+            pdf_bookmark_page?: number | null;
         };
         /** ReadingProgressRequest */
         ReadingProgressRequest: {
@@ -11105,6 +11086,11 @@ export interface components {
              */
             ended_at: string;
         };
+        /** SetBookmarkRequest */
+        SetBookmarkRequest: {
+            /** Pdf Page */
+            pdf_page: number;
+        };
         /** SettingsUpdate */
         SettingsUpdate: {
             [key: string]: string;
@@ -11126,24 +11112,6 @@ export interface components {
             section_id: string;
             /** Document Id */
             document_id: string;
-        };
-        /** StartConceptItemResponse */
-        StartConceptItemResponse: {
-            /** Concept */
-            concept: string;
-            /** Prereq Chain Length */
-            prereq_chain_length: number;
-            /** Flashcard Count */
-            flashcard_count: number;
-            /** Rationale */
-            rationale: string;
-        };
-        /** StartConceptsAPIResponse */
-        StartConceptsAPIResponse: {
-            /** Document Id */
-            document_id: string;
-            /** Concepts */
-            concepts: components["schemas"]["StartConceptItemResponse"][];
         };
         /** StartRunRequest */
         StartRunRequest: {
@@ -11205,28 +11173,6 @@ export interface components {
              * @default []
              */
             sub_collections: components["schemas"]["CollectionSubCollection"][];
-        };
-        /** StudyPathAPIResponse */
-        StudyPathAPIResponse: {
-            /** Concept */
-            concept: string;
-            /** Document Id */
-            document_id: string;
-            /** Path */
-            path: components["schemas"]["StudyPathItemResponse"][];
-        };
-        /** StudyPathItemResponse */
-        StudyPathItemResponse: {
-            /** Concept */
-            concept: string;
-            /** Mastery */
-            mastery: number;
-            /** Skip */
-            skip: boolean;
-            /** Reason */
-            reason: string;
-            /** Avg Stability Days */
-            avg_stability_days: number;
         };
         /** StudyStatsResponse */
         StudyStatsResponse: {
@@ -15135,6 +15081,70 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ReadingPositionResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_bookmark_documents__document_id__bookmark_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetBookmarkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadingPositionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_bookmark_documents__document_id__bookmark_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -21548,69 +21558,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SectionHeatmapResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_study_path_study_path_get: {
-        parameters: {
-            query: {
-                document_id: string;
-                concept: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StudyPathAPIResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_start_concepts_study_start_get: {
-        parameters: {
-            query: {
-                document_id: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StartConceptsAPIResponse"];
                 };
             };
             /** @description Validation Error */

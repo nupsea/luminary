@@ -359,6 +359,9 @@ function RenderedBlockContent({
   )
 }
 
+/** No margin utilities: see the `.cm-md-block` rule in liveThemeSpec. */
+export const BLOCK_HOST_CLASS = "cm-md-block group/md-block relative"
+
 class RenderedBlock extends WidgetType {
   private root: Root | null = null
   private endDrag: (() => void) | null = null
@@ -395,7 +398,7 @@ class RenderedBlock extends WidgetType {
 
   toDOM(view: EditorView) {
     const host = document.createElement("div")
-    host.className = "cm-md-block group/md-block relative my-1"
+    host.className = BLOCK_HOST_CLASS
     this.root = createRoot(host)
     this.root.render(
       <RenderedBlockContent
@@ -851,7 +854,7 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
   return Decoration.set(marks, true)
 }
 
-const liveTheme = EditorView.theme({
+export const liveThemeSpec = {
   ".cm-md-note-link-pill": {
     display: "inline-flex",
     alignItems: "center",
@@ -890,8 +893,10 @@ const liveTheme = EditorView.theme({
     paddingLeft: "10px",
     color: "hsl(var(--muted-foreground))",
   },
+  // Padding, never margin: CodeMirror's height map cannot see a block widget's
+  // margins, so every margin pixel shifts each click and arrow below the block.
   ".cm-md-block": {
-    margin: "6px 0",
+    padding: "6px 0",
     position: "relative",
     whiteSpace: "normal",
     fontSize: "inherit",
@@ -1030,7 +1035,9 @@ const liveTheme = EditorView.theme({
     fontWeight: "600",
     color: "hsl(var(--primary) / 0.9)",
   },
-})
+} satisfies Parameters<typeof EditorView.theme>[0]
+
+const liveTheme = EditorView.theme(liveThemeSpec)
 
 // A state field, not a view plugin: CodeMirror refuses block decorations from
 // a plugin, and a rendered table is a block.
