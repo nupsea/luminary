@@ -797,3 +797,41 @@ async def test_a_named_model_wins_over_the_provider_default(test_db):
             ).json()
 
     assert data["model"] == "claude-opus-4-6"
+
+
+async def test_two_writers_of_an_absent_setting_both_succeed(test_db):
+    """#251: a fresh library's first chat-model install adopts the model from two
+    places at once. Select-then-insert let both find no row and both insert.
+
+    The barrier holds each writer after any read of `settings` until the other has
+    read too, the interleaving production hit. Cursor events run inside SQLAlchemy's
+    greenlet on the loop thread, so they await the barrier with `await_only`."""
+    import asyncio
+
+    from sqlalchemy import event
+    from sqlalchemy.util import await_only
+
+    engine, factory = test_db
+    barrier = asyncio.Barrier(2)
+
+    def hold_after_read(conn, cursor, statement, *_):  # noqa: ARG001
+        if statement.lstrip().upper().startswith("SELECT") and "settings" in statement:
+            await_only(asyncio.wait_for(barrier.wait(), 5))
+
+    async def adopt(model: str) -> None:
+        async with factory() as session:
+            await update_llm_settings(session, local_chat_model=model)
+
+    event.listen(engine.sync_engine, "after_cursor_execute", hold_after_read)
+    try:
+        await asyncio.gather(adopt("qwen3.5:4b"), adopt("qwen3.5:4b"))
+    finally:
+        event.remove(engine.sync_engine, "after_cursor_execute", hold_after_read)
+
+    async with factory() as session:
+        row = (
+            await session.execute(
+                select(SettingsModel).where(SettingsModel.key == "local_chat_model")
+            )
+        ).scalar_one()
+    assert row.value == "qwen3.5:4b"
