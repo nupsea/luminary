@@ -20,11 +20,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import StaticPool
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-import app.database as db_module
-from app.db_init import create_all_tables
 from app.models import (
     ChatSuggestionHistoryModel,
     DocumentModel,
@@ -37,23 +33,9 @@ from app.services.suggestion_service import SuggestionService, _jaccard_similari
 
 
 @pytest.fixture()
-async def db_session():
-    """In-memory SQLite with full schema for document/section queries."""
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-    )
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    orig_factory = db_module._session_factory
-    orig_engine = db_module._engine
-    db_module._engine = engine
-    db_module._session_factory = factory
-    async with factory() as session:
+async def db_session(memory_db):
+    async with memory_db.factory() as session:
         yield session
-    db_module._session_factory = orig_factory
-    db_module._engine = orig_engine
-    await engine.dispose()
 
 
 def _make_doc(doc_id: str, title: str, content_type: str) -> DocumentModel:

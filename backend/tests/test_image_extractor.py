@@ -10,10 +10,8 @@ import pytest
 import pytest_asyncio
 from PIL import Image as PILImage
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
 
-from app.models import Base, DocumentModel, EnrichmentJobModel, ImageModel
+from app.models import DocumentModel, EnrichmentJobModel, ImageModel
 from app.services.image_extractor import (
     _MAX_DIM,
     _MIN_HEIGHT,
@@ -353,14 +351,8 @@ def test_prose_guard_refuses_to_judge_a_short_label_run(tmp_path):
 
 
 @pytest_asyncio.fixture
-async def handler_db():
-    """In-memory SQLite engine with all tables created."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    yield factory
-    await engine.dispose()
+async def handler_db(memory_db):
+    return memory_db.factory
 
 
 async def _seed_doc_and_job(factory, doc_id: str, job_id: str, file_path: Path):

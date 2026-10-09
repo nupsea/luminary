@@ -4,15 +4,12 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import DocumentModel
 
 
 @pytest.fixture
-async def db_session():
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+async def db_session(memory_db):
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
         yield session
