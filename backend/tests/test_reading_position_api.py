@@ -145,3 +145,47 @@ async def test_get_position_returns_404_for_missing_doc(test_db) -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get("/documents/nonexistent-doc-id/position")
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_bookmark_survives_position_saves_and_clears(test_db) -> None:
+    """The bookmark is placed by the reader alone: a position save never moves it."""
+    from httpx import ASGITransport, AsyncClient
+
+    doc_id = str(uuid.uuid4())
+    await _create_document(doc_id)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.put(f"/documents/{doc_id}/bookmark", json={"pdf_page": 37})
+        assert r.status_code == 200
+        assert r.json()["pdf_bookmark_page"] == 37
+        assert r.json()["last_pdf_page"] is None
+
+        await client.post(f"/documents/{doc_id}/position", json={"last_pdf_page": 151})
+        body = (await client.get(f"/documents/{doc_id}/position")).json()
+        assert body["last_pdf_page"] == 151
+        assert body["pdf_bookmark_page"] == 37
+
+        r = await client.put(f"/documents/{doc_id}/bookmark", json={"pdf_page": 40})
+        assert r.json()["pdf_bookmark_page"] == 40
+
+        assert (await client.delete(f"/documents/{doc_id}/bookmark")).status_code == 204
+        body = (await client.get(f"/documents/{doc_id}/position")).json()
+        assert body["pdf_bookmark_page"] is None
+        assert body["last_pdf_page"] == 151
+
+
+@pytest.mark.asyncio
+async def test_bookmark_rejects_page_zero_and_missing_doc(test_db) -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    doc_id = str(uuid.uuid4())
+    await _create_document(doc_id)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.put(f"/documents/{doc_id}/bookmark", json={"pdf_page": 0})
+        assert r.status_code == 422
+        r = await client.put("/documents/nonexistent-doc-id/bookmark", json={"pdf_page": 3})
+        assert r.status_code == 404
+        r = await client.delete("/documents/nonexistent-doc-id/bookmark")
+        assert r.status_code == 404

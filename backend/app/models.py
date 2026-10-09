@@ -916,6 +916,8 @@ class ReadingPositionModel(Base):
     last_section_heading: Mapped[str | None] = mapped_column(String(300), nullable=True)
     last_pdf_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_epub_chapter_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Placed by the reader, unlike last_pdf_page; the position POST never touches it.
+    pdf_bookmark_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )

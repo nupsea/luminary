@@ -66,17 +66,14 @@ def test_from_gaps_api_503_ollama_offline(client):
 
 
 @pytest.mark.asyncio
-async def test_generate_from_gaps_creates_flashcards():
+async def test_generate_from_gaps_creates_flashcards(memory_db):
     """FlashcardService.generate_from_gaps creates one flashcard per parseable gap."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    from app.database import make_engine
-    from app.db_init import create_all_tables
     from app.models import FlashcardModel
     from app.services.flashcard import get_flashcard_service
 
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     gaps = ["concept A", "concept B"]
@@ -117,17 +114,14 @@ async def test_generate_from_gaps_creates_flashcards():
 
 
 @pytest.mark.asyncio
-async def test_generate_from_gaps_skips_malformed_llm():
+async def test_generate_from_gaps_skips_malformed_llm(memory_db):
     """FlashcardService.generate_from_gaps skips gaps with unparseable LLM responses."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    from app.database import make_engine
-    from app.db_init import create_all_tables
     from app.models import FlashcardModel
     from app.services.flashcard import get_flashcard_service
 
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     gaps = ["valid gap", "bad gap"]
@@ -166,17 +160,14 @@ async def test_generate_from_gaps_skips_malformed_llm():
 
 
 @pytest.mark.asyncio
-async def test_gap_card_to_flashcards():
+async def test_gap_card_to_flashcards(memory_db):
     """End-to-end: POST /flashcards/from-gaps inserts FlashcardModel rows with deck='gaps'."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    from app.database import make_engine
-    from app.db_init import create_all_tables
     from app.models import FlashcardModel
     from app.services.flashcard import get_flashcard_service
 
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     gaps = ["Newton's first law", "photosynthesis"]

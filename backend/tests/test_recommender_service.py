@@ -7,8 +7,6 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import (
     ConceptModel,
     ContentActivityModel,
@@ -26,9 +24,8 @@ pytestmark = pytest.mark.usefixtures("card_documents")
 
 
 @pytest.fixture
-async def session_factory():
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+async def session_factory(memory_db):
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
     yield factory
     await engine.dispose()

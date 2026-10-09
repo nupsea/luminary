@@ -132,6 +132,7 @@ export function usePdfKeyScroll(
   scrollAreaRef: React.RefObject<HTMLDivElement | null>,
   /** The scroll area exists only once the document has loaded. */
   ready: boolean,
+  onScrollKey?: () => void,
 ): void {
   useEffect(() => {
     const el = scrollAreaRef.current
@@ -143,9 +144,10 @@ export function usePdfKeyScroll(
       const step = keyStep(e.key, e.shiftKey, el!.clientHeight)
       if (step === null) return
       e.preventDefault()
+      onScrollKey?.()
       el!.scrollBy({ top: step, behavior: e.repeat ? "auto" : "smooth" })
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [scrollAreaRef, ready])
+  }, [scrollAreaRef, ready, onScrollKey])
 }

@@ -1866,6 +1866,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/bookmark": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Bookmark
+         * @description Place the document's one PDF bookmark, moving it if one exists.
+         *
+         *     Returns 404 if the document does not exist.
+         */
+        put: operations["set_bookmark_documents__document_id__bookmark_put"];
+        post?: never;
+        /**
+         * Clear Bookmark
+         * @description Remove the document's PDF bookmark. Removing an absent one succeeds.
+         *
+         *     Returns 404 if the document does not exist.
+         */
+        delete: operations["clear_bookmark_documents__document_id__bookmark_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/activity/read": {
         parameters: {
             query?: never;
@@ -10330,6 +10358,8 @@ export interface components {
             last_pdf_page: number | null;
             /** Last Epub Chapter Index */
             last_epub_chapter_index: number | null;
+            /** Pdf Bookmark Page */
+            pdf_bookmark_page?: number | null;
         };
         /** ReadingProgressRequest */
         ReadingProgressRequest: {
@@ -11055,6 +11085,11 @@ export interface components {
              * Format: date-time
              */
             ended_at: string;
+        };
+        /** SetBookmarkRequest */
+        SetBookmarkRequest: {
+            /** Pdf Page */
+            pdf_page: number;
         };
         /** SettingsUpdate */
         SettingsUpdate: {
@@ -15046,6 +15081,70 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ReadingPositionResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_bookmark_documents__document_id__bookmark_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetBookmarkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadingPositionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_bookmark_documents__document_id__bookmark_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

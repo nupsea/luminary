@@ -8,8 +8,6 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.services.llm import LLMService, get_llm_service
 
@@ -17,7 +15,7 @@ from app.services.llm import LLMService, get_llm_service
 
 
 @pytest.fixture
-async def settings_db(tmp_path, monkeypatch):
+async def settings_db(memory_db, tmp_path, monkeypatch):
     """In-memory SQLite with tables; resets settings cache before/after."""
     import app.services.settings_service as svc_module
     from app.services.settings_service import _DEFAULTS
@@ -27,8 +25,7 @@ async def settings_db(tmp_path, monkeypatch):
 
     get_settings.cache_clear()
 
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     orig_engine = db_module._engine

@@ -42,8 +42,6 @@ import app.services.section_summarizer as section_summarizer_module
 import app.services.summarizer as summarizer_module
 import app.services.vector_store as vs_module
 import app.workflows.ingestion as ingestion_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.models import ChunkModel, DocumentModel
 
@@ -64,7 +62,7 @@ class _MockEmbeddingService:
 
 
 @pytest.fixture
-async def integration_db(tmp_path, monkeypatch):
+async def integration_db(memory_db, tmp_path, monkeypatch):
     """Isolated environment: in-memory SQLite, temp LanceDB dir,
     mocked embedding service and entity extractor."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
@@ -74,8 +72,7 @@ async def integration_db(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
     # Set up in-memory SQLite
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     # Swap DB singletons

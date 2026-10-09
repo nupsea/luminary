@@ -195,16 +195,15 @@ def test_the_timezone_offset_is_dropped():
     assert diagnostics.redact(line) == "time=2026-09-24T15:57:37.559 level=INFO"
 
 
-async def test_document_and_collection_names_are_removed(no_ollama, tmp_path, monkeypatch):
+async def test_document_and_collection_names_are_removed(
+    memory_db, no_ollama, tmp_path, monkeypatch
+):
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     import app.database as db_module
-    from app.database import make_engine
-    from app.db_init import create_all_tables
     from app.models import CollectionModel, DocumentModel
 
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(db_module, "_engine", engine)
     monkeypatch.setattr(db_module, "_session_factory", factory)
