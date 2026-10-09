@@ -16,8 +16,6 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 
 # Load manifest at import time so parametrize can reference it.
@@ -34,13 +32,12 @@ pytest_plugins = ["tests.conftest_books"]
 
 
 @pytest.fixture
-async def _fast_test_db(tmp_path, monkeypatch):
+async def _fast_test_db(memory_db, tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from app.config import get_settings
 
     get_settings.cache_clear()
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
     orig_engine = db_module._engine
     orig_factory = db_module._session_factory

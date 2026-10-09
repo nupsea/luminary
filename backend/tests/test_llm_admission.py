@@ -471,14 +471,12 @@ async def test_an_unreachable_provider_still_releases_the_gate(admission_setting
 
 
 @pytest.mark.asyncio
-async def test_status_endpoint_reports_the_pause_the_ui_shows(tmp_path, monkeypatch):
+async def test_status_endpoint_reports_the_pause_the_ui_shows(memory_db, tmp_path, monkeypatch):
     """I-10: the pause has an explicit state, and it is the gate's own, not a guess."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     import app.database as db_module
     from app.config import get_settings
-    from app.database import make_engine
-    from app.db_init import create_all_tables
     from app.main import app
     from app.models import DocumentModel
 
@@ -488,8 +486,7 @@ async def test_status_endpoint_reports_the_pause_the_ui_shows(tmp_path, monkeypa
     monkeypatch.setenv("OLLAMA_NUM_PARALLEL", "1")
     get_settings.cache_clear()
 
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
     orig_engine, orig_factory = db_module._engine, db_module._session_factory
     db_module._engine, db_module._session_factory = engine, factory

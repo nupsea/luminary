@@ -9,15 +9,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.services.activity_service import ActivityService
 
 
 @pytest.fixture
-async def factory():
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+async def factory(memory_db):
+    engine = memory_db.engine
     f = async_sessionmaker(engine, expire_on_commit=False)
     orig_engine = db_module._engine
     orig_factory = db_module._session_factory

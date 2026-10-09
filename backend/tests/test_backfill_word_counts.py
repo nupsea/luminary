@@ -11,18 +11,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import DocumentModel
 from app.scripts.backfill_word_counts import recount_all
 
 
 @pytest.fixture
-async def library(tmp_path, monkeypatch):
+async def library(memory_db, tmp_path, monkeypatch):
     """An in-memory library plus a real source file on disk to recount from."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
-    await create_all_tables(engine)
+    engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
     orig_engine, orig_factory = db_module._engine, db_module._session_factory
     db_module._engine, db_module._session_factory = engine, factory
