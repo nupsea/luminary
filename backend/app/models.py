@@ -113,8 +113,6 @@ class SectionModel(Base):
     # Tech section detection fields (set by tech_book/tech_article content type)
     admonition_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     parent_section_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Prerequisite chain depth (number of hops from root to this section's concepts)
-    difficulty_estimate: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class ChunkModel(Base):
@@ -747,7 +745,6 @@ class EnrichmentJobModel(Base):
       image_extract    -- PDF/EPUB image extraction
       image_analyze    -- vision LLM image description
       diagram_extract  -- diagram-type routing and COMPONENT node extraction
-      prerequisites    -- prerequisite graph extraction
       web_refs         -- web reference resolution
       concept_link     -- cross-document concept linking
       chapter_cards    -- cards written per chapter, held until the chapter is practised

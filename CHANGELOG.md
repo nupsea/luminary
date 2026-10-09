@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The PDF view scrolls continuously.** Pages stack in one scroll, so the wheel, the paging keys and a text selection all run across page breaks; only the pages near the view are drawn.
 - **Selected text offers Define for a term and Simplify for a passage**, both answered from the document's own passages rather than the selection alone.
 
+### Removed
+- **The "Where to start" panel and `/study/start` and `/study/path`.** Nothing ever filled them: the prerequisite extractor behind them was never run, and run, the local model found no prerequisites or invented them. Prerequisite edges stated in the text ("X requires Y") still show on the Map.
+
 ### Fixed
 - **Chapter cards on technical books asked who did something and why, as if the book were a story.** Chapter cards now ask what each kind of book is for, and a technical or research card about a person rather than its subject is refused. A story read as technical from its preface is now classed by how its body reads.
 - **Selecting text in the PDF painted a bar in the page margin.**

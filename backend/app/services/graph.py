@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session_factory
 from app.repos.graph_diagram_repo import DIAGRAM_EDGE_KINDS, GraphDiagramRepo
 from app.repos.graph_entity_repo import GraphEntityRepo
-from app.services import graph_prereq, graph_view
+from app.services import graph_view
 
 logger = logging.getLogger(__name__)
 
@@ -118,24 +118,6 @@ class GraphService:
                 logger.info("graph not written: document %s was deleted", document_id)
                 return False
         return True
-
-    async def add_prerequisite_with_section(
-        self,
-        dependent_id: str,
-        prerequisite_id: str,
-        document_id: str,
-        confidence: float,
-        source_section_id: str,
-    ) -> None:
-        extracted = DocumentGraph()
-        extracted.add_edge(
-            "PREREQUISITE_OF",
-            dependent_id,
-            prerequisite_id,
-            confidence=confidence,
-            source_section_id=source_section_id,
-        )
-        await self.write_document_graph(document_id, extracted)
 
     async def add_same_concept_edge(
         self,
@@ -335,22 +317,6 @@ class GraphService:
             if len(pairs) >= limit:
                 break
         return pairs
-
-    # Prerequisites
-
-    async def get_prerequisite_edges_for_document(self, document_id: str) -> list[dict]:
-        async with _session() as session:
-            return await graph_prereq.prerequisite_edges(GraphEntityRepo(session), document_id)
-
-    async def get_entry_point_concepts(self, document_id: str, limit: int = 10) -> list[str]:
-        async with _session() as session:
-            return await graph_prereq.entry_points(GraphEntityRepo(session), document_id, limit)
-
-    async def get_learning_path(self, start_entity_name: str, document_id: str) -> dict:
-        async with _session() as session:
-            return await graph_prereq.learning_path(
-                GraphEntityRepo(session), start_entity_name, document_id
-            )
 
     # SAME_CONCEPT
 

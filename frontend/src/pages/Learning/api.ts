@@ -13,7 +13,6 @@ import type {
   DocumentGroup,
   DueCountResponse,
   SessionListResponse,
-  StartConceptsData,
 } from "./types"
 
 export async function fetchSearch(
@@ -103,8 +102,3 @@ export async function fetchNotesCount(): Promise<number> {
     return 0
   }
 }
-
-export const fetchStartConcepts = (
-  documentId: string,
-): Promise<StartConceptsData> =>
-  apiGet<StartConceptsData>("/study/start", { document_id: documentId })

@@ -79,7 +79,6 @@ from app.services.image_enricher import image_analyze_handler
 from app.services.image_extractor import image_extract_handler
 from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.llm_admission import unattended
-from app.services.prereq_extractor import prereq_extract_handler
 from app.services.python_extras import activate_extras
 from app.services.reference_enricher import web_refs_handler
 from app.services.settings_service import _cache as _llm_cache
@@ -228,8 +227,6 @@ async def lifespan(app: FastAPI):
     _worker.register("image_analyze", image_analyze_handler)
     _worker.register("diagram_extract", diagram_extract_handler)
     _worker.register("web_refs", web_refs_handler)
-    # TODO(#227): nothing enqueues this job, so no prerequisite edge is ever written.
-    _worker.register("prerequisites", prereq_extract_handler)
     _worker.register("concept_link", concept_link_handler)
     _worker.register("chapter_cards", chapter_cards_handler)
     await _worker.start()
