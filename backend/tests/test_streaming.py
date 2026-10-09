@@ -82,6 +82,6 @@ def test_every_streaming_route_uses_the_disconnect_safe_response():
     offenders = [
         str(p.relative_to(app_dir))
         for p in app_dir.rglob("*.py")
-        if p.name != "streaming.py" and pattern.search(p.read_text())
+        if p.name != "streaming.py" and pattern.search(p.read_text(encoding="utf-8"))
     ]
     assert offenders == []
