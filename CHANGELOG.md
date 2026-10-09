@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Chapter cards on technical books asked who did something and why, as if the book were a story.** Chapter cards now ask what each kind of book is for, and a technical or research card about a person rather than its subject is refused. A story read as technical from its preface is now classed by how its body reads.
 - **Selecting text in the PDF painted a bar in the page margin.**
+- **Dragging a selection across a gap in PDF text jumped it to the end of the page.** The text layer now carries the end-of-content guard pdf.js's own viewer uses.
 - **A highlight made near a page break was saved to the page in view** rather than the page it was made on.
 - **Deleting a document while its cards were generating could leave cards behind for a document that no longer exists.** Deleting now stops the generation, and the database refuses such a card; the upgrade removes any already left behind.
 
