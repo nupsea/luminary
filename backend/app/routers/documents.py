@@ -68,6 +68,7 @@ from app.schemas.documents import (
     ReparseResponse,
     SavePositionRequest,
     SectionItem,
+    SetBookmarkRequest,
     UrlIngestRequest,
     YouTubeIngestRequest,
 )
@@ -196,6 +197,7 @@ __all__ = [
     "ReadingPositionResponse",
     "SavePositionRequest",
     "SectionItem",
+    "SetBookmarkRequest",
     "UrlIngestRequest",
     "YouTubeIngestRequest",
     "_delete_raw_file",
@@ -2325,6 +2327,17 @@ async def refresh_document_progress(document_id: str) -> DocumentProgressRespons
 # Reading position persistence — resume where you left off
 
 
+def _position_response(row: ReadingPositionModel) -> ReadingPositionResponse:
+    return ReadingPositionResponse(
+        document_id=row.document_id,
+        last_section_id=row.last_section_id,
+        last_section_heading=row.last_section_heading,
+        last_pdf_page=row.last_pdf_page,
+        last_epub_chapter_index=row.last_epub_chapter_index,
+        pdf_bookmark_page=row.pdf_bookmark_page,
+    )
+
+
 @router.post("/{document_id}/position", response_model=ReadingPositionResponse, status_code=200)
 async def save_reading_position(
     document_id: str, body: SavePositionRequest
@@ -2364,13 +2377,7 @@ async def save_reading_position(
         await session.commit()
         await session.refresh(row)
 
-    return ReadingPositionResponse(
-        document_id=row.document_id,
-        last_section_id=row.last_section_id,
-        last_section_heading=row.last_section_heading,
-        last_pdf_page=row.last_pdf_page,
-        last_epub_chapter_index=row.last_epub_chapter_index,
-    )
+    return _position_response(row)
 
 
 @router.get("/{document_id}/position", response_model=ReadingPositionResponse)
@@ -2391,13 +2398,40 @@ async def get_reading_position(document_id: str) -> ReadingPositionResponse:
     if row is None:
         raise HTTPException(status_code=404, detail="No reading position saved for this document")
 
-    return ReadingPositionResponse(
-        document_id=row.document_id,
-        last_section_id=row.last_section_id,
-        last_section_heading=row.last_section_heading,
-        last_pdf_page=row.last_pdf_page,
-        last_epub_chapter_index=row.last_epub_chapter_index,
-    )
+    return _position_response(row)
+
+
+@router.put("/{document_id}/bookmark", response_model=ReadingPositionResponse)
+async def set_bookmark(document_id: str, body: SetBookmarkRequest) -> ReadingPositionResponse:
+    """Place the document's one PDF bookmark, moving it if one exists.
+
+    Returns 404 if the document does not exist.
+    """
+    async with get_session_factory()() as session:
+        await get_or_404(session, DocumentModel, document_id, name="Document")
+        row = await session.get(ReadingPositionModel, document_id)
+        if row is None:
+            row = ReadingPositionModel(document_id=document_id, updated_at=datetime.now(UTC))
+            session.add(row)
+        row.pdf_bookmark_page = body.pdf_page
+        await session.commit()
+        await session.refresh(row)
+
+    return _position_response(row)
+
+
+@router.delete("/{document_id}/bookmark", status_code=204)
+async def clear_bookmark(document_id: str) -> None:
+    """Remove the document's PDF bookmark. Removing an absent one succeeds.
+
+    Returns 404 if the document does not exist.
+    """
+    async with get_session_factory()() as session:
+        await get_or_404(session, DocumentModel, document_id, name="Document")
+        row = await session.get(ReadingPositionModel, document_id)
+        if row is not None and row.pdf_bookmark_page is not None:
+            row.pdf_bookmark_page = None
+            await session.commit()
 
 
 @router.post("/{document_id}/activity/read", status_code=204)
