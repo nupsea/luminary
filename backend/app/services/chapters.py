@@ -33,6 +33,15 @@ _GENERIC_HEADING = re.compile(
     r"|references|introduction|overview)\W*$",
     re.I,
 )
+# Pages about the book, not of it (#252). "Introduction" is absent: in a technical book it is
+# often chapter 1.
+_FRONT_MATTER = re.compile(
+    r"^\W*(?:title page|half title|copyright|dedication|preface|foreword"
+    r"|acknowledge?ments?|contributors?(?: list)?|(?:table of )?contents|about this book"
+    r"|praise for|conventions used|using code examples|how to contact us|who this book is for"
+    r"|o.reilly online learning)\b",
+    re.I,
+)
 
 # One "Chapter 5" heading in an article is a cross-reference, not a structure.
 MIN_MARKED_CHAPTERS = 2
@@ -52,6 +61,9 @@ WINDOW_CHARS = 30_000
 # about 1.5k characters a page, while Hegel's chunks carry their section's first page, so a
 # 76k-character window would read "Pages 9-9".
 MAX_CHARS_PER_PAGE = 10_000
+# Front matter is looked for only this far in: thinkpython2's preface and contributor list end
+# about 9% into the book, while acknowledgements that close a book sit past 90%.
+FRONT_MATTER_SHARE = 0.15
 
 
 @dataclass(frozen=True)
@@ -140,12 +152,40 @@ def _without_back_matter(members: list[SectionExtent]) -> list[SectionExtent]:
     return members
 
 
+def _front_matter_end(ordered: Sequence[SectionExtent]) -> int:
+    """Index of the first section past the opening front matter, 0 when there is none.
+
+    A preface's own subsections ("The strange history of this book") carry no front-matter
+    name, so the cut runs through the last named front-matter section near the start. An
+    untitled opening is cut only with named front matter after it: alone, it is as often a
+    paper's abstract as a title page.
+    """
+    if ordered[0].heading.strip() and not _FRONT_MATTER.match(ordered[0].heading):
+        return 0
+    limit = FRONT_MATTER_SHARE * sum(s.chars for s in ordered)
+    end, seen = 0, 0
+    for i, s in enumerate(ordered):
+        if seen >= limit:
+            break
+        if _FRONT_MATTER.match(s.heading):
+            end = i + 1
+        seen += s.chars
+    return end if end < len(ordered) else 0
+
+
 def _starts(ordered: Sequence[SectionExtent]) -> tuple[list[int], bool]:
-    """Indexes opening each chapter, and whether they came from heading marks."""
-    if sum(s.chars for s in ordered) < WHOLE_DOCUMENT_CHARS:
-        return [0], False
-    marked = _boundaries(ordered)
-    return (marked, True) if marked is not None else (_windows(ordered), False)
+    """Indexes opening each chapter, and whether they came from heading marks.
+
+    A marked book already starts at its first mark; an unmarked one starts past its front matter.
+    """
+    big = sum(s.chars for s in ordered) >= WHOLE_DOCUMENT_CHARS
+    marked = _boundaries(ordered) if big else None
+    if marked is not None:
+        return marked, True
+    front = _front_matter_end(ordered)
+    if not big:
+        return [front], False
+    return [front + i for i in _windows(ordered[front:])], False
 
 
 def _chapter(members: list[SectionExtent], order: int, title: str | None) -> Chapter:
@@ -163,7 +203,7 @@ def _chapter(members: list[SectionExtent], order: int, title: str | None) -> Cha
 
 
 def detect_chapters(sections: Sequence[SectionExtent], document_title: str) -> list[Chapter]:
-    """Chapters in reading order. Front matter before the first marked chapter is left out."""
+    """Chapters in reading order, never opening on front matter."""
     ordered = sorted((s for s in sections if s.chars > 0), key=lambda s: s.first_chunk)
     if not ordered:
         return []
