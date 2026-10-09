@@ -6,6 +6,7 @@ export interface ReadingPosition {
   last_section_heading: string | null
   last_pdf_page: number | null
   last_epub_chapter_index: number | null
+  pdf_bookmark_page: number | null
 }
 
 interface ResumeBannerProps {
