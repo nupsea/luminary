@@ -350,8 +350,7 @@ from a `user-attachments` upload, never from a repo path, and never autoplays or
 loops it, so an animated image is the only thing that plays on its own. WebP
 over GIF: GIF's 256-colour palette bands a dark UI and blurs small text, and the
 same 25s cut measured 12.6 MB as a 1000px GIF against 5.5 MB as a sharper 1400px
-WebP. The source `demo.mp4` and the YouTube tour are linked underneath; GitHub's
-file view plays the mp4 when clicked.
+WebP. The YouTube tour is linked underneath.
 
 `assets/images/demo.webp` is `demo.mp4` cropped to the app window (browser
 chrome out), cut to its beats, at 1400px and 15fps:
