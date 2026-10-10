@@ -1,5 +1,6 @@
 import logging
 import re
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -121,6 +122,7 @@ def eq_predicate(column: str, value: str, *, context: str) -> str | None:
 class LanceDBService:
     def __init__(self) -> None:
         self._db: Any = None
+        self._create_lock = threading.Lock()
 
     def _connect(self) -> None:
         if self._db is not None:
@@ -133,12 +135,22 @@ class LanceDBService:
         self._db = lancedb.connect(str(vectors_dir))
         logger.info("LanceDB connected at %s", vectors_dir)
 
-    def _get_table(self) -> Any:
+    def _open_or_create(self, name: str, schema: pa.Schema) -> Any:
+        """Open a table, creating it once if absent.
+
+        Creation is serialized: two `to_thread` callers on a fresh library both saw the
+        table missing, and on Windows the loser's `open_table` then failed as well (#195).
+        """
         self._connect()
-        existing = self._db.list_tables().tables
-        if TABLE_NAME in existing:
-            return self._db.open_table(TABLE_NAME)
-        return self._db.create_table(TABLE_NAME, schema=SCHEMA)
+        if name in self._db.list_tables().tables:
+            return self._db.open_table(name)
+        with self._create_lock:
+            if name in self._db.list_tables().tables:
+                return self._db.open_table(name)
+            return self._db.create_table(name, schema=schema)
+
+    def _get_table(self) -> Any:
+        return self._open_or_create(TABLE_NAME, SCHEMA)
 
     def upsert_chunks(self, chunks: list[dict[str, Any]]) -> None:
         """Upsert chunk rows keyed on chunk_id."""
@@ -170,35 +182,23 @@ class LanceDBService:
         logger.info("Deleted vectors for document %s from LanceDB", document_id)
 
     def _get_or_create_note_table(self) -> Any:
-        self._connect()
-        existing = self._db.list_tables().tables
-        if NOTE_TABLE_NAME in existing:
-            tbl = self._db.open_table(NOTE_TABLE_NAME)
-            # Inspect the vector field dimension; drop and recreate if mismatched
-            try:
-                vector_field = tbl.schema.field("vector")
-                actual_dim = vector_field.type.list_size
-                if actual_dim != NOTE_VECTOR_DIM:
-                    logger.warning(
-                        "note_vectors_v2 schema mismatch (found %d-dim) -- dropping and "
-                        "recreating with %d-dim",
-                        actual_dim,
-                        NOTE_VECTOR_DIM,
-                    )
+        tbl = self._open_or_create(NOTE_TABLE_NAME, NOTE_SCHEMA)
+        # Inspect the vector field dimension; drop and recreate if mismatched
+        try:
+            actual_dim = tbl.schema.field("vector").type.list_size
+            if actual_dim != NOTE_VECTOR_DIM:
+                logger.warning(
+                    "note_vectors_v2 schema mismatch (found %d-dim) -- dropping and "
+                    "recreating with %d-dim",
+                    actual_dim,
+                    NOTE_VECTOR_DIM,
+                )
+                with self._create_lock:
                     self._db.drop_table(NOTE_TABLE_NAME)
                     return self._db.create_table(NOTE_TABLE_NAME, schema=NOTE_SCHEMA)
-            except Exception as exc:
-                logger.warning("Could not inspect note_vectors_v2 schema: %s", exc)
-            return tbl
-        try:
-            return self._db.create_table(NOTE_TABLE_NAME, schema=NOTE_SCHEMA)
-        except ValueError:
-            # list_tables() then create_table() is check-then-act, and two
-            # concurrent callers both pass the check. Reachable without any test
-            # harness: `POST /notes` schedules its embedding as a background
-            # task, so creating two notes in quick succession on a fresh install
-            # races here and one of them raises "Table already exists".
-            return self._db.open_table(NOTE_TABLE_NAME)
+        except Exception as exc:
+            logger.warning("Could not inspect note_vectors_v2 schema: %s", exc)
+        return tbl
 
     def upsert_note_vector(
         self, note_id: str, document_id: str | None, content: str, vector: list[float]
@@ -243,11 +243,7 @@ class LanceDBService:
             logger.exception("delete_note_vector failed for note_id=%s", note_id)
 
     def _get_image_table(self) -> Any:
-        self._connect()
-        existing = self._db.list_tables().tables
-        if IMAGE_TABLE_NAME in existing:
-            return self._db.open_table(IMAGE_TABLE_NAME)
-        return self._db.create_table(IMAGE_TABLE_NAME, schema=IMAGE_SCHEMA)
+        return self._open_or_create(IMAGE_TABLE_NAME, IMAGE_SCHEMA)
 
     def upsert_image_vector(
         self, image_id: str, document_id: str, description: str, vector: list[float]
@@ -340,11 +336,7 @@ class LanceDBService:
     # asyncio.to_thread when invoked from async code (invariant I-2).
 
     def _get_or_create_concept_table(self) -> Any:
-        self._connect()
-        existing = self._db.list_tables().tables
-        if CONCEPT_TABLE_NAME in existing:
-            return self._db.open_table(CONCEPT_TABLE_NAME)
-        return self._db.create_table(CONCEPT_TABLE_NAME, schema=CONCEPT_SCHEMA)
+        return self._open_or_create(CONCEPT_TABLE_NAME, CONCEPT_SCHEMA)
 
     def fetch_chunk_vectors(self, chunk_ids: list[str]) -> dict[str, list[float]]:
         """Bulk-load chunk_id -> vector for the given ids (one filtered scan).
@@ -435,8 +427,9 @@ class LanceDBService:
         """Drop the concept vector table (for a full regenerate). Idempotent."""
         try:
             self._connect()
-            if CONCEPT_TABLE_NAME in self._db.list_tables().tables:
-                self._db.drop_table(CONCEPT_TABLE_NAME)
+            with self._create_lock:
+                if CONCEPT_TABLE_NAME in self._db.list_tables().tables:
+                    self._db.drop_table(CONCEPT_TABLE_NAME)
         except Exception as exc:
             logger.warning("clear_concept_vectors failed: %s", exc)
 
