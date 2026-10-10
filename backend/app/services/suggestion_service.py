@@ -93,6 +93,34 @@ def _quoted_from(item: dict, passages: list[str]) -> bool:
     return _excerpt_is_grounded(evidence, _normalize_for_match(passages[index]))
 
 
+def _user_prompt(
+    document_id: str | None, summary: str, entity_names: list[str], passages: list[str] | None
+) -> str:
+    entities = ", ".join(entity_names[:10])
+    if document_id is None:
+        return (
+            f"Passages from across the documents:\n{summary[:4000]}\n\n"
+            f"Key entities: {entities}\n\n"
+            f"Write the 6 questions."
+        )
+    if passages:
+        grounding = "\n\n".join(f"[P{i}] {p}" for i, p in enumerate(passages, 1))
+    else:
+        grounding = summary[:3000]
+    return _USER_PROMPT.format(passages=grounding, entities=entities)
+
+
+def _keep_quoted(candidates: list[dict], passages: list[str], document_id: str) -> list[dict]:
+    quoted = [c for c in candidates if _quoted_from(c, passages)]
+    logger.info(
+        "suggestions: %d of %d candidates quote their passage for doc=%s",
+        len(quoted),
+        len(candidates),
+        document_id,
+    )
+    return quoted
+
+
 def _system_prompt() -> str:
     return render_for(SUGGESTION_SPEC, "background")
 
@@ -461,32 +489,12 @@ class SuggestionService:
         history_text = ", ".join(topics) if topics else "(none)"
         guidance = _LEVEL_GUIDANCE.get(target_bloom, _LEVEL_GUIDANCE[2])
 
-        if document_id is not None:
-            grounding = (
-                "\n\n".join(f"[P{i}] {p}" for i, p in enumerate(passages, 1))
-                if passages
-                else summary[:3000]
-            )
-            system = _system_prompt().format(
-                guidance=guidance,
-                bloom_level=target_bloom,
-                history=history_text,
-            )
-            user = _USER_PROMPT.format(
-                passages=grounding,
-                entities=", ".join(entity_names[:10]),
-            )
-        else:
-            system = _cross_doc_system().format(
-                guidance=guidance,
-                bloom_level=target_bloom,
-                history=history_text,
-            )
-            user = (
-                f"Passages from across the documents:\n{summary[:4000]}\n\n"
-                f"Key entities: {', '.join(entity_names[:10])}\n\n"
-                f"Write the 6 questions."
-            )
+        system = (_system_prompt() if document_id is not None else _cross_doc_system()).format(
+            guidance=guidance,
+            bloom_level=target_bloom,
+            history=history_text,
+        )
+        user = _user_prompt(document_id, summary, entity_names, passages)
 
         try:
             # Abandoned if the user ends up waiting on it. Suggestions are the
@@ -515,14 +523,7 @@ class SuggestionService:
         try:
             candidates = _parse_questions(raw)
             if document_id is not None and passages:
-                quoted = [c for c in candidates if _quoted_from(c, passages)]
-                logger.info(
-                    "suggestions: %d of %d candidates quote their passage for doc=%s",
-                    len(quoted),
-                    len(candidates),
-                    document_id,
-                )
-                candidates = quoted
+                candidates = _keep_quoted(candidates, passages, document_id)
             filtered = self.filter_near_duplicates(candidates, history)
             # An empty return falls back to templates at the caller. That fallback
             # was silent, so a model emitting unparseable JSON looked identical to
