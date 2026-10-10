@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The "Where to start" panel and `/study/start` and `/study/path`.** Nothing ever filled them: the prerequisite extractor behind them was never run, and run, the local model found no prerequisites or invented them. Prerequisite edges stated in the text ("X requires Y") still show on the Map.
 
 ### Fixed
+- **Suggested questions asked about things the document does not say (#66).** Each question must now copy the words that answer it from a passage of the document, and one document's suggestions are no longer padded with generic templates. Over two 200-question runs, answers flagged as not in the text fell from 13% to 9-11% of model questions.
 - **A document parsed as a conversation lost all its text before the first speaker line.** An essay whose worked examples read as "Name: ..." lines kept 35k of its 79k characters, without warning. That text is now kept, as it already was before a first heading.
 - **Generating cards for a document that no longer exists ran the model, then failed with a 500.** It is now refused with a 404 before any generation.
 - **Two first writers to a fresh library's vector store could lose a note's embedding or fail an ingest.** Both found a table missing, both created it, and the loser failed. A table is now created once, under a lock.
