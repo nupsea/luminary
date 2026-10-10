@@ -655,6 +655,31 @@ def test_a_suggestion_is_kept_only_when_it_quotes_its_passage(item, kept):
     assert _quoted_from({"question": "q", **item}, _PASSAGES) is kept
 
 
+_INCIDENT_PASSAGES = [_PASSAGES[0], "On-call is paged for P1 incidents within five minutes."]
+
+
+@pytest.mark.parametrize(
+    ("question", "passages", "evidence", "kept"),
+    [
+        # "[P2]" exists only in the prompt; a reader has no P2.
+        ("What does P2 say about catalogs?", _PASSAGES, "expose table locations", False),
+        ("What can a catalog expose?", _PASSAGES, "expose table locations", True),
+        # The document's own vocabulary is not a prompt label.
+        (
+            "How fast is on-call paged for P1 incidents?",
+            _INCIDENT_PASSAGES,
+            "within five minutes",
+            True,
+        ),
+    ],
+)
+def test_a_suggestion_never_names_a_prompt_passage_label(question, passages, evidence, kept):
+    from app.services.suggestion_service import _quoted_from
+
+    item = {"question": question, "source": "P2", "evidence": evidence}
+    assert _quoted_from(item, passages) is kept
+
+
 @pytest.mark.asyncio
 async def test_generation_drops_questions_that_do_not_quote_the_document(db_session):
     raw = (

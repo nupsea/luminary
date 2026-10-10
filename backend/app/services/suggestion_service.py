@@ -53,7 +53,8 @@ SUGGESTION_SPEC = PromptSpec(
         f"{_STYLE_RULES}\n"
         "These topics are already covered -- prefer different ones: {history}\n\n"
         "Each passage is labelled like [P1]. For every question, name the passage that "
-        "answers it and copy, word for word, the words in that passage that answer it.\n\n"
+        "answers it and copy, word for word, the words in that passage that answer it. "
+        "The labels are for you; never mention one in a question.\n\n"
         "Output a JSON array of objects with keys 'question', 'depth' "
         "(integer, always {bloom_level}), 'source' (the passage label) and 'evidence' "
         "(the copied words)."
@@ -69,8 +70,19 @@ _MIN_EVIDENCE_CHARS = 12
 _MIN_PASSAGE_CHARS = 200
 
 
+_PASSAGE_LABEL = re.compile(r"\bP\d+\b")
+
+
 def _quoted_from(item: dict, passages: list[str]) -> bool:
-    """Whether the question's evidence is text of the passage it names."""
+    """Whether the question's evidence is text of the passage it names.
+
+    The question itself must not name a label: "[P3]" exists only in the prompt, so a
+    question about "P3" means nothing to a reader. A label the document's own text
+    uses ("P1 incidents") is the document's vocabulary and stays.
+    """
+    labels = _PASSAGE_LABEL.findall(str(item.get("question", "")))
+    if any(not any(re.search(rf"\b{label}\b", p) for p in passages) for label in labels):
+        return False
     match = re.fullmatch(r"\[?P(\d+)\]?", str(item.get("source", "")).strip(), re.IGNORECASE)
     evidence = str(item.get("evidence", ""))
     if not match or len(evidence.strip()) < _MIN_EVIDENCE_CHARS:
