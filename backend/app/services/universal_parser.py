@@ -484,18 +484,20 @@ class UniversalParser:
         if not matches:
             return []
 
-        # Always group: the generic loop treats a matched line as a heading,
-        # and for a transcript that line is the utterance. Turn count is not a
-        # reason to fall back into it.
-        if sig.doc_type == "chat":
-            return self._segment_chat_grouped(text, matches)
-
         # Text before the first heading is a web article's lede, and it was dropped (#97).
         # Only prose is kept: a title line or a scraped nav bar is furniture. No heading (I-30).
+        # The same before a chat's first turn: an essay whose examples read as "Name: ..."
+        # lines scores as a chat, and lost everything above its first example.
         preamble = text[: matches[0].start()].strip()
         visible = _MD_IMAGE.sub("", _MD_LINK.sub(r"\1", preamble))
         if any(line.strip() and not _is_marker(line) for line in visible.splitlines()):
             sections.append(Section(heading="", level=1, text=preamble, page_start=0, page_end=0))
+
+        # Always group: the generic loop treats a matched line as a heading,
+        # and for a transcript that line is the utterance. Turn count is not a
+        # reason to fall back into it.
+        if sig.doc_type == "chat":
+            return sections + self._segment_chat_grouped(text, matches)
 
         for i, m in enumerate(matches):
             is_markdown = sig.id == "markdown_header"

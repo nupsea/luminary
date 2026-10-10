@@ -425,6 +425,31 @@ def test_the_text_before_the_first_heading_is_kept_without_a_heading(tmp_path):
     assert [s.heading for s in doc.sections[1:]] == ["Part 1", "Part 2", "Part 3"]
 
 
+def test_text_before_the_first_turn_of_a_chat_is_kept(tmp_path):
+    """An essay whose worked examples read as "Name: ..." lines scores as a chat; the
+    chat path started its first section at the first turn and dropped everything above."""
+    opening = "".join(
+        f"Paragraph {n} explains why retrieval practice changes what a reader remembers.\n\n"
+        for n in range(1, 6)
+    )
+    turns = "".join(
+        f"{speaker}: Turn {n} of the worked example.\n"
+        for n in range(1, 21)
+        for speaker in ("Exercise", "Answer")
+    )
+    f = tmp_path / "essay.md"
+    f.write_text(opening + turns)
+
+    doc = up.parse(f, "md")
+
+    assert doc is not None and doc.structure_type == "chat"
+    body = "\n".join(s.text for s in doc.sections)
+    for n in range(1, 6):
+        assert f"Paragraph {n} explains" in body
+    assert doc.sections[0].heading == ""
+    assert "Turn 20 of the worked example" in body
+
+
 def test_a_title_line_or_nav_bar_before_the_first_heading_is_not_kept(tmp_path):
     f = tmp_path / "nav.md"
     f.write_text(
