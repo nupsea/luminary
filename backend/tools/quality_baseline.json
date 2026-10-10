@@ -154,7 +154,7 @@
     "app/services/feynman_service.py": 18,
     "app/services/flashcard.py": 29,
     "app/services/flashcard_audit.py": 4,
-    "app/services/flashcard_generators.py": 24,
+    "app/services/flashcard_generators.py": 22,
     "app/services/flashcard_grounding.py": 9,
     "app/services/flashcard_repair.py": 8,
     "app/services/flashcard_search.py": 16,

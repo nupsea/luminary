@@ -30,6 +30,7 @@ from app.models import (
     NoteModel,
     SectionModel,
 )
+from app.repos.document_repo import DocumentRepo
 from app.services import llm_output_stats
 from app.services.enrichment_concurrency import get_enrichment_llm_semaphore
 from app.services.flashcard_factuality import (
@@ -927,15 +928,16 @@ async def generate(
 
     llm = _get_llm_service()
 
-    doc_result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-    doc = doc_result.scalar_one_or_none()
+    # Before any generation: an unknown document otherwise spent the model's time and
+    # then failed the flashcard insert's foreign key (#282).
+    doc = await DocumentRepo(session).get_or_404(document_id)
     profile = DocumentProfile.of(doc)
 
     # Whether this recording has more than one participant, which is what
     # separates a meeting from a talk when no profile decided it. Only asked for
     # the content types where the answer changes the prompt.
     has_speakers: bool | None = None
-    if (doc.content_type if doc else "") in ("audio", "video"):
+    if doc.content_type in ("audio", "video"):
         has_speakers = bool(
             (
                 await session.execute(
@@ -964,14 +966,14 @@ async def generate(
     passage_chunk_ids: list[str] = []
     if context and context.strip():
         combined_text = context.strip()[:_CHUNK_CHAR_LIMIT]
-        # Still need a chunk_id (NOT NULL) -- grab the first chunk for the document.
+        # The document's first chunk, or none: never the document id, which is not a chunk.
         first_chunk_result = await session.execute(
             select(ChunkModel.id)
             .where(ChunkModel.document_id == document_id)
             .order_by(ChunkModel.chunk_index)
             .limit(1)
         )
-        first_chunk_id = first_chunk_result.scalar_one_or_none() or document_id
+        first_chunk_id = first_chunk_result.scalar_one_or_none()
     else:
         chunks = await _fetch_chunks(
             document_id, scope, section_heading, session, profile.has_front_matter

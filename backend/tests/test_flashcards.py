@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from stubs import CapturingLLMService as _CapturingLLMService
 from stubs import MockLLMService as _MockLLMService
 from stubs import SequenceLLMService as _SequenceLLMService
@@ -446,6 +447,51 @@ async def test_generate_endpoint_returns_201(test_db):
     assert data[0]["fsrs_state"] == "new"
     assert data[0]["question"] == "What problem does quorum consistency solve?"
     assert data[0]["is_user_edited"] is False
+
+
+@pytest.mark.parametrize("context", [None, "Quantum entanglement describes a correlation."])
+async def test_generate_for_an_unknown_document_is_404_before_any_model_call(test_db, context):
+    mock_llm = _CapturingLLMService(response="[]")
+
+    with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/flashcards/generate",
+                json={"document_id": str(uuid.uuid4()), "count": 1, "context": context},
+            )
+
+    assert resp.status_code == 404, resp.text
+    assert mock_llm.captured_prompts == [] and mock_llm.captured_messages == []
+
+
+@pytest.mark.usefixtures("single_prompt")
+async def test_a_card_from_selected_text_never_names_the_document_as_its_chunk(test_db):
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        await session.commit()
+
+    llm_json = json.dumps(
+        [
+            {
+                "question": "What does quantum entanglement describe?",
+                "answer": "A correlation between particles.",
+                "source_excerpt": _CHUNK_QUOTE,
+            },
+        ]
+    )
+    with patch("app.services.flashcard.get_llm_service", return_value=_MockLLMService(llm_json)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/flashcards/generate",
+                json={"document_id": doc_id, "count": 1, "context": _CHUNK_QUOTE + "."},
+            )
+
+    assert resp.status_code == 201, resp.text
+    async with factory() as session:
+        stored = (await session.execute(select(FlashcardModel))).scalars().all()
+    assert [c.chunk_id for c in stored] == [None]
 
 
 async def test_generate_without_cloud_key_is_503_naming_settings(test_db, monkeypatch):
