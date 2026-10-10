@@ -241,8 +241,9 @@ async def test_suggestions_returns_four(db_session):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("document_id", [None, "doc-short-1"])
-async def test_fewer_generated_than_four_are_topped_up_from_templates(db_session, document_id):
-    """Dedup against history can leave 1-3 generated questions; the response still has 4."""
+async def test_fewer_generated_than_four(db_session, document_id):
+    """Across documents, templates top 1-3 generated questions up to 4. For one document the
+    generated questions stand alone: a template there is unchecked against the text."""
     db_session.add(_make_doc("doc-short-1", "Short Doc", "notes"))
     db_session.add(_make_section("doc-short-1", "Intro", 1))
     await db_session.commit()
@@ -265,10 +266,10 @@ async def test_fewer_generated_than_four_are_topped_up_from_templates(db_session
 
         result = await get_suggestions(document_id=document_id)
 
-    assert len(result.suggestions) == 4
+    assert len(result.suggestions) == (4 if document_id is None else 2)
     assert [s.text for s in result.suggestions[:2]] == [g["question"] for g in generated]
     assert all(s.id for s in result.suggestions[:2])
-    assert len({s.text for s in result.suggestions}) == 4
+    assert len({s.text for s in result.suggestions}) == len(result.suggestions)
 
 
 # (g) AC11: suggestions not in recent history

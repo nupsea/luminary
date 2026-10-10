@@ -398,7 +398,9 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
             )
             if candidates:
                 items = await svc.persist_shown(candidates[:4], document_id=document_id)
-                return _topped_up(items, _doc_templates(doc, entities, headings))
+                # Never padded with templates: they are not checked against the text, and
+                # they filled the slots the quote check had just emptied.
+                return SuggestionResponse(suggestions=[SuggestionItem(**i) for i in items])
     except LLMUnavailableError:
         logger.info("LLM unavailable, falling back to template suggestions for doc=%s", document_id)
 
