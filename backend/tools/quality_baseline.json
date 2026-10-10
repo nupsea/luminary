@@ -182,7 +182,7 @@
     "app/services/section_summarizer.py": 7,
     "app/services/settings_service.py": 2,
     "app/services/study_assembler.py": 10,
-    "app/services/suggestion_service.py": 13,
+    "app/services/suggestion_service.py": 11,
     "app/services/tag_graph.py": 2,
     "app/services/tag_merge_service.py": 9,
     "app/services/tag_normalizer.py": 14,

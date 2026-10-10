@@ -11,10 +11,11 @@ from sqlalchemy import func, select, update
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models import ChatSuggestionHistoryModel, ChunkModel, SectionSummaryModel, SummaryModel
+from app.models import ChatSuggestionHistoryModel, ChunkModel, SummaryModel
 from app.services.llm import LLMUnavailableError, get_llm_service
 from app.services.llm_admission import YieldedToInteractive, run_yielding_to_interactive
 from app.services.prompt_spec import NO_FENCES, PromptSpec, render_for
+from app.services.qa import _excerpt_is_grounded, _normalize_for_match
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +52,73 @@ SUGGESTION_SPEC = PromptSpec(
         "{guidance}\n"
         f"{_STYLE_RULES}\n"
         "These topics are already covered -- prefer different ones: {history}\n\n"
-        "Output a JSON array of objects with keys 'question' and 'depth' "
-        "(integer, always {bloom_level})."
+        "Each passage is labelled like [P1]. For every question, name the passage that "
+        "answers it and copy, word for word, the words in that passage that answer it. "
+        "The labels are for you; never mention one in a question.\n\n"
+        "Output a JSON array of objects with keys 'question', 'depth' "
+        "(integer, always {bloom_level}), 'source' (the passage label) and 'evidence' "
+        "(the copied words)."
     ),
     accommodations=(NO_FENCES,),
 )
+
+# A question is shown only when its evidence is text of the passage it names (#66).
+# The floor is the flashcard quote floor: "def add(a, b):" is checkable, "the author"
+# proves nothing.
+_MIN_EVIDENCE_CHARS = 12
+# A chunk this short is a heading, a caption or a nav line, not text to ask about.
+_MIN_PASSAGE_CHARS = 200
+
+
+_PASSAGE_LABEL = re.compile(r"\bP\d+\b")
+
+
+def _quoted_from(item: dict, passages: list[str]) -> bool:
+    """Whether the question's evidence is text of the passage it names.
+
+    The question itself must not name a label: "[P3]" exists only in the prompt, so a
+    question about "P3" means nothing to a reader. A label the document's own text
+    uses ("P1 incidents") is the document's vocabulary and stays.
+    """
+    labels = _PASSAGE_LABEL.findall(str(item.get("question", "")))
+    if any(not any(re.search(rf"\b{label}\b", p) for p in passages) for label in labels):
+        return False
+    match = re.fullmatch(r"\[?P(\d+)\]?", str(item.get("source", "")).strip(), re.IGNORECASE)
+    evidence = str(item.get("evidence", ""))
+    if not match or len(evidence.strip()) < _MIN_EVIDENCE_CHARS:
+        return False
+    index = int(match.group(1)) - 1
+    if not 0 <= index < len(passages):
+        return False
+    return _excerpt_is_grounded(evidence, _normalize_for_match(passages[index]))
+
+
+def _user_prompt(
+    document_id: str | None, summary: str, entity_names: list[str], passages: list[str] | None
+) -> str:
+    entities = ", ".join(entity_names[:10])
+    if document_id is None:
+        return (
+            f"Passages from across the documents:\n{summary[:4000]}\n\n"
+            f"Key entities: {entities}\n\n"
+            f"Write the 6 questions."
+        )
+    if passages:
+        grounding = "\n\n".join(f"[P{i}] {p}" for i, p in enumerate(passages, 1))
+    else:
+        grounding = summary[:3000]
+    return _USER_PROMPT.format(passages=grounding, entities=entities)
+
+
+def _keep_quoted(candidates: list[dict], passages: list[str], document_id: str) -> list[dict]:
+    quoted = [c for c in candidates if _quoted_from(c, passages)]
+    logger.info(
+        "suggestions: %d of %d candidates quote their passage for doc=%s",
+        len(quoted),
+        len(candidates),
+        document_id,
+    )
+    return quoted
 
 
 def _system_prompt() -> str:
@@ -216,7 +279,12 @@ def _items_from(result: object) -> list[dict]:
     if not isinstance(result, list):
         return []
     return [
-        {"question": str(item.get("question", "")), "bloom_level": _depth_of(item)}
+        {
+            "question": str(item.get("question", "")),
+            "bloom_level": _depth_of(item),
+            "source": item.get("source"),
+            "evidence": item.get("evidence"),
+        }
         for item in result
         if isinstance(item, dict) and item.get("question")
     ]
@@ -320,36 +388,22 @@ class SuggestionService:
             return row
 
     async def get_grounding_passages(self, document_id: str, limit: int = 6) -> list[str]:
-        """Real text from across the document, for grounding question generation.
+        """The document's own text, sampled evenly across it, for question generation.
 
-        An executive summary alone gives the model a paraphrase to riff on, which
-        is how questions came to presuppose framings the document never makes.
-        Section summaries are preferred (already condensed, one per section);
-        chunks are the fallback for documents ingested before section summaries.
-
-        Sampled evenly across the document rather than taking the first N, so the
-        questions are not all drawn from the preface.
+        Never summaries: a summary is a paraphrase, and questions written from one
+        presupposed framings the document never makes (#66).
         """
         factory = get_session_factory()
         async with factory() as session:
-            rows = (
+            chunk_rows = (
                 await session.execute(
-                    select(SectionSummaryModel.heading, SectionSummaryModel.content)
-                    .where(SectionSummaryModel.document_id == document_id)
-                    .order_by(SectionSummaryModel.unit_index)
+                    select(ChunkModel.text)
+                    .where(ChunkModel.document_id == document_id)
+                    .order_by(ChunkModel.chunk_index)
                 )
             ).all()
-            passages = [f"{heading}: {content}" for heading, content in rows if content]
-
-            if not passages:
-                chunk_rows = (
-                    await session.execute(
-                        select(ChunkModel.text)
-                        .where(ChunkModel.document_id == document_id)
-                        .order_by(ChunkModel.chunk_index)
-                    )
-                ).all()
-                passages = [r[0] for r in chunk_rows if r[0]]
+        texts = [r[0] for r in chunk_rows if r[0]]
+        passages = [t for t in texts if len(t) >= _MIN_PASSAGE_CHARS] or texts
 
         if len(passages) > limit:
             step = len(passages) / limit
@@ -435,28 +489,12 @@ class SuggestionService:
         history_text = ", ".join(topics) if topics else "(none)"
         guidance = _LEVEL_GUIDANCE.get(target_bloom, _LEVEL_GUIDANCE[2])
 
-        if document_id is not None:
-            grounding = "\n\n".join(passages) if passages else summary[:3000]
-            system = _system_prompt().format(
-                guidance=guidance,
-                bloom_level=target_bloom,
-                history=history_text,
-            )
-            user = _USER_PROMPT.format(
-                passages=grounding,
-                entities=", ".join(entity_names[:10]),
-            )
-        else:
-            system = _cross_doc_system().format(
-                guidance=guidance,
-                bloom_level=target_bloom,
-                history=history_text,
-            )
-            user = (
-                f"Passages from across the documents:\n{summary[:4000]}\n\n"
-                f"Key entities: {', '.join(entity_names[:10])}\n\n"
-                f"Write the 6 questions."
-            )
+        system = (_system_prompt() if document_id is not None else _cross_doc_system()).format(
+            guidance=guidance,
+            bloom_level=target_bloom,
+            history=history_text,
+        )
+        user = _user_prompt(document_id, summary, entity_names, passages)
 
         try:
             # Abandoned if the user ends up waiting on it. Suggestions are the
@@ -484,6 +522,8 @@ class SuggestionService:
             return []
         try:
             candidates = _parse_questions(raw)
+            if document_id is not None and passages:
+                candidates = _keep_quoted(candidates, passages, document_id)
             filtered = self.filter_near_duplicates(candidates, history)
             # An empty return falls back to templates at the caller. That fallback
             # was silent, so a model emitting unparseable JSON looked identical to
