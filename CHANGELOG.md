@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The "Where to start" panel and `/study/start` and `/study/path`.** Nothing ever filled them: the prerequisite extractor behind them was never run, and run, the local model found no prerequisites or invented them. Prerequisite edges stated in the text ("X requires Y") still show on the Map.
 
 ### Fixed
+- **Two first writers to a fresh library's vector store could lose a note's embedding or fail an ingest.** Both found a table missing, both created it, and the loser failed. A table is now created once, under a lock.
 - **A fresh library reported the first chat-model install as failed** (`UNIQUE constraint failed: settings.key`) although the model installed. Two writers of a setting no library had yet both inserted it; settings writes are now one upsert.
 - **Closing a streamed answer early could strand a database connection**, logged as "Exception terminating connection" and held until garbage collection (with SQLite's write lock, if it was writing). A stream now stops at its next step instead of mid-query.
 - **The backend logged a warning for every library document without a cover.** A missing cover is now an empty response, not a 404.
