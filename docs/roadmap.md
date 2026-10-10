@@ -671,12 +671,12 @@ and die after 5 wrong guesses; a new code replaces the last. Tokens are `lum_` p
 stored as SHA-256 in `devices`, and a revoked row is kept (the panel folds all but the latest 3).
 Pairing is loopback-only: TrustedHost refuses any non-loopback Host, so no phone can reach it yet. `POST /devices/pair` is the one
 unguarded route; minting codes, listing and revoking are `local` only (Settings > Devices).
-`tests/test_device_auth.py` and `scripts/smoke/S255.sh` (run in both modes) are the gate.
+`tests/test_device_auth.py` and `scripts/smoke/S255.sh` (run in both modes) are the gate. Both
+halves were shown failing: with the middleware removed, `test_an_unpaired_origin_cannot_write`
+fails (200, the write lands); with only the `revoked_at` check in `resolve_token` removed,
+`test_a_paired_device_is_admitted_until_revoked` fails (200 after revocation) and nothing else does.
 
 *Open:*
-- With the middleware removed, `test_an_unpaired_origin_cannot_write` fails (200, the write lands).
-  The revocation half was not shown failing on its own: removing only the `revoked_at` check in
-  `resolve_token` and running `-k revoked` is the run still owed.
 - A paired browser origin cannot read responses yet: `Authorization` forces a CORS preflight, and
   public mode has no CORS. That lands with the first browser consumer (0.20.0 or 0.21.0).
 - A headless 0.18.0 server has no `local` caller to show the first code.
