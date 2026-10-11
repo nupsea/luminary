@@ -5,6 +5,7 @@ import {
   hasKeyFor,
   isLocalModel,
   localChatModelHint,
+  localChatModelUse,
   modelForProvider,
   saveBlocker,
 } from "./cloudModels"
@@ -14,6 +15,14 @@ describe("isLocalModel", () => {
     expect(isLocalModel("ollama/qwen3.5:4b")).toBe(true)
     expect(isLocalModel("qwen3.5:4b")).toBe(true)
     expect(isLocalModel("gemini/gemini-3.5-flash-lite")).toBe(false)
+  })
+})
+
+describe("localChatModelUse", () => {
+  it("says what the local model is in use for, not just that it is", () => {
+    expect(localChatModelUse("private").badge).toBe("In use")
+    expect(localChatModelUse("hybrid").badge).toBe("In use for summaries, tags and titles")
+    expect(localChatModelUse("cloud").badge).toBe("Offline fallback")
   })
 })
 

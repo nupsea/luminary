@@ -505,12 +505,25 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
 
           <div className="border-t border-border" />
 
+          {/* Read from the router, never written here: prose about routing drifts
+              from routing. Placed under the mode so a saved choice shows its effect
+              before the local model pickers below. */}
+          <section>
+            <h3 className="mb-1 text-sm font-semibold text-foreground">Which model does what</h3>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Your saved settings, job by job. Changes above show here once saved.
+            </p>
+            <RoutingTable />
+          </section>
+
+          <div className="border-t border-border" />
+
           {/* Section 1.5: Models and optional components */}
           <section>
-            <h3 className="mb-1 text-sm font-semibold text-foreground">Models & components</h3>
+            <h3 className="mb-1 text-sm font-semibold text-foreground">Local models & components</h3>
             <p className="mb-3 text-xs text-muted-foreground">
-              Install what this machine needs, and choose which model each job uses. Downloads
-              run in the background and can be removed again here.
+              The models that run on this machine, and what to install. Downloads run in the
+              background and can be removed again here.
             </p>
             <ModelsAndComponents
               llm={llm}
@@ -677,21 +690,6 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
             )}
           </section>
 
-          <div className="border-t border-border" />
-
-          {/* Section 4: where the work runs.
-              This replaced three hardcoded sentences, one of which was wrong: it
-              told the reader flashcards stayed local in hybrid mode, while card
-              generation resolves the `generation` role and takes the interactive
-              route. Prose describing routing drifts from routing; the table is
-              read from the router itself. */}
-          <section>
-            <h3 className="mb-1 text-sm font-semibold text-foreground">Where your work runs</h3>
-            <p className="mb-3 text-xs text-muted-foreground">
-              Saved settings, not the option selected above. Save to see this change.
-            </p>
-            <RoutingTable />
-          </section>
         </div>
       </div>
     </div>

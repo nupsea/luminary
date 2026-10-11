@@ -35,6 +35,17 @@ export function localChatModelHint(mode: string | undefined, providerLabel: stri
   return "Answers questions and writes cards on this machine."
 }
 
+/** What "in use" means for the local chat model under the saved mode. */
+export function localChatModelUse(mode: string | undefined): { badge: string; toast: string } {
+  if (mode === "hybrid") {
+    return { badge: "In use for summaries, tags and titles", toast: "for summaries, tags and titles" }
+  }
+  if (mode === "cloud") {
+    return { badge: "Offline fallback", toast: "as the offline fallback" }
+  }
+  return { badge: "In use", toast: "for answers and cards" }
+}
+
 export function hasKeyFor(provider: string, flags: KeyFlags | undefined): boolean {
   if (!flags) return false
   if (provider === "openai") return flags.has_openai_key

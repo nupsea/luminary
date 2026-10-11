@@ -194,7 +194,7 @@ export function ModelsAndComponents({ llm, narrowedDefaults, onSave }: Props) {
       />
       <div className="space-y-3">
         <ModelPicker
-          label="Chat model"
+          label="Local chat model"
           hint={localChatModelHint(
             llm?.mode,
             providerSetup(llm?.provider ?? "")?.label ?? "your provider",
@@ -205,7 +205,7 @@ export function ModelsAndComponents({ llm, narrowedDefaults, onSave }: Props) {
           disabled={!llm?.ollama_reachable}
         />
         <ModelPicker
-          label="Vision model"
+          label="Local vision model"
           hint="Reads figures and diagrams during ingestion. Install one below to enable it."
           value={vision}
           options={options}

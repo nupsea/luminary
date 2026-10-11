@@ -31,6 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 
 import { apiGet } from "@/lib/apiClient"
+import { effectiveDefaultModel } from "@/lib/chatSettingsUtils"
 import type { components } from "@/types/api"
 import { ChartTooltip } from "@/components/ui/chart-tooltip"
 
@@ -46,6 +47,11 @@ type PhoenixUrl = components["schemas"]["PhoenixUrlResponse"]
 interface LLMSettings {
   processing_mode: string
   active_model: string
+  available_local_models: string[]
+  ollama_reachable: boolean
+  mode: string
+  provider: string
+  model: string
 }
 
 // Local-only subset of the documents list row used by Admin's
@@ -619,8 +625,11 @@ export default function Admin() {
     }
   }, [])
 
-  const ollamaOnline = llmState.data?.processing_mode === "local"
-  const activeModel = llmState.data?.active_model ?? overviewState.data?.llm_status ?? "—"
+  // processing_mode is the engine mode, so "local" read Ollama as down in Hybrid and
+  // Cloud; and active_model is "" there, which `??` passed through as a blank badge.
+  const ollamaOnline = llmState.data?.ollama_reachable ?? false
+  const activeModel =
+    (llmState.data && effectiveDefaultModel(llmState.data)) || overviewState.data?.llm_status || "—"
   const ingestingDocs = docsState.data.filter((d) => d.stage !== "complete")
 
   return (

@@ -43,7 +43,8 @@ describe("egressSummary", () => {
       row("answering", "Answering your question", false),
     ]))
     expect(text).toContain("answering your question")
-    expect(text).toContain("openai")
+    // The provider's name, not its routing id ("reach gemini").
+    expect(text).toContain("reach OpenAI")
     expect(text).not.toContain("indexing your library")
   })
 

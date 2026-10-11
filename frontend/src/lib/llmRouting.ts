@@ -5,6 +5,7 @@
 // untested by convention.
 
 import { apiGet } from "@/lib/apiClient"
+import { providerSetup } from "@/lib/engineOffer"
 import type { components } from "@/types/api"
 
 export type RoutingResponse = components["schemas"]["RoutingResponse"]
@@ -32,7 +33,9 @@ export function egressSummary(data: RoutingResponse): string {
   if (leaving.length === 0) {
     return `Nothing leaves this machine.${notRunLine}`
   }
-  const provider = data.provider ?? "your provider"
+  const provider = data.provider
+    ? (providerSetup(data.provider)?.label ?? data.provider)
+    : "your provider"
   // Enrichment is the one routable row that sends document text rather than a
   // question: in Cloud mode a summary is written from a section, not a retrieval.
   const sendsSections = leaving.some((w) => w.id === "enrichment")
