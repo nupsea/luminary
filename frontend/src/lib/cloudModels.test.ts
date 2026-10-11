@@ -1,6 +1,29 @@
 import { describe, expect, it } from "vitest"
 
-import { formatModelOption, hasKeyFor, modelForProvider, saveBlocker } from "./cloudModels"
+import {
+  formatModelOption,
+  hasKeyFor,
+  isLocalModel,
+  localChatModelHint,
+  modelForProvider,
+  saveBlocker,
+} from "./cloudModels"
+
+describe("isLocalModel", () => {
+  it("keeps a cloud model away from the local installer", () => {
+    expect(isLocalModel("ollama/qwen3.5:4b")).toBe(true)
+    expect(isLocalModel("qwen3.5:4b")).toBe(true)
+    expect(isLocalModel("gemini/gemini-3.5-flash-lite")).toBe(false)
+  })
+})
+
+describe("localChatModelHint", () => {
+  it("does not claim the local model answers questions in Hybrid or Cloud", () => {
+    expect(localChatModelHint("private", "Google Gemini")).toContain("Answers questions")
+    expect(localChatModelHint("hybrid", "Google Gemini")).toContain("Answers and cards use Google Gemini")
+    expect(localChatModelHint("cloud", "Google Gemini")).toContain("only when Google Gemini can't be reached")
+  })
+})
 
 const GEMINI = [
   { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", recommended: true },

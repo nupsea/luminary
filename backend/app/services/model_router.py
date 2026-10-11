@@ -45,6 +45,7 @@ from app.model_registry import (
     vision_candidates,
 )
 from app.services import settings_service
+from app.services.connectivity import is_cloud_model
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +218,13 @@ def narrowed_defaults() -> dict[str, dict[str, str]]:
     narrowed: dict[str, dict[str, str]] = {}
     for role, (configured, registry_reason) in asked.items():
         choice = resolve(role)
+        # A cloud route is the engine mode the user chose, not the host overruling
+        # them. Hybrid still runs the local chat model for background work, so that
+        # is the route to judge; in Cloud mode no local chat route is in play.
+        if role == "chat" and is_cloud_model(choice.model):
+            choice = resolve("background")
+            if is_cloud_model(choice.model):
+                continue
         if choice.model == configured:
             continue
         narrowed[role] = {

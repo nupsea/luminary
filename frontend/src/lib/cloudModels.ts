@@ -19,6 +19,22 @@ export interface KeyFlags {
   has_google_key: boolean
 }
 
+/** A model that runs on this machine: an Ollama id, prefixed or bare. */
+export function isLocalModel(model: string): boolean {
+  return !model.includes("/") || model.startsWith("ollama/")
+}
+
+/** What the local chat model does under the saved engine mode. */
+export function localChatModelHint(mode: string | undefined, providerLabel: string): string {
+  if (mode === "hybrid") {
+    return `Writes summaries, tags and titles on this machine. Answers and cards use ${providerLabel}, set above, and fall back to this model when ${providerLabel} can't be reached.`
+  }
+  if (mode === "cloud") {
+    return `Cloud mode sends everything to ${providerLabel}, set above. This model answers only when ${providerLabel} can't be reached.`
+  }
+  return "Answers questions and writes cards on this machine."
+}
+
 export function hasKeyFor(provider: string, flags: KeyFlags | undefined): boolean {
   if (!flags) return false
   if (provider === "openai") return flags.has_openai_key

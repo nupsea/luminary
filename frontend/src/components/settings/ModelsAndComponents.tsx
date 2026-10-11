@@ -14,6 +14,8 @@ import { ChatModelChoice } from "@/components/setup/ChatModelChoice"
 import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import { ModelDriftNotice, type ModelDrift, type ModelRole } from "@/components/settings/ModelDriftNotice"
 import { useComponents } from "@/hooks/useSetup"
+import { localChatModelHint } from "@/lib/cloudModels"
+import { providerSetup } from "@/lib/engineOffer"
 import { formatBytes, uninstallComponent, type Component } from "@/lib/setupApi"
 import { cn } from "@/lib/utils"
 
@@ -22,6 +24,8 @@ interface ModelChoice {
   vision_model: string
   available_local_models: string[]
   ollama_reachable: boolean
+  mode: string
+  provider: string
 }
 
 interface Props {
@@ -191,7 +195,10 @@ export function ModelsAndComponents({ llm, narrowedDefaults, onSave }: Props) {
       <div className="space-y-3">
         <ModelPicker
           label="Chat model"
-          hint="Answers questions and generates flashcards on this machine."
+          hint={localChatModelHint(
+            llm?.mode,
+            providerSetup(llm?.provider ?? "")?.label ?? "your provider",
+          )}
           value={chat}
           options={options}
           onChange={setChat}
