@@ -1377,7 +1377,7 @@ export interface paths {
          *     - For EPUB: extracts the embedded cover image from the archive.
          *     - For PDF: renders page 0 via PyMuPDF (fitz) if not already cached.
          *     - If images exist (e.g. from article extraction), serves the first diagram/figure.
-         *     - Returns 404 if no image can be produced for this document.
+         *     - Returns 204 if no image can be produced for this document, 404 if it does not exist.
          */
         get: operations["get_document_cover_documents__document_id__cover_get"];
         put?: never;
@@ -5013,6 +5013,9 @@ export interface paths {
         /**
          * Get Llm Routing
          * @description Which engine serves each unit of work, and what that means leaves the machine.
+         *
+         *     With any of *mode*, *provider* or *model*, the report is for that unsaved choice,
+         *     resolved by the same code; nothing is saved.
          */
         get: operations["get_llm_routing_settings_llm_routing_get"];
         put?: never;
@@ -5100,16 +5103,31 @@ export interface paths {
         };
         /**
          * List Llm Models
-         * @description Return available models for the given provider with cost info.
-         *
-         *     Fetches live from each provider's own endpoint using the stored key, so
-         *     the list reflects what that key can actually reach instead of a fixed
-         *     roster that goes stale the moment a provider ships a new model. Falls
-         *     back to a curated list when no key is configured or the live call fails.
+         * @description Models the stored key for *provider* can reach; a curated list without one.
          */
         get: operations["list_llm_models_settings_llm_models_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/llm/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save Llm Key
+         * @description Check a provider key with the provider, then keep it unless it was refused.
+         */
+        post: operations["save_llm_key_settings_llm_key_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7384,6 +7402,27 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** CloudModel */
+        CloudModel: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Cost Input */
+            cost_input?: number | null;
+            /** Cost Output */
+            cost_output?: number | null;
+            /**
+             * Cost Note
+             * @default
+             */
+            cost_note: string;
+            /**
+             * Recommended
+             * @default false
+             */
+            recommended: boolean;
         };
         /** ClusterNotePreview */
         ClusterNotePreview: {
@@ -10285,6 +10324,28 @@ export interface components {
             active_days: components["schemas"]["Metric"];
             documents: components["schemas"]["Metric"];
             notes: components["schemas"]["Metric"];
+        };
+        /** ProviderKeyRequest */
+        ProviderKeyRequest: {
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "openai" | "anthropic" | "gemini";
+            /** Api Key */
+            api_key: string;
+        };
+        /** ProviderKeyResponse */
+        ProviderKeyResponse: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "verified" | "rejected" | "unchecked";
+            /** Saved */
+            saved: boolean;
+            /** Message */
+            message: string;
         };
         /** PurgeJunkResponse */
         PurgeJunkResponse: {
@@ -20155,7 +20216,11 @@ export interface operations {
     };
     get_llm_routing_settings_llm_routing_get: {
         parameters: {
-            query?: never;
+            query?: {
+                mode?: ("private" | "hybrid" | "cloud") | null;
+                provider?: ("openai" | "anthropic" | "gemini") | null;
+                model?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -20169,6 +20234,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoutingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -20283,9 +20357,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["CloudModel"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_llm_key_settings_llm_key_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderKeyResponse"];
                 };
             };
             /** @description Validation Error */

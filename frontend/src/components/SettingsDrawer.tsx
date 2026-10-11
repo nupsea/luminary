@@ -1,13 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Loader2, Monitor, Moon, RefreshCw, Settings, Sun, X } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { toast } from "sonner"
+import { type CloudProvider, hasKeyFor, saveBlocker } from "@/lib/cloudModels"
+import { pendingRouting } from "@/lib/llmRouting"
+import { providerSetup } from "@/lib/engineOffer"
 import { ALWAYS_LOCAL, ENGINE_MODES, engineMode } from "@/lib/engineModes"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
 import { apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 import { RoutingTable } from "@/components/settings/RoutingTable"
+import { CloudProviderSettings } from "@/components/settings/CloudProviderSettings"
+import { invalidateKeyedQueries, saveProviderKey } from "@/lib/cloudKeys"
 import { API_BASE } from "@/lib/config"
 import { getTheme, setTheme, type Theme } from "@/lib/theme"
 import { DevicesSettings } from "@/components/settings/DevicesSettings"
@@ -37,14 +42,7 @@ interface LLMSettings {
   local_chat_model: string
   vision_model: string
   ollama_reachable: boolean
-}
-
-interface ModelOption {
-  id: string
-  name: string
-  cost_input?: number
-  cost_output?: number
-  cost_note?: string
+  keyring_available: boolean
 }
 
 interface StorageInfo {
@@ -191,23 +189,6 @@ function BackgroundControl() {
   )
 }
 
-async function fetchModels(provider: string): Promise<ModelOption[]> {
-  try {
-    return await apiGet<ModelOption[]>("/settings/llm/models", { provider })
-  } catch {
-    return []
-  }
-}
-
-function formatModelOption(m: ModelOption): string {
-  let label = m.name
-  if (m.cost_input != null && m.cost_output != null) {
-    label += ` — $${m.cost_input}/$${m.cost_output}/1M`
-  }
-  if (m.cost_note) label += ` (${m.cost_note})`
-  return label
-}
-
 // Appearance: light / dark / follow-OS. Persists via lib/theme; the pre-paint
 // script in index.html applies the choice before React mounts.
 const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
@@ -294,80 +275,58 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   })
 
   const [localMode, setLocalMode] = useState<"private" | "cloud" | "hybrid">("private")
-  const [localProvider, setLocalProvider] = useState("openai")
-  const [localModel, setLocalModel] = useState("gpt-4o-mini")
-  const [useCustomModel, setUseCustomModel] = useState(false)
+  const [localProvider, setLocalProvider] = useState<CloudProvider>("openai")
+  const [localModel, setLocalModel] = useState("")
   const [apiKey, setApiKey] = useState("")
   const [isSaving, setIsSaving] = useState(false)
 
   const isCloudMode = localMode === "cloud" || localMode === "hybrid"
-  // Whether a key is stored is part of the cache key, not just a fetch input:
-  // the endpoint returns the curated fallback with no key and the live
-  // per-key list with one, so keying on provider alone served the keyless
-  // list for another five minutes after the user pasted their key -- which
-  // reads exactly as "it doesn't show my models".
-  const hasKeyForFetch =
-    localProvider === "openai"
-      ? Boolean(llm?.has_openai_key)
-      : localProvider === "anthropic"
-        ? Boolean(llm?.has_anthropic_key)
-        : Boolean(llm?.has_google_key)
-  const { data: availableModels = [], isLoading: modelsLoading } = useQuery({
-    queryKey: ["llm-models", localProvider, hasKeyForFetch],
-    queryFn: () => fetchModels(localProvider),
-    enabled: isCloudMode && open,
-    staleTime: 5 * 60 * 1000,
-  })
 
   const [pullModel, setPullModel] = useState("")
   const [pullLines, setPullLines] = useState<string[]>([])
   const [isPulling, setIsPulling] = useState(false)
   const pullScrollRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (llm) {
-      setLocalMode(llm.mode)
-      setLocalProvider(llm.provider)
-      setLocalModel(llm.model)
-    }
-  }, [llm])
+  // Reset from the saved choice only when it changes, not on every refetch:
+  // saving a key refetches, and resetting then dropped a provider picked but not saved.
+  const savedChoice = llm ? `${llm.mode}|${llm.provider}|${llm.model}` : null
+  const [syncedChoice, setSyncedChoice] = useState<string | null>(null)
+  if (llm && savedChoice !== syncedChoice) {
+    setSyncedChoice(savedChoice)
+    setLocalMode(llm.mode)
+    setLocalProvider(llm.provider as CloudProvider)
+    setLocalModel(llm.model)
+  }
 
-  // Reset custom-model toggle when provider changes
-  useEffect(() => {
-    setUseCustomModel(false)
-  }, [localProvider])
+  const providerLabel = providerSetup(localProvider)?.label ?? localProvider
+  const preview = pendingRouting(llm, { mode: localMode, provider: localProvider, model: localModel })
+  const blocker = saveBlocker({
+    mode: localMode,
+    providerLabel,
+    hasKey: hasKeyFor(localProvider, llm),
+    pendingKey: apiKey.trim() !== "",
+    model: localModel,
+  })
 
   async function handleSave() {
     setIsSaving(true)
     try {
-      const updates: {
-        mode?: string
-        provider?: string
-        model?: string
-        openai_api_key?: string | null
-        anthropic_api_key?: string | null
-        google_api_key?: string | null
-      } = {
-        mode: localMode,
-        provider: localProvider,
-        model: localModel,
+      // A key pasted but not checked yet goes through the same check as "Save key".
+      if (isCloudMode && apiKey.trim()) {
+        const check = await saveProviderKey(localProvider, apiKey.trim())
+        if (!check.saved) {
+          toast.error(check.message)
+          return
+        }
+        setApiKey("")
       }
-      if (apiKey.trim()) {
-        if (localProvider === "openai") updates.openai_api_key = apiKey.trim()
-        else if (localProvider === "anthropic") updates.anthropic_api_key = apiKey.trim()
-        else updates.google_api_key = apiKey.trim()
-      }
-      await patchLLMSettings(updates)
-      setApiKey("")
+      await patchLLMSettings(
+        isCloudMode
+          ? { mode: localMode, provider: localProvider, model: localModel }
+          : { mode: localMode },
+      )
       toast.success("Settings saved")
-      void queryClient.invalidateQueries({ queryKey: ["llm-settings"] })
-      // A newly saved key changes what the provider will list, and the chat and
-      // study selectors read their own copies of it.
-      void queryClient.invalidateQueries({ queryKey: ["llm-models"] })
-      void queryClient.invalidateQueries({ queryKey: ["chat-cloud-models"] })
-      void queryClient.invalidateQueries({ queryKey: ["study-cloud-models"] })
-      // The routing table reads the saved mode, so it is stale until this fires.
-      void queryClient.invalidateQueries({ queryKey: ["llm-routing"] })
+      invalidateKeyedQueries(queryClient)
     } catch {
       toast.error("Failed to save settings")
     } finally {
@@ -424,13 +383,6 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   }
 
   if (!open) return null
-
-  const hasKeyForProvider =
-    localProvider === "openai"
-      ? llm?.has_openai_key
-      : localProvider === "anthropic"
-        ? llm?.has_anthropic_key
-        : llm?.has_google_key
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -492,91 +444,37 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
               {localMode !== "private" && " Uses your provider's quota and is billed by them."}
             </p>
 
-            {(localMode === "cloud" || localMode === "hybrid") && (
-              <div className="space-y-3">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    Provider
-                  </label>
-                  <select
-                    value={localProvider}
-                    onChange={(e) => setLocalProvider(e.target.value)}
-                    className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="openai">OpenAI</option>
-                    <option value="anthropic">Anthropic</option>
-                    <option value="gemini">Google Gemini</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-1 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                    Model
-                    {modelsLoading && <span className="text-muted-foreground">Loading...</span>}
-                  </label>
-                  {availableModels.length > 0 && !useCustomModel ? (
-                    <select
-                      value={availableModels.some(m => m.id === localModel) ? localModel : ""}
-                      onChange={(e) => setLocalModel(e.target.value)}
-                      className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                    >
-                      {!availableModels.some(m => m.id === localModel) && (
-                        <option value="" disabled>— Select a model —</option>
-                      )}
-                      {availableModels.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {formatModelOption(m)}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type="text"
-                      value={localModel}
-                      onChange={(e) => setLocalModel(e.target.value)}
-                      placeholder="e.g. gpt-4o-mini"
-                      className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                    />
-                  )}
-                  {availableModels.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setUseCustomModel(!useCustomModel)}
-                      className="mt-1 text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      {useCustomModel ? "← Pick from list" : "Enter custom model ID"}
-                    </button>
-                  )}
-                  {availableModels.length === 0 && !modelsLoading && isCloudMode && (
-                    <p className="mt-1 text-xs text-amber-600">
-                      Save an API key first to see available models.
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="mb-1 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                    API Key
-                    {hasKeyForProvider ? (
-                      <span className="text-green-600">saved securely</span>
-                    ) : (
-                      <span className="text-amber-600">Key not set</span>
-                    )}
-                  </label>
-                  <input
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={hasKeyForProvider ? "Enter to replace" : "Paste API key"}
-                    className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </div>
-              </div>
+            {isCloudMode && (
+              <CloudProviderSettings
+                llm={llm}
+                provider={localProvider}
+                onProviderChange={setLocalProvider}
+                model={localModel}
+                onModelChange={setLocalModel}
+                apiKey={apiKey}
+                onApiKeyChange={setApiKey}
+                enabled={open}
+              />
             )}
 
+            <button
+              onClick={() => void handleSave()}
+              disabled={isSaving || blocker !== null}
+              className="mt-4 w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            >
+              {isSaving ? "Saving..." : `Save ${engineMode(localMode).label}${isCloudMode ? ` with ${providerLabel}` : ""}`}
+            </button>
+            {blocker && <p className="mt-1.5 text-center text-xs text-muted-foreground">{blocker}</p>}
+
             {(localMode === "private" || localMode === "hybrid") && (
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground">Pull a model</p>
+              <div className="mt-5 space-y-2 border-t border-border pt-4">
+                <p className="text-xs font-medium text-foreground">Download a local model</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {localMode === "hybrid"
+                    ? "Summaries, tags and titles run on this machine in Hybrid. "
+                    : ""}
+                  Pull any model from the Ollama library by name.
+                </p>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -588,7 +486,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
                   <button
                     onClick={() => void handlePull()}
                     disabled={!pullModel.trim() || isPulling}
-                    className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                    className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
                   >
                     {isPulling ? "Pulling..." : "Pull"}
                   </button>
@@ -605,24 +503,37 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
                 )}
               </div>
             )}
+          </section>
 
-            <button
-              onClick={() => void handleSave()}
-              disabled={isSaving}
-              className="mt-4 w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-            >
-              {isSaving ? "Saving..." : "Save"}
-            </button>
+          <div className="border-t border-border" />
+
+          {/* Read from the router, never written here: prose about routing drifts
+              from routing. An unsaved choice is resolved by the same router. */}
+          <section>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-foreground">Which model does what</h3>
+              {preview && (
+                <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                  Not saved
+                </span>
+              )}
+            </div>
+            <p className="mb-3 text-xs text-muted-foreground">
+              {preview
+                ? `What ${engineMode(localMode).label}${isCloudMode ? ` with ${providerLabel}` : ""} will do once saved. Until then your saved ${engineMode(llm?.mode).label} settings keep running.`
+                : "Your saved settings, job by job."}
+            </p>
+            <RoutingTable preview={preview} />
           </section>
 
           <div className="border-t border-border" />
 
           {/* Section 1.5: Models and optional components */}
           <section>
-            <h3 className="mb-1 text-sm font-semibold text-foreground">Models & components</h3>
+            <h3 className="mb-1 text-sm font-semibold text-foreground">Local models & components</h3>
             <p className="mb-3 text-xs text-muted-foreground">
-              Install what this machine needs, and choose which model each job uses. Downloads
-              run in the background and can be removed again here.
+              The models that run on this machine, and what to install. Downloads run in the
+              background and can be removed again here.
             </p>
             <ModelsAndComponents
               llm={llm}
@@ -789,21 +700,6 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
             )}
           </section>
 
-          <div className="border-t border-border" />
-
-          {/* Section 4: where the work runs.
-              This replaced three hardcoded sentences, one of which was wrong: it
-              told the reader flashcards stayed local in hybrid mode, while card
-              generation resolves the `generation` role and takes the interactive
-              route. Prose describing routing drifts from routing; the table is
-              read from the router itself. */}
-          <section>
-            <h3 className="mb-1 text-sm font-semibold text-foreground">Where your work runs</h3>
-            <p className="mb-3 text-xs text-muted-foreground">
-              Saved settings, not the option selected above. Save to see this change.
-            </p>
-            <RoutingTable />
-          </section>
         </div>
       </div>
     </div>

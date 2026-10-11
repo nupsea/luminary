@@ -168,7 +168,7 @@ export function BlogRefineDialog({
               localModels={buildModelOptions(llmSettings)}
               cloudModels={cloudModelChoices}
               effectiveDefault={effectiveDefaultModel(llmSettings)}
-              title="Model used to refine this note. 'Auto' follows your Settings."
+              surface="blog"
             />
           </div>
 

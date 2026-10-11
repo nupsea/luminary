@@ -4,6 +4,7 @@ The guard's threshold is bracketed by measured runners: capped at 512 MiB, 40 su
 vision calls left 1.60 GB beyond the model; uncapped, the same calls passed 3 GB by call 13.
 """
 
+import asyncio
 import subprocess
 import sys
 
@@ -260,3 +261,24 @@ async def test_the_gate_trims_only_with_nothing_in_flight(monkeypatch):
         async with llm_admission.background_call():
             pass
     assert trims == [True]
+
+
+async def test_a_waiter_is_not_admitted_while_the_trim_runs(monkeypatch):
+    """The trim awaits a process scan; a slot left unclaimed meanwhile admitted two at width 1."""
+
+    async def slow_trim():
+        await asyncio.sleep(0.05)
+        return False
+
+    monkeypatch.setattr(llm_admission, "trim_if_ballooned", slow_trim)
+    monkeypatch.setattr(llm_admission, "enrichment_concurrency", lambda: 1)
+    peak = 0
+
+    async def call():
+        nonlocal peak
+        async with llm_admission.background_call():
+            peak = max(peak, llm_admission.current_state().background_inflight)
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(asyncio.gather(call(), call()), timeout=2.0)
+    assert peak == 1

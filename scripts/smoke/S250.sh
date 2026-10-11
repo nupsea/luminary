@@ -17,7 +17,8 @@
 #   5. in private mode the routing report names nothing leaving the machine,
 #      which is what the offer says about the arm the reader is already on
 #   6. work that is not routable is on-device in every mode
-#   7. PATCH /settings/llm refuses a mode that is not Local, Hybrid or Cloud
+#   7. GET /settings/llm/routing?mode= previews an unsaved mode and saves nothing
+#   8. PATCH /settings/llm refuses a mode that is not Local, Hybrid or Cloud
 #
 # Non-destructive. Nothing here writes a setting -- a PATCH would create the very
 # row whose absence check 2 is about. Check 7 sends one that validation rejects
@@ -101,6 +102,19 @@ if not any(not w['routable'] for w in report['work']):
     raise SystemExit
 print('ok')
 ")"
+
+check "a preview reports the unsaved mode" "ok" "$(curl -s "$BASE/settings/llm/routing?mode=private" | python3 -c "
+import sys, json
+report = json.load(sys.stdin)
+if report['mode'] != 'private' or report['leaves_device']:
+    print(f\"preview of private reports mode={report['mode']} leaving={report['leaves_device']}\")
+    raise SystemExit
+print('ok')
+")"
+AFTER=$(curl -s "$BASE/settings/llm" | python3 -c "import sys, json; print(json.load(sys.stdin)['mode'])")
+check "a preview saves nothing" "$MODE" "$AFTER"
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/settings/llm/routing?mode=turbo")
+check "an unknown preview mode is refused" "422" "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "$BASE/settings/llm" \
     -H "Content-Type: application/json" -d '{"mode": "turbo"}')

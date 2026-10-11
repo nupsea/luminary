@@ -8,14 +8,21 @@ description: Which engine answers, what leaves the machine, and which hosts may 
 
 One stored setting, `llm_mode`, decides which engine runs synthesis. The default is `private`.
 
-| Mode | Interactive work (ask, explain, practice) | Background work (summaries, tags, titles) |
-|---|---|---|
-| `private` | local (Ollama) | local |
-| `hybrid` | the user's cloud key | local |
-| `cloud` | the user's cloud key | the user's cloud key |
+| Mode | Interactive work (ask, explain, practice) | Background work (summaries, tags, titles) | Figures |
+|---|---|---|---|
+| `private` | local (Ollama) | local | local |
+| `hybrid` | the user's cloud key | local | local |
+| `cloud` | the user's cloud key | the user's cloud key | the user's cloud key |
 
 `settings_service.get_effective_routing` resolves the route. **No key still means a fully working
 local app** (I-16), which is why hybrid is offered and never defaulted.
+
+In `cloud`, no local model runs while the provider is reachable: `model_router._cloud_vision` sends
+figures to the cloud model when `cloud_models.reads_images` says it accepts images, and the local
+reader is the offline fallback in `image_enricher._call_vision_llm`. A model not known to read images,
+or a missing key, keeps figures local with the reason on the routing row.
+`GET /settings/llm/routing?mode=&provider=&model=` reports an unsaved choice through the same
+resolver (a ContextVar overlay, `previewing_routing`), so Settings can preview it without saving.
 
 Hybrid carries a recommendation for Ask and Practice (`EngineModeDef.recommendation`), shown in
 `EngineChoice`, Settings and the engine offer. It is a label, never a preselection or a default:
@@ -44,6 +51,14 @@ rather than restating it: two wordings about what leaves the machine are two thi
   decision.
 - A provider change carries that provider's default model; a model picked for the provider being
   kept survives (I-53). Otherwise picking Anthropic routed `anthropic/gpt-4o-mini`.
+- **A key is checked before it is kept.** `POST /settings/llm/key` lists the provider's models with
+  it: a refusal is not saved, and an unreachable provider saves it as `unchecked`, since offline is
+  not a verdict. Google answers both a bad key and an unsupported region with 400; only
+  `API_KEY` in the body means the key.
+- **Model lists exist before a key does.** `cloud_models._CURATED` is the list without a key and
+  the sort order with one; with a key, the provider's own listing decides. Prices are read from
+  litellm's bundled cost map (I-18), so a model newer than the pinned litellm shows no price rather
+  than a typed one.
 - Where a key lands is read from the machine: `keyring_available` says whether it goes to the OS
   keychain or falls back to a plaintext row in the library database (Docker, headless Linux). The
   key panel's sentence follows it, and README states the split per install path.

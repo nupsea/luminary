@@ -11,6 +11,7 @@ import { toast } from "sonner"
 
 import { useHostVerdict } from "@/hooks/useHostVerdict"
 import { apiGet, apiPatch } from "@/lib/apiClient"
+import { hasKeyFor } from "@/lib/cloudModels"
 import { PROVIDER_SETUP, providerSetup } from "@/lib/engineOffer"
 import {
   ALWAYS_LOCAL,
@@ -39,7 +40,7 @@ export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
   const [provider, setProvider] = useState<string>("anthropic")
   const [apiKey, setApiKey] = useState("")
 
-  const { data: routing } = useQuery({ queryKey: ["llm-routing"], queryFn: fetchRouting })
+  const { data: routing } = useQuery({ queryKey: ["llm-routing"], queryFn: () => fetchRouting() })
   const { data: llm } = useQuery({
     queryKey: ["llm-settings"],
     queryFn: () => apiGet<LLMModeState>("/settings/llm"),
@@ -79,8 +80,7 @@ export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
 
   const probe = routing?.local_probe_seconds ?? null
   const setup = providerSetup(provider)
-  const hasAnyKey =
-    llm?.has_openai_key || llm?.has_anthropic_key || llm?.has_google_key || false
+  const hasKey = hasKeyFor(provider, llm)
   const hostRefusesLocal = host?.supported === false
 
   return (
@@ -148,7 +148,7 @@ export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder={hasAnyKey ? "A key is already saved" : "Paste an API key"}
+              placeholder={hasKey ? "A key is already saved" : "Paste an API key"}
               className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
             />
           </div>

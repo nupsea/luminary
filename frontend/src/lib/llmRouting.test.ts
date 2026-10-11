@@ -7,7 +7,36 @@
 
 import { describe, expect, it } from "vitest"
 
-import { egressSummary, type RoutingResponse, type WorkRoutingItem } from "./llmRouting"
+import { egressSummary, pendingRouting, type RoutingResponse, type WorkRoutingItem } from "./llmRouting"
+
+describe("pendingRouting", () => {
+  const saved = { mode: "hybrid", provider: "gemini", model: "gemini-3.5-flash-lite" }
+
+  it("is undefined while the form matches what is saved", () => {
+    expect(pendingRouting(saved, { ...saved })).toBeUndefined()
+  })
+
+  it("previews Cloud picked but not saved", () => {
+    expect(pendingRouting(saved, { ...saved, mode: "cloud" })).toEqual({
+      mode: "cloud",
+      provider: "gemini",
+      model: "gemini-3.5-flash-lite",
+    })
+  })
+
+  it("ignores provider and model in Local, where they are not used", () => {
+    const savedLocal = { ...saved, mode: "private" }
+    expect(pendingRouting(savedLocal, { ...savedLocal, provider: "openai", model: "" })).toBeUndefined()
+    expect(pendingRouting(saved, { ...saved, mode: "private" })).toEqual({ mode: "private" })
+  })
+
+  it("leaves an empty model out so the provider default applies", () => {
+    expect(pendingRouting(saved, { mode: "hybrid", provider: "openai", model: "" })).toEqual({
+      mode: "hybrid",
+      provider: "openai",
+    })
+  })
+})
 
 function row(id: string, label: string, onDevice: boolean, refused = false): WorkRoutingItem {
   return {
@@ -43,7 +72,8 @@ describe("egressSummary", () => {
       row("answering", "Answering your question", false),
     ]))
     expect(text).toContain("answering your question")
-    expect(text).toContain("openai")
+    // The provider's name, not its routing id ("reach gemini").
+    expect(text).toContain("reach OpenAI")
     expect(text).not.toContain("indexing your library")
   })
 
@@ -73,6 +103,16 @@ describe("egressSummary", () => {
     ]))
     expect(text).toContain("sections of your documents")
     expect(text).toContain("Answering your question send your question plus the passages")
+  })
+
+  it("says Cloud-mode figures send images, not a question", () => {
+    const text = egressSummary(report([
+      row("figures", "Reading figures", false),
+      row("answering", "Answering your question", false),
+    ]))
+    expect(text).toContain("Reading figures sends the images in your documents.")
+    expect(text).toContain("Answering your question send your question plus the passages")
+    expect(text).not.toContain("Reading figures send your question")
   })
 
   it("does not mention document sections when enrichment stays local", () => {

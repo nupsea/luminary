@@ -2,12 +2,14 @@
 // states what each costs; it never downloads one the user did not pick.
 
 import { useState } from "react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, Download, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { ReportProblem } from "@/components/setup/ReportProblem"
 import { apiPatch } from "@/lib/apiClient"
+import { localChatModelUse } from "@/lib/cloudModels"
+import { fetchLLMSettings } from "@/lib/llmSettings"
 import {
   formatBytes,
   installOrThrow,
@@ -22,6 +24,9 @@ function bare(model: string): string {
 
 export function ChatModelChoice({ choices }: { choices: Choice[] }) {
   const queryClient = useQueryClient()
+  // In Hybrid and Cloud the local model does not answer, so "In use" says what it does.
+  const { data: llm } = useQuery({ queryKey: ["llm-settings"], queryFn: fetchLLMSettings })
+  const role = localChatModelUse(llm?.mode)
   const [busy, setBusy] = useState<string | null>(null)
   const [progress, setProgress] = useState<string | null>(null)
   const [error, setError] = useState<{ model: string; detail: string } | null>(null)
@@ -44,7 +49,7 @@ export function ChatModelChoice({ choices }: { choices: Choice[] }) {
       // Switched only after the download completes, so a failed one leaves the old model.
       await apiPatch("/settings/llm", { local_chat_model: choice.model })
       await refreshModelState(queryClient)
-      toast.success(`Now using ${bare(choice.model)} for chat and flashcards`)
+      toast.success(`Now using ${bare(choice.model)} ${role.toast}`)
     } catch (e) {
       setError({ model: choice.model, detail: e instanceof Error ? e.message : "Install failed" })
     } finally {
@@ -83,7 +88,7 @@ export function ChatModelChoice({ choices }: { choices: Choice[] }) {
             </p>
             {choice.selected && choice.installed ? (
               <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-500">
-                <Check size={12} /> In use
+                <Check size={12} /> {role.badge}
               </span>
             ) : (
               <button

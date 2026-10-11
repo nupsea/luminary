@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A red bookmark in the PDF view.** One per document, placed from the toolbar; the document opens on it, and a chip beside it jumps back from wherever citations or search took you.
 
 ### Changed
+- **Settings sets up a cloud provider in order: provider, key, model.** A key is checked with the provider before it is saved, and every provider lists its current models (Gemini 3.x, GPT-6, Claude 5.x) before a key exists.
 - **The PDF view scrolls continuously.** Pages stack in one scroll, so the wheel, the paging keys and a text selection all run across page breaks; only the pages near the view are drawn.
 - **Selected text offers Define for a term and Simplify for a passage**, both answered from the document's own passages rather than the selection alone.
 
@@ -17,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The "Where to start" panel and `/study/start` and `/study/path`.** Nothing ever filled them: the prerequisite extractor behind them was never run, and run, the local model found no prerequisites or invented them. Prerequisite edges stated in the text ("X requires Y") still show on the Map.
 
 ### Fixed
+- **Hybrid and Cloud modes showed a warning that the machine had overruled the local chat model, and its "Switch" button failed with 404.** Using the cloud model was the mode working as chosen; the warning now reports only a local model the machine overruled.
+- **In Hybrid and Cloud, Settings presented the local model as the chat model**, and the Dev Tools page showed a blank model and Ollama offline. Settings now opens with which model does what, job by job, labels the pickers as local, and says what the local model is in use for.
+- **Picking a mode in Settings left "Which model does what" showing the saved one**, so Cloud picked but not saved still listed summaries on the local model. The table now previews the unsaved choice, marked Not saved, resolved by the same router (`GET /settings/llm/routing?mode=&provider=&model=`); nothing is saved until Save.
+- **Cloud mode still read figures with the local model**, so a Cloud install kept qwen loaded for figures alone. Cloud now sends figures to the cloud model too, with the local reader as the offline fallback; no local model runs in Cloud while the provider is reachable.
+- **A conversation started in Local mode kept answering locally after switching to Hybrid.** Ask copied the current default into the conversation as a pinned model; it now stays on Auto unless a model is picked.
+- **Choosing Google Gemini in Settings kept `gpt-4o-mini` as the model and asked for a key before showing where to enter one.** New Gemini setups also defaulted to `gemini-1.5-flash-8b-001`, which Google has retired.
 - **Suggested questions asked about things the document does not say (#66).** Each question must now copy the words that answer it from a passage of the document, and one document's suggestions are no longer padded with generic templates. Over two 200-question runs, answers flagged as not in the text fell from 13% to 9-11% of model questions.
 - **A document parsed as a conversation lost all its text before the first speaker line.** An essay whose worked examples read as "Name: ..." lines kept 35k of its 79k characters, without warning. That text is now kept, as it already was before a first heading.
 - **Generating cards for a document that no longer exists ran the model, then failed with a 500.** It is now refused with a 404 before any generation.

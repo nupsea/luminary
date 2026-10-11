@@ -322,7 +322,7 @@ export function ChatConversation({
       // an all-scope session (selectedDocId -> null) re-arms the Learning-tab
       // pre-populate effect, which stamps activeDocumentId back on as "single".
       docSelectorTouched.current = true
-      setModel(sess.model ?? llmSettings?.active_model ?? "")
+      setModel(sess.model ?? "")
       setQaError(null)
     } catch {
       // Session disappeared (deleted in another tab) -- start fresh.
@@ -351,13 +351,16 @@ export function ChatConversation({
     docSelectorTouched.current = false
   }
 
+  // "" is Auto: the route Settings decides. Copying the current default in here
+  // pinned it, so a conversation started in Local kept answering locally after
+  // the switch to Hybrid.
+  const loggedLoad = useRef(false)
   useEffect(() => {
-    if (llmSettings && !model) {
-      const elapsed = Date.now() - mountTime.current
-      logger.info("[Chat] loaded", { duration_ms: elapsed })
-      setModel(llmSettings.active_model)
+    if (llmSettings && !loggedLoad.current) {
+      loggedLoad.current = true
+      logger.info("[Chat] loaded", { duration_ms: Date.now() - mountTime.current })
     }
-  }, [llmSettings, model])
+  }, [llmSettings])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -860,6 +863,7 @@ export function ChatConversation({
             localModels={localModelChoices}
             cloudModels={cloudModelChoices}
             effectiveDefault={effectiveModel}
+            surface="chat"
           />
         )}
 

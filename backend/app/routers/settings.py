@@ -1,13 +1,11 @@
 """Settings router — GET and PATCH /settings/llm (DB-backed, mode + encrypted keys)."""
 
-import asyncio
 import logging
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import httpx
-import litellm
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -18,9 +16,13 @@ from app.services.background_prefs import (
     quiet_background,
     set_background_prefs,
 )
+from app.services.cloud_models import PROVIDER_LABELS, list_models
 from app.services.settings_service import (
     get_llm_settings,
     get_rerank_enabled,
+    previewing_routing,
+    resolve_provider_api_key,
+    save_provider_key,
     set_rerank_enabled,
     update_llm_settings,
 )
@@ -238,11 +240,20 @@ class RoutingResponse(BaseModel):
 
 
 @router.get("/llm/routing", response_model=RoutingResponse)
-async def get_llm_routing() -> RoutingResponse:
-    """Which engine serves each unit of work, and what that means leaves the machine."""
+async def get_llm_routing(
+    mode: Literal["private", "hybrid", "cloud"] | None = None,
+    provider: Literal["openai", "anthropic", "gemini"] | None = None,
+    model: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] | None = None,
+) -> RoutingResponse:
+    """Which engine serves each unit of work, and what that means leaves the machine.
+
+    With any of *mode*, *provider* or *model*, the report is for that unsaved choice,
+    resolved by the same code; nothing is saved.
+    """
     from app.services.llm_routing import routing_report  # noqa: PLC0415
 
-    report = routing_report()
+    with previewing_routing(mode, provider, model):
+        report = routing_report()
     return RoutingResponse(
         mode=report.mode,
         provider=report.provider,
@@ -343,255 +354,49 @@ async def _resume_background_work() -> None:
     )
 
 
-# Model list — fetches available models from each provider
-
-# Hardcoded cost metadata (USD per 1M tokens, input/output).
-# Values are approximate list prices; free-tier notes where applicable.
-_MODEL_COSTS: dict[str, dict] = {
-    # Gemini — only models confirmed available to new API keys
-    "gemini-2.5-pro-exp-03-25": {"input": 0.0, "output": 0.0, "note": "Free (experimental)"},
-    "gemini-1.5-flash-8b-001": {"input": 0.0375, "output": 0.15, "note": ""},
-    "gemini-1.5-pro-001": {"input": 1.25, "output": 5.00, "note": ""},
-    "gemini-1.5-pro-002": {"input": 1.25, "output": 5.00, "note": ""},
-    # OpenAI. GPT-5 family list prices are omitted here (not confirmed) so the
-    # dropdown shows the name without a fabricated price — formatModelOption
-    # renders name-only when cost is absent.
-    "gpt-5.4": {"note": "frontier"},
-    "gpt-5.1": {"note": "frontier"},
-    "gpt-5-mini": {"note": "frontier"},
-    "gpt-4o-mini": {"input": 0.15, "output": 0.60, "note": ""},
-    "gpt-4o": {"input": 2.50, "output": 10.00, "note": ""},
-    "gpt-4.1-nano": {"input": 0.10, "output": 0.40, "note": ""},
-    "gpt-4.1-mini": {"input": 0.40, "output": 1.60, "note": ""},
-    "gpt-4.1": {"input": 2.00, "output": 8.00, "note": ""},
-    "o4-mini": {"input": 1.10, "output": 4.40, "note": ""},
-    "o3-mini": {"input": 1.10, "output": 4.40, "note": ""},
-    # Anthropic
-    "claude-haiku-4-5-20251001": {"input": 0.25, "output": 1.25, "note": ""},
-    "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00, "note": ""},
-    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00, "note": ""},
-    "claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00, "note": ""},
-    "claude-opus-4-6": {"input": 15.00, "output": 75.00, "note": ""},
-}
-
-_ANTHROPIC_MODELS = [
-    {"id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5"},
-    {"id": "claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku"},
-    {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
-    {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet"},
-    {"id": "claude-opus-4-6", "name": "Claude Opus 4.6"},
-]
-
-_OPENAI_MODELS = [
-    # Latest / most capable first.
-    {"id": "gpt-5.4", "name": "GPT-5.4"},
-    {"id": "gpt-5.1", "name": "GPT-5.1"},
-    {"id": "gpt-5-mini", "name": "GPT-5 mini"},
-    {"id": "gpt-4.1", "name": "GPT-4.1"},
-    {"id": "gpt-4.1-mini", "name": "GPT-4.1 mini"},
-    {"id": "gpt-4.1-nano", "name": "GPT-4.1 nano"},
-    {"id": "gpt-4o", "name": "GPT-4o"},
-    {"id": "gpt-4o-mini", "name": "GPT-4o mini"},
-    {"id": "o4-mini", "name": "o4-mini"},
-    {"id": "o3-mini", "name": "o3-mini"},
-]
-
-_MODEL_API_TIMEOUT = 5.0
+# Cloud models and keys
 
 
-def _attach_costs(models: list[dict]) -> list[dict]:
-    """Attach cost metadata to each model dict."""
-    result = []
-    for m in models:
-        mid = m["id"]
-        cost = _MODEL_COSTS.get(mid, {})
-        result.append(
-            {
-                **m,
-                "cost_input": cost.get("input"),
-                "cost_output": cost.get("output"),
-                "cost_note": cost.get("note", ""),
-            }
-        )
-    return result
+class CloudModel(BaseModel):
+    id: str
+    name: str
+    # USD per 1M tokens from litellm's cost map; None when it has no price.
+    cost_input: float | None = None
+    cost_output: float | None = None
+    cost_note: str = ""
+    recommended: bool = False
 
 
-# Model IDs that Google's ListModels API still returns with generateContent support,
-# but are no longer usable by new API keys. Confirmed 404/NOT_FOUND in production.
-# Includes both short aliases and their versioned (-001/-002) variants.
-_DEPRECATED_GEMINI_IDS = {
-    "gemini-2.0-flash",  # "no longer available to new users"
-    "gemini-2.0-flash-001",  # versioned variant — same restriction
-    "gemini-2.0-flash-lite",  # "no longer available to new users"
-    "gemini-2.0-flash-lite-001",  # versioned variant — confirmed 404
-    "gemini-1.5-flash",  # "not found for API version v1beta"
-    "gemini-1.5-flash-001",  # versioned variant — same restriction
-    "gemini-1.5-flash-002",  # versioned variant — same restriction
-}
+@router.get("/llm/models", response_model=list[CloudModel])
+async def list_llm_models(provider: str) -> list[CloudModel]:
+    """Models the stored key for *provider* can reach; a curated list without one."""
+    api_key = resolve_provider_api_key(provider) if provider in PROVIDER_LABELS else ""
+    return [CloudModel(**m) for m in await list_models(provider, api_key)]
 
 
-async def _list_gemini_models(api_key: str) -> list[dict]:
-    """Call Google's ListModels API and return models that support generateContent.
+class ProviderKeyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    Filters out model IDs in _DEPRECATED_GEMINI_IDS which the API still lists but
-    returns 404 for new API keys.
-    """
-    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}&pageSize=50"
-    try:
-        async with httpx.AsyncClient(timeout=_MODEL_API_TIMEOUT) as client:
-            resp = await client.get(url)
-            if resp.status_code != 200:
-                logger.warning(
-                    "Gemini ListModels returned %d: %s", resp.status_code, resp.text[:200]
-                )
-                return []
-            data = resp.json()
-    except Exception as exc:
-        logger.warning("Gemini ListModels failed: %s", exc)
-        return []
-
-    models = []
-    for m in data.get("models", []):
-        if "generateContent" not in m.get("supportedGenerationMethods", []):
-            continue
-        raw_name = m.get("name", "")  # e.g. "models/gemini-1.5-flash-001"
-        model_id = raw_name.replace("models/", "")
-        if model_id in _DEPRECATED_GEMINI_IDS:
-            continue
-        display = m.get("displayName") or model_id
-        models.append({"id": model_id, "name": display})
-
-    # Sort: known models first (by _MODEL_COSTS key order), then alphabetical
-    known_order = list(_MODEL_COSTS.keys())
-    models.sort(
-        key=lambda m: (known_order.index(m["id"]) if m["id"] in known_order else 999, m["id"])
-    )
-    return models
+    provider: Literal["openai", "anthropic", "gemini"]
+    api_key: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
-# Non-chat families a provider's /models endpoint also returns. litellm's cost
-# map already marks most of them, but only for ids it has seen -- a brand-new
-# image or audio model is absent from the map exactly like a brand-new chat
-# model, and `_is_chat_model` keeps what it does not recognise. These prefixes
-# are what remains: families that are never chat, whatever the version number.
-_NON_CHAT_PREFIXES = (
-    "babbage",
-    "dall-e",
-    "davinci",
-    "gpt-image",
-    "omni-moderation",
-    "sora",
-    "text-embedding",
-    "text-moderation",
-    "tts-",
-    "whisper",
-)
+class ProviderKeyResponse(BaseModel):
+    # verified: the provider accepted it. rejected: refused, and not saved.
+    # unchecked: saved, but the provider could not be asked.
+    status: Literal["verified", "rejected", "unchecked"]
+    saved: bool
+    message: str
 
 
-def _is_chat_model(model_id: str) -> bool:
-    """True unless this id is known, or shaped, as something other than chat.
-
-    An id absent from litellm's cost map is kept rather than dropped: it is
-    more likely a model newer than litellm's snapshot -- the exact problem
-    this replaces, a hardcoded roster going stale -- than an obscure non-chat
-    one. `_NON_CHAT_PREFIXES` covers the families where that guess is wrong.
-    """
-    bare = model_id.split("/", 1)[-1]
-    if bare.startswith(_NON_CHAT_PREFIXES):
-        return False
-    mode = litellm.model_cost.get(model_id, {}).get("mode")
-    if mode is None:
-        mode = litellm.model_cost.get(bare, {}).get("mode")
-    return mode is None or mode == "chat"
-
-
-def _strip_provider_prefix(model_id: str, provider: str) -> str:
-    """Return the bare model id.
-
-    Providers disagree about this and the difference is invisible until it
-    breaks: litellm's OpenAI `get_models` returns `model["id"]` verbatim
-    (`gpt-4o`), while its Anthropic one returns `"anthropic/" + id`. Every
-    consumer here re-attaches the prefix itself -- the frontend builds
-    `${provider}/${id}` and `get_effective_routing` builds `f"{prefix}/{model}"`
-    -- so passing a prefixed id through yields `anthropic/anthropic/claude-...`,
-    which resolves to nothing.
-    """
-    return model_id[len(provider) + 1 :] if model_id.startswith(f"{provider}/") else model_id
-
-
-async def _list_provider_models_live(
-    provider: str, api_key: str, curated: list[dict]
-) -> list[dict]:
-    """Models this key can actually reach, fetched live via litellm.
-
-    Falls back to the curated list when no key is configured or the live call
-    fails or returns nothing, so the dropdown never regresses to empty.
-    """
-    if not api_key:
-        return curated
-    try:
-        # litellm's provider `get_models` is a synchronous HTTP call.
-        raw_ids = await asyncio.to_thread(
-            litellm.get_valid_models,
-            check_provider_endpoint=True,
-            custom_llm_provider=provider,
-            api_key=api_key,
-        )
-    except Exception as exc:
-        logger.warning("%s model list failed: %s", provider, exc)
-        return curated
-
-    seen: set[str] = set()
-    ids: list[str] = []
-    for raw in raw_ids:
-        mid = _strip_provider_prefix(raw, provider)
-        if mid and mid not in seen and _is_chat_model(mid):
-            seen.add(mid)
-            ids.append(mid)
-    if not ids:
-        return curated
-
-    known_names = {m["id"]: m["name"] for m in curated}
-    models = [{"id": mid, "name": known_names.get(mid, mid)} for mid in ids]
-    known_order = list(_MODEL_COSTS.keys())
-    models.sort(
-        key=lambda m: (known_order.index(m["id"]) if m["id"] in known_order else 999, m["id"])
-    )
-    return models
-
-
-@router.get("/llm/models")
-async def list_llm_models(
-    provider: str,
+@router.post("/llm/key", response_model=ProviderKeyResponse)
+async def save_llm_key(
+    req: ProviderKeyRequest,
     db: AsyncSession = Depends(get_db),
-) -> list[dict]:
-    """Return available models for the given provider with cost info.
-
-    Fetches live from each provider's own endpoint using the stored key, so
-    the list reflects what that key can actually reach instead of a fixed
-    roster that goes stale the moment a provider ships a new model. Falls
-    back to a curated list when no key is configured or the live call fails.
-    """
-    from app.services.settings_service import _cache  # noqa: PLC0415
-
-    if provider == "gemini":
-        api_key = _cache.get("google_api_key", "")
-        if not api_key:
-            return []
-        models = await _list_gemini_models(api_key)
-        return _attach_costs(models)
-
-    if provider == "openai":
-        api_key = _cache.get("openai_api_key", "")
-        models = await _list_provider_models_live("openai", api_key, _OPENAI_MODELS)
-        return _attach_costs(models)
-
-    if provider == "anthropic":
-        api_key = _cache.get("anthropic_api_key", "")
-        models = await _list_provider_models_live("anthropic", api_key, _ANTHROPIC_MODELS)
-        return _attach_costs(models)
-
-    return []
+) -> ProviderKeyResponse:
+    """Check a provider key with the provider, then keep it unless it was refused."""
+    status, message = await save_provider_key(db, req.provider, req.api_key)
+    return ProviderKeyResponse(status=status, saved=status != "rejected", message=message)
 
 
 # Web search settings

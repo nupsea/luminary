@@ -392,13 +392,15 @@ async def background_call():
         # A call that ended while this one queued may have earned a rest it must also wait out.
         if not paced or state.rest_until <= time.monotonic():
             break
-    # With nothing in flight an unload strands no call (I-64).
-    if not state.background_activity and not state.interactive_activity:
-        await trim_if_ballooned()
+    # Claim the slot before any await, or a waiter behind this one is admitted past the width.
+    alone = not state.background_activity and not state.interactive_activity
     started = time.monotonic()
     entry = [started]
     state.background_activity.append(entry)
     try:
+        # With nothing else in flight an unload strands no call (I-64).
+        if alone:
+            await trim_if_ballooned()
         yield entry
     finally:
         with contextlib.suppress(ValueError):

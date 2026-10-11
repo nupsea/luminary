@@ -11,6 +11,7 @@ import { useState } from "react"
 import { AlertTriangle, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
+import { isLocalModel } from "@/lib/cloudModels"
 import { installOrThrow, type InstallProgress } from "@/lib/setupApi"
 import { cn } from "@/lib/utils"
 
@@ -44,9 +45,11 @@ export function ModelDriftNotice({ narrowedDefaults, availableLocalModels, onSav
   const [progress, setProgress] = useState<string | null>(null)
 
   const key = (role: ModelRole, d: ModelDrift) => `${role}:${d.configured}:${d.resolved}`
+  // Only a local model can be installed and pinned here; a cloud model reaching
+  // this notice was sent to the local installer and answered 404.
   const roles = (Object.keys(narrowedDefaults) as ModelRole[]).filter((role) => {
     const d = narrowedDefaults[role]
-    return !!d && !dismissed.has(key(role, d))
+    return !!d && isLocalModel(d.resolved) && !dismissed.has(key(role, d))
   })
   if (roles.length === 0) return null
 

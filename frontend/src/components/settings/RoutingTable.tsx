@@ -6,14 +6,13 @@
 // they cannot. Nothing here is written down in this file -- a hardcoded table
 // would keep reassuring the reader after a route moved.
 //
-// It renders the SAVED mode, not the radio button the user is hovering. Showing
-// a routing report for a mode nobody has committed to would be the same lie in
-// the other direction.
+// With a `preview`, it renders an unsaved choice as the backend would resolve it;
+// the caller labels it as unsaved, so it is never read as what is running.
 
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { Ban, Cloud, HardDrive, Lock } from "lucide-react"
 
-import { egressSummary, fetchRouting, type WorkRoutingItem } from "@/lib/llmRouting"
+import { egressSummary, fetchRouting, type RoutingPreview, type WorkRoutingItem } from "@/lib/llmRouting"
 import { cn } from "@/lib/utils"
 
 function EngineChip({ item }: { item: WorkRoutingItem }) {
@@ -74,10 +73,11 @@ function Row({ item }: { item: WorkRoutingItem }) {
   )
 }
 
-export function RoutingTable() {
+export function RoutingTable({ preview }: { preview?: RoutingPreview }) {
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["llm-routing"],
-    queryFn: fetchRouting,
+    queryKey: ["llm-routing", preview ?? null],
+    queryFn: () => fetchRouting(preview),
+    placeholderData: keepPreviousData,
   })
 
   if (isLoading) {
