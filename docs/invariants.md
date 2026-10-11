@@ -294,6 +294,11 @@ reached: the bundled 4B server held 13.4 GB beside a 5 GB vision server, and jet
 reaches it (512, as compose, both installers and `bootstrap.sh` set it, the last through launchd
 and its own environment). `test_ollama_runtime_budget.py` (every launch path, every cap) and
 `supervisor::tests::the_prompt_cache_is_bounded_whatever_env_says` guard it.
+An Ollama we did not start is not bounded by any of that: `launchctl setenv` ends at reboot, and
+Ollama.app then starts from the login items uncapped, which a source or dev run adopts. Warmup reads
+the runner's cap for the host banner, and `background_call` unloads the model, with nothing in
+flight, once its runner holds 3 GB more than `/api/ps` reports (capped peak 1.60 GB, uncapped passes
+3 GB by call 13). `test_prompt_cache_guard.py` guards it.
 
 ## Retired numbers
 

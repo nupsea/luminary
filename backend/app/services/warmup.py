@@ -17,7 +17,7 @@ import time
 import httpx
 
 from app.config import get_settings
-from app.services import model_keepwarm, model_prefetch, network_errors
+from app.services import model_keepwarm, model_prefetch, network_errors, runtime_memory
 from app.services.executors import get_model_executor
 from app.services.startup_status import get_startup_status
 
@@ -177,6 +177,9 @@ async def _warm_llm() -> None:
                 logger.warning("Warmup: the chat model ran on the processor; local models off")
                 return
             if interactive:
+                # The runner exists only once a model is loaded. Read before `ready`,
+                # which ends the banner's polling.
+                await runtime_memory.check_prompt_cache_cap()
                 status.set_state("chat_model", "ready", model or "")
                 # The one local generation at start-up that something already
                 # times. Whether its cost was a load, start-up contention, or
