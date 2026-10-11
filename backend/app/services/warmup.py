@@ -177,9 +177,8 @@ async def _warm_llm() -> None:
                 logger.warning("Warmup: the chat model ran on the processor; local models off")
                 return
             if interactive:
-                # The runner exists only once a model is loaded. Read before `ready`,
-                # which ends the banner's polling.
-                await runtime_memory.check_prompt_cache_cap()
+                # A loaded runner's cap is the truest reading (I-64).
+                await runtime_memory.log_prompt_cache_status()
                 status.set_state("chat_model", "ready", model or "")
                 # The one local generation at start-up that something already
                 # times. Whether its cost was a load, start-up contention, or

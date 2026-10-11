@@ -85,17 +85,66 @@ export interface HostVerdict {
   settling?: boolean
   /** The model server keeps old prompts in memory without a bound (I-64). */
   prompt_cache_unbounded?: boolean
+  /** How the local Ollama was started, which decides its fix. */
+  ollama_launch?: "macos_app" | "launchd" | "systemd" | "windows" | "terminal" | null
+  /** The launchd label or systemd unit that restarts it. */
+  ollama_service?: string | null
+}
+
+const MAC_FORGETS = " macOS forgets this setting when the Mac restarts; this notice returns if it does."
+
+// `launchctl setenv` reaches only what launchd starts; a terminal's `ollama serve`
+// reads its shell, a systemd server its unit (I-64).
+function promptCacheFix(host: HostVerdict): string {
+  const unit = host.ollama_service
+  switch (host.ollama_launch) {
+    case "macos_app":
+      return (
+        "quit Ollama from the menu bar, run `launchctl setenv LLAMA_ARG_CACHE_RAM 512` in a " +
+        "terminal, then open Ollama again." + MAC_FORGETS
+      )
+    case "launchd":
+      return (
+        "run `launchctl setenv LLAMA_ARG_CACHE_RAM 512 && " +
+        (unit === "homebrew.mxcl.ollama"
+          ? "brew services restart ollama"
+          : `launchctl kickstart -k gui/$(id -u)/${unit}`) +
+        "` in a terminal." + MAC_FORGETS
+      )
+    case "systemd":
+      return (
+        `run \`sudo systemctl edit ${unit}\`, add \`Environment="LLAMA_ARG_CACHE_RAM=512"\` ` +
+        `under \`[Service]\`, save, then run \`sudo systemctl restart ${unit}\`.`
+      )
+    case "windows":
+      return (
+        "run `setx LLAMA_ARG_CACHE_RAM 512`, quit Ollama (from its tray icon, or Ctrl+C where " +
+        "`ollama serve` runs), then start it again from the Start menu or a new terminal."
+      )
+    case "terminal":
+      return (
+        (/^(Darwin|macOS)/.test(host.host)
+          ? "Ollama was started from a terminal, which `launchctl setenv` does not reach. "
+          : "Ollama was started from a terminal. ") +
+        "Stop it (Ctrl+C in that terminal) and start it with " +
+        "`LLAMA_ARG_CACHE_RAM=512 ollama serve`. To keep the setting, add " +
+        "`export LLAMA_ARG_CACHE_RAM=512` to your shell profile."
+      )
+    default:
+      return "set LLAMA_ARG_CACHE_RAM=512 where Ollama is started, then restart Ollama."
+  }
 }
 
 /** The banner line for a model server whose prompt cache can fill the machine, or null. */
 export function promptCacheNotice(host: HostVerdict | undefined): string | null {
   if (!host?.prompt_cache_unbounded) return null
-  return (
-    "The local model server can keep up to 8 GB of old prompts in memory, which slows " +
-    "or crashes a 16 GB machine. Luminary unloads the model when that happens. To fix it, " +
-    "quit Ollama, run `launchctl setenv LLAMA_ARG_CACHE_RAM 512` in a terminal (on Windows " +
-    "or Linux, set LLAMA_ARG_CACHE_RAM=512 for Ollama), then start Ollama again."
-  )
+  const fix = promptCacheFix(host)
+  const lead =
+    "Ollama has no limit on the old prompts it keeps in memory: up to 8 GB, which slows or " +
+    "crashes a 16 GB machine. Luminary unloads the model when it grows too large."
+  // The terminal fix opens on its own sentence; the others continue "To fix it, ...".
+  const steps = host.ollama_launch === "terminal" ? ` ${fix}` : ` To fix it, ${fix}`
+  return `${lead}${steps} This notice clears once Ollama restarts with the limit.`
 }
 
 /**

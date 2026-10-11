@@ -20,10 +20,11 @@ export function useHostVerdict(): HostVerdict | undefined {
     staleTime: Infinity,
     gcTime: Infinity,
     // A supported verdict turns if the chat model loading now lands on the
-    // processor (I-60).
+    // processor (I-60). The prompt-cache notice clears once Ollama restarts capped.
     refetchInterval: (query) => {
       const v = query.state.data
-      return v?.supported && v.settling ? 5_000 : false
+      if (v?.supported && v.settling) return 5_000
+      return v?.prompt_cache_unbounded ? 15_000 : false
     },
   })
   return data
