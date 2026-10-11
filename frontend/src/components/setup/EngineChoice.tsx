@@ -40,7 +40,7 @@ export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
   const [provider, setProvider] = useState<string>("anthropic")
   const [apiKey, setApiKey] = useState("")
 
-  const { data: routing } = useQuery({ queryKey: ["llm-routing"], queryFn: fetchRouting })
+  const { data: routing } = useQuery({ queryKey: ["llm-routing"], queryFn: () => fetchRouting() })
   const { data: llm } = useQuery({
     queryKey: ["llm-settings"],
     queryFn: () => apiGet<LLMModeState>("/settings/llm"),

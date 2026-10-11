@@ -7,7 +7,36 @@
 
 import { describe, expect, it } from "vitest"
 
-import { egressSummary, type RoutingResponse, type WorkRoutingItem } from "./llmRouting"
+import { egressSummary, pendingRouting, type RoutingResponse, type WorkRoutingItem } from "./llmRouting"
+
+describe("pendingRouting", () => {
+  const saved = { mode: "hybrid", provider: "gemini", model: "gemini-3.5-flash-lite" }
+
+  it("is undefined while the form matches what is saved", () => {
+    expect(pendingRouting(saved, { ...saved })).toBeUndefined()
+  })
+
+  it("previews Cloud picked but not saved", () => {
+    expect(pendingRouting(saved, { ...saved, mode: "cloud" })).toEqual({
+      mode: "cloud",
+      provider: "gemini",
+      model: "gemini-3.5-flash-lite",
+    })
+  })
+
+  it("ignores provider and model in Local, where they are not used", () => {
+    const savedLocal = { ...saved, mode: "private" }
+    expect(pendingRouting(savedLocal, { ...savedLocal, provider: "openai", model: "" })).toBeUndefined()
+    expect(pendingRouting(saved, { ...saved, mode: "private" })).toEqual({ mode: "private" })
+  })
+
+  it("leaves an empty model out so the provider default applies", () => {
+    expect(pendingRouting(saved, { mode: "hybrid", provider: "openai", model: "" })).toEqual({
+      mode: "hybrid",
+      provider: "openai",
+    })
+  })
+})
 
 function row(id: string, label: string, onDevice: boolean, refused = false): WorkRoutingItem {
   return {

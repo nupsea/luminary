@@ -3,6 +3,7 @@ import { Loader2, Monitor, Moon, RefreshCw, Settings, Sun, X } from "lucide-reac
 import { useRef, useState } from "react"
 import { toast } from "sonner"
 import { type CloudProvider, hasKeyFor, saveBlocker } from "@/lib/cloudModels"
+import { pendingRouting } from "@/lib/llmRouting"
 import { providerSetup } from "@/lib/engineOffer"
 import { ALWAYS_LOCAL, ENGINE_MODES, engineMode } from "@/lib/engineModes"
 import { cn } from "@/lib/utils"
@@ -298,6 +299,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   }
 
   const providerLabel = providerSetup(localProvider)?.label ?? localProvider
+  const preview = pendingRouting(llm, { mode: localMode, provider: localProvider, model: localModel })
   const blocker = saveBlocker({
     mode: localMode,
     providerLabel,
@@ -506,14 +508,22 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
           <div className="border-t border-border" />
 
           {/* Read from the router, never written here: prose about routing drifts
-              from routing. Placed under the mode so a saved choice shows its effect
-              before the local model pickers below. */}
+              from routing. An unsaved choice is resolved by the same router. */}
           <section>
-            <h3 className="mb-1 text-sm font-semibold text-foreground">Which model does what</h3>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-foreground">Which model does what</h3>
+              {preview && (
+                <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                  Not saved
+                </span>
+              )}
+            </div>
             <p className="mb-3 text-xs text-muted-foreground">
-              Your saved settings, job by job. Changes above show here once saved.
+              {preview
+                ? `What ${engineMode(localMode).label}${isCloudMode ? ` with ${providerLabel}` : ""} will do once saved. Until then your saved ${engineMode(llm?.mode).label} settings keep running.`
+                : "Your saved settings, job by job."}
             </p>
-            <RoutingTable />
+            <RoutingTable preview={preview} />
           </section>
 
           <div className="border-t border-border" />

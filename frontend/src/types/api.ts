@@ -5013,6 +5013,9 @@ export interface paths {
         /**
          * Get Llm Routing
          * @description Which engine serves each unit of work, and what that means leaves the machine.
+         *
+         *     With any of *mode*, *provider* or *model*, the report is for that unsaved choice,
+         *     resolved by the same code; nothing is saved.
          */
         get: operations["get_llm_routing_settings_llm_routing_get"];
         put?: never;
@@ -20213,7 +20216,11 @@ export interface operations {
     };
     get_llm_routing_settings_llm_routing_get: {
         parameters: {
-            query?: never;
+            query?: {
+                mode?: ("private" | "hybrid" | "cloud") | null;
+                provider?: ("openai" | "anthropic" | "gemini") | null;
+                model?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -20227,6 +20234,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoutingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -11,8 +11,35 @@ import type { components } from "@/types/api"
 export type RoutingResponse = components["schemas"]["RoutingResponse"]
 export type WorkRoutingItem = components["schemas"]["WorkRoutingItem"]
 
-export function fetchRouting(): Promise<RoutingResponse> {
-  return apiGet<RoutingResponse>("/settings/llm/routing")
+/** An unsaved choice to report routes for; the backend resolves it without saving. */
+export interface RoutingPreview {
+  mode: string
+  provider?: string
+  model?: string
+}
+
+export function fetchRouting(preview?: RoutingPreview): Promise<RoutingResponse> {
+  return apiGet<RoutingResponse>("/settings/llm/routing", preview ? { ...preview } : undefined)
+}
+
+/**
+ * The preview to show, or undefined when the form matches what is saved.
+ *
+ * Provider and model only count in Hybrid and Cloud, and an empty model is
+ * left out so the backend applies the provider's default, as saving would.
+ */
+export function pendingRouting(
+  saved: { mode: string; provider: string; model: string } | undefined,
+  form: { mode: string; provider: string; model: string },
+): RoutingPreview | undefined {
+  if (!saved) return undefined
+  const usesProvider = form.mode !== "private"
+  const changed =
+    form.mode !== saved.mode ||
+    (usesProvider && (form.provider !== saved.provider || form.model !== saved.model))
+  if (!changed) return undefined
+  if (!usesProvider) return { mode: form.mode }
+  return { mode: form.mode, provider: form.provider, ...(form.model ? { model: form.model } : {}) }
 }
 
 /**

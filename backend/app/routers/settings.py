@@ -20,6 +20,7 @@ from app.services.cloud_models import PROVIDER_LABELS, list_models
 from app.services.settings_service import (
     get_llm_settings,
     get_rerank_enabled,
+    previewing_routing,
     resolve_provider_api_key,
     save_provider_key,
     set_rerank_enabled,
@@ -239,11 +240,20 @@ class RoutingResponse(BaseModel):
 
 
 @router.get("/llm/routing", response_model=RoutingResponse)
-async def get_llm_routing() -> RoutingResponse:
-    """Which engine serves each unit of work, and what that means leaves the machine."""
+async def get_llm_routing(
+    mode: Literal["private", "hybrid", "cloud"] | None = None,
+    provider: Literal["openai", "anthropic", "gemini"] | None = None,
+    model: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] | None = None,
+) -> RoutingResponse:
+    """Which engine serves each unit of work, and what that means leaves the machine.
+
+    With any of *mode*, *provider* or *model*, the report is for that unsaved choice,
+    resolved by the same code; nothing is saved.
+    """
     from app.services.llm_routing import routing_report  # noqa: PLC0415
 
-    report = routing_report()
+    with previewing_routing(mode, provider, model):
+        report = routing_report()
     return RoutingResponse(
         mode=report.mode,
         provider=report.provider,
