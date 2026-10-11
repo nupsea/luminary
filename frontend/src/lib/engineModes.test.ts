@@ -8,6 +8,7 @@ import {
   hostNotice,
   localModelNotice,
   modelUnavailableMessage,
+  promptCacheNotice,
   splitNotice,
   type HostVerdict,
 } from "./engineModes"
@@ -135,6 +136,22 @@ describe("splitNotice", () => {
 
   it("waits for the routing report rather than guess what runs here", () => {
     expect(splitNotice(split(0.5), undefined)).toBeNull()
+  })
+})
+
+describe("promptCacheNotice", () => {
+  const host: HostVerdict = { supported: true, host: "macOS/arm64", message: null }
+
+  it("names the setting and the restart when the server's prompt cache is unbounded", () => {
+    const text = promptCacheNotice({ ...host, prompt_cache_unbounded: true })
+    expect(text).toContain("LLAMA_ARG_CACHE_RAM")
+    expect(text).toContain("start Ollama again")
+  })
+
+  it("says nothing for a bounded or unread cache, or before the verdict loads", () => {
+    expect(promptCacheNotice({ ...host, prompt_cache_unbounded: false })).toBeNull()
+    expect(promptCacheNotice(host)).toBeNull()
+    expect(promptCacheNotice(undefined)).toBeNull()
   })
 })
 

@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from app import config as _config_module
 from app.services.connectivity import is_cloud_model
 from app.services.enrichment_concurrency import enrichment_concurrency
+from app.services.runtime_memory import trim_if_ballooned
 
 logger = logging.getLogger(__name__)
 
@@ -391,6 +392,9 @@ async def background_call():
         # A call that ended while this one queued may have earned a rest it must also wait out.
         if not paced or state.rest_until <= time.monotonic():
             break
+    # With nothing in flight an unload strands no call (I-64).
+    if not state.background_activity and not state.interactive_activity:
+        await trim_if_ballooned()
     started = time.monotonic()
     entry = [started]
     state.background_activity.append(entry)

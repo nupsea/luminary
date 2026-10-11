@@ -184,6 +184,7 @@ async def test_the_endpoint_reports_this_host():
         "measured",
         "settling",
         "gpu_share",
+        "prompt_cache_unbounded",
     }
     assert isinstance(body["supported"], bool)
     # Supported hosts carry no message; unsupported ones must carry one.

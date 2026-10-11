@@ -83,6 +83,19 @@ export interface HostVerdict {
   gpu_share?: number | null
   /** A chat-model load is under way whose measurement can still turn the verdict. */
   settling?: boolean
+  /** The model server keeps old prompts in memory without a bound (I-64). */
+  prompt_cache_unbounded?: boolean
+}
+
+/** The banner line for a model server whose prompt cache can fill the machine, or null. */
+export function promptCacheNotice(host: HostVerdict | undefined): string | null {
+  if (!host?.prompt_cache_unbounded) return null
+  return (
+    "The local model server can keep up to 8 GB of old prompts in memory, which slows " +
+    "or crashes a 16 GB machine. Luminary unloads the model when that happens. To fix it, " +
+    "quit Ollama, run `launchctl setenv LLAMA_ARG_CACHE_RAM 512` in a terminal (on Windows " +
+    "or Linux, set LLAMA_ARG_CACHE_RAM=512 for Ollama), then start Ollama again."
+  )
 }
 
 /**

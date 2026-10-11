@@ -70,6 +70,7 @@ async def host_support() -> dict:
     far, so the case this endpoint exists for is the container.
     """
     from app.host_support import local_inference_support, measured_offload  # noqa: PLC0415
+    from app.services.runtime_memory import prompt_cache_unbounded  # noqa: PLC0415
     from app.services.startup_status import get_startup_status  # noqa: PLC0415
 
     verdict = local_inference_support()
@@ -90,6 +91,8 @@ async def host_support() -> dict:
         # supported verdict (I-60). A saved `measured` cannot say that: every
         # launch measures again.
         "settling": chat in ("pending", "loading"),
+        # The model server keeps old prompts in memory without a bound (I-64).
+        "prompt_cache_unbounded": prompt_cache_unbounded(),
     }
 
 

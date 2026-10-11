@@ -1,13 +1,14 @@
 // The support boundary, stated once, wherever the user is. Not dismissible: hidden,
 // an unsupported host just looks like a broken product. Names the work the SAVED
 // mode refuses and never switches the mode itself (I-16). A model split between card
-// and processor is supported but slower, and says so (#156).
+// and processor is supported but slower, and says so (#156). An unbounded prompt cache
+// names its fix (I-64).
 
 import { useQuery } from "@tanstack/react-query"
 import { AlertTriangle } from "lucide-react"
 
 import { useHostVerdict } from "@/hooks/useHostVerdict"
-import { hostNotice, isSplit, splitNotice } from "@/lib/engineModes"
+import { hostNotice, isSplit, promptCacheNotice, splitNotice } from "@/lib/engineModes"
 import { fetchRouting } from "@/lib/llmRouting"
 
 export function HostSupportBanner() {
@@ -18,7 +19,7 @@ export function HostSupportBanner() {
     enabled: host?.supported === false || isSplit(host),
   })
 
-  const text = hostNotice(host, routing) ?? splitNotice(host, routing)
+  const text = hostNotice(host, routing) ?? splitNotice(host, routing) ?? promptCacheNotice(host)
   if (!text) return null
 
   return (
