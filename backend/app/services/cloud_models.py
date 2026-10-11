@@ -92,6 +92,19 @@ def _is_chat_model(model_id: str) -> bool:
     return mode is None or mode == "chat"
 
 
+def reads_images(model: str) -> bool:
+    """Whether the routed `provider/id` *model* accepts an image.
+
+    Every curated model does. Any other id needs litellm's map to say so; unknown
+    stays False so a text-only model never receives a figure.
+    """
+    provider, _, model_id = model.partition("/")
+    if any(m["id"] == model_id for m in _CURATED.get(provider, [])):
+        return True
+    entry = litellm.model_cost.get(model) or litellm.model_cost.get(model_id) or {}
+    return bool(entry.get("supports_vision"))
+
+
 def _strip_provider_prefix(model_id: str, provider: str) -> str:
     """litellm's OpenAI listing returns bare ids, its Anthropic one `anthropic/<id>`.
 

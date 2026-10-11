@@ -105,6 +105,16 @@ describe("egressSummary", () => {
     expect(text).toContain("Answering your question send your question plus the passages")
   })
 
+  it("says Cloud-mode figures send images, not a question", () => {
+    const text = egressSummary(report([
+      row("figures", "Reading figures", false),
+      row("answering", "Answering your question", false),
+    ]))
+    expect(text).toContain("Reading figures sends the images in your documents.")
+    expect(text).toContain("Answering your question send your question plus the passages")
+    expect(text).not.toContain("Reading figures send your question")
+  })
+
   it("does not mention document sections when enrichment stays local", () => {
     const text = egressSummary(report([
       row("enrichment", "Summaries, tags and titles at ingest", true),

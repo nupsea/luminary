@@ -8,14 +8,21 @@ description: Which engine answers, what leaves the machine, and which hosts may 
 
 One stored setting, `llm_mode`, decides which engine runs synthesis. The default is `private`.
 
-| Mode | Interactive work (ask, explain, practice) | Background work (summaries, tags, titles) |
-|---|---|---|
-| `private` | local (Ollama) | local |
-| `hybrid` | the user's cloud key | local |
-| `cloud` | the user's cloud key | the user's cloud key |
+| Mode | Interactive work (ask, explain, practice) | Background work (summaries, tags, titles) | Figures |
+|---|---|---|---|
+| `private` | local (Ollama) | local | local |
+| `hybrid` | the user's cloud key | local | local |
+| `cloud` | the user's cloud key | the user's cloud key | the user's cloud key |
 
 `settings_service.get_effective_routing` resolves the route. **No key still means a fully working
 local app** (I-16), which is why hybrid is offered and never defaulted.
+
+In `cloud`, no local model runs while the provider is reachable: `model_router._cloud_vision` sends
+figures to the cloud model when `cloud_models.reads_images` says it accepts images, and the local
+reader is the offline fallback in `image_enricher._call_vision_llm`. A model not known to read images,
+or a missing key, keeps figures local with the reason on the routing row.
+`GET /settings/llm/routing?mode=&provider=&model=` reports an unsaved choice through the same
+resolver (a ContextVar overlay, `previewing_routing`), so Settings can preview it without saving.
 
 Hybrid carries a recommendation for Ask and Practice (`EngineModeDef.recommendation`), shown in
 `EngineChoice`, Settings and the engine offer. It is a label, never a preselection or a default:

@@ -63,10 +63,11 @@ export function egressSummary(data: RoutingResponse): string {
   const provider = data.provider
     ? (providerSetup(data.provider)?.label ?? data.provider)
     : "your provider"
-  // Enrichment is the one routable row that sends document text rather than a
-  // question: in Cloud mode a summary is written from a section, not a retrieval.
+  // Enrichment and figures send document content rather than a question: in
+  // Cloud mode a summary is written from a section, a description from an image.
   const sendsSections = leaving.some((w) => w.id === "enrichment")
-  const withQuestions = leaving.filter((w) => w.id !== "enrichment")
+  const sendsFigures = leaving.some((w) => w.id === "figures")
+  const withQuestions = leaving.filter((w) => w.id !== "enrichment" && w.id !== "figures")
   const parts = [`Only ${joinLabels(leaving.map((w) => w.label.toLowerCase()))} reach ${provider}.`]
   if (withQuestions.length > 0) {
     parts.push(
@@ -75,6 +76,9 @@ export function egressSummary(data: RoutingResponse): string {
   }
   if (sendsSections) {
     parts.push("Summaries, tags and titles send sections of your documents.")
+  }
+  if (sendsFigures) {
+    parts.push("Reading figures sends the images in your documents.")
   }
   parts.push("Your library, its index and your learner record stay on this machine.")
   return `${parts.join(" ")}${notRunLine}`

@@ -169,6 +169,49 @@ def test_the_local_probe_is_null_when_nothing_measured_it(private_routing, monke
     assert llm_routing.routing_report().local_probe_seconds == 21.3
 
 
+@pytest.fixture
+def cloud_routing():
+    original = dict(ss._cache)
+    ss._cache.update(
+        {
+            "llm_mode": "cloud",
+            "cloud_provider": "gemini",
+            "cloud_model": "gemini-3.5-flash-lite",
+            "google_api_key": "test-not-a-real-key",
+        }
+    )
+    yield
+    ss._cache.clear()
+    ss._cache.update(original)
+
+
+def test_cloud_mode_reads_figures_with_the_cloud_model(cloud_routing):
+    """Cloud mode runs no local model while online, figures included."""
+    report = llm_routing.routing_report()
+
+    assert set(report.leaves_device) == {"enrichment", "figures", "study_material", "answering"}
+    assert _row(report, "figures").model == "gemini/gemini-3.5-flash-lite"
+
+
+def test_hybrid_keeps_figures_on_this_machine(hybrid_routing):
+    assert _row(llm_routing.routing_report(), "figures").on_device
+
+
+def test_a_model_not_known_to_read_images_keeps_figures_local_and_says_why(cloud_routing):
+    ss._cache["cloud_model"] = "some-text-only-model"
+    row = _row(llm_routing.routing_report(), "figures")
+
+    assert row.on_device
+    assert row.fallback_reason and "read images" in row.fallback_reason
+
+
+def test_cloud_without_a_key_keeps_figures_local_and_says_why(cloud_routing_without_a_key):
+    row = _row(llm_routing.routing_report(), "figures")
+
+    assert row.on_device
+    assert row.fallback_reason
+
+
 def test_a_preview_reports_the_unsaved_mode_and_saves_nothing(hybrid_routing):
     """Picking Cloud before saving shows Cloud's routes; the saved Hybrid is untouched."""
     saved = llm_routing.routing_report()

@@ -165,6 +165,47 @@ async def test_vision_timeout_follows_the_host_measurement(monkeypatch, tmp_path
     assert seen == [300.0, 900.0]
 
 
+@pytest.mark.asyncio
+async def test_cloud_mode_reads_a_figure_in_the_cloud_and_falls_back_locally(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The cloud reader first; the local one only when the provider cannot be reached."""
+    import app.services.image_enricher as ie
+    import app.services.settings_service as ss
+    from app.services.llm import LLMAPIConnectionError
+
+    img_path = tmp_path / "fig.png"
+    PILImage.new("RGB", (200, 200), (10, 20, 30)).save(img_path)
+    settings = MagicMock()
+    settings.OLLAMA_URL = "http://ollama:11434"
+    settings.VISION_TIMEOUT_SECONDS = 300.0
+    settings.VISION_KEEP_ALIVE = "60s"
+
+    tried: list[str] = []
+
+    async def _offline_cloud(**kwargs):
+        tried.append(kwargs["model"])
+        if not kwargs["model"].startswith("ollama/"):
+            raise LLMAPIConnectionError(
+                message="provider unreachable", llm_provider="gemini", model=kwargs["model"]
+            )
+        return '{"image_type": "chart", "description": "x"}'
+
+    svc = MagicMock()
+    svc.complete = _offline_cloud
+    monkeypatch.setattr(ie, "get_llm_service", lambda: svc)
+    monkeypatch.setattr(ie, "get_vision_model", lambda: "ollama/qwen3.5:4b")
+    monkeypatch.setitem(ss._cache, "llm_mode", "cloud")
+    monkeypatch.setitem(ss._cache, "cloud_provider", "gemini")
+    monkeypatch.setitem(ss._cache, "cloud_model", "gemini-3.5-flash-lite")
+    monkeypatch.setitem(ss._cache, "google_api_key", "test-not-a-real-key")
+
+    result = await ie._call_vision_llm(img_path, settings, "")
+
+    assert tried == ["gemini/gemini-3.5-flash-lite", "ollama/qwen3.5:4b"]
+    assert result["image_type"] == "chart"
+
+
 def test_enrich_semaphore_is_per_event_loop(monkeypatch) -> None:
     """A second loop gets its own semaphore rather than reusing one bound elsewhere."""
     import weakref
