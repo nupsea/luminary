@@ -100,7 +100,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 219,
+  "complexity_over_10": 218,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",

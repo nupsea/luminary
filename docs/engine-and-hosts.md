@@ -44,6 +44,14 @@ rather than restating it: two wordings about what leaves the machine are two thi
   decision.
 - A provider change carries that provider's default model; a model picked for the provider being
   kept survives (I-53). Otherwise picking Anthropic routed `anthropic/gpt-4o-mini`.
+- **A key is checked before it is kept.** `POST /settings/llm/key` lists the provider's models with
+  it: a refusal is not saved, and an unreachable provider saves it as `unchecked`, since offline is
+  not a verdict. Google answers both a bad key and an unsupported region with 400; only
+  `API_KEY` in the body means the key.
+- **Model lists exist before a key does.** `cloud_models._CURATED` is the list without a key and
+  the sort order with one; with a key, the provider's own listing decides. Prices are read from
+  litellm's bundled cost map (I-18), so a model newer than the pinned litellm shows no price rather
+  than a typed one.
 - Where a key lands is read from the machine: `keyring_available` says whether it goes to the OS
   keychain or falls back to a plaintext row in the library database (Docker, headless Linux). The
   key panel's sentence follows it, and README states the split per install path.

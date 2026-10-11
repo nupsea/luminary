@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.exceptions import CloudKeyMissing
 from app.models import SettingsModel
 from app.repos.settings_repo import SettingsRepo
+from app.services.cloud_models import PROVIDER_DEFAULT_MODEL, check_key
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ _DEFAULTS: dict[str, str] = {
     "llm_mode": "private",
     "llm_offer_dismissed": "",
     "cloud_provider": "openai",
-    "cloud_model": "gpt-4o-mini",
+    "cloud_model": PROVIDER_DEFAULT_MODEL["openai"],
     "local_chat_model": "",
     "vision_model": "",
     "openai_api_key": "",
@@ -277,16 +278,17 @@ def get_vision_model() -> str:
     return configured_vision_override() or default_vision_model()
 
 
-# The model a provider starts on when the learner picks the provider and nothing
-# else -- which is every path through the engine question, first run or upgrade.
-# The Settings dropdown offers the rest; these only have to be real and cheap.
-# Kept here rather than read from the router's catalogue because a service may
-# not import from the API layer.
-_PROVIDER_DEFAULT_MODEL: dict[str, str] = {
-    "openai": "gpt-4o-mini",
-    "anthropic": "claude-haiku-4-5-20251001",
-    "gemini": "gemini-1.5-flash-8b-001",
-}
+async def save_provider_key(db: AsyncSession, provider: str, api_key: str) -> tuple[str, str]:
+    """Check *api_key* with the provider and keep it unless the provider refused it.
+
+    A key the provider could not be asked about is kept: offline is not a verdict.
+    """
+
+    status, message = await check_key(provider, api_key)
+    if status != "rejected":
+        field = _PROVIDER_KEY_FIELDS[provider][0]
+        await update_llm_settings(db, **{field: api_key})
+    return status, message
 
 
 async def update_llm_settings(
@@ -327,7 +329,7 @@ async def update_llm_settings(
         # not resolve. Only a provider *change* resets it, so a model deliberately
         # picked for the provider being kept survives.
         if model is None and provider != _cache.get("cloud_provider"):
-            fallback = _PROVIDER_DEFAULT_MODEL.get(provider)
+            fallback = PROVIDER_DEFAULT_MODEL.get(provider)
             if fallback:
                 updates_db["cloud_model"] = fallback
                 updates_cache["cloud_model"] = fallback
