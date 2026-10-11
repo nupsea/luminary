@@ -550,7 +550,7 @@ export default function Study() {
           }
           cloudModels={studyCloudModelChoices}
           effectiveDefault={effectiveDefaultModel(llmSettings)}
-          title="Model that writes the cards here. 'Auto' follows your Settings."
+          surface="study"
         />
       </div>
 

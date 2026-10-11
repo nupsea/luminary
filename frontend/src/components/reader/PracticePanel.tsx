@@ -443,7 +443,7 @@ export function PracticePanel({
                   }
                   cloudModels={cloudModelChoices}
                   effectiveDefault={effectiveDefaultModel(llmSettings)}
-                  title="Model that writes the cards here. 'Auto' follows your Settings."
+                  surface="practice"
                 />
               </div>
               <CardGenerator

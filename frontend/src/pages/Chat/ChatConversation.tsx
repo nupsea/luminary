@@ -863,6 +863,7 @@ export function ChatConversation({
             localModels={localModelChoices}
             cloudModels={cloudModelChoices}
             effectiveDefault={effectiveModel}
+            surface="chat"
           />
         )}
 
