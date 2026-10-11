@@ -20,9 +20,11 @@ from app.repos.study_repo import DueScope, StudyRepo
 from app.services import chapter_backfill, chapter_cards
 from app.services.flashcard_chapter import (
     MAX_CHAPTER_WINDOWS,
+    MAX_EVIDENCE_RESTATED,
     Book,
     Passage,
     Window,
+    _evidence_restated,
     build_windows,
     card_from_reply,
 )
@@ -77,6 +79,31 @@ def test_a_grounded_standalone_card_passes():
 )
 def test_each_gate_fires(question, answer, reason):
     assert reason in _gate(question, answer)
+
+
+XOR = "**XOR**, short for “eXclusive OR”, asks if one *and only one* of its inputs is true."
+ASIDE = (
+    "Performance optimizations As always, a lot of detail goes into making a storage engine "
+    "perform well in practice."
+)
+
+
+def test_the_restated_evidence_ceiling():
+    """Two judged cards bracket MAX_EVIDENCE_RESTATED: a right answer and a non-answer."""
+    right = (
+        "What does an XOR gate return when exactly one input is true?",
+        "An exclusive OR (XOR) gate returns true only when exactly one of its inputs is "
+        "different, not both.",
+    )
+    non_answer = (
+        "What performance issue affects storage engines when searching for non-existent keys?",
+        "They can be slow because a lot of detail goes into making the storage engine perform "
+        "well in practice.",
+    )
+    assert _evidence_restated(right[1], XOR) < MAX_EVIDENCE_RESTATED
+    assert _evidence_restated(non_answer[1], ASIDE) >= MAX_EVIDENCE_RESTATED
+    assert _gate(*right, text=XOR) == "ok"
+    assert "restates its evidence" in _gate(*non_answer, text=ASIDE)
 
 
 def test_the_narrator_passes_only_when_the_question_names_the_book():
