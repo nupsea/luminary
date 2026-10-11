@@ -23,6 +23,8 @@ CLOUD = "openai/gpt-5.4"
 @pytest.fixture
 def admission_settings(monkeypatch):
     """Override Settings for the admission gate only, without touching the env."""
+    # The runner-memory check probes the real Ollama port; test_prompt_cache_guard covers it.
+    monkeypatch.setattr(llm_admission, "trim_if_ballooned", AsyncMock(return_value=False))
 
     def _apply(**overrides):
         base = config_module.Settings()
