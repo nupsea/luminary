@@ -142,10 +142,44 @@ describe("splitNotice", () => {
 describe("promptCacheNotice", () => {
   const host: HostVerdict = { supported: true, host: "macOS/arm64", message: null }
 
-  it("names the setting and the restart when the server's prompt cache is unbounded", () => {
-    const text = promptCacheNotice({ ...host, prompt_cache_unbounded: true })
-    expect(text).toContain("LLAMA_ARG_CACHE_RAM")
-    expect(text).toContain("start Ollama again")
+  const unbounded = (
+    ollama_launch: HostVerdict["ollama_launch"],
+    ollama_service: string | null = null,
+  ) => promptCacheNotice({ ...host, prompt_cache_unbounded: true, ollama_launch, ollama_service })
+
+  // `launchctl setenv` never reaches a terminal's `ollama serve`: offering it there
+  // left the notice up after the user followed it.
+  it("tells a terminal's server to start with the setting, not launchctl", () => {
+    const text = unbounded("terminal")
+    expect(text).toContain("`LLAMA_ARG_CACHE_RAM=512 ollama serve`")
+    expect(text).toContain("`launchctl setenv` does not reach")
+    expect(text).not.toContain("launchctl setenv LLAMA")
+    const linux = promptCacheNotice({
+      ...host,
+      host: "Linux/x86_64",
+      prompt_cache_unbounded: true,
+      ollama_launch: "terminal",
+    })
+    expect(linux).not.toContain("launchctl")
+  })
+
+  it("names the restart for each way Ollama is started", () => {
+    expect(unbounded("macos_app")).toContain("`launchctl setenv LLAMA_ARG_CACHE_RAM 512`")
+    expect(unbounded("macos_app")).toContain("open Ollama again")
+    expect(unbounded("launchd", "homebrew.mxcl.ollama")).toContain("brew services restart ollama")
+    expect(unbounded("launchd", "com.me.ollama")).toContain(
+      "launchctl kickstart -k gui/$(id -u)/com.me.ollama",
+    )
+    expect(unbounded("systemd", "ollama.service")).toContain("`sudo systemctl edit ollama.service`")
+    expect(unbounded("systemd", "ollama.service")).toContain("`sudo systemctl restart ollama.service`")
+    expect(unbounded("windows")).toContain("`setx LLAMA_ARG_CACHE_RAM 512`")
+    expect(unbounded(null)).toContain("LLAMA_ARG_CACHE_RAM=512")
+  })
+
+  it("leaves every command in balanced backticks, which the banner renders as code", () => {
+    for (const launch of ["macos_app", "launchd", "systemd", "windows", "terminal", null] as const) {
+      expect((unbounded(launch, "ollama.service") ?? "").split("`").length % 2).toBe(1)
+    }
   })
 
   it("says nothing for a bounded or unread cache, or before the verdict loads", () => {

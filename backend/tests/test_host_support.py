@@ -185,6 +185,8 @@ async def test_the_endpoint_reports_this_host():
         "settling",
         "gpu_share",
         "prompt_cache_unbounded",
+        "ollama_launch",
+        "ollama_service",
     }
     assert isinstance(body["supported"], bool)
     # Supported hosts carry no message; unsupported ones must carry one.

@@ -302,10 +302,14 @@ reaches it (512, as compose, both installers and `bootstrap.sh` set it, the last
 and its own environment). `test_ollama_runtime_budget.py` (every launch path, every cap) and
 `supervisor::tests::the_prompt_cache_is_bounded_whatever_env_says` guard it.
 An Ollama we did not start is not bounded by any of that: `launchctl setenv` ends at reboot, and
-Ollama.app then starts from the login items uncapped, which a source or dev run adopts. Warmup reads
-the runner's cap for the host banner, and `background_call` unloads the model, with nothing in
-flight, once its runner holds 3 GB more than `/api/ps` reports (capped peak 1.60 GB, uncapped passes
-3 GB by call 13). `test_prompt_cache_guard.py` guards it.
+Ollama.app then starts from the login items uncapped, which a source or dev run adopts. `/setup/
+host-support` reads the server's cap on every fetch (a loaded runner's, else the environment it
+hands the next one) and names how it was started, because each launch has its own fix: `launchctl
+setenv` reaches Ollama.app and launchd jobs but never an `ollama serve` started from a terminal, and
+a systemd server reads its unit. A verdict held from an earlier read once kept the banner up after
+the fix. `background_call` unloads the model, with nothing in flight, once its runner holds 3 GB
+more than `/api/ps` reports (capped peak 1.60 GB, uncapped passes 3 GB by call 13); that holds the
+banner until that server restarts. `test_prompt_cache_guard.py` guards it.
 
 ## Retired numbers
 

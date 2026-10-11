@@ -28,7 +28,18 @@ export function HostSupportBanner() {
       className="mx-4 mt-2 flex shrink-0 items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
     >
       <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-      <span className="flex-1">{text}</span>
+      <span className="flex-1">
+        {/* Backticked text is a command to copy. */}
+        {text.split("`").map((part, i) =>
+          i % 2 ? (
+            <code key={i} className="rounded bg-amber-100 px-1 font-mono dark:bg-amber-900/40">
+              {part}
+            </code>
+          ) : (
+            part
+          ),
+        )}
+      </span>
     </div>
   )
 }
