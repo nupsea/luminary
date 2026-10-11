@@ -28,6 +28,9 @@ from app.services.settings_service import (
 @pytest.fixture
 async def test_db(memory_db, tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    # Model listing honours env keys, so a developer's own key must not reach these tests.
+    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
     from app.config import get_settings
 
     get_settings.cache_clear()
@@ -167,21 +170,166 @@ async def test_patch_llm_settings_rejects_unknown_fields(test_db):
     assert resp.status_code == 422
 
 
-async def test_openai_model_list_includes_gpt5_family(test_db):
-    """The OpenAI model dropdown offers the latest GPT-5 models; cost-less entries
-    are returned cleanly (name-only in the UI)."""
+@pytest.mark.parametrize("provider", ["openai", "anthropic", "gemini"])
+async def test_every_provider_lists_models_before_a_key_is_saved(test_db, provider):
+    """Gemini listed nothing without a key, so its model field showed the previous
+    provider's `gpt-4o-mini` and asked for a key the form had not offered yet."""
+    from app.services.cloud_models import PROVIDER_DEFAULT_MODEL
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get("/settings/llm/models", params={"provider": "openai"})
+        resp = await client.get("/settings/llm/models", params={"provider": provider})
     assert resp.status_code == 200
-    ids = [m["id"] for m in resp.json()]
-    assert "gpt-5.4" in ids
-    assert "gpt-5.1" in ids
-    # gpt-4o-mini still present with its price metadata intact
-    mini = next(m for m in resp.json() if m["id"] == "gpt-4o-mini")
-    assert mini["cost_input"] == 0.15
-    # a GPT-5 entry returns with no fabricated price
-    g5 = next(m for m in resp.json() if m["id"] == "gpt-5.4")
-    assert g5["cost_input"] is None
+    models = resp.json()
+    assert models[0]["id"] == PROVIDER_DEFAULT_MODEL[provider]
+    assert [m["id"] for m in models if m["recommended"]] == [PROVIDER_DEFAULT_MODEL[provider]]
+
+
+def test_curated_prices_come_from_the_cost_map():
+    """Prices are litellm's, never typed here: the hand table had Haiku 4.5 at a
+    quarter of its price. A model the map does not know is shown without one."""
+    import litellm
+
+    from app.services.cloud_models import _price_per_million
+
+    entry = litellm.model_cost["claude-haiku-4-5-20251001"]
+    assert _price_per_million("anthropic", "claude-haiku-4-5-20251001") == (
+        round(entry["input_cost_per_token"] * 1e6, 4),
+        round(entry["output_cost_per_token"] * 1e6, 4),
+    )
+    # Gemini entries are keyed `gemini/<id>` in the map.
+    assert _price_per_million("gemini", "gemini-3.1-pro-preview")[0] is not None
+    assert _price_per_million("openai", "gpt-99-unknown") == (None, None)
+
+
+async def test_gemini_lists_live_models_with_a_key_and_drops_retired_ones(test_db, monkeypatch):
+    import httpx
+
+    seen: dict = {}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen["key"] = request.headers.get("x-goog-api-key")
+        seen["url"] = str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "models": [
+                    {
+                        "name": "models/gemini-9-flash",
+                        "supportedGenerationMethods": ["generateContent"],
+                    },
+                    {
+                        "name": "models/gemini-3.8-flash",
+                        "displayName": "Gemini 3.8 Flash",
+                        "supportedGenerationMethods": ["generateContent"],
+                    },
+                    {
+                        "name": "models/gemini-2.0-flash",
+                        "supportedGenerationMethods": ["generateContent"],
+                    },
+                    {
+                        "name": "models/text-embedding-004",
+                        "supportedGenerationMethods": ["embedContent"],
+                    },
+                ]
+            },
+        )
+
+    real = httpx.AsyncClient
+    transport = httpx.MockTransport(handle)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=transport, **kw))
+    svc_module._cache["google_api_key"] = "AIza-test"
+
+    async with real(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/settings/llm/models", params={"provider": "gemini"})
+    assert [m["id"] for m in resp.json()] == ["gemini-3.8-flash", "gemini-9-flash"]
+    # The key travels in a header, never in a URL a log line could print.
+    assert seen["key"] == "AIza-test"
+    assert "AIza-test" not in seen["url"]
+
+
+def _mock_provider(
+    monkeypatch, status: int, body: dict | None = None, exc: Exception | None = None
+):
+    import httpx
+
+    def handle(_request: httpx.Request) -> httpx.Response:
+        if exc is not None:
+            raise exc
+        return httpx.Response(status, json=body or {})
+
+    real = httpx.AsyncClient
+    transport = httpx.MockTransport(handle)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=transport, **kw))
+    return real
+
+
+async def test_a_key_the_provider_accepts_is_saved(test_db, monkeypatch):
+    real = _mock_provider(monkeypatch, 200, {"models": []})
+    async with real(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/settings/llm/key", json={"provider": "gemini", "api_key": "  AIza-good  "}
+        )
+        settings = (await client.get("/settings/llm")).json()
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "verified"
+    assert resp.json()["saved"] is True
+    assert svc_module._cache["google_api_key"] == "AIza-good"
+    assert settings["has_google_key"] is True
+
+
+async def test_a_key_the_provider_refuses_is_not_saved(test_db, monkeypatch):
+    body = {
+        "error": {
+            "code": 400,
+            "message": "API key not valid.",
+            "status": "INVALID_ARGUMENT",
+            "details": [{"reason": "API_KEY_INVALID"}],
+        }
+    }
+    real = _mock_provider(monkeypatch, 400, body)
+    async with real(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/settings/llm/key", json={"provider": "gemini", "api_key": "bad"})
+    assert resp.json()["status"] == "rejected"
+    assert resp.json()["saved"] is False
+    assert svc_module._cache["google_api_key"] == ""
+
+
+async def test_a_region_refusal_is_not_reported_as_a_bad_key(test_db, monkeypatch):
+    """Google also answers 400 for an unsupported region; another key would not help."""
+    body = {
+        "error": {
+            "code": 400,
+            "message": "User location is not supported for the API use.",
+            "status": "FAILED_PRECONDITION",
+        }
+    }
+    real = _mock_provider(monkeypatch, 400, body)
+    async with real(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/settings/llm/key", json={"provider": "gemini", "api_key": "k"})
+    data = resp.json()
+    assert data["status"] == "unchecked"
+    assert "User location is not supported" in data["message"]
+
+
+async def test_an_unreachable_provider_keeps_the_key(test_db, monkeypatch):
+    import httpx
+
+    real = _mock_provider(monkeypatch, 0, exc=httpx.ConnectError("Name or service not known"))
+    async with real(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/settings/llm/key", json={"provider": "openai", "api_key": "sk-x"}
+        )
+    data = resp.json()
+    assert data["status"] == "unchecked"
+    assert data["saved"] is True
+    assert "could not find the server" in data["message"]
+    assert svc_module._cache["openai_api_key"] == "sk-x"
+
+
+async def test_a_blank_key_is_refused_before_any_request(test_db):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/settings/llm/key", json={"provider": "gemini", "api_key": "   "})
+    assert resp.status_code == 422
 
 
 async def test_openai_model_list_fetches_live_when_key_configured(test_db):
@@ -215,17 +363,17 @@ async def test_anthropic_model_list_strips_the_provider_prefix(test_db):
     svc_module._cache["anthropic_api_key"] = "ant-test-key"
     with unittest.mock.patch(
         "litellm.get_valid_models",
-        return_value=["anthropic/claude-sonnet-4-6", "anthropic/claude-99-future"],
+        return_value=["anthropic/claude-sonnet-5-5", "anthropic/claude-99-future"],
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get("/settings/llm/models", params={"provider": "anthropic"})
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()]
-    assert ids == ["claude-sonnet-4-6", "claude-99-future"]
+    assert ids == ["claude-sonnet-5-5", "claude-99-future"]
     assert not any(i.startswith("anthropic/") for i in ids)
     # A known id keeps its display name; an unknown one falls back to the id.
     by_id = {m["id"]: m["name"] for m in resp.json()}
-    assert by_id["claude-sonnet-4-6"] == "Claude Sonnet 4.6"
+    assert by_id["claude-sonnet-5-5"] == "Claude Sonnet 5.5"
     assert by_id["claude-99-future"] == "claude-99-future"
 
 
@@ -266,7 +414,7 @@ async def test_openai_model_list_falls_back_on_live_failure(test_db):
             resp = await client.get("/settings/llm/models", params={"provider": "openai"})
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()]
-    assert "gpt-5.4" in ids
+    assert "gpt-6-luna" in ids
 
 
 async def test_openai_model_list_curated_without_key(test_db):
@@ -279,7 +427,7 @@ async def test_openai_model_list_curated_without_key(test_db):
     assert resp.status_code == 200
     mock_list.assert_not_called()
     ids = [m["id"] for m in resp.json()]
-    assert "gpt-5.4" in ids
+    assert "gpt-6-luna" in ids
 
 
 async def test_switch_to_gpt5_persists(test_db):

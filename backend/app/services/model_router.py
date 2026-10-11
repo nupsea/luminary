@@ -26,7 +26,7 @@ ingestion for a configuration problem the user can see in Settings.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app.model_registry import (
@@ -45,6 +45,7 @@ from app.model_registry import (
     vision_candidates,
 )
 from app.services import settings_service
+from app.services.connectivity import is_cloud_model
 
 logger = logging.getLogger(__name__)
 
@@ -72,57 +73,13 @@ class ModelChoice:
 def resolve(role: Role, *, background: bool = False) -> ModelChoice:
     """The model this backend would actually call for *role*."""
     if role == "vision":
-        override = settings_service.configured_vision_override()
-        if override:
-            return ModelChoice(role, override, None, profile_for(override), explicit=True)
-        # Sharing is a remedy for a host that cannot hold two models, not a
-        # preference. On a machine with room for a dedicated reader, the
-        # configured one is kept -- quietly retargeting vision on a 32GB laptop
-        # because a chat model happens to also have eyes would be this code
-        # overruling a deployment decision nobody asked it to revisit.
-        #
-        # "Room" is the residency limit, not host RAM. Gating on RAM alone left a
-        # 36GB machine running the low profile resolving two models against a
-        # limit of one: the reader fitted the host and the profile still forbade
-        # it. That is the case the bundled app hits when it sizes itself down, and
-        # the case anyone hits by choosing the profile deliberately.
-        from app.memory_profile import max_resident_models  # noqa: PLC0415
-
-        configured = settings_service.get_vision_model()
-        profile = profile_for(configured)
-        fits = profile is None or fits_host(profile)
-        room_for_two = max_resident_models() > 1
-        # ...and the two must fit *together*. The residency limit says how many
-        # runners may load, not whether the machine survives them: on 16GB the
-        # text model plus the 6.81GB reader is 10.02GB, and the backend peaks at
-        # 4.7GB during ingest, which is when both are in use. That leaves ~1.3GB
-        # for the OS and the embedder, so the machine swaps rather than refuses --
-        # exactly what this phase exists to prevent.
-        text_profile = profile_for(resolve("chat").model)
-        together = (
-            profile is None
-            or text_profile is None
-            or profile.id == text_profile.id
-            or fits_together((text_profile, profile))
-        )
-        if fits and room_for_two and together:
-            return ModelChoice(role, configured, None, profile)
-        model = _shared_vision_model() or _reader_that_fits(text_profile) or configured
-        # Reported, per this field's own contract. It was left unset here, so the
-        # one narrowing decision this module makes that the registry cannot see
-        # was invisible to every caller: a `.env` pinning a dedicated reader on a
-        # 16GB host ran the generalist with `fallback_reason` null, an empty
-        # `narrowed_defaults` and no warning at boot.
-        reason = None
-        if model != configured:
-            if not fits:
-                reason = f"{configured} does not fit this host"
-            elif not room_for_two:
-                reason = f"this profile keeps one model resident, which {model} already is"
-            else:
-                other = text_profile.id if text_profile is not None else "the text model"
-                reason = f"{configured} and {other} cannot both be resident on this host"
-        return ModelChoice(role, model, None, profile_for(model), fallback_reason=reason)
+        cloud, why_local = _cloud_vision()
+        if cloud is not None:
+            return cloud
+        local = _local_vision()
+        if why_local and local.fallback_reason is None:
+            return replace(local, fallback_reason=why_local)
+        return local
 
     if role == "generation":
         override = configured_generation_override()
@@ -139,6 +96,82 @@ def resolve(role: Role, *, background: bool = False) -> ModelChoice:
     except ValueError as exc:
         local = settings_service.get_local_chat_model()
         return ModelChoice(role, local, None, profile_for(local), fallback_reason=str(exc))
+
+
+def _local_vision() -> ModelChoice:
+    """The on-device figure reader for this host."""
+    role: Role = "vision"
+    override = settings_service.configured_vision_override()
+    if override:
+        return ModelChoice(role, override, None, profile_for(override), explicit=True)
+    # Sharing is a remedy for a host that cannot hold two models, not a
+    # preference. On a machine with room for a dedicated reader, the
+    # configured one is kept -- quietly retargeting vision on a 32GB laptop
+    # because a chat model happens to also have eyes would be this code
+    # overruling a deployment decision nobody asked it to revisit.
+    #
+    # "Room" is the residency limit, not host RAM. Gating on RAM alone left a
+    # 36GB machine running the low profile resolving two models against a
+    # limit of one: the reader fitted the host and the profile still forbade
+    # it. That is the case the bundled app hits when it sizes itself down, and
+    # the case anyone hits by choosing the profile deliberately.
+    from app.memory_profile import max_resident_models  # noqa: PLC0415
+
+    configured = settings_service.get_vision_model()
+    profile = profile_for(configured)
+    fits = profile is None or fits_host(profile)
+    room_for_two = max_resident_models() > 1
+    # ...and the two must fit *together*. The residency limit says how many
+    # runners may load, not whether the machine survives them: on 16GB the
+    # text model plus the 6.81GB reader is 10.02GB, and the backend peaks at
+    # 4.7GB during ingest, which is when both are in use. That leaves ~1.3GB
+    # for the OS and the embedder, so the machine swaps rather than refuses --
+    # exactly what this phase exists to prevent.
+    text_profile = profile_for(resolve("chat").model)
+    together = (
+        profile is None
+        or text_profile is None
+        or profile.id == text_profile.id
+        or fits_together((text_profile, profile))
+    )
+    if fits and room_for_two and together:
+        return ModelChoice(role, configured, None, profile)
+    model = _shared_vision_model() or _reader_that_fits(text_profile) or configured
+    # Reported, per this field's own contract. It was left unset here, so the
+    # one narrowing decision this module makes that the registry cannot see
+    # was invisible to every caller: a `.env` pinning a dedicated reader on a
+    # 16GB host ran the generalist with `fallback_reason` null, an empty
+    # `narrowed_defaults` and no warning at boot.
+    reason = None
+    if model != configured:
+        if not fits:
+            reason = f"{configured} does not fit this host"
+        elif not room_for_two:
+            reason = f"this profile keeps one model resident, which {model} already is"
+        else:
+            other = text_profile.id if text_profile is not None else "the text model"
+            reason = f"{configured} and {other} cannot both be resident on this host"
+    return ModelChoice(role, model, None, profile_for(model), fallback_reason=reason)
+
+
+def _cloud_vision() -> tuple[ModelChoice | None, str | None]:
+    """Cloud mode reads figures with the cloud model, so no local model runs online.
+
+    Returns (choice, None), or (None, why the local reader serves instead) in Cloud
+    mode without a key or with a text-only model. (None, None) outside Cloud mode.
+    """
+    from app.services.cloud_models import reads_images  # noqa: PLC0415
+
+    mode, _ = settings_service.active_routing()
+    if mode != "cloud":
+        return None, None
+    try:
+        model, api_key = settings_service.get_effective_routing(background=True)
+    except ValueError as exc:
+        return None, str(exc)
+    if not reads_images(model):
+        return None, f"{model} is not known to read images"
+    return ModelChoice("vision", model, api_key, profile_for(model)), None
 
 
 def _shared_vision_model() -> str | None:
@@ -217,6 +250,13 @@ def narrowed_defaults() -> dict[str, dict[str, str]]:
     narrowed: dict[str, dict[str, str]] = {}
     for role, (configured, registry_reason) in asked.items():
         choice = resolve(role)
+        # A cloud route is the engine mode the user chose, not the host overruling
+        # them. Hybrid still runs the local chat model for background work, so that
+        # is the route to judge; in Cloud mode no local chat route is in play.
+        if role == "chat" and is_cloud_model(choice.model):
+            choice = resolve("background")
+            if is_cloud_model(choice.model):
+                continue
         if choice.model == configured:
             continue
         narrowed[role] = {

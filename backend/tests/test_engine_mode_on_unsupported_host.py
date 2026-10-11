@@ -62,8 +62,8 @@ def test_db(memory_db):
     [
         ("private", {"enrichment", "figures", "study_material", "answering"}),
         ("hybrid", {"enrichment", "figures"}),
-        # The figure reader is local in every mode.
-        ("cloud", {"figures"}),
+        # Cloud reads figures with the cloud model, so nothing waits on this host.
+        ("cloud", set()),
     ],
 )
 def test_the_routing_table_names_the_work_this_host_does_not_run(mode, value, not_run):

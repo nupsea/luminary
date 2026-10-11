@@ -146,8 +146,8 @@ for it leave the machine — never the document, the library or your learner rec
 Search runs on your machine either way, so the key buys the finish, not the start. The installed
 apps keep the key in your OS keychain. Docker and headless Linux have no keychain, so there a key
 saved in Settings is written to the library database in plain text; the key panel says which
-applies before you paste. **Settings → Where your work runs** lists every task and whether it runs on
-this machine.
+applies before you paste. **Settings → Which model does what** lists every task, the model that
+serves it, and whether it runs on this machine.
 
 ## What else is in it
 

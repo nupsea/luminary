@@ -167,3 +167,86 @@ def test_the_local_probe_is_null_when_nothing_measured_it(private_routing, monke
 
     monkeypatch.setattr(model_keepwarm, "measured_probe_seconds", lambda: 21.3)
     assert llm_routing.routing_report().local_probe_seconds == 21.3
+
+
+@pytest.fixture
+def cloud_routing():
+    original = dict(ss._cache)
+    ss._cache.update(
+        {
+            "llm_mode": "cloud",
+            "cloud_provider": "gemini",
+            "cloud_model": "gemini-3.5-flash-lite",
+            "google_api_key": "test-not-a-real-key",
+        }
+    )
+    yield
+    ss._cache.clear()
+    ss._cache.update(original)
+
+
+def test_cloud_mode_reads_figures_with_the_cloud_model(cloud_routing):
+    """Cloud mode runs no local model while online, figures included."""
+    report = llm_routing.routing_report()
+
+    assert set(report.leaves_device) == {"enrichment", "figures", "study_material", "answering"}
+    assert _row(report, "figures").model == "gemini/gemini-3.5-flash-lite"
+
+
+def test_hybrid_keeps_figures_on_this_machine(hybrid_routing):
+    assert _row(llm_routing.routing_report(), "figures").on_device
+
+
+def test_a_model_not_known_to_read_images_keeps_figures_local_and_says_why(cloud_routing):
+    ss._cache["cloud_model"] = "some-text-only-model"
+    row = _row(llm_routing.routing_report(), "figures")
+
+    assert row.on_device
+    assert row.fallback_reason and "read images" in row.fallback_reason
+
+
+def test_cloud_without_a_key_keeps_figures_local_and_says_why(cloud_routing_without_a_key):
+    row = _row(llm_routing.routing_report(), "figures")
+
+    assert row.on_device
+    assert row.fallback_reason
+
+
+def test_a_preview_reports_the_unsaved_mode_and_saves_nothing(hybrid_routing):
+    """Picking Cloud before saving shows Cloud's routes; the saved Hybrid is untouched."""
+    saved = llm_routing.routing_report()
+    with ss.previewing_routing("cloud", None, None):
+        preview = llm_routing.routing_report()
+
+    assert preview.mode == "cloud"
+    assert _row(preview, "enrichment").model == "openai/gpt-5-mini"
+    assert not _row(preview, "enrichment").on_device
+    assert ss._cache["llm_mode"] == "hybrid"
+    assert llm_routing.routing_report().leaves_device == saved.leaves_device
+
+
+def test_a_previewed_provider_without_its_key_shows_the_local_fallback(hybrid_routing):
+    """A provider switch takes its default model, and a missing key is reported, not hidden."""
+    with ss.previewing_routing(None, "anthropic", None):
+        row = _row(llm_routing.routing_report(), "answering")
+
+    assert row.on_device
+    assert row.fallback_reason and "anthropic" in row.fallback_reason
+
+
+async def test_the_routing_endpoint_previews_query_params(hybrid_routing):
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        preview = await client.get(
+            "/settings/llm/routing", params={"mode": "cloud", "model": "gpt-6-luna"}
+        )
+        saved = await client.get("/settings/llm/routing")
+        bad = await client.get("/settings/llm/routing", params={"mode": "orbit"})
+
+    rows = {w["id"]: w for w in preview.json()["work"]}
+    assert rows["enrichment"]["model"] == "openai/gpt-6-luna"
+    assert "enrichment" not in saved.json()["leaves_device"]
+    assert bad.status_code == 422

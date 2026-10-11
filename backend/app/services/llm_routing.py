@@ -181,7 +181,8 @@ def routing_report() -> RoutingReport:
             "figures",
             "Reading figures",
             "vision",
-            "The figure reader is an on-device model chosen for this host.",
+            "Stays on this machine in Local and Hybrid mode. Cloud mode sends figure "
+            "images to your provider, with the local reader as the offline fallback.",
         ),
         _routed(
             "study_material",

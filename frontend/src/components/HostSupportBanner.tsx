@@ -15,7 +15,7 @@ export function HostSupportBanner() {
   const host = useHostVerdict()
   const { data: routing } = useQuery({
     queryKey: ["llm-routing"],
-    queryFn: fetchRouting,
+    queryFn: () => fetchRouting(),
     enabled: host?.supported === false || isSplit(host),
   })
 

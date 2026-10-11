@@ -4,6 +4,8 @@ import contextlib
 import hashlib
 import logging
 import socket
+from collections.abc import Iterator
+from contextvars import ContextVar
 
 import keyring
 import keyring.backends.fail
@@ -14,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.exceptions import CloudKeyMissing
 from app.models import SettingsModel
 from app.repos.settings_repo import SettingsRepo
+from app.services.cloud_models import PROVIDER_DEFAULT_MODEL, check_key
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +52,7 @@ _DEFAULTS: dict[str, str] = {
     "llm_mode": "private",
     "llm_offer_dismissed": "",
     "cloud_provider": "openai",
-    "cloud_model": "gpt-4o-mini",
+    "cloud_model": PROVIDER_DEFAULT_MODEL["openai"],
     "local_chat_model": "",
     "vision_model": "",
     "openai_api_key": "",
@@ -277,16 +280,17 @@ def get_vision_model() -> str:
     return configured_vision_override() or default_vision_model()
 
 
-# The model a provider starts on when the learner picks the provider and nothing
-# else -- which is every path through the engine question, first run or upgrade.
-# The Settings dropdown offers the rest; these only have to be real and cheap.
-# Kept here rather than read from the router's catalogue because a service may
-# not import from the API layer.
-_PROVIDER_DEFAULT_MODEL: dict[str, str] = {
-    "openai": "gpt-4o-mini",
-    "anthropic": "claude-haiku-4-5-20251001",
-    "gemini": "gemini-1.5-flash-8b-001",
-}
+async def save_provider_key(db: AsyncSession, provider: str, api_key: str) -> tuple[str, str]:
+    """Check *api_key* with the provider and keep it unless the provider refused it.
+
+    A key the provider could not be asked about is kept: offline is not a verdict.
+    """
+
+    status, message = await check_key(provider, api_key)
+    if status != "rejected":
+        field = _PROVIDER_KEY_FIELDS[provider][0]
+        await update_llm_settings(db, **{field: api_key})
+    return status, message
 
 
 async def update_llm_settings(
@@ -327,7 +331,7 @@ async def update_llm_settings(
         # not resolve. Only a provider *change* resets it, so a model deliberately
         # picked for the provider being kept survives.
         if model is None and provider != _cache.get("cloud_provider"):
-            fallback = _PROVIDER_DEFAULT_MODEL.get(provider)
+            fallback = PROVIDER_DEFAULT_MODEL.get(provider)
             if fallback:
                 updates_db["cloud_model"] = fallback
                 updates_cache["cloud_model"] = fallback
@@ -448,6 +452,42 @@ def cloud_provider_prefixes() -> frozenset[str]:
     return frozenset(_PROVIDER_KEY_FIELDS)
 
 
+# An unsaved mode/provider/model, layered over `_cache` for the current task only.
+# A ContextVar rather than a write to `_cache`: a preview must never reach a real call.
+_routing_preview: ContextVar[dict[str, str] | None] = ContextVar("routing_preview", default=None)
+
+
+def _routing_value(key: str) -> str:
+    preview = _routing_preview.get()
+    if preview and key in preview:
+        return preview[key]
+    return _cache[key]
+
+
+@contextlib.contextmanager
+def previewing_routing(
+    mode: str | None, provider: str | None, model: str | None
+) -> Iterator[None]:
+    """Resolve routes as if *mode*, *provider* and *model* were saved.
+
+    A provider without a model takes that provider's default, as saving would (I-53).
+    """
+    preview: dict[str, str] = {}
+    if mode:
+        preview["llm_mode"] = mode
+    if provider:
+        preview["cloud_provider"] = provider
+        if not model and provider != _cache["cloud_provider"]:
+            model = PROVIDER_DEFAULT_MODEL.get(provider)
+    if model:
+        preview["cloud_model"] = model
+    token = _routing_preview.set(preview)
+    try:
+        yield
+    finally:
+        _routing_preview.reset(token)
+
+
 def active_routing() -> tuple[str, str | None]:
     """The stored mode, and the cloud provider when one is in play.
 
@@ -455,8 +495,8 @@ def active_routing() -> tuple[str, str | None]:
     `private` mode because no provider is selected there, which is different from
     a provider being configured and unused.
     """
-    mode = _cache.get("llm_mode", "private")
-    provider = _cache.get("cloud_provider") if mode in ("hybrid", "cloud") else None
+    mode = _routing_value("llm_mode")
+    provider = _routing_value("cloud_provider") if mode in ("hybrid", "cloud") else None
     return mode, provider
 
 
@@ -498,7 +538,7 @@ def get_effective_routing(background: bool = False) -> tuple[str, str | None]:
 
     Raises CloudKeyMissing when cloud routing is active but the API key is missing.
     """
-    mode = _cache["llm_mode"]
+    mode = _routing_value("llm_mode")
 
     # Hybrid: background tasks → local Ollama; interactive → cloud
     effective_mode = ("private" if background else "cloud") if mode == "hybrid" else mode
@@ -506,8 +546,8 @@ def get_effective_routing(background: bool = False) -> tuple[str, str | None]:
     if effective_mode == "private":
         return get_local_chat_model(), None
 
-    provider = _cache["cloud_provider"]
-    cloud_model = _cache["cloud_model"]
+    provider = _routing_value("cloud_provider")
+    cloud_model = _routing_value("cloud_model")
     prefix = provider if provider in _PROVIDER_KEY_FIELDS else "openai"
     api_key = resolve_provider_api_key(prefix)
 

@@ -84,7 +84,8 @@ was a heading. Every caller reads `get_rerank_enabled`. `test_chat_graph_nodes.p
 chat-graph retrieval stops reading it, shrinks `k`, or the entity regex returns to single words.
 
 **I-53. A provider and a model are stored apart and spent together, so choosing a provider without a model routes to another provider's model.**
-A provider change carries that provider's default model (`_PROVIDER_DEFAULT_MODEL`); re-sending the
+A provider change carries that provider's default model (`cloud_models.PROVIDER_DEFAULT_MODEL`, the
+head of its curated list), and Settings swaps the model field on the same click; re-sending the
 stored provider is not a change, and a model named in the same PATCH wins. `test_settings.py` fails
 CI if an offered provider resolves outside its own family.
 

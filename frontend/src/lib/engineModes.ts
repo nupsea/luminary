@@ -49,10 +49,10 @@ export const ENGINE_MODES: readonly EngineModeDef[] = [
   {
     id: "cloud",
     label: "Cloud",
-    summary: "Answers, cards, summaries, tags and titles all use your API key.",
+    summary: "Answers, cards, summaries, tags, titles and figures all use your API key.",
     sends:
-      "Your question with the passages retrieved for it, and sections of your documents for summaries, tags and titles.",
-    onUnsupportedHost: "Everything works with your key except describing figures.",
+      "Your question with the passages retrieved for it, sections of your documents for summaries, tags and titles, and the figures in them.",
+    onUnsupportedHost: "Everything works with your key.",
     needsKey: true,
   },
 ] as const
@@ -180,7 +180,7 @@ export function hostNotice(
     mode.id === "private"
       ? " Hybrid or Cloud mode runs answers and cards with your API key; change it in Settings."
       : mode.id === "hybrid"
-        ? " Cloud mode makes summaries, tags and titles with your API key and sends sections of your documents to your provider; change it in Settings."
+        ? " Cloud mode makes summaries, tags and titles and reads figures with your API key, sending sections of your documents and their figures to your provider; change it in Settings."
         : ""
   return `This machine can't run a local model at a usable speed (${host.host}). In ${mode.label} mode, not run: ${labels}.${next}`
 }

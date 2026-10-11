@@ -224,23 +224,22 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
 
     Falls back to {"image_type": "other", "description": raw_text, ...} if JSON parse fails.
     Raises LLMUnavailableError if no model is reachable.
-
-    When VISION_MODEL is an Ollama model and Ollama is unreachable, automatically falls
-    back to LITELLM_DEFAULT_MODEL (e.g. a cloud model) if it is not Ollama-based.
     """
-    vision_model: str = get_vision_model()
-    # The background route, not the interactive one. Enrichment runs on the
-    # user's own documents during ingestion, and in hybrid mode the interactive
-    # route is the cloud -- resolving "chat" here would base64 figures out of a
-    # private PDF to a provider, which is the leak class the background= audit
-    # closed.
+    # The vision role, then the background route -- never "chat". In hybrid the
+    # interactive route is the cloud, and resolving it here would base64 figures
+    # out of a private PDF to a provider: the leak class the background= audit
+    # closed. Only Cloud mode resolves vision to the cloud.
     from app.services.model_router import resolve  # noqa: PLC0415
 
+    vision_model: str = resolve("vision").model
     default_model: str = resolve("background").model
 
-    # Build list of models to try: primary first, then cloud fallback if primary is Ollama.
+    # The other side as fallback: local when the provider is unreachable, the
+    # cloud route when Ollama is.
     models_to_try: list[str] = [vision_model]
-    if vision_model.startswith("ollama/") and not default_model.startswith("ollama/"):
+    if not vision_model.startswith("ollama/"):
+        models_to_try.append(get_vision_model())
+    elif not default_model.startswith("ollama/"):
         models_to_try.append(default_model)
 
     # Resize large images to reduce inference time and avoid timeouts.
@@ -457,11 +456,13 @@ class ImageEnricherService:
                             get_vision_model(),
                         )
                     else:
+                        from app.services.model_router import resolve  # noqa: PLC0415
+
                         logger.warning(
-                            "image_enricher: vision model(s) unreachable for image_id=%s "
-                            "(VISION_MODEL=%s). In cloud mode, set VISION_MODEL to a "
-                            "cloud vision model, or leave Ollama running locally.",
+                            "image_enricher: no figure reader reachable for image_id=%s "
+                            "(tried %s, local %s)",
                             img.id,
+                            resolve("vision").model,
                             get_vision_model(),
                         )
                     raise
