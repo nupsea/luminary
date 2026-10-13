@@ -30,6 +30,7 @@ import fitz  # PyMuPDF
 from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
+from app.services import pdf_furniture, pdf_hyphens
 from app.services.source_text import read_source_text
 from app.services.universal_parser import _drop_bodyless, _is_nav_line
 from app.types import ParsedDocument, Section
@@ -213,8 +214,20 @@ def _is_metadata(heading: str) -> bool:
     return heading.lower().strip() in _METADATA_SIGNALS
 
 
-def _page_text_with_paragraphs(page) -> str:
-    """Page text with a blank line between paragraphs.
+def _is_body_block(block: tuple, page_height: float, running: frozenset[str]) -> bool:
+    # (x0, y0, x1, y1, text, block_no, block_type); type 0 is text.
+    if len(block) <= 6 or block[6] != 0 or not str(block[4]).strip():
+        return False
+    return not pdf_furniture.is_running(str(block[4]), block[1], block[3], page_height, running)
+
+
+def _page_text_with_paragraphs(
+    page,
+    running: frozenset[str] = frozenset(),
+    compounds: frozenset[tuple[str, str]] = frozenset(),
+) -> str:
+    """Page text with a blank line between paragraphs, without its running heads, and with
+    words broken at a line end rejoined.
 
     A PDF text layer is hard-wrapped, so flat extraction yields no paragraph
     boundary and the reader renders a whole chapter as one block. PyMuPDF's
@@ -227,14 +240,14 @@ def _page_text_with_paragraphs(page) -> str:
         return page.get_text()
     if not blocks:
         return page.get_text()
-    # (x0, y0, x1, y1, text, block_no, block_type); type 0 is text.
+    height = float(page.rect.height) or 1.0
     ordered = sorted(
-        (b for b in blocks if len(b) > 6 and b[6] == 0 and str(b[4]).strip()),
+        (b for b in blocks if _is_body_block(b, height, running)),
         key=lambda b: (round(b[1], 1), round(b[0], 1)),
     )
     if not ordered:
         return page.get_text()
-    return "\n\n".join(str(b[4]).strip() for b in ordered)
+    return "\n\n".join(pdf_hyphens.join_breaks(str(b[4]).strip(), compounds) for b in ordered)
 
 
 # A chapter's first body line is a subtitle only when it reads as a title. Word
@@ -372,12 +385,19 @@ class BookParser:
         doc = fitz.open(str(file_path))
         if len(doc) == 0:
             return None
-        # Extract per-page text to enable page number assignment after segmentation
-        page_texts = [_page_text_with_paragraphs(page) for page in doc]
+        running = pdf_furniture.running_signatures(doc)
+        compounds = pdf_hyphens.printed_compounds(doc)
+        page_texts = [_page_text_with_paragraphs(page, running, compounds) for page in doc]
+        # Pages are assigned by searching each heading in the page text as printed, so a
+        # section's page, and every citation from it, does not move with the stripping.
+        printed_pages = [_page_text_with_paragraphs(page, compounds=compounds) for page in doc]
         total_pages = len(doc)
         # Join pages with \f (form feed) so we can map chunks back to physical
         # page numbers even after Gutenberg/metadata stripping alters string offsets.
-        all_text = "\f".join(page_texts)
+        # The \n after it starts a line: chapter patterns anchor on ^, and a chapter
+        # opening its page, no longer under a running head, must still match. The
+        # chunker drops the \f, so without it a page's last word fused with the next.
+        all_text = "\f\n".join(page_texts)
         clean_text, _ = self._strip_gutenberg(all_text)
         sections = self._segment_chapters(clean_text)
         if not sections:
@@ -390,7 +410,7 @@ class BookParser:
         min_page = 1
         for section in sections:
             base = section.heading.split("—")[0].strip()
-            for page_num, pt in enumerate(page_texts, start=1):
+            for page_num, pt in enumerate(printed_pages, start=1):
                 if page_num >= min_page and base in pt:
                     section.page_start = page_num
                     min_page = page_num
