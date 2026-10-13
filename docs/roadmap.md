@@ -98,7 +98,7 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | I. Every host | 0.13.x | Every host is a first-class host — **0.13.9 released; exit gate open.** **Checkpoint A** | #24, #99, #110, #154, #155, #156 | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator; `make smoke` green on Windows and against the bundled macOS app |
 | II. Stability | 0.14.x | Gates you can believe — **0.14.5 released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
 | | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #100, #158, #159, #161, #185, #186, #187, #188, #189, #191, #204, #205 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
-| III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement; chapter practice | #66, #160, #162, #195, #221, #222, #223, #226, #227, #229, #231 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
+| III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement; chapter practice — **pairing merged (#260); chunking reads the measured form (#223, wire and column open); chapter card quality open (#160, #231, #252)** | #66, #160, #162, #195, #221, #222, #223, #226, #227, #229, #231 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail | #48 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
 | | 0.18.0 | Your own server. **Checkpoint C** | | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key |
 | IV. Separation | 0.19.0 | Components separated for mobile | | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
@@ -540,10 +540,11 @@ tokens against 1500) trades answer relevance for citation support on `paper` and
 effect on `book`; faithfulness was not measured (`backend/app/config.py`,
 `QA_CONTEXT_TOKEN_BUDGET_SLOW_HOST`). Note search's semantic arm finds a note from a query sharing
 no word stem with it at recall@1 0.64 and @5 0.79, measured on short notes only (#100,
-`docs/eval-coverage.md`). **Suggested questions (#66) moved to 0.16.0.** The fix on
-`fix/suggestions-grounded-66` stops "the text doesn't say" answers carrying citations (18 to 2 of 48
-on one library) but leaves real answers uncited (3 to 12), which breaks the rule that an answer
-shows its sources. The same bar covers
+`docs/eval-coverage.md`). **Suggested questions (#66): each must quote the passage that answers it
+(PR #288, 0.16.0).** Over two 200-question runs per arm on 50 documents, questions answered "not in
+the text" fell from 13.2% and 13.0% to 11.0% and 8.8%. That flag is a phrase match; a hand-read of one
+run found about 16 truly unanswerable questions before and 13 after, so the effect is real in
+direction and small. #66 stays open. The same bar covers
 Ask on a false premise (#158), web chunk hygiene (#159) and flashcard quality:
 0.53 of delivered cards are good, and no checker applied after generation lifts that above 0.62 (#191).
 A prompt that asks for a reason only where the text states one, plus a check that rejects unnamed
@@ -660,8 +661,11 @@ since its own chunks are identical.
 - `make eval` uploads every corpus document as `book` (`evals/lib/manifest.py`), so committed
   baselines for non-book goldens were measured on documents labelled as novels.
 
-YouTube ingest re-verification (#162) moved to 0.16.0: it needs traffic the development network does
-not allow. Then Checkpoint B: the app is stable enough that the next three rungs open it to the network.
+YouTube ingest (#162) is re-verified on the macOS dev backend (2026-10-10): download, transcript,
+a cited answer with its timestamp, and the 503 when ffmpeg is missing. The bundled app, Windows,
+Linux, the browser flow and a multi-chunk video are not verified, and #162 stays open.
+
+Then Checkpoint B: the app is stable enough that the next three rungs open it to the network.
 
 **Checkpoint B gates still to run** (table under "Checkpoint releases"). Each one is recorded here
 when it passes, or named in the release notes as not exercised:

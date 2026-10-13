@@ -6,11 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **A web page in any browser tab could drive the backend.** A form post or a plain fetch from another origin needs no CORS preflight, so it ran. A request from any other origin, another localhost port included, now needs a paired device's token; the app itself needs none (#260).
+
 ### Added
+- **Pair a device with a one-time code.** Settings > Devices shows an 8-character code, valid for five minutes and one use, that a device exchanges for its own revocable token; only the token's hash is stored (#260).
+- **The Pomodoro focus timer is in the app.** It was in developer builds only (#261).
 - **A red bookmark in the PDF view.** One per document, placed from the toolbar; the document opens on it, and a chip beside it jumps back from wherever citations or search took you.
 
 ### Changed
 - **A document is chunked by its measured shape, not by the type it was uploaded as (#223).** A manual uploaded as a book, or a meeting saved as notes, is now cut and expanded like what it is. A book whose code examples print timestamps is no longer read as a journal, and a tutorial divided into Parts of titled topics is a reference. Documents ingested before 0.16.0 keep the shape they were stored with.
+- **Ask lets the model route a question its opening words only guess at.** "Which…" or "how does…" claimed a route the model never checked, and "How does X compare with Y?" went to the graph. On 160 held-out questions, routing went from 74% to 88% right; the model is consulted on more questions, about 110 ms each on a fast machine (#268).
 - **Settings sets up a cloud provider in order: provider, key, model.** A key is checked with the provider before it is saved, and every provider lists its current models (Gemini 3.x, GPT-6, Claude 5.x) before a key exists.
 - **The PDF view scrolls continuously.** Pages stack in one scroll, so the wheel, the paging keys and a text selection all run across page breaks; only the pages near the view are drawn.
 - **Selected text offers Define for a term and Simplify for a passage**, both answered from the document's own passages rather than the selection alone.
@@ -39,6 +45,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dragging a selection across a gap in PDF text jumped it to the end of the page.** The text layer now carries the end-of-content guard pdf.js's own viewer uses.
 - **A highlight made near a page break was saved to the page in view** rather than the page it was made on.
 - **Deleting a document while its cards were generating could leave cards behind for a document that no longer exists.** Deleting now stops the generation, and the database refuses such a card; the upgrade removes any already left behind.
+- **A model server Luminary did not start could grow to 13.7 GB during one ingest.** Ollama.app loses its 512 MB prompt-cache cap at reboot. Luminary now unloads the models when that cache balloons, and a banner says how to cap it for the way Ollama was launched (#289, #291).
+- **Key points described only the opening of a long book.** They were written when the first three sections were summarized and never rebuilt; they now are once every section is, and summaries a restart interrupted resume (#263).
+- **An unmarked book's first chapter was its title pages and contributor list**, so its practice questions asked about contributors. Chapters now start after the opening front matter (#271).
+- **The Map told you to ingest a document when the entity model was missing.** It now says why the graph is empty and offers the install (#266).
+- **In the live note editor, text below a diagram, table or code block could not be selected, and ArrowUp skipped lines** (#270).
+- **Scraped DocBook pages kept their Prev / Next navigation lines** in sections and passages (#240).
+- **Speech to text failed to install from a source checkout** with `No module named pip` (#262).
+
+### Not fixed in this release
+- **About one model-written suggested question in ten still gets an answer flagged as not in the text (#66).**
+- **Generated cards are still below the factuality and clarity floors (#160)**, and chapter cards on a technical book can still quiz its preface (#252).
+- **YouTube ingest is verified only in a macOS source run (#162)**, not yet in the desktop app or on Windows and Linux.
+
+### Upgrading
+- **This release migrates the database**: a table of paired devices, cards that are deleted with their document (cards already left behind are removed), and the PDF bookmark. An older version cannot open the library afterwards.
 
 ## [0.15.5] - 2026-10-07
 
