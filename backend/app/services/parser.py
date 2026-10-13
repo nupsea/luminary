@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
+from app.services import pdf_furniture, pdf_hyphens
 from app.services.book_parser import BookParser
 from app.services.source_text import read_source_text
 from app.services.universal_parser import UniversalParser
@@ -283,12 +284,6 @@ def _usable_heading(title: str, page, body_size: float, fallback_body: str) -> s
 _SPACE_GAP_EM = 0.2
 
 
-# Running headers and footers sit in the page margins and are short. Once
-# blocks become paragraphs, each would otherwise land in the prose as one.
-_MARGIN_FRACTION = 0.1
-_FURNITURE_MAX_CHARS = 80
-
-
 def _printed_page_labels(doc) -> dict[int, str]:
     """Sheet number -> the number printed on it, where the two differ.
 
@@ -433,17 +428,52 @@ def _is_folio(text: str) -> bool:
     return stripped.isdigit() and 1 <= len(stripped) <= _PAGE_NUMBER_MAX_DIGITS
 
 
+def _block_text(block: dict) -> str:
+    return " ".join(_join_spans(line.get("spans", [])) for line in block.get("lines", [])).strip()
+
+
 def _is_page_furniture(block: dict, page_height: float) -> bool:
+    """Any short margin block. The TOC path trusts its bookmarks for structure, so it can
+    afford this; the fallback paths find headings in the text and use `pdf_furniture`."""
     bbox = block.get("bbox")
     if not bbox or len(bbox) < 4:
         return False
-    top, bottom = float(bbox[1]), float(bbox[3])
-    margin = page_height * _MARGIN_FRACTION
-    in_margin = bottom <= margin or top >= page_height - margin
-    if not in_margin:
+    if not pdf_furniture.in_margin(float(bbox[1]), float(bbox[3]), page_height):
         return False
-    text = " ".join(_join_spans(line.get("spans", [])) for line in block.get("lines", [])).strip()
-    return 0 < len(text) <= _FURNITURE_MAX_CHARS
+    return 0 < len(_block_text(block)) <= pdf_furniture.FURNITURE_MAX_CHARS
+
+
+def _is_running_furniture(
+    block: dict, page_height: float, running: frozenset[str], heading_threshold: float
+) -> bool:
+    """A recurring margin block, unless it is set at heading size: the fallback scan reads
+    headings from the text, and removing one would merge two sections."""
+    bbox = block.get("bbox")
+    if not running or not bbox or len(bbox) < 4:
+        return False
+    sizes = [s["size"] for line in block.get("lines", []) for s in line.get("spans", [])]
+    if sizes and max(sizes) >= heading_threshold:
+        return False
+    return pdf_furniture.is_running(
+        _block_text(block), float(bbox[1]), float(bbox[3]), page_height, running
+    )
+
+
+def _append_body_line(
+    texts: list[str],
+    raw_parts: list[str],
+    line: str,
+    continues_block: bool,
+    compounds: frozenset[tuple[str, str]],
+) -> None:
+    """Append a line, or finish the word the block's previous line broke at its end."""
+    if continues_block:
+        joined = pdf_hyphens.join_breaks(f"{texts[-1]}\n{line}", compounds)
+        if "\n" not in joined:
+            texts[-1] = raw_parts[-1] = joined
+            return
+    texts.append(line)
+    raw_parts.append(line)
 
 
 # A stacked fraction (numerator, root symbol, denominator) sits on one visual
@@ -609,6 +639,8 @@ class DocumentParser:
 
         body_avg = sum(all_font_sizes) / len(all_font_sizes) if all_font_sizes else 12.0
         heading_threshold = body_avg * 1.2
+        # Joined inside a block, before any page-break offset is measured from its length.
+        compounds = pdf_hyphens.printed_compounds(doc)
 
         # Try PDF built-in bookmarks (TOC) first -- these have accurate page numbers
         # and define the chapter-level structure the author intended.
@@ -654,7 +686,8 @@ class DocumentParser:
                             block_lines.append(line_text)
                         if block_lines:
                             bbox = block.get("bbox") or (0.0, 0.0, 0.0, 0.0)
-                            raw_blocks.append(("\n".join(block_lines), tuple(bbox)))
+                            text = pdf_hyphens.join_breaks("\n".join(block_lines), compounds)
+                            raw_blocks.append((text, tuple(bbox)))
                     page_block_cache[pn] = _merge_same_row_blocks(raw_blocks, body_avg)
                 return page_block_cache[pn]
 
@@ -845,12 +878,18 @@ class DocumentParser:
             current_texts = []
             current_page_marks = []
 
+        running = pdf_furniture.running_signatures(doc)
         for page_num, page in enumerate(doc):
             if page_num + 1 > current_page_start:
                 current_page_marks.append(len(current_texts))
+            page_height = float(page.rect.height) or 1.0
             for block in page.get_text("dict")["blocks"]:  # type: ignore[arg-type]
                 if block.get("type") != 0:
                     continue
+                if _is_running_furniture(block, page_height, running, heading_threshold):
+                    continue
+                # A word broken at a line end continues only within its own block.
+                continues_block = False
                 for line in block.get("lines", []):
                     spans = line.get("spans", [])
                     if not spans:
@@ -866,9 +905,12 @@ class DocumentParser:
                     ):
                         level = 1 if max_size >= h1_min else 2
                         flush_section(line_text, level, page_num + 1)
+                        continues_block = False
                     else:
-                        current_texts.append(line_text)
-                        raw_parts.append(line_text)
+                        _append_body_line(
+                            current_texts, raw_parts, line_text, continues_block, compounds
+                        )
+                        continues_block = True
 
         flush_section("_end", 0, total_pages + 1)
         raw_text = "\n".join(raw_parts)
