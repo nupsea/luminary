@@ -21,7 +21,9 @@ can always correct the exact type, and the picker stays visible so they can.
 
 from __future__ import annotations
 
+import itertools
 import re
+from collections import defaultdict
 
 # Gutenberg wraps every text in a licence. The markers are stable across the
 # corpus and are the only reliable way to find where the actual work starts.
@@ -212,12 +214,16 @@ _NAMED_MARKER = re.compile(
 # Counting them makes every novel a reference: Hamlet rates 1.63 on them alone.
 _NARRATIVE_DIVISION = re.compile(r"^[ \t]{0,6}(?:Chapter|Part|Book|Canto|Act|Scene)\b", re.I | re.M)
 
-# Three dated units is a habit rather than a mention.
+# An entry is dated by the day. A time of day, or more digits after the day,
+# makes the line a record -- a log line, a query result, a partition value.
 _DATED_ENTRY = re.compile(
-    r"^[ \t]{0,6}(?:Date\s*:|\d{4}-\d{2}-\d{2}\b|"
+    r"^[ \t]{0,6}(?:Date\s*:|\d{4}-\d{2}-\d{2}\b(?![-T ]?\d)|"
     r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}\b)",
     re.I | re.M,
 )
+
+# Three dated units is a habit rather than a mention.
+_MIN_DATED_ENTRIES = 3
 
 # Past this length, marker density describes how long a document is rather than
 # what it is: `ibm-sdm-vol-2` carries 1,391 markers and rates 0.47 uncapped.
@@ -478,9 +484,58 @@ def classify_form(
 
     # Dated or delimited units, not merely short: keying on length alone made a
     # 1,704-word blog post a journal.
-    if len(_DATED_ENTRY.findall(full)) >= 3:
+    if is_made_of_dated_units(full):
         return "entries"
 
     if word_count < _ARTICLE_MAX_WORDS:
         return "article"
+    # A manual titles its sections in markdown or a PDF outline rather than
+    # numbering them in the text, which the markers above cannot see.
+    if has_nested_sections(sections):
+        return "reference"
     return "prose"
+
+
+def is_made_of_dated_units(text: str) -> bool:
+    """Whether the text is a run of dated entries, not a work that mentions dates.
+
+    A journal's dates divide it: every stretch of text belongs to some entry.
+    Dates gathered in one place -- a release history, a dated preface -- leave
+    one undated stretch holding most of the work, and that work is not entries.
+    """
+    entry_starts = [match.start() for match in _DATED_ENTRY.finditer(text)]
+    if len(entry_starts) < _MIN_DATED_ENTRIES:
+        return False
+    boundaries = [0, *entry_starts, len(text)]
+    longest_stretch = max(end - start for start, end in itertools.pairwise(boundaries))
+    return longest_stretch <= len(text) / 2
+
+
+def has_nested_sections(sections: list[dict]) -> bool:
+    """Whether the document's divisions split into titled sub-sections.
+
+    A reference is organised for lookup, so its divisions nest: chapter, then
+    the topics inside it. A narrative is read in order, and when it nests at all
+    it nests narrative divisions -- Part into Chapter, Act into Scene -- so depth
+    counts only where the deeper levels hold topics.
+    """
+    divisions = _divisions_by_level(sections)
+    if len(divisions) < 2:
+        return False
+    _top, *deeper = sorted(divisions)
+    topics = [h for lvl in deeper for h in divisions[lvl] if not _NARRATIVE_DIVISION.match(h)]
+    return len(topics) > 1
+
+
+def _divisions_by_level(sections: list[dict]) -> dict[int, list[str]]:
+    """Titled headings per level, for the levels that divide the document.
+
+    A level used once is the document's title, not a division.
+    """
+    by_level: dict[int, list[str]] = defaultdict(list)
+    for section in sections:
+        heading = str(section.get("heading") or "").strip()
+        level = section.get("level")
+        if heading and isinstance(level, int):
+            by_level[level].append(heading)
+    return {lvl: headings for lvl, headings in by_level.items() if len(headings) > 1}

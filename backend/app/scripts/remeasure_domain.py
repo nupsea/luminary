@@ -72,7 +72,10 @@ async def _read(doc: DocumentModel, session) -> tuple[str, list[dict], int, str]
 
         path = Path(doc.file_path)
         parsed = await asyncio.to_thread(DocumentParser().parse, path, path.suffix.lstrip("."))
-        sections = [{"heading": s.heading} for s in parsed.sections]
+        # As parse_node builds them: `classify_form` reads the heading levels.
+        sections = [
+            {"heading": s.heading, "level": s.level, "text": s.text} for s in parsed.sections
+        ]
         return parsed.raw_text, sections, parsed.word_count, path.suffix.lstrip(".")
     except Exception as exc:  # noqa: BLE001
         logger.warning("  could not read %s: %s", doc.title, type(exc).__name__)
