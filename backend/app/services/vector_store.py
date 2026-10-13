@@ -162,6 +162,27 @@ class LanceDBService:
         ).when_matched_update_all().when_not_matched_insert_all().execute(chunks)
         logger.info("Upserted %d chunks to LanceDB", len(chunks))
 
+    def replace_chunk_text(self, updates: dict[str, tuple[str, list[float]]]) -> int:
+        """Set text and vector on existing chunk rows, keeping every other field as stored.
+
+        `updates` is chunk_id -> (text, vector). Returns how many rows were rewritten.
+        """
+        pred = id_predicate("chunk_id", list(updates), context="replace_chunk_text")
+        if pred is None:
+            return 0
+        table = self._get_table()
+        rows = table.search().where(pred).limit(len(updates)).to_list()
+        merged = [
+            {
+                **{k: v for k, v in r.items() if not k.startswith("_")},
+                "text": updates[r["chunk_id"]][0],
+                "vector": updates[r["chunk_id"]][1],
+            }
+            for r in rows
+        ]
+        self.upsert_chunks(merged)
+        return len(merged)
+
     def count_for_document(self, document_id: str) -> int:
         """Return the number of vector rows stored for the given document_id."""
         try:

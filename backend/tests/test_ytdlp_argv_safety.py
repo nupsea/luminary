@@ -29,6 +29,13 @@ def test_audio_download_ends_option_parsing_before_the_url():
     assert '"--"' in argv
 
 
+def test_caption_download_ends_option_parsing_before_the_url():
+    argv = _argv_before_url(inspect.getsource(youtube_downloader), '"--skip-download"')
+    assert '"--"' in argv
+    # A track key is YouTube's, so it is bound to its flag and never a token of its own.
+    assert 'f"--sub-langs={track}"' in argv
+
+
 def test_a_url_that_looks_like_a_flag_is_still_rejected_upstream():
     """Defence in depth: the allowlist and the separator both have to hold."""
     assert not youtube_downloader.is_youtube_url("--config-location=/etc/passwd")

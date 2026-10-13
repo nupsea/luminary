@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from typing import NamedTuple
 
 from fastapi import Depends
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
@@ -319,6 +319,39 @@ class DocumentRepo:
 
 def get_document_repo(session: AsyncSession = Depends(get_db)) -> DocumentRepo:
     return DocumentRepo(session)
+
+
+async def index_chunks_fts(session: AsyncSession, document_id: str) -> None:
+    """(Re)write the document's FTS5 rows: context_header || text || entities_text.
+
+    The header lives out of chunks.text (kept off the embedding) but is still indexed
+    for BM25 so section/title terms remain matchable; entities_text bridges canonical
+    entity names. Rowid delete: FTS5 UNINDEXED equality is unreliable (patterns.md).
+    """
+    await session.execute(
+        text(
+            "DELETE FROM chunks_fts WHERE rowid IN "
+            "(SELECT rowid FROM chunks WHERE document_id = :doc_id)"
+        ),
+        {"doc_id": document_id},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO chunks_fts(rowid, text, chunk_id, document_id) "
+            "SELECT rowid, "
+            "       CASE "
+            "         WHEN context_header IS NOT NULL AND context_header != '' "
+            "         THEN context_header || ' ' "
+            "         ELSE '' END "
+            "       || text || CASE "
+            "         WHEN entities_text IS NOT NULL AND entities_text != '' "
+            "         THEN ' ' || entities_text "
+            "         ELSE '' END, "
+            "       id, document_id FROM chunks "
+            "WHERE document_id = :doc_id"
+        ),
+        {"doc_id": document_id},
+    )
 
 
 class ChunkLocation(NamedTuple):

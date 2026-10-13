@@ -20,6 +20,7 @@ import { ModelsAndComponents } from "@/components/settings/ModelsAndComponents"
 import { type ModelDrift } from "@/components/settings/ModelDriftNotice"
 import { OreillySettings } from "@/components/settings/OreillySettings"
 import { ReportIssue } from "@/components/settings/ReportIssue"
+import { TranscriptVocabularySettings } from "@/components/settings/TranscriptVocabularySettings"
 import type { components } from "@/types/api"
 import { refreshModelState } from "@/lib/setupApi"
 
@@ -658,6 +659,10 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
           <div className="border-t border-border" />
 
           <BackgroundControl />
+
+          <div className="border-t border-border" />
+
+          <TranscriptVocabularySettings />
 
           <div className="border-t border-border" />
 

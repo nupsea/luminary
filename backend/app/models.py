@@ -59,6 +59,14 @@ class DocumentModel(Base):
     # Canonical YouTube video URL -- set during YouTube ingestion, same value as source_url.
     # Separate field so API consumers can identify YouTube docs without heuristic URL parsing.
     youtube_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Terms the source's own metadata spells (title, tags, description), handed to
+    # the speech model so a re-import transcribes with the same hints. Null = none.
+    transcript_vocabulary: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # captions|speech: the uploader's caption track, or speech-to-text. Null = not media.
+    transcript_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Corrections applied to the transcript: [{"heard", "term", "source": user|model,
+    # "count"}]. User entries are re-applied on re-import; model ones are re-derived.
+    transcript_corrections: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # Approximate publication year parsed from document front matter (Copyright YYYY).
     # Nullable: most documents will not have explicit year information.
     publication_year: Mapped[int | None] = mapped_column(Integer, nullable=True)

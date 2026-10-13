@@ -12,20 +12,26 @@ transcript to DocumentModel.
 """
 
 import asyncio
+import contextlib
 import logging
 import shutil
 import tempfile
 import uuid as _uuid
+import wave
 from pathlib import Path
 
 from sqlalchemy import update as _update
 
 from app.database import get_session_factory
 from app.models import DocumentModel
+from app.repos.transcript_repo import fetch_transcript_inputs
 from app.services import (
     audio_transcriber as _audio_transcriber_module,  # indirect: get_audio_transcriber is patched
 )
+from app.services.captions import captions_path, parse_vtt
 from app.services.components import resolve_tool
+from app.services.transcript_correction import correct_transcript
+from app.services.transcript_vocabulary import hotwords
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _persist_classification,
@@ -82,10 +88,38 @@ def _chunk_audio(
     return chunks
 
 
+def _wav_duration(path: Path) -> float | None:
+    try:
+        with contextlib.closing(wave.open(str(path), "rb")) as w:
+            return w.getnframes() / w.getframerate()
+    except (wave.Error, OSError, EOFError, ZeroDivisionError):
+        return None
+
+
+async def _transcript(doc_id: str, source: Path, audio: Path) -> tuple[list[dict], float, str]:
+    """(segments, duration, transcript_source): the uploader's captions, else primed
+    Whisper; then the corrections pass (`transcript_correction`)."""
+    captions = captions_path(source)
+    segments = parse_vtt(captions.read_text(encoding="utf-8")) if captions.exists() else []
+    if segments:
+        segments = await correct_transcript(doc_id, segments, ordinary=None)
+        return segments, _wav_duration(audio) or segments[-1]["end"], "captions"
+    vocabulary, _, _ = await fetch_transcript_inputs(doc_id)
+    transcriber = _audio_transcriber_module.get_audio_transcriber()
+    # CPU-bound -- run in thread pool to keep event loop free for status polls
+    segments, duration = await asyncio.to_thread(
+        transcriber.transcribe, audio, hotwords=hotwords(vocabulary)
+    )
+    segments = await correct_transcript(doc_id, segments, ordinary=transcriber.is_whole_word)
+    return segments, duration, "speech"
+
+
 async def transcribe_node(state: IngestionState) -> IngestionState:
     """Transcribe audio/video files using faster-whisper.
 
     For non-audio/video content types this is a pass-through.
+    An uploader's caption track beside the audio is read instead of transcribing;
+    otherwise Whisper runs, primed with the document's `transcript_vocabulary`.
     For audio files: calls AudioTranscriber directly.
     For video files: runs ffmpeg to extract audio first, then transcribes.
     Builds parsed_document from segments, writes audio_duration_seconds to
@@ -149,10 +183,7 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
         else:
             transcribe_fp = fp
 
-        transcriber = _audio_transcriber_module.get_audio_transcriber()
-        loop = asyncio.get_running_loop()
-        # CPU-bound -- run in thread pool to keep event loop free for status polls
-        segments, duration = await loop.run_in_executor(None, transcriber.transcribe, transcribe_fp)
+        segments, duration, transcript_source = await _transcript(doc_id, fp, transcribe_fp)
 
         raw_text = " ".join(s["text"] for s in segments)
         audio_chunks = _chunk_audio(segments, doc_id)
@@ -186,6 +217,7 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
                 .values(
                     audio_duration_seconds=duration,
                     word_count=len(raw_text.split()),
+                    transcript_source=transcript_source,
                 )
             )
             await session.commit()
@@ -206,6 +238,7 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
                 "doc_id": doc_id,
                 "segments": len(segments),
                 "duration": duration,
+                "transcript_source": transcript_source,
                 "is_technical": is_technical,
             },
         )

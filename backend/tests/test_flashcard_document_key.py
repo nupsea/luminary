@@ -9,7 +9,7 @@ import sqlite3
 import uuid
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -71,9 +71,14 @@ async def test_the_upgrade_removes_orphan_cards_and_their_index_rows(tmp_path):
 
         factory = async_sessionmaker(engine, expire_on_commit=False)
         async with factory() as session:
-            session.add(
-                DocumentModel(
-                    id="kept", title="t", format="txt", content_type="notes", file_path="x"
+            # Raw SQL: the ORM writes every column `models.py` declares, and columns
+            # added after the downgrade target do not exist in this schema.
+            await session.execute(
+                text(
+                    "INSERT INTO documents (id, title, format, content_type, word_count, "
+                    "page_count, file_path, stage, tags, created_at, last_accessed_at) "
+                    "VALUES ('kept', 't', 'txt', 'notes', 0, 0, 'x', 'complete', '[]', "
+                    "'2026-03-31', '2026-03-31')"
                 )
             )
             kept, orphan, note = _card("kept"), _card("gone"), _card(None)

@@ -162,7 +162,8 @@ def routing_report() -> RoutingReport:
             "transcription",
             "Transcribing audio and video",
             f"whisper-{settings.WHISPER_MODEL_SIZE}",
-            "Whisper runs on this machine in every mode.",
+            "Whisper runs on this machine in every mode, and so does the local model "
+            "that checks misheard terms against your vocabulary.",
         ),
         _fixed(
             "extraction",

@@ -1232,6 +1232,26 @@ export interface paths {
         patch: operations["patch_document_documents__document_id__patch"];
         trace?: never;
     };
+    "/documents/{document_id}/transcript/corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Correct Transcript Term
+         * @description Replace a misheard term throughout a transcript, its search index and vectors.
+         */
+        post: operations["correct_transcript_term_documents__document_id__transcript_corrections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/overview": {
         parameters: {
             query?: never;
@@ -5172,6 +5192,24 @@ export interface paths {
         patch: operations["patch_retrieval_settings_settings_retrieval_patch"];
         trace?: never;
     };
+    "/settings/transcript-vocabulary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Transcript Vocabulary */
+        get: operations["get_transcript_vocabulary_settings_transcript_vocabulary_get"];
+        /** Put Transcript Vocabulary */
+        put: operations["put_transcript_vocabulary_settings_transcript_vocabulary_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/background": {
         parameters: {
             query?: never;
@@ -7946,6 +7984,13 @@ export interface components {
             channel_name?: string | null;
             /** Youtube Url */
             youtube_url?: string | null;
+            /** Transcript Source */
+            transcript_source?: string | null;
+            /**
+             * Transcript Corrections
+             * @default []
+             */
+            transcript_corrections: components["schemas"]["TranscriptCorrection"][];
         };
         /** DocumentDiagnostics */
         DocumentDiagnostics: {
@@ -11653,6 +11698,54 @@ export interface components {
             /** Message */
             message?: string | null;
         };
+        /** TranscriptCorrection */
+        TranscriptCorrection: {
+            /** Heard */
+            heard: string;
+            /** Term */
+            term: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "user" | "model";
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+        };
+        /** TranscriptFixRequest */
+        TranscriptFixRequest: {
+            /** Heard */
+            heard: string;
+            /** Term */
+            term: string;
+            /**
+             * Remember
+             * @default true
+             */
+            remember: boolean;
+        };
+        /** TranscriptFixResponse */
+        TranscriptFixResponse: {
+            /** Occurrences */
+            occurrences: number;
+            /** Chunks */
+            chunks: number;
+            /** Sections */
+            sections: number;
+            /** Vocabulary Added */
+            vocabulary_added: boolean;
+        };
+        /**
+         * TranscriptVocabulary
+         * @description Terms every speech transcript is corrected toward ("LanceDB", "Kimi K3").
+         */
+        TranscriptVocabulary: {
+            /** Terms */
+            terms?: string[];
+        };
         /** TranscriptionResponse */
         TranscriptionResponse: {
             /** Text */
@@ -14266,6 +14359,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    correct_transcript_term_documents__document_id__transcript_corrections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TranscriptFixRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptFixResponse"];
                 };
             };
             /** @description Validation Error */
@@ -20464,6 +20592,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetrievalSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_transcript_vocabulary_settings_transcript_vocabulary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptVocabulary"];
+                };
+            };
+        };
+    };
+    put_transcript_vocabulary_settings_transcript_vocabulary_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TranscriptVocabulary"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptVocabulary"];
                 };
             };
             /** @description Validation Error */

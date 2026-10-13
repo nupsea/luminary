@@ -6,9 +6,9 @@ via `__all__` so existing imports keep working.
 """
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from app.schemas.membership import CollectionRef
 from app.types import ContentType
@@ -126,6 +126,13 @@ class DocumentDiagnostics(BaseModel):
     vector_count: int
 
 
+class TranscriptCorrection(BaseModel):
+    heard: str
+    term: str
+    source: Literal["user", "model"]
+    count: int = 0
+
+
 class DocumentDetail(BaseModel):
     id: str
     title: str
@@ -157,6 +164,23 @@ class DocumentDetail(BaseModel):
     video_title: str | None = None
     channel_name: str | None = None
     youtube_url: str | None = None
+    # captions|speech for media; null otherwise.
+    transcript_source: str | None = None
+    transcript_corrections: list[TranscriptCorrection] = []
+
+
+class TranscriptFixRequest(BaseModel):
+    heard: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    term: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    # Also add `term` to the personal vocabulary every later import is corrected with.
+    remember: bool = True
+
+
+class TranscriptFixResponse(BaseModel):
+    occurrences: int
+    chunks: int
+    sections: int
+    vocabulary_added: bool
 
 
 class ChunkItem(BaseModel):
