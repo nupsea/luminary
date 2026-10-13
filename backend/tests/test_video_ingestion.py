@@ -122,7 +122,10 @@ async def test_transcribe_node_video_with_ffmpeg(test_db, tmp_path):
     }
 
     class _MockTranscriber:
-        def transcribe(self, file_path: Path) -> tuple[list[dict], float]:
+        def is_whole_word(self, word: str) -> bool:
+            return True
+
+        def transcribe(self, file_path: Path, *, hotwords=None) -> tuple[list[dict], float]:
             return (
                 [
                     {"start": 0.0, "end": 5.0, "text": "Hello from video"},

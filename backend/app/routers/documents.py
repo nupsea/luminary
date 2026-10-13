@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import uuid
 import zipfile
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -69,6 +70,9 @@ from app.schemas.documents import (
     SavePositionRequest,
     SectionItem,
     SetBookmarkRequest,
+    TranscriptCorrection,
+    TranscriptFixRequest,
+    TranscriptFixResponse,
     UrlIngestRequest,
     YouTubeIngestRequest,
 )
@@ -81,6 +85,7 @@ from app.services import network_errors
 from app.services import youtube_downloader as _yt_module
 from app.services.activity_service import ActivityService
 from app.services.article_extractor import get_article_extractor
+from app.services.captions import captions_path
 from app.services.components import (
     capabilities,
     ffmpeg_install_command,
@@ -126,6 +131,8 @@ from app.services.remote_source import (
     fetch_remote_document,
 )
 from app.services.summarizer import PREGENERATE_MODES
+from app.services.transcript_fix import fix_term
+from app.services.transcript_vocabulary import vocabulary_from_metadata
 from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
 from app.types import DocumentProfile
@@ -1173,6 +1180,10 @@ async def ingest_url(
     if not dest.exists():
         raise HTTPException(status_code=500, detail="Downloaded audio file not found")
 
+    track = _yt_module.uploader_caption_language(meta)
+    if track:
+        await _yt_module.download_captions(body.url, captions_path(dest), track)
+
     async with get_session_factory()() as session:
         doc = DocumentModel(
             id=doc_id,
@@ -1188,6 +1199,7 @@ async def ingest_url(
             video_title=video_title,
             channel_name=channel_name,
             youtube_url=body.url,
+            transcript_vocabulary=vocabulary_from_metadata(meta) or None,
         )
         # Document row must exist in SQLite before the background ingestion job starts.
         session.add(doc)
@@ -1299,7 +1311,31 @@ async def get_document(document_id: str):
         video_title=doc.video_title,
         channel_name=doc.channel_name,
         youtube_url=doc.youtube_url,
+        transcript_source=doc.transcript_source,
+        transcript_corrections=_transcript_corrections(doc.transcript_corrections),
     )
+
+
+def _transcript_corrections(stored: list | None) -> list[TranscriptCorrection]:
+    return [
+        TranscriptCorrection(**c)
+        for c in stored or []
+        if isinstance(c, dict) and c.get("source") in ("user", "model")
+    ]
+
+
+@router.post(
+    "/{document_id}/transcript/corrections", response_model=TranscriptFixResponse
+)
+async def correct_transcript_term(
+    document_id: str, body: TranscriptFixRequest
+) -> TranscriptFixResponse:
+    """Replace a misheard term throughout a transcript, its search index and vectors."""
+    async with get_session_factory()() as session:
+        result = await fix_term(
+            session, document_id, body.heard, body.term, remember=body.remember
+        )
+    return TranscriptFixResponse(**asdict(result))
 
 
 @router.get("/{document_id}/overview", response_model=DocumentOverviewResponse)

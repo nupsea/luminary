@@ -35,7 +35,7 @@ from app.services.tech_section_parser import (
     is_objective_candidate,
 )
 from app.telemetry import trace_ingestion_node
-from app.types import DocumentProfile, chunk_config_for_form
+from app.types import PREVIEW_CHARS, DocumentProfile, chunk_config_for_form
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _background_tasks,
@@ -43,9 +43,6 @@ from app.workflows.ingestion_nodes._shared import (
 )
 
 logger = logging.getLogger(__name__)
-
-# `preview` is a bounded snippet; reading text lives in `body`, uncapped (I-29).
-PREVIEW_CHARS = 10000
 
 
 def _profile(state: IngestionState) -> DocumentProfile:

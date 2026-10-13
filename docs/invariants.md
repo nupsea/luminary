@@ -235,6 +235,16 @@ from 1.20x. Figures are separated from bordered prose by full-width-line share (
 0.25, between 0.176 and 0.333), not text density. Extraction retires what it no longer produces only
 on a complete pass. `tests/test_image_extractor.py` guards it.
 
+**I-66. A transcript correction is a glossary term a model chose for a span code proposed, never text a model wrote.**
+Terms come from the source's metadata and the learner's vocabulary; code proposes spans that read
+like one (`MIN_SIMILARITY` 0.56, bracketed by "rack" -> "RAG" 0.571 and "Dara engineering is" ->
+"DataEngBytes" 0.552) and are not ordinary words or a different number. Asked for a yes-list, the
+local 4B model accepted 18 of 49 noise spans on a real talk ("find" -> "Flink"), so the model picks
+between the two sentences, at temperature 0, on the local model, and a span is changed only when the
+corrected sentence wins in both orders. On the same talk: none of the 49 accepted; 9 of 12 known
+mishearings fixed in the unprimed transcript, all 5 left after priming in the primed one, and two runs
+agreed. `tests/test_transcript_correction.py` guards both orders, the locality and the floor.
+
 ## Quality gates
 
 **I-32. An eval metric that could not be computed is a failure, never a pass.**

@@ -15,12 +15,17 @@ class SettingsRepo:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def get_flag(self, key: str) -> bool | None:
-        """The stored flag, or None when unset or not a boolean."""
+    async def get(self, key: str) -> Any:
+        """The stored value, or None when unset."""
         row = (
             await self.session.execute(select(SettingsModel).where(SettingsModel.key == key))
         ).scalar_one_or_none()
-        return row.value if row is not None and isinstance(row.value, bool) else None
+        return None if row is None else row.value
+
+    async def get_flag(self, key: str) -> bool | None:
+        """The stored flag, or None when unset or not a boolean."""
+        value = await self.get(key)
+        return value if isinstance(value, bool) else None
 
     async def set_flag(self, key: str, value: bool) -> None:
         await self.put(key, bool(value))

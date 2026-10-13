@@ -95,7 +95,10 @@ async def test_transcribe_node_populates_parsed_document(test_db, tmp_path):
     audio_file.write_bytes(b"\x00" * 100)
 
     class _MockAudioTranscriber:
-        def transcribe(self, file_path: Path) -> tuple[list[dict], float]:
+        def is_whole_word(self, word: str) -> bool:
+            return True
+
+        def transcribe(self, file_path: Path, *, hotwords=None) -> tuple[list[dict], float]:
             return (
                 [
                     {"start": 0.0, "end": 5.0, "text": "Hello"},

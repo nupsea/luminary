@@ -4,6 +4,9 @@ from typing import Any, Literal, TypedDict, TypeGuard, get_args
 # A card written ahead for a chapter, outside the review schedule until the chapter is practised.
 CARD_HELD = "held"
 
+# A section's `preview` is a bounded snippet; reading text lives in `body`, uncapped (I-29).
+PREVIEW_CHARS = 10000
+
 ContentType = Literal[
     "book",
     "conversation",

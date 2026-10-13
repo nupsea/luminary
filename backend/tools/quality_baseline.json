@@ -193,7 +193,6 @@
     "app/workflows/concept_nodes/persist.py": 5,
     "app/workflows/ingestion_nodes/_shared.py": 4,
     "app/workflows/ingestion_nodes/chunk.py": 9,
-    "app/workflows/ingestion_nodes/embed.py": 1,
     "app/workflows/ingestion_nodes/entity_extract.py": 1,
     "app/workflows/ingestion_nodes/finalize.py": 3,
     "app/workflows/ingestion_nodes/transcribe.py": 1

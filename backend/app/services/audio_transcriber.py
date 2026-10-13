@@ -68,12 +68,20 @@ class AudioTranscriber:
             ) from exc
         logger.info("AudioTranscriber: loaded model_size=%s from local cache", model_size)
 
-    def transcribe(self, file_path: Path) -> tuple[list[dict], float]:
+    def transcribe(
+        self, file_path: Path, *, hotwords: str | None = None
+    ) -> tuple[list[dict], float]:
         """Return (segments, duration_seconds).
 
         segments: list of {"start": float, "end": float, "text": str}
+
+        `hotwords` primes every 30 s window, unlike `initial_prompt`, which only
+        reaches the first. A primed model can emit its prompt over silence (see
+        `dictate`), so silence is cut out first whenever there is a prompt.
         """
-        segments_iter, info = self._model.transcribe(str(file_path), beam_size=1)
+        segments_iter, info = self._model.transcribe(
+            str(file_path), beam_size=1, hotwords=hotwords, vad_filter=hotwords is not None
+        )
         result = [
             {"start": seg.start, "end": seg.end, "text": seg.text.strip()}
             for seg in segments_iter
@@ -85,6 +93,17 @@ class AudioTranscriber:
             info.duration,
         )
         return result, info.duration
+
+    def is_whole_word(self, word: str) -> bool:
+        """Whether the speech model's own vocabulary holds `word` as one token.
+
+        The tokenizer writes the commonest words as a bare space marker then the
+        word ("Ġ", "that"), so that form counts as whole too.
+        """
+        tokens = self._model.hf_tokenizer.encode(
+            " " + word.casefold(), add_special_tokens=False
+        ).tokens
+        return len(tokens) == 1 or (len(tokens) == 2 and tokens[0] == "Ġ")
 
     def dictate(self, file_path: Path, *, language: str | None) -> tuple[str, float]:
         """Transcribe a short spoken answer; returns (text, duration_seconds).

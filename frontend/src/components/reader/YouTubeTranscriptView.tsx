@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query"
-import { ExternalLink, Loader2, Search, X } from "lucide-react"
+import { ExternalLink, Loader2, PenLine, Search, X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiGet } from "@/lib/apiClient"
+import { transcriptSourceLabel } from "@/lib/transcriptVocabulary"
+import { TranscriptFixForm } from "./TranscriptFixForm"
 import type { ChunkItem, DocumentDetail } from "./types"
 import { relativeDate } from "@/components/library/utils"
 import { cn } from "@/lib/utils"
@@ -53,6 +55,8 @@ export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }:
   const readerZoom = usePanelZoomStore((s) => s.getZoom("reader"))
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
+  const [fixOpen, setFixOpen] = useState(false)
+  const [fixHeard, setFixHeard] = useState("")
   const searchInputRef = useRef<HTMLInputElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
 
@@ -128,6 +132,21 @@ export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }:
 
   const duration = formatDuration(doc.audio_duration_seconds ?? null)
   const videoUrl = doc.youtube_url ?? doc.source_url
+  const corrections = doc.transcript_corrections ?? []
+  const sourceLabel = transcriptSourceLabel(doc.transcript_source, corrections)
+  const correctionsTitle = corrections
+    .filter((c) => (c.count ?? 0) > 0)
+    .map((c) => `${c.heard} → ${c.term} (${c.count})`)
+    .join("\n")
+
+  // A selection inside the transcript is the likeliest thing being fixed.
+  const openFix = () => {
+    const selection = window.getSelection()
+    const inside =
+      selection && contentRef.current && contentRef.current.contains(selection.anchorNode)
+    setFixHeard(inside ? selection.toString().trim() : "")
+    setFixOpen(true)
+  }
 
   const matchingChunkIds = searchQuery.trim()
     ? new Set(
@@ -161,7 +180,26 @@ export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }:
           )}
           {duration && <span>{duration}</span>}
           <span>Ingested {relativeDate(doc.created_at)}</span>
+          {sourceLabel && (
+            <span title={correctionsTitle || undefined}>{sourceLabel}</span>
+          )}
+          {(doc.stage === "complete" || doc.stage === "enriching") && !fixOpen && (
+            <button
+              onClick={openFix}
+              className="inline-flex items-center gap-1 text-primary hover:underline"
+            >
+              <PenLine size={11} />
+              Fix a term
+            </button>
+          )}
         </div>
+        {fixOpen && (
+          <TranscriptFixForm
+            documentId={doc.id}
+            initialHeard={fixHeard}
+            onClose={() => setFixOpen(false)}
+          />
+        )}
       </div>
 
       {/* Keyword search bar */}

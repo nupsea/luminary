@@ -5,7 +5,7 @@ from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -26,6 +26,7 @@ from app.services.settings_service import (
     set_rerank_enabled,
     update_llm_settings,
 )
+from app.services.transcript_fix import personal_vocabulary, set_personal_vocabulary
 
 logger = logging.getLogger(__name__)
 
@@ -442,6 +443,29 @@ async def patch_retrieval_settings(
 ) -> RetrievalSettingsResponse:
     await set_rerank_enabled(db, body.rerank_enabled)
     return RetrievalSettingsResponse(rerank_enabled=await get_rerank_enabled(db))
+
+
+# Transcript vocabulary
+
+
+class TranscriptVocabulary(BaseModel):
+    """Terms every speech transcript is corrected toward ("LanceDB", "Kimi K3")."""
+
+    terms: list[Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)]] = Field(
+        default_factory=list, max_length=1000
+    )
+
+
+@router.get("/transcript-vocabulary", response_model=TranscriptVocabulary)
+async def get_transcript_vocabulary(db: AsyncSession = Depends(get_db)) -> TranscriptVocabulary:
+    return TranscriptVocabulary(terms=await personal_vocabulary(db))
+
+
+@router.put("/transcript-vocabulary", response_model=TranscriptVocabulary)
+async def put_transcript_vocabulary(
+    body: TranscriptVocabulary, db: AsyncSession = Depends(get_db)
+) -> TranscriptVocabulary:
+    return TranscriptVocabulary(terms=await set_personal_vocabulary(db, body.terms))
 
 
 # Background work

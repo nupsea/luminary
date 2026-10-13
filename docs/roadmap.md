@@ -53,6 +53,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 | A citation lands on its passage -- marked, centred and held there -- in prose, transcripts and as an overlay on the PDF page itself | `invariants.md` I-41, `frontend/src/lib/citation/`, `make verify-citation` |
 | Engine modes (private, hybrid, cloud), the engine offer, the privacy receipt, and the supported-host policy (0.10.0) | `engine-and-hosts.md` |
 | The docked reader panel: faces, per-type citations, docked chat and composer, live markdown, the in-reader practice loop (0.11.0) | `reader-panel.md`, `make verify-dock` |
+| Transcripts that spell their terms: the uploader's captions over speech recognition, Whisper primed with the video's metadata, a judged glossary pass, a personal vocabulary and a reader fix that rewrites text, index and vectors | `invariants.md` I-66, `services/transcript_correction.py`, `services/transcript_fix.py` |
 
 Notes and the recommender shipped without a surviving contract doc because their behaviour is
 adequately described by `architecture.md` plus the code. Their specs were deleted on

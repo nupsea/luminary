@@ -8,6 +8,7 @@ import asyncio
 import importlib.util
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -142,3 +143,64 @@ async def download_audio(url: str, dest_stem: Path) -> None:
             else f"yt-dlp download failed (exit {proc.returncode})"
         )
     logger.info("yt-dlp downloaded audio to %s.wav", dest_stem)
+
+
+_TRACK_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+
+
+def _uploaded_tracks(meta: dict) -> list[str]:
+    return [
+        k
+        for k in meta.get("subtitles") or {}
+        if isinstance(k, str) and _TRACK_KEY.fullmatch(k) and k != "live_chat"
+    ]
+
+
+def uploader_caption_language(meta: dict) -> str | None:
+    """The key of the uploader's caption track in the language the video is spoken in.
+
+    `subtitles` holds tracks a person uploaded; YouTube's own speech recognition is
+    in `automatic_captions` and mishears the same words Whisper does. A track in
+    another language is a translation, not what was said, so a video that does not
+    declare its language gets no track.
+    """
+    spoken = meta.get("language")
+    if not isinstance(spoken, str) or not spoken:
+        return None
+    primary = spoken.split("-")[0].casefold()
+    matching = [k for k in _uploaded_tracks(meta) if k.split("-")[0].casefold() == primary]
+    if not matching:
+        return None
+    return spoken if spoken in matching else sorted(matching)[0]
+
+
+async def download_captions(url: str, dest: Path, track: str) -> bool:
+    """Write the uploader's `track` as WebVTT to `dest`. False when none arrived.
+
+    Never fatal: without captions the audio is transcribed instead.
+    """
+    stem = dest.parent / f"{dest.name}.part"
+    proc = await asyncio.create_subprocess_exec(
+        *_ytdlp_argv(),
+        "--skip-download",
+        "--write-subs",
+        "--no-write-auto-subs",
+        f"--sub-langs={track}",
+        "--sub-format=vtt",
+        "-o",
+        f"{stem}.%(ext)s",
+        # See fetch_metadata: `--` ends option parsing so the URL can never be
+        # read as a flag.
+        "--",
+        url,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    written = stem.with_name(f"{stem.name}.{track}.vtt")
+    if proc.returncode != 0 or not written.exists():
+        logger.warning("caption track %s not downloaded: %s", track, _last_error_line(stderr))
+        written.unlink(missing_ok=True)
+        return False
+    written.replace(dest)
+    return True

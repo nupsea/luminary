@@ -14,9 +14,8 @@ canonical entity names.
 import asyncio
 import logging
 
-from sqlalchemy import text
-
 from app.database import get_session_factory
+from app.repos.document_repo import index_chunks_fts
 from app.telemetry import trace_ingestion_node
 from app.workflows.ingestion_nodes._shared import IngestionState, _update_stage
 
@@ -145,27 +144,7 @@ async def keyword_index_node(state: IngestionState) -> IngestionState:
     with trace_ingestion_node("keyword_index", state):
         try:
             async with get_session_factory()() as session:
-                # FTS text = context_header || text || entities_text (when each is
-                # present). The header lives out of chunks.text (kept off the
-                # embedding) but is still indexed for BM25 so section/title terms
-                # remain matchable; entities_text bridges canonical entity names.
-                await session.execute(
-                    text(
-                        "INSERT INTO chunks_fts(rowid, text, chunk_id, document_id) "
-                        "SELECT rowid, "
-                        "       CASE "
-                        "         WHEN context_header IS NOT NULL AND context_header != '' "
-                        "         THEN context_header || ' ' "
-                        "         ELSE '' END "
-                        "       || text || CASE "
-                        "         WHEN entities_text IS NOT NULL AND entities_text != '' "
-                        "         THEN ' ' || entities_text "
-                        "         ELSE '' END, "
-                        "       id, document_id FROM chunks "
-                        "WHERE document_id = :doc_id"
-                    ),
-                    {"doc_id": doc_id},
-                )
+                await index_chunks_fts(session, doc_id)
                 await session.commit()
             logger.info("FTS5 index populated", extra={"doc_id": doc_id})
             # Forward-fill per-chunk content dates for temporal query filters.
