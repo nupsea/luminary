@@ -624,12 +624,41 @@ library last opened at revision `f1a2b3c4d5e6`. Results:
 delete `graph.kuzu`.
 
 **Retiring `content_type` is not a mechanical refactor, so it moved to 0.16.0 (#223).** `form`,
-`domain` and `register` are written at ingest by `_persist_classification`, but chunking, the book
-prompt guideline and front-matter skipping still key on the legacy label. The stored `form` disagrees
-with the label's mapping on 13 of 67 dev-library documents (2026-10-01), so dropping the column
-changes what one document in five receives, and needs a measurement first. 0.15.0 ships the prep:
-readers take the kind from `DocumentProfile.of(doc)` (`backend/app/types.py`), still built from the
-legacy columns, and the quality ratchet counts `content_type` references per file, shrink-only.
+`domain` and `register` are written at ingest by `_persist_classification`; the quality ratchet
+counts `content_type` references per file, shrink-only.
+
+*Built in 0.16.0:* policy reads the measured facets. `DocumentProfile.of(doc)` takes the stored
+`form`, `domain` and `register`, and the legacy columns answer only what was never measured;
+chunking dispatches on the form (`chunk_node`), and context expansion and front-matter skipping
+follow it. Two `classify_form` defects surfaced in the measurement and are fixed from what the form
+means: `entries` needs dated units that divide the text, not dates anywhere (timestamps in a
+book's query examples made the Iceberg book a journal and cut it into 199-character chunks), and a
+long document whose titled divisions split into titled topics is a `reference` (a markdown tutorial
+in Parts read as prose). Both definitions were revised once each after a library document failed
+validation (timestamps were first counted as dates; a tutorial's "Part" headings first hid its
+depth), so the library shaped them more than a held-out set would have.
+
+The labelled corpus now carries a `form` per document (`tests/fixtures/content_type_labels.json`),
+labels proposed in #294 and not yet reviewed by the maintainer. 10 of its 14 files are in the
+checkout and all 10 are classified as labelled; the other 4 skip.
+
+Measured 2026-10-13, one isolated backend per rule on the same six documents, the label rule on
+`master` and the form rule on the branch, the cross-encoder confirmed loaded. The Iceberg book
+(1,469 chunks) and the tutorial (178) chunk exactly as under the label; only `ml_notes` changes
+chunker, `entries` -> `article`. Of 40 figures (HR@5, MRR, nDCG@10 and search failures, five
+goldens, rerank on and off), 36 are equal to four decimals. The four that move: notes without
+rerank, MRR 0.9375 -> 0.9667 and nDCG@10 0.9531 -> 0.9750; the tutorial with rerank, MRR
+0.5485 -> 0.5496 and nDCG@10 0.6355 -> 0.6365, from BM25 statistics shared across the corpus
+since its own chunks are identical.
+
+*Open:*
+- A library ingested before 0.16.0 keeps the forms the old classifier stored, which context
+  expansion now reads; `app.scripts.remeasure_domain --apply` re-measures them, and nothing runs it
+  for a desktop user.
+- The wire and the column: the API, the frontend's reading profiles and filters still take
+  `content_type`, and the column is not dropped.
+- `make eval` uploads every corpus document as `book` (`evals/lib/manifest.py`), so committed
+  baselines for non-book goldens were measured on documents labelled as novels.
 
 YouTube ingest re-verification (#162) moved to 0.16.0: it needs traffic the development network does
 not allow. Then Checkpoint B: the app is stable enough that the next three rungs open it to the network.

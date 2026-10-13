@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A red bookmark in the PDF view.** One per document, placed from the toolbar; the document opens on it, and a chip beside it jumps back from wherever citations or search took you.
 
 ### Changed
+- **A document is chunked by its measured shape, not by the type it was uploaded as (#223).** A manual uploaded as a book, or a meeting saved as notes, is now cut and expanded like what it is. A book whose code examples print timestamps is no longer read as a journal, and a tutorial divided into Parts of titled topics is a reference. Documents ingested before 0.16.0 keep the shape they were stored with.
 - **Settings sets up a cloud provider in order: provider, key, model.** A key is checked with the provider before it is saved, and every provider lists its current models (Gemini 3.x, GPT-6, Claude 5.x) before a key exists.
 - **The PDF view scrolls continuously.** Pages stack in one scroll, so the wheel, the paging keys and a text selection all run across page breaks; only the pages near the view are drawn.
 - **Selected text offers Define for a term and Simplify for a passage**, both answered from the document's own passages rather than the selection alone.
