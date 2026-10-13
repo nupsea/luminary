@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-14
+
 ### Security
 - **A web page in any browser tab could drive the backend.** A form post or a plain fetch from another origin needs no CORS preflight, so it ran. A request from any other origin, another localhost port included, now needs a paired device's token; the app itself needs none (#260).
 
@@ -13,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pair a device with a one-time code.** Settings > Devices shows an 8-character code, valid for five minutes and one use, that a device exchanges for its own revocable token; only the token's hash is stored (#260).
 - **The Pomodoro focus timer is in the app.** It was in developer builds only (#261).
 - **A red bookmark in the PDF view.** One per document, placed from the toolbar; the document opens on it, and a chip beside it jumps back from wherever citations or search took you.
+- **YouTube transcripts get names and technical terms right (#298).** The uploader's own captions are used when a video has them. Otherwise speech recognition is primed with terms from the video's title and description and from a personal vocabulary in Settings, and the local model repairs a misheard term only when it prefers the corrected sentence in both orders. On a 37-minute talk, 9 of 10 misheard terms were repaired and none were introduced. A term still wrong can be fixed from the reader: the fix applies everywhere in the transcript, including search, and is remembered.
 
 ### Changed
 - **A document is chunked by its measured shape, not by the type it was uploaded as (#223).** A manual uploaded as a book, or a meeting saved as notes, is now cut and expanded like what it is. A book whose code examples print timestamps is no longer read as a journal, and a tutorial divided into Parts of titled topics is a reference. Documents ingested before 0.16.0 keep the shape they were stored with.
@@ -25,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The "Where to start" panel and `/study/start` and `/study/path`.** Nothing ever filled them: the prerequisite extractor behind them was never run, and run, the local model found no prerequisites or invented them. Prerequisite edges stated in the text ("X requires Y") still show on the Map.
 
 ### Fixed
+- **PDF text carried page headers, page numbers and line-break hyphens mid-sentence** ("two families of 69 storage engines", "bookques- tions"), which broke quote checks, search and the reader. They are removed at import (#296).
+- **Direct mode invented the content of a pasted link.** It cannot open links, so a question like "blog for this video: <url>" got a made-up article. It now says so and points at Add Content, without calling a model; the receipt for that reply names no model (#297).
 - **Hybrid and Cloud modes showed a warning that the machine had overruled the local chat model, and its "Switch" button failed with 404.** Using the cloud model was the mode working as chosen; the warning now reports only a local model the machine overruled.
 - **In Hybrid and Cloud, Settings presented the local model as the chat model**, and the Dev Tools page showed a blank model and Ollama offline. Settings now opens with which model does what, job by job, labels the pickers as local, and says what the local model is in use for.
 - **Picking a mode in Settings left "Which model does what" showing the saved one**, so Cloud picked but not saved still listed summaries on the local model. The table now previews the unsaved choice, marked Not saved, resolved by the same router (`GET /settings/llm/routing?mode=&provider=&model=`); nothing is saved until Save.
@@ -59,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **YouTube ingest is verified only in a macOS source run (#162)**, not yet in the desktop app or on Windows and Linux.
 
 ### Upgrading
-- **This release migrates the database**: a table of paired devices, cards that are deleted with their document (cards already left behind are removed), and the PDF bookmark. An older version cannot open the library afterwards.
+- **This release migrates the database**: a table of paired devices, cards that are deleted with their document (cards already left behind are removed), the PDF bookmark, and a document's transcript vocabulary and corrections. An older version cannot open the library afterwards.
 
 ## [0.15.5] - 2026-10-07
 
