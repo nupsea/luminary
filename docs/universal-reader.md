@@ -63,7 +63,7 @@ Neither field alone picks a layout, so both are stored:
 
 | Field | Source | Values | Answers |
 |---|---|---|---|
-| `documents.content_type` | `_classify` in `workflows/ingestion_nodes/_shared.py` | `book`, `paper`, `tech_book`, `tech_article`, `conversation`, `code`, `notes`, `audio`, `video`, `kindle_clippings`, `epub` | What the document is about, and how it chunks |
+| `documents.content_type` | `_classify` in `workflows/ingestion_nodes/_shared.py` | `book`, `paper`, `tech_book`, `tech_article`, `conversation`, `code`, `notes`, `audio`, `video`, `kindle_clippings`, `epub` | What the document is about. Chunking reads the measured `form` instead (`DocumentProfile.of`, `app/types.py`) |
 | `documents.structure_type` | `UniversalParser` signature discovery and `BookParser`, persisted by `parse_node` | `book`, `paper`, `script`, `chat` | How it is laid out |
 
 `content_type` knows a transcript is technical; `structure_type` knows it is

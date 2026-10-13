@@ -294,27 +294,60 @@ class TestGenreWiring:
 
 
 class TestProfileOfStoredDocument:
-    """`DocumentProfile.of` reads the legacy columns, so a reader moved onto it
-    behaves as it did when it tested `content_type` itself."""
+    """`DocumentProfile.of` reads what classification measured. The label is a
+    fallback for what it did not: `book` covers a novel and a textbook, so a
+    policy keyed on it chunks and prompts the textbook as a novel (#223)."""
 
     @staticmethod
-    def _row(content_type: str, form: str, is_technical: bool | None = None):
+    def _row(
+        content_type: str,
+        form: str | None = None,
+        domain: str | None = None,
+        register: str | None = None,
+        is_technical: bool | None = None,
+    ):
         from types import SimpleNamespace
 
         return SimpleNamespace(
-            content_type=content_type, is_technical=is_technical, form=form, domain=None
+            content_type=content_type,
+            is_technical=is_technical,
+            form=form,
+            domain=domain,
+            register=register,
         )
 
-    def test_front_matter_follows_the_legacy_book_label_not_the_stored_form(self) -> None:
-        # A `book` the classifier stored as `article`, and a `tech_article` stored as `prose`:
-        # both disagreements exist in a real library, and only the label decided before.
-        assert DocumentProfile.of(self._row("book", form="article")).has_front_matter
-        assert not DocumentProfile.of(self._row("tech_article", form="prose")).has_front_matter
+    def test_the_measured_form_decides_over_the_label(self) -> None:
+        textbook = DocumentProfile.of(self._row("book", form="reference"))
+        assert textbook.form == "reference"
+        assert not textbook.has_front_matter
+        assert not textbook.expands_context
 
-    def test_only_book_skips_front_matter_among_stored_types(self) -> None:
-        stored = ["book", "tech_book", "tech_article", "paper", "conversation", "audio", "notes"]
-        skips = [ct for ct in stored if DocumentProfile.of(self._row(ct, "prose")).has_front_matter]
-        assert skips == ["book"]
+        novel = DocumentProfile.of(self._row("tech_article", form="prose"))
+        assert novel.has_front_matter
+
+    def test_a_row_from_before_the_facets_reads_its_label(self) -> None:
+        assert DocumentProfile.of(self._row("book")).form == "prose"
+        assert DocumentProfile.of(self._row("tech_book")).form == "reference"
+
+    def test_a_failed_domain_probe_falls_back_to_the_label(self) -> None:
+        """A failed probe stores a null domain, but `tech_book` names the subject."""
+        profile = DocumentProfile.of(self._row("tech_book", form="reference"))
+        assert profile.domain == "technical"
+
+        measured = DocumentProfile.of(self._row("tech_book", form="reference", domain="general"))
+        assert measured.domain == "general"
 
     def test_no_document_has_no_front_matter(self) -> None:
         assert not DocumentProfile.of(None).has_front_matter
+
+
+class TestWithMeasuredForm:
+    def test_the_measured_form_decides_chunking(self) -> None:
+        profile = DocumentProfile.from_legacy("book").with_measured_form("reference")
+        assert profile.chunk_config == DocumentProfile(form="reference").chunk_config
+
+    def test_an_unknown_form_keeps_the_label(self) -> None:
+        """A form outside the vocabulary would have no chunk sizes at all."""
+        book = DocumentProfile.from_legacy("book")
+        assert book.with_measured_form(None).form == "prose"
+        assert book.with_measured_form("novel").form == "prose"

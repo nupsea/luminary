@@ -1,12 +1,14 @@
-"""The chunker family: chunk_node + content-type-specific chunkers.
+"""The chunker family: chunk_node + form-specific chunkers.
 
-chunk_node is the dispatcher. Based on `content_type` it delegates to
-one of:
-- _chunk_book           books / EPUBs / kindle clippings / notes / papers
-- _chunk_tech_book      technical books with fenced code + numbered headings
-- _chunk_conversation   conversation transcripts with speaker turns
+chunk_node is the dispatcher. Media and code are recognised by their content
+type; everything else by the document's measured form:
 - audio path            uses pre-built `_audio_chunks` from transcribe_node
 - _chunk_code_file      source-code files (function/class granularity via CodeParser)
+- _chunk_tech_book      reference and article: fenced code, numbered headings
+- _chunk_book           prose and script, read start to finish
+- _chunk_conversation   dialogue: speaker turns
+- _chunk_paper          paper: abstract, method, results
+- _chunk_generic        entries, and the fallback for the above
 
 Each chunker writes ChunkModel rows (and CodeSnippetModel for code) and
 returns an updated IngestionState. The shared chunker contract is:
@@ -44,6 +46,12 @@ logger = logging.getLogger(__name__)
 
 # `preview` is a bounded snippet; reading text lives in `body`, uncapped (I-29).
 PREVIEW_CHARS = 10000
+
+
+def _profile(state: IngestionState) -> DocumentProfile:
+    """`DocumentProfile.of` mid-ingest: the measured form is in the state, not yet the row."""
+    legacy = DocumentProfile.from_legacy(state.get("content_type"), state.get("is_technical"))
+    return legacy.with_measured_form(state.get("form"))
 
 
 def _context_header(doc_title: str, section_heading: str) -> str:
@@ -346,8 +354,8 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
     4. Store extracted code blocks in CodeSnippetModel with language and AST signature.
     """
 
-    content_type = state.get("content_type") or "tech_book"
-    cfg = DocumentProfile.from_legacy(content_type, state.get("is_technical")).chunk_config
+    profile = _profile(state)
+    cfg = profile.chunk_config
 
     async with get_session_factory()() as session:
         doc_result = await session.execute(
@@ -522,7 +530,7 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
             "doc_id": doc_id,
             "num_chunks": len(chunks),
             "num_snippets": len(snippet_models),
-            "content_type": content_type,
+            "form": profile.form,
         },
     )
     return {**state, "chunks": chunks, "status": "embedding"}
@@ -776,19 +784,21 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                 )
                 return {**state, "chunks": chunks, "status": "embedding"}
 
-            if content_type in ("tech_book", "tech_article"):
+            profile = _profile(state)
+            if profile.form in ("reference", "article"):
                 return await _chunk_tech_book(state, pd, doc_id)
 
-            if content_type == "book":
+            # A play is read start to finish, as prose is.
+            if profile.form in ("prose", "script"):
                 return await _chunk_book(state, pd, doc_id)
 
-            if content_type == "conversation":
+            if profile.form == "dialogue":
                 return await _chunk_conversation(state, pd, doc_id)
 
-            if content_type == "paper":
+            if profile.form == "paper":
                 return await _chunk_paper(state, pd, doc_id)
 
-            return await _chunk_generic(state, pd, doc_id, content_type)
+            return await _chunk_generic(state, pd, doc_id)
         except Exception as exc:
             logger.exception("chunk_node failed", exc_info=exc)
             return {**state, "status": "error", "error": str(exc)}
@@ -814,7 +824,7 @@ async def _chunk_paper(state: IngestionState, pd: dict | None, doc_id: str) -> I
             "Paper structure not recognised; using generic chunking",
             extra={"doc_id": doc_id, "num_sections": len(raw_sections)},
         )
-        return await _chunk_generic(state, pd, doc_id, "paper")
+        return await _chunk_generic(state, pd, doc_id)
 
     try:
         cfg = chunk_config_for_form("paper")
@@ -916,18 +926,16 @@ async def _chunk_paper(state: IngestionState, pd: dict | None, doc_id: str) -> I
             exc_info=exc,
             extra={"doc_id": doc_id},
         )
-        return await _chunk_generic(state, pd, doc_id, "paper")
+        return await _chunk_generic(state, pd, doc_id)
 
 
-async def _chunk_generic(
-    state: IngestionState, pd: dict | None, doc_id: str, content_type: str
-) -> IngestionState:
+async def _chunk_generic(state: IngestionState, pd: dict | None, doc_id: str) -> IngestionState:
     """Section-aware chunking with the default splitter.
 
-    Also the fallback for content types with a specialised chunker, so an
+    Also the fallback for forms with a specialised chunker, so an
     unrecognised or malformed document still ingests instead of failing.
     """
-    cfg = DocumentProfile.from_legacy(content_type, state.get("is_technical")).chunk_config
+    cfg = _profile(state).chunk_config
     splitter = _splitter_cls()(chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"])
     chunks = []
     async with get_session_factory()() as session:

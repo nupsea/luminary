@@ -17,7 +17,7 @@ from pathlib import Path
 from app.services.content_classifier import classify_content, classify_form
 from app.services.llm_admission import awaited
 from app.telemetry import trace_ingestion_node
-from app.types import TECHNICAL_CONTENT_TYPES, DocumentProfile, register_for_form
+from app.types import TECHNICAL_CONTENT_TYPES, register_for_form
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _parser,
@@ -87,7 +87,31 @@ async def parse_node(state: IngestionState) -> IngestionState:
             return {**state, "status": "error", "error": str(exc)}
 
 
-async def _measure_facets(content_type: str, pd: dict | None) -> tuple[bool | None, str | None]:
+def _measure_form(state: IngestionState) -> str | None:
+    pd = state.get("parsed_document")
+    if not pd:
+        return None
+    fp = Path(state["file_path"])
+    return classify_form(
+        pd["raw_text"], pd["sections"], pd["word_count"], fp.suffix.lstrip("."), fp.name
+    )
+
+
+async def _measure_register(form: str | None, pd: dict | None) -> str | None:
+    # A paper reports and a manual instructs, so the shape settles it and the
+    # probe would spend ~2.6s on a known answer. Combining the two probes into
+    # one call was measured instead and is worse on both axes and 0.84x the
+    # speed -- the cost is prompt tokens, not call overhead.
+    settled = register_for_form(form) if form else None
+    if settled is not None:
+        return settled
+    raw_text = (pd or {}).get("raw_text") or ""
+    return await detect_register(raw_text) if raw_text.strip() else None
+
+
+async def _measure_facets(
+    content_type: str, form: str | None, pd: dict | None
+) -> tuple[bool | None, str | None]:
     """Read the domain and the register from the document, in one pass.
 
     Both are asked of the text rather than derived from the type, because the
@@ -95,17 +119,7 @@ async def _measure_facets(content_type: str, pd: dict | None) -> tuple[bool | No
     and nothing about a content type says whether a work tells or explains.
     """
     is_technical = await _measure_domain(content_type, pd)
-    raw_text = (pd or {}).get("raw_text") or ""
-
-    # A paper reports and a manual instructs, so the shape settles it and the
-    # probe would spend ~2.6s on a known answer. Combining the two probes into
-    # one call was measured instead and is worse on both axes and 0.84x the
-    # speed -- the cost is prompt tokens, not call overhead.
-    settled = register_for_form(DocumentProfile.from_legacy(content_type).form)
-    if settled is not None:
-        return is_technical, settled
-    register = await detect_register(raw_text) if raw_text.strip() else None
-    return is_technical, register
+    return is_technical, await _measure_register(form, pd)
 
 
 async def _measure_domain(content_type: str, pd: dict | None) -> bool | None:
@@ -143,14 +157,10 @@ async def classify_node(state: IngestionState) -> IngestionState:
                 if pd
                 else "tech_article"
             )
-            # The user asserted the domain; the register is settled by the
-            # resolved shape when that shape is a manual, and read otherwise.
-            settled = register_for_form(DocumentProfile.from_legacy(resolved).form)
-            if settled is not None:
-                register = settled
-            else:
-                register = await detect_register(pd["raw_text"]) if pd else None
-            await _persist_classification(state["document_id"], resolved, True, register)
+            # The user asserted the domain; the shape is still measured.
+            form = _measure_form(state)
+            register = await _measure_register(form, pd)
+            await _persist_classification(state["document_id"], resolved, True, register, form)
             logger.info(
                 "classify_node: resolved user-provided 'technical'",
                 extra={"doc_id": state["document_id"], "content_type": resolved},
@@ -159,6 +169,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
                 **state,
                 "content_type": resolved,
                 "is_technical": True,
+                "form": form,
                 "status": "chunking",
             }
         if provided in ("audio", "video"):
@@ -168,25 +179,14 @@ async def classify_node(state: IngestionState) -> IngestionState:
                 extra={"doc_id": state["document_id"], "content_type": provided},
             )
             return {**state, "status": "chunking"}
-        is_technical, register = await _measure_facets(provided, state.get("parsed_document"))
-        pd_provided = state.get("parsed_document")
-        form = (
-            classify_form(
-                pd_provided["raw_text"],
-                pd_provided["sections"],
-                pd_provided["word_count"],
-                Path(state["file_path"]).suffix.lstrip("."),
-                Path(state["file_path"]).name,
-            )
-            if pd_provided
-            else None
-        )
+        form = _measure_form(state)
+        is_technical, register = await _measure_facets(provided, form, state.get("parsed_document"))
         await _persist_classification(state["document_id"], provided, is_technical, register, form)
         logger.info(
             "classify_node: skipping (user-provided content_type)",
             extra={"doc_id": state["document_id"], "content_type": provided},
         )
-        return {**state, "is_technical": is_technical, "status": "chunking"}
+        return {**state, "is_technical": is_technical, "form": form, "status": "chunking"}
     with trace_ingestion_node("classify", state):
         try:
             pd = state["parsed_document"]
@@ -251,20 +251,13 @@ async def classify_node(state: IngestionState) -> IngestionState:
 
             # Media documents are decided in transcribe_node instead — their text
             # does not exist yet at this point.
-            is_technical, register = await _measure_facets(content_type, pd)
-            # The classified type has to reach the row, not just the state. Chunking
-            # and NER read it from the state and were correct, so a document could
-            # be chunked and entity-extracted as a tech_book while the library, the
-            # filters and every later read still called it whatever the row was
-            # seeded with. Harmless while this branch only ran for documents whose
-            # row already held the caller's own value; a silent mislabel now that
-            # classification is the normal path.
             # Measured from structure, not derived from content_type: the
             # legacy map reaches `reference` only through `tech_book`, so a
             # non-technical manual could never be one.
-            form = classify_form(
-                pd["raw_text"], pd["sections"], pd["word_count"], file_ext, filename
-            )
+            form = _measure_form(state)
+            is_technical, register = await _measure_facets(content_type, form, pd)
+            # The classified facets reach the row, not just the state: the library,
+            # filters and every later read come from the row.
             await _persist_classification(
                 state["document_id"], content_type, is_technical, register, form
             )
@@ -281,6 +274,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
                 **state,
                 "content_type": content_type,
                 "is_technical": is_technical,
+                "form": form,
                 "status": "chunking",
             }
         except Exception as exc:
