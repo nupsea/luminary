@@ -170,27 +170,21 @@ async def _expand_context(
 
     expanded_by_id: dict[str, ScoredChunk] = {chunk.chunk_id: chunk for chunk in chunks}
 
-    # Collect all document_ids to fetch content_types in a single query.
     doc_ids = list({c.document_id for c in chunks})
 
     async with get_session_factory()() as session:
-        # Fetch content_type per document
-        ct_result = await session.execute(
-            text("SELECT id, content_type FROM documents WHERE id IN :doc_ids").bindparams(
-                bindparam("doc_ids", expanding=True)
-            ),
-            {"doc_ids": doc_ids},
-        )
-        content_types: dict[str, str] = {row[0]: row[1] for row in ct_result.fetchall()}
+        docs = (
+            await session.execute(
+                text(
+                    "SELECT id, content_type, is_technical, form, domain, register "
+                    "FROM documents WHERE id IN :doc_ids"
+                ).bindparams(bindparam("doc_ids", expanding=True)),
+                {"doc_ids": doc_ids},
+            )
+        ).fetchall()
 
         # Neighbouring chunks only continue the same thought in some forms.
-        # Derived from content_type rather than read from `documents.form`
-        # because content_type is still the authoritative column in this rung.
-        eligible_docs = {
-            did
-            for did, ct in content_types.items()
-            if DocumentProfile.from_legacy(ct).expands_context
-        }
+        eligible_docs = {row.id for row in docs if DocumentProfile.of(row).expands_context}
         if not eligible_docs:
             return chunks
 

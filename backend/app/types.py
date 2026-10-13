@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
-from typing import Any, Literal, TypedDict
+from dataclasses import dataclass, field, replace
+from typing import Any, Literal, TypedDict, TypeGuard, get_args
 
 # A card written ahead for a chapter, outside the review schedule until the chapter is practised.
 CARD_HELD = "held"
@@ -24,12 +24,12 @@ ContentType = Literal[
 # Document facets. `ContentType` above answers four questions with one value --
 # container, shape, subject, size -- so it enumerates eleven cells of a cross
 # product. These separate the questions; `format` carries the container.
-# Written alongside content_type, which stays authoritative until the wire moves.
+# Policy reads these; content_type stays on the wire until the API moves (#223).
 
 Form = Literal[
     "prose",  # continuous long-form read start to finish
     "article",  # one self-contained piece, shallow headings
-    "reference",  # manual or textbook: numbered sections, admonitions, code
+    "reference",  # manual or textbook: sections nested or numbered for lookup
     "paper",  # abstract, method, results, references
     "dialogue",  # speaker turns: chat, interview, meeting, talk transcript
     "script",  # play or screenplay: scenes and stage directions
@@ -91,6 +91,13 @@ _REGISTER_BY_FORM: dict[str, Register] = {
     "paper": "expository",
     "reference": "expository",
 }
+
+
+_FORMS: frozenset[str] = frozenset(get_args(Form))
+
+
+def is_form(value: object) -> TypeGuard[Form]:
+    return value in _FORMS
 
 
 def register_for_form(form: Form) -> "Register | None":
@@ -217,13 +224,20 @@ class DocumentProfile:
     def of(cls, doc: Any) -> "DocumentProfile":
         """The profile policy reads for a stored document (None: nothing known).
 
-        Built from the legacy columns: stored `form` disagrees with them on about
-        one document in five, so reading it would change chunking and prompts.
-        Readers come through here so that switch is one measured edit.
+        What classification measured wins; the legacy columns answer only where
+        it measured nothing -- a row from before the facets, or a failed probe.
         """
         if doc is None:
             return cls.from_legacy(None)
-        return cls.from_legacy(doc.content_type, doc.is_technical)
+        legacy = cls.from_legacy(doc.content_type, doc.is_technical)
+        measured = cls.from_row(doc)
+        if measured is None:
+            return legacy
+        return replace(measured, domain=measured.domain or legacy.domain)
+
+    def with_measured_form(self, form: str | None) -> "DocumentProfile":
+        """This profile shaped by a measured form, when it is one the policies know."""
+        return replace(self, form=form) if is_form(form) else self
 
 
 @dataclass

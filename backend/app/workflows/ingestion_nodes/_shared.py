@@ -120,6 +120,7 @@ class IngestionState(TypedDict):
     section_summary_count: int | None
     audio_duration_seconds: float | None
     is_technical: bool | None
+    form: str | None
     structure_type: str | None
     defer_section_summaries: bool | None
     _audio_chunks: list[dict[str, Any]] | None
