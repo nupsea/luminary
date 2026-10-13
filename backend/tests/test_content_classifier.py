@@ -11,6 +11,7 @@ run -- they cover the specific defects that produced the 4/13, so a regression
 is caught even where the corpus is unavailable.
 """
 
+import functools
 import json
 from pathlib import Path
 
@@ -44,18 +45,23 @@ def _cases() -> list[dict]:
     return json.loads(_LABELS.read_text())["cases"]
 
 
-def _classify_path(path: Path) -> str:
+@functools.cache
+def _parse(path: Path) -> tuple[str, list[dict], int]:
     from app.services.parser import DocumentParser  # noqa: PLC0415
 
-    fmt = path.suffix.lstrip(".")
-    parsed = DocumentParser().parse(path, fmt)
-    return classify_content(
-        parsed.raw_text,
-        [s.__dict__ for s in parsed.sections],
-        parsed.word_count,
-        fmt,
-        path.name,
-    )
+    parsed = DocumentParser().parse(path, path.suffix.lstrip("."))
+    return parsed.raw_text, [s.__dict__ for s in parsed.sections], parsed.word_count
+
+
+def _corpus_path(case: dict) -> Path:
+    path = _REPO_ROOT / case["path"]
+    if not path.exists():
+        pytest.skip(f"{case['path']} not in this checkout")
+    return path
+
+
+def _classify_path(path: Path) -> str:
+    return classify_content(*_parse(path), path.suffix.lstrip("."), path.name)
 
 
 @pytest.mark.parametrize("case", _cases(), ids=lambda c: Path(c["path"]).name)
@@ -66,10 +72,7 @@ def test_labelled_corpus_family(case: dict) -> None:
     tech_book vs tech_article only changes chunk sizing, so family is asserted
     separately from the exact type and is the stricter gate of the two.
     """
-    path = _REPO_ROOT / case["path"]
-    if not path.exists():
-        pytest.skip(f"{case['path']} not in this checkout")
-    got = _classify_path(path)
+    got = _classify_path(_corpus_path(case))
     assert _FAMILIES[got] == case["family"], (
         f"{case['path']}: got {got} (family {_FAMILIES[got]}), "
         f"expected family {case['family']} -- {case['why']}"
@@ -78,12 +81,19 @@ def test_labelled_corpus_family(case: dict) -> None:
 
 @pytest.mark.parametrize("case", _cases(), ids=lambda c: Path(c["path"]).name)
 def test_labelled_corpus_exact(case: dict) -> None:
-    path = _REPO_ROOT / case["path"]
-    if not path.exists():
-        pytest.skip(f"{case['path']} not in this checkout")
-    got = _classify_path(path)
+    got = _classify_path(_corpus_path(case))
     assert got in case["expected"], (
         f"{case['path']}: got {got}, expected one of {case['expected']} -- {case['why']}"
+    )
+
+
+@pytest.mark.parametrize("case", _cases(), ids=lambda c: Path(c["path"]).name)
+def test_labelled_corpus_form(case: dict) -> None:
+    """The shape decides chunking, so a wrong form mis-cuts the whole document."""
+    path = _corpus_path(case)
+    got = classify_form(*_parse(path), path.suffix.lstrip("."), path.name)
+    assert got in case["form"], (
+        f"{case['path']}: got form {got}, expected one of {case['form']} -- {case['why']}"
     )
 
 
@@ -305,6 +315,67 @@ class TestFormIsStructuralOnly:
             f"Date: 2026-06-{d:02d}\nWoke before the alarm again.\n\n" for d in range(1, 9)
         )
         assert classify_form(journal, [], 600, "txt") == "entries"
+
+    def test_dates_gathered_in_one_place_are_not_entries(self) -> None:
+        """A release history at the front of a book is dated lines, not dated
+        units: the work after it belongs to no entry."""
+        history = "".join(f"2024-0{m}-15 Early release\n" for m in range(1, 8))
+        book = history + "\n" + ("Tables are partitioned by hidden transforms. " * 8000)
+        assert classify_form(book, [], 48000, "pdf") != "entries"
+
+        # Timestamps in query output are records, wherever they fall.
+        results = "".join(
+            "Snapshots are listed by commit time.\n2023-03-07 08:10:23 +00:00\n"
+            + ("Tables are partitioned by hidden transforms. " * 1100)
+            + "\n"
+            for _ in range(7)
+        )
+        assert classify_form(results, [], 48000, "pdf") != "entries"
+
+        # The same dates dividing the text are a journal, however long each entry.
+        long_entries = "".join(
+            f"2024-0{m}-15\n" + ("Tables are partitioned by hidden transforms. " * 1100) + "\n"
+            for m in range(1, 8)
+        )
+        assert classify_form(long_entries, [], 48000, "txt") == "entries"
+
+    def test_nested_sections_make_a_long_document_a_reference(self) -> None:
+        """A manual titles its sections in markdown or a PDF outline rather than
+        numbering them in the text, so the markers miss it. It divides for
+        lookup -- sections into sub-sections -- where a narrative divides once."""
+        text = "Lexical search ranks by term overlap. " * 1500
+        manual = [
+            {"heading": title, "level": level}
+            for i in range(6)
+            for title, level in (
+                (f"Topic {i}", 2),
+                (f"Topic {i}, first idea", 3),
+                (f"Topic {i}, second idea", 3),
+            )
+        ]
+        assert classify_form(text, manual, 9400, "md") == "reference"
+
+        # A tutorial's Parts hold topics: the depth is topical, whatever the top is called.
+        tutorial = [
+            {"heading": heading, "level": level}
+            for p in range(4)
+            for heading, level in ((f"Part {p}", 2), *((f"{p}.{t} The Index", 3) for t in range(4)))
+        ]
+        assert classify_form(text, tutorial, 9400, "md") == "reference"
+
+        # One titled level, plus a title used once, is a narrative's shape.
+        novel = [{"heading": "The Voyage", "level": 1}] + [
+            {"heading": f"{i} — The Traveller Returns", "level": 2} for i in range(40)
+        ]
+        assert classify_form(text, novel, 32000, "txt") == "prose"
+
+        # Naming a narrative's divisions twice over is not depth.
+        parts = [
+            {"heading": heading, "level": level}
+            for p in range(4)
+            for heading, level in ((f"Part {p}", 1), *((f"Chapter {c}", 2) for c in range(10)))
+        ]
+        assert classify_form(text, parts, 30000, "txt") == "prose"
 
     def test_a_very_long_manual_is_still_a_reference(self) -> None:
         """Density stops describing the document and starts describing its
