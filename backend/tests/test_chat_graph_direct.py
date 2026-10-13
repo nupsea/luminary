@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.runtime.chat_graph import build_chat_graph, classify_node, route_node
-from app.runtime.chat_nodes.direct import direct_node
+from app.runtime.chat_nodes.direct import direct_node, unreadable_link
 from app.runtime.qa_stream import get_qa_service
 from app.services.qa import QA_CREATIVE_TEMPERATURE, QA_DIRECT_SYSTEM_PROMPT
 
@@ -155,3 +155,43 @@ async def test_stream_answer_direct_composes_with_creative(test_db):
     call_kwargs = mock_llm.generate.call_args.kwargs
     assert call_kwargs["system"] == QA_DIRECT_SYSTEM_PROMPT
     assert call_kwargs["temperature"] == QA_CREATIVE_TEMPERATURE
+
+
+_BLOG_FOR_VIDEO = (
+    "Provide me a blog like content for the following video: "
+    "https://www.youtube.com/watch?v=WDsP555Jub0"
+)
+
+
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    [
+        (_BLOG_FOR_VIDEO, "https://www.youtube.com/watch?v=WDsP555Jub0"),
+        ("https://youtu.be/abc123", "https://youtu.be/abc123"),
+        ("Summarize https://example.com/post.", "https://example.com/post"),
+        ("What is www.example.org/guide about?", "www.example.org/guide"),
+        ("write a curl command that POSTs JSON to https://api.example.com/v1/users", None),
+        ("explain recursion", None),
+    ],
+)
+def test_unreadable_link_flags_only_questions_about_link_content(question, expected):
+    assert unreadable_link(question) == expected
+
+
+@pytest.mark.asyncio
+async def test_stream_answer_direct_refuses_link_content_without_calling_model(test_db):
+    """A model handed only a URL string invents what is behind it; Direct must not ask it."""
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock()
+
+    svc = get_qa_service()
+    with patch("app.runtime.qa_stream.get_llm_service", return_value=mock_llm):
+        events = [e async for e in svc.stream_answer(_BLOG_FOR_VIDEO, [], "all", None, direct=True)]
+
+    mock_llm.generate.assert_not_called()
+    done_event_raw = next(e for e in events if '"done": true' in e.lower())
+    done_payload = json.loads(done_event_raw.replace("data: ", "").strip())
+    assert done_payload["direct"] is True
+    assert "can't open links" in done_payload["answer"]
+    assert "Add Content" in done_payload["answer"]
+    assert done_payload["citations"] == []
