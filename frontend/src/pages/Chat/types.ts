@@ -60,10 +60,11 @@ export type AnyCardData = GapCardData | QuizCardData | TeachBackCardData
 // What the answer cost and what left the machine. The Settings routing table says
 // where work runs in general; this says what happened for this answer, which is the
 // version a reader can check. `engine` comes from the backend's `is_on_device`, the
-// same one the table uses, so the two cannot disagree.
+// same one the table uses, so the two cannot disagree. "none" is a reply Luminary
+// wrote itself, with no model call.
 export interface AnswerReceipt {
-  engine: "local" | "cloud"
-  model: string
+  engine: "local" | "cloud" | "none"
+  model: string | null
   ttft_seconds: number | null
   total_seconds: number
   passages_sent: number | null

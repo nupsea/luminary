@@ -195,3 +195,7 @@ async def test_stream_answer_direct_refuses_link_content_without_calling_model(t
     assert "can't open links" in done_payload["answer"]
     assert "Add Content" in done_payload["answer"]
     assert done_payload["citations"] == []
+    # The receipt must not name a model or claim the question went to the cloud.
+    assert done_payload["receipt"]["engine"] == "none"
+    assert done_payload["receipt"]["model"] is None
+    assert done_payload["receipt"]["ttft_seconds"] is None

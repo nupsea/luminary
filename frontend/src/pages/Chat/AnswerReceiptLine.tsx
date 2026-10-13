@@ -3,6 +3,13 @@
 import type { AnswerReceipt } from "./types"
 
 export function AnswerReceiptLine({ receipt }: { receipt: AnswerReceipt }) {
+  if (receipt.engine === "none") {
+    return (
+      <div className="mt-2 text-[11px] text-muted-foreground">
+        Answered by Luminary · no model call · nothing left this machine
+      </div>
+    )
+  }
   const local = receipt.engine === "local"
   // A null ttft means no model was called (a cached or pass-through answer). Showing
   // 0s there would read as "instant" for work that never happened.
