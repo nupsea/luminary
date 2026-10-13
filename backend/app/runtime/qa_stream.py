@@ -36,6 +36,10 @@ from app.types import ScoredChunk
 
 logger = logging.getLogger(__name__)
 
+# served_model for a reply Luminary wrote itself (the Direct link guard): no model ran,
+# so the receipt must not name one or claim the question left the machine.
+NO_MODEL = "none"
+
 # A graph node that renders a UI card sets state["answer"] = CARD_PREFIX + json;
 # the stream then emits exactly {"card": ...} and {"done": true}, no tokens.
 CARD_PREFIX = "__card__"
@@ -287,9 +291,13 @@ def _receipt(
     # Which engine served the answer and how much of the library went with it make
     # the privacy claim checkable. A pass-through answer has no TTFT: null, not 0.
     # context_budget_reason says when the slow-host path halved the budget (#100).
+    if served_model == NO_MODEL:
+        engine = "none"
+    else:
+        engine = "local" if is_on_device(served_model) else "cloud"
     return {
-        "engine": "local" if is_on_device(served_model) else "cloud",
-        "model": served_model,
+        "engine": engine,
+        "model": None if served_model == NO_MODEL else served_model,
         "ttft_seconds": round(ttft_seconds, 2) if ttft_seconds is not None else None,
         "total_seconds": round(time.perf_counter() - t_start, 2),
         "passages_sent": 0 if direct else result.get("_passages_sent"),
@@ -536,6 +544,8 @@ class QAService:
                 return
         else:
             answer.text = result.get("answer") or ""
+            if req.direct:
+                answer.served_model = NO_MODEL
             for word in answer.text.split():
                 yield _sse({"token": word + " "})
             answer.grounded = _Grounded(result.get("citations") or [])
