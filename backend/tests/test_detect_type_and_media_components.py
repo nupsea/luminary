@@ -114,6 +114,32 @@ async def test_detect_type_failure_does_not_block_the_upload() -> None:
 
 
 @pytest.mark.anyio
+async def test_detect_type_kills_the_parse_it_gives_up_on(monkeypatch, tmp_path) -> None:
+    """A parse left running after the timeout stalled the upload that followed it
+    by ~38s on an 81MB PDF, because PyMuPDF holds the GIL the event loop needs."""
+    import os
+    import time
+
+    from app.services import type_detection
+
+    pid_file = tmp_path / "pid"
+    sleeper = "import os,sys,time; open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(60)"
+    monkeypatch.setattr(
+        type_detection,
+        "_child_argv",
+        lambda *_: [sys.executable, "-c", sleeper, str(pid_file)],
+    )
+    started = time.monotonic()
+    result = await type_detection.detect_content_type(
+        tmp_path / "x.pdf", "pdf", "x.pdf", timeout=1.0
+    )
+    assert result is None
+    assert time.monotonic() - started < 10
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_file.read_text()), 0)
+
+
+@pytest.mark.anyio
 async def test_youtube_error_names_every_missing_component(monkeypatch) -> None:
     """Not just the first one, and not shell instructions.
 
