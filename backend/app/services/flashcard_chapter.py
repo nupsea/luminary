@@ -227,6 +227,27 @@ def _answer_coverage(answer: str, shown: str, units: Sequence[str]) -> float:
     return max(best_unit(answer, list(units))[1], span)
 
 
+# An answer that repeats nearly all of its evidence picked nothing out of it: it pastes the passage
+# or restates an aside that does not answer. Bracketed by test_the_restated_evidence_ceiling: the
+# XOR definition repeats 0.75 and is right, "a lot of detail goes into performance" repeats 0.82.
+MAX_EVIDENCE_RESTATED = 0.8
+
+
+def _evidence_restated(answer: str, evidence: str) -> float:
+    words = _content(evidence)
+    return len(_content(answer) & words) / len(words) if words else 0.0
+
+
+def _answer_rejection(answer: str, shown: str, evidence: str, units: Sequence[str]) -> str | None:
+    coverage = _answer_coverage(answer, shown, units)
+    if coverage < MIN_ANSWER_COVERAGE:
+        return f"answer in no sentence ({coverage:.2f})"
+    restated = _evidence_restated(answer, evidence)
+    if restated >= MAX_EVIDENCE_RESTATED:
+        return f"answer restates its evidence ({restated:.2f})"
+    return None
+
+
 def card_from_reply(
     raw: str,
     *,
@@ -243,9 +264,9 @@ def card_from_reply(
     q, a = parsed
     if not q.rstrip(_CLOSERS).endswith("?"):
         return None, "not a question"
-    coverage = _answer_coverage(a, shown, window.units)
-    if coverage < MIN_ANSWER_COVERAGE:
-        return None, f"answer in no sentence ({coverage:.2f})"
+    weak = _answer_rejection(a, shown, evidence, window.units)
+    if weak:
+        return None, weak
     unshown = names_not_in(q, f"{book.title} {window.heading} {book.known_names} {window.text}")
     if unshown:
         return None, f"names someone unshown {unshown}"
