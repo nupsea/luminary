@@ -14,7 +14,20 @@
       "Bash(npm run lint:*)",
       "Bash(python3 scripts/check_manifest_schema.py)",
       "Bash(python3 scripts/check_manifest_coverage.py)",
-      "Bash(bash scripts/smoke/:*)"
+      "Bash(bash scripts/smoke/:*)",
+      "Bash(git grep *)",
+      "Bash(git -C * status*)",
+      "Bash(git -C * diff*)",
+      "Bash(git -C * log*)",
+      "Bash(git -C * show*)",
+      "Bash(gh issue view *)",
+      "Bash(gh issue list *)",
+      "Bash(gh run view *)",
+      "Bash(gh pr checks *)",
+      "Bash(lsof -nP *)",
+      "Bash(ollama ps)",
+      "Bash(ollama list)",
+      "mcp__github__pull_request_read"
     ]
   },
   "hooks": {

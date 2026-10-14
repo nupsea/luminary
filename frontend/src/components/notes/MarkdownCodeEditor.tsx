@@ -30,6 +30,7 @@ import {
   smartDeleteSpec,
   smartEnterSpec,
   syncDocSpec,
+  toggleCheckboxSpec,
   toggleInlineMarkSpec,
   toggleLinkSpec,
 } from "./markdownEditorCommands"
@@ -494,13 +495,10 @@ export function noteEditorKeymaps(latest: {
         },
       },
       {
-        key: "Mod-/",
-        run: () => {
-          if (latest.current.onOpenShortcuts) {
-            latest.current.onOpenShortcuts()
-            return true
-          }
-          return false
+        key: "Mod-Shift-c",
+        run: (v) => {
+          v.dispatch(toggleCheckboxSpec(v.state))
+          return true
         },
       },
       ]),

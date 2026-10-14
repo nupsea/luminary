@@ -1048,3 +1048,72 @@ export function toggleLinkSpec(state: EditorState): TransactionSpec {
     scrollIntoView: true,
   }
 }
+
+/**
+ * Toggle checkbox markdown for the current line.
+ * Converts bullet list items to checkboxes and vice versa.
+ */
+export function toggleCheckboxSpec(state: EditorState): TransactionSpec | null {
+  const { from, empty } = state.selection.main
+  if (!empty) return null
+
+  const line = state.doc.lineAt(from)
+  const lineText = line.text
+  
+  // Check for task list item (e.g. `- [ ] `, `* [x] `, `+ [ ] `)
+  const taskMatch = lineText.match(/^( *)([-*+])\s+\[([ xX])\](.*)$/)
+  if (taskMatch) {
+    const indent = taskMatch[1]
+    const bullet = taskMatch[2]
+    const checked = taskMatch[3]
+    const content = taskMatch[4]
+    
+    // Toggle the checkbox state
+    const newChecked = checked === " " ? "x" : " "
+    const newText = `${indent}${bullet} [${newChecked}]${content}`
+    
+    return {
+      changes: { from: line.from, to: line.to, insert: newText },
+      selection: { anchor: line.from + newText.length },
+      scrollIntoView: true,
+    }
+  }
+  
+  // Check for bullet list item (e.g. `- `, `* `, `+ `)
+  const bulletMatch = lineText.match(/^( *)([-*+])\s+(.*)$/)
+  if (bulletMatch) {
+    const indent = bulletMatch[1]
+    const bullet = bulletMatch[2]
+    const content = bulletMatch[3]
+    
+    // Convert to task list item
+    const newText = `${indent}${bullet} [ ] ${content}`
+    
+    return {
+      changes: { from: line.from, to: line.to, insert: newText },
+      selection: { anchor: line.from + newText.length },
+      scrollIntoView: true,
+    }
+  }
+  
+  // Check for ordered list item (e.g. `1. `, `2) `)
+  const orderedMatch = lineText.match(/^( *)(\d+)([.)])\s+(.*)$/)
+  if (orderedMatch) {
+    const indent = orderedMatch[1]
+    const num = orderedMatch[2]
+    const delimiter = orderedMatch[3]
+    const content = orderedMatch[4]
+    
+    // Convert to task list item
+    const newText = `${indent}${num}${delimiter} [ ] ${content}`
+    
+    return {
+      changes: { from: line.from, to: line.to, insert: newText },
+      selection: { anchor: line.from + newText.length },
+      scrollIntoView: true,
+    }
+  }
+  
+  // If not a list item, do nothing
+  return null
+}
