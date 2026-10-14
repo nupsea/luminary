@@ -144,10 +144,25 @@ def score_flashcards(
     }
 
 
-def judge_flashcard(card: dict, source_chunk: str, judge_model: str) -> dict:
-    """Judge one flashcard using LiteLLM strict JSON output."""
+def json_judge_reply(system: str, prompt: str, judge_model: str, **extra) -> str:
+    """One deterministic JSON-mode judge call through LiteLLM; the raw reply, unparsed."""
     import litellm  # noqa: PLC0415
 
+    response = litellm.completion(
+        model=judge_model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0,
+        **extra,
+    )
+    return response.choices[0].message.content or ""
+
+
+def judge_flashcard(card: dict, source_chunk: str, judge_model: str) -> dict:
+    """Judge one flashcard using LiteLLM strict JSON output."""
     # Every axis is defined. Naming them and nothing else produced
     # `atomicity 1.0000` on a set that was visibly two thirds multi-point answers:
     # an undefined axis is answered with whatever is agreeable.
@@ -172,16 +187,8 @@ def judge_flashcard(card: dict, source_chunk: str, judge_model: str) -> dict:
         f"Passage:\n{source_chunk}\n\n"
         f"Question:\n{card.get('question', '')}\n\nAnswer:\n{card.get('answer', '')}"
     )
-    response = litellm.completion(
-        model=judge_model,
-        messages=[
-            {"role": "system", "content": "You are a strict flashcard quality judge."},
-            {"role": "user", "content": prompt},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0,
-    )
-    parsed = json.loads(response.choices[0].message.content or "{}")
+    raw = json_judge_reply("You are a strict flashcard quality judge.", prompt, judge_model)
+    parsed = json.loads(raw or "{}")
     # Missing or unrecognised fields raise rather than defaulting. The defaults
     # here were "no" and clarity 1 -- the worst score on both axes -- so a judge
     # that answered in an unexpected shape reported the model as producing false,

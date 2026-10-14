@@ -14,6 +14,8 @@ _LINE_END_BREAK = re.compile(r"(?<=[^\W\d_])([‐­])[ \t]*\n[ \t]*(?=[^\W\d_])"
 _PRINTED_COMPOUND = re.compile(r"(\w+)‐(\w+)")
 _WORD_BEFORE = re.compile(r"\w+\Z")
 _WORD_AFTER = re.compile(r"\w+")
+# The whole token, punctuation included, so "rency, 186" moves "rency," and leaves "186".
+_FIRST_TOKEN = re.compile(r"\s*(\S+)")
 # Longer than any word, so the backward search stays local to the break.
 _WORD_WINDOW = 64
 
@@ -36,3 +38,24 @@ def join_breaks(text: str, compounds: frozenset[tuple[str, str]] = frozenset()) 
         return match.group(1) if match.group(1) == "‐" and pair in compounds else ""
 
     return _LINE_END_BREAK.sub(_join, text)
+
+
+def join_block_breaks(
+    blocks: list[str], compounds: frozenset[tuple[str, str]] = frozenset()
+) -> list[str]:
+    """Rejoin a word whose halves fall in two layout blocks (a page, column or figure between).
+
+    The blank line between blocks is the parser's seam, not the document's paragraph break: a
+    typesetter never breaks a paragraph's last word. The tail moves onto the block holding the
+    head, so the block count, and every page break counted in blocks, stays put.
+    """
+    out = list(blocks)
+    for i in range(len(out) - 1):
+        tail = _FIRST_TOKEN.match(out[i + 1])
+        if not tail:
+            continue
+        seam = f"{out[i].rstrip()}\n{tail.group(1)}"
+        joined = join_breaks(seam, compounds)
+        if joined != seam:
+            out[i], out[i + 1] = joined, out[i + 1][tail.end() :].lstrip()
+    return out

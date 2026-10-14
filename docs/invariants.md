@@ -153,8 +153,9 @@ parsing 12/12 in isolation. Numbers go after prose. No free-text field joins
 **I-34. A flashcard's excerpt is a span of the passage the card was written from, and every card records whether that was checked.**
 A card is written from a passage or not at all. `grounding` has four states (`unchecked | verified |
 unsupported | unverifiable`), because a boolean reads an uncheckable library as clean. The match
-tolerates whitespace, elision and one trailing punctuation mark. `POST /flashcards/grounding/audit`
-recomputes without a model. `tests/test_flashcard_grounding.py` and `tests/test_flashcard_audit.py`
+tolerates whitespace, elision, one trailing punctuation mark, and formatting a reader never sees
+(markdown markup, PDF line-break hyphens); a lone `*` and an in-line hyphen are content.
+`POST /flashcards/grounding/audit` recomputes without a model. `tests/test_flashcard_grounding.py` and `tests/test_flashcard_audit.py`
 guard it.
 
 **I-35. A card's passage is what was in its prompt, and it is judged by neither the model that wrote it nor one that agrees with everything.**
