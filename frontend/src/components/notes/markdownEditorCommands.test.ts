@@ -20,6 +20,7 @@ import {
   smartEnterSpec,
   tableNextCellSpec,
   tablePrevCellSpec,
+  toggleCheckboxSpec,
   toggleInlineMarkSpec,
   toggleLinkSpec,
 } from "./markdownEditorCommands"
@@ -581,6 +582,98 @@ describe("toggleLinkSpec (Mod-k)", () => {
     expect(spec).not.toBeNull()
     const next = apply(state, spec)
     expect(next.doc.toString()).toBe("visit Luminary now")
+  })
+})
+
+describe("toggleCheckboxSpec", () => {
+  it("converts bullet list item to checkbox", () => {
+    const state = mdState("- Item 1", 8)
+    const spec = toggleCheckboxSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("- [ ] Item 1")
+  })
+
+  it("converts ordered list item to checkbox", () => {
+    const state = mdState("1. Item 1", 8)
+    const spec = toggleCheckboxSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("1. [ ] Item 1")
+  })
+
+  it("toggles checkbox from unchecked to checked", () => {
+    const state = mdState("- [ ] Item 1", 8)
+    const spec = toggleCheckboxSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("- [x] Item 1")
+  })
+
+  it("toggles checkbox from checked to unchecked", () => {
+    const state = mdState("- [x] Item 1", 8)
+    const spec = toggleCheckboxSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("- [ ] Item 1")
+  })
+
+  it("does nothing when not on a list item", () => {
+    const state = mdState("Some text", 5)
+    const spec = toggleCheckboxSpec(state)
+    expect(spec).toBeNull()
+  })
+
+  it("does nothing when there's a selection", () => {
+    const state = EditorState.create({ doc: "Some text", selection: { anchor: 0, head: 4 } })
+    const spec = toggleCheckboxSpec(state)
+    expect(spec).toBeNull()
+  })
+})
+
+describe("toggleCheckboxSpec", () => {
+  it("converts bullet list item to checkbox", () => {
+    const state = mdState("- Item 1", 8)
+    const spec = toggleCheckboxSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("- [ ] Item 1")
+  })
+
+  it("converts ordered list item to checkbox", () => {
+    const state = mdState("1. Item 1", 8)
+    const spec = toggleCheckboxSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("1. [ ] Item 1")
+  })
+
+  it("toggles checkbox from unchecked to checked", () => {
+    const state = mdState("- [ ] Item 1", 8)
+    const spec = toggleCheckboxSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("- [x] Item 1")
+  })
+
+  it("toggles checkbox from checked to unchecked", () => {
+    const state = mdState("- [x] Item 1", 8)
+    const spec = toggleCheckboxSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("- [ ] Item 1")
+  })
+
+  it("does nothing when not on a list item", () => {
+    const state = mdState("Some text", 5)
+    const spec = toggleCheckboxSpec(state)
+    expect(spec).toBeNull()
+  })
+
+  it("does nothing when there's a selection", () => {
+    const state = EditorState.create({ doc: "Some text", selection: { anchor: 0, head: 4 } })
+    const spec = toggleCheckboxSpec(state)
+    expect(spec).toBeNull()
   })
 })
 
