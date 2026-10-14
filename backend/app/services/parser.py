@@ -709,6 +709,7 @@ class DocumentParser:
                 if pn == first_page_idx:
                     blocks = blocks[: _find_heading_block(blocks, toc[0][1], 0) or 0]
                 front.extend(blocks)
+            front = pdf_hyphens.join_block_breaks(front, compounds)
             front_text = "\n\n".join(front).strip()
             if front_text:
                 joined = "\n\n".join(front)
@@ -776,6 +777,7 @@ class DocumentParser:
                 # Blocks are the layout's own paragraphs; a PDF text layer is
                 # hard-wrapped, so joining lines alone leaves no boundary and
                 # the reader renders a whole chapter as one block.
+                texts = pdf_hyphens.join_block_breaks(texts, compounds)
                 joined = "\n\n".join(texts)
                 text = joined.strip()
                 # Offsets are measured on the joined string, then shifted by
@@ -879,6 +881,8 @@ class DocumentParser:
             current_page_marks = []
 
         running = pdf_furniture.running_signatures(doc)
+        # A broken word continues across blocks and pages (see join_block_breaks), never a heading.
+        continues_block = False
         for page_num, page in enumerate(doc):
             if page_num + 1 > current_page_start:
                 current_page_marks.append(len(current_texts))
@@ -888,8 +892,6 @@ class DocumentParser:
                     continue
                 if _is_running_furniture(block, page_height, running, heading_threshold):
                     continue
-                # A word broken at a line end continues only within its own block.
-                continues_block = False
                 for line in block.get("lines", []):
                     spans = line.get("spans", [])
                     if not spans:

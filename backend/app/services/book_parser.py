@@ -247,7 +247,8 @@ def _page_text_with_paragraphs(
     )
     if not ordered:
         return page.get_text()
-    return "\n\n".join(pdf_hyphens.join_breaks(str(b[4]).strip(), compounds) for b in ordered)
+    texts = [pdf_hyphens.join_breaks(str(b[4]).strip(), compounds) for b in ordered]
+    return "\n\n".join(pdf_hyphens.join_block_breaks(texts, compounds))
 
 
 # A chapter's first body line is a subtitle only when it reads as a title. Word
@@ -387,7 +388,9 @@ class BookParser:
             return None
         running = pdf_furniture.running_signatures(doc)
         compounds = pdf_hyphens.printed_compounds(doc)
-        page_texts = [_page_text_with_paragraphs(page, running, compounds) for page in doc]
+        page_texts = pdf_hyphens.join_block_breaks(
+            [_page_text_with_paragraphs(page, running, compounds) for page in doc], compounds
+        )
         # Pages are assigned by searching each heading in the page text as printed, so a
         # section's page, and every citation from it, does not move with the stripping.
         printed_pages = [_page_text_with_paragraphs(page, compounds=compounds) for page in doc]

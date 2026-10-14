@@ -39,6 +39,29 @@ def test_a_compound_the_document_prints_mid_line_keeps_its_hyphen():
     )
 
 
+@pytest.mark.parametrize(
+    ("blocks", "expected"),
+    [
+        (["the weav‐", "ing loom"], ["the weaving", "loom"]),
+        # The token moves whole, punctuation with it, and an emptied block stays in place.
+        (["concur‐", "rency, 186"], ["concurrency,", "186"]),
+        (["spin‐", "ning.", "Next"], ["spinning.", "", "Next"]),
+        (["an in-", "memory index"], ["an in-", "memory index"]),
+        (["the work‐", "18 notes"], ["the work‐", "18 notes"]),
+    ],
+)
+def test_a_break_across_a_block_seam_joins_and_keeps_the_block_count(blocks, expected):
+    assert pdf_hyphens.join_block_breaks(blocks) == expected
+
+
+def test_a_compound_across_a_block_seam_keeps_its_hyphen():
+    compounds = frozenset({("well", "known")})
+    assert pdf_hyphens.join_block_breaks(["a well‐", "known tale"], compounds) == [
+        "a well‐known",
+        "tale",
+    ]
+
+
 def _write(page, y, text, size=11):
     writer = fitz.TextWriter(page.rect)
     writer.append(fitz.Point(72, y), text, font=_FONT, fontsize=size)
@@ -46,8 +69,9 @@ def _write(page, y, text, size=11):
 
 
 def _book(path, *, heading_size=20, toc=False, compound=False):
-    """Three sheets; sheet 1 opens with a heading and breaks "weaving" across two lines.
-    Every sheet's first body line names its sheet, so a page break can be checked."""
+    """Three sheets; sheet 1 opens with a heading, breaks "weaving" across two lines and
+    "spinning" across the page. Every sheet's first body line after the broken word names its
+    sheet, so a page break can be checked."""
     doc = fitz.open()
     for sheet in (1, 2, 3):
         page = doc.new_page()
@@ -56,11 +80,15 @@ def _book(path, *, heading_size=20, toc=False, compound=False):
             _write(page, 180, "Sheet 1 opens. The weav‐")
             _write(page, 194, "ing of cloth is slow.")
         else:
+            if sheet == 2:
+                _write(page, 166, "ning.")
             _write(page, 180, f"Sheet {sheet} opens. {_BODY}")
         if compound:
             _write(page, 208, "A well‐known tale.")
         for line in range(6):
             _write(page, 222 + line * 14, _BODY)
+        if sheet == 1:
+            _write(page, 306, "Then the spin‐")
         if sheet == 3:
             _write(page, 320, "CHAPTER 2", heading_size)
             _write(page, 370, _BODY)
@@ -75,6 +103,7 @@ def _assert_joined_and_pages_land(parsed):
     text = "\n".join(s.text for s in parsed.sections)
     assert "weaving of cloth" in text.replace("\n", " ")
     assert "weav‐" not in text
+    assert "the spinning." in text
     for s in parsed.sections:
         for offset in s.page_breaks:
             assert s.text[offset:].startswith("Sheet "), (s.heading, s.text[offset : offset + 30])
@@ -107,6 +136,7 @@ def test_the_book_parser_path_joins(tmp_path):
     assert [(s.page_start, s.page_end) for s in parsed.sections] == [(1, 3), (3, 3)]
     assert "weaving of cloth" in parsed.raw_text.replace("\n", " ")
     assert "weav‐" not in parsed.raw_text
+    assert "the spinning." in parsed.raw_text
 
 
 def test_a_printed_compound_broken_at_a_line_end_keeps_its_hyphen(tmp_path):
