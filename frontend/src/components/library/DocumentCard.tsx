@@ -794,7 +794,7 @@ export function DocumentCard({
             Delete <span className="font-semibold">{doc.title}</span>?
             {isProcessing
               ? " The in-flight ingestion will be cancelled."
-              : " This cannot be undone."}
+              : " This cannot be undone. Your notes on it are kept in Notes."}
           </p>
           <div className="flex justify-end gap-2">
             <button

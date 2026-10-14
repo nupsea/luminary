@@ -49,7 +49,7 @@ if [ -z "${DOC_ID}" ]; then
 fi
 
 # Delete the document however this script exits -- see S137.
-cleanup_doc() { curl -s -o /dev/null -X DELETE "${BASE}/documents/${DOC_ID}" || true; rm -rf "$SMOKE_TMPDIR"; }
+cleanup_doc() { curl -s -o /dev/null -X DELETE "${BASE}/documents/${DOC_ID}?delete_notes=true" || true; rm -rf "$SMOKE_TMPDIR"; }
 trap cleanup_doc EXIT
 
 echo "Ingested doc=${DOC_ID}, waiting for stage=complete..."

@@ -202,6 +202,21 @@ class LanceDBService:
         table.delete(pred)
         logger.info("Deleted vectors for document %s from LanceDB", document_id)
 
+    def release_document_notes(self, document_id: str, *, delete_notes: bool) -> None:
+        """Detach note vectors from a deleted document, or delete them with it.
+
+        Note search returns the vector row's document_id, so a kept note left
+        pointing here would link to a document that no longer exists.
+        """
+        pred = eq_predicate("document_id", document_id, context="release_document_notes")
+        if pred is None:
+            return
+        table = self._get_or_create_note_table()
+        if delete_notes:
+            table.delete(pred)
+        else:
+            table.update(where=pred, values={"document_id": ""})
+
     def _get_or_create_note_table(self) -> Any:
         tbl = self._open_or_create(NOTE_TABLE_NAME, NOTE_SCHEMA)
         # Inspect the vector field dimension; drop and recreate if mismatched

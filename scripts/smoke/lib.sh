@@ -182,7 +182,7 @@ FIXTURE
     fi
     doc_id="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["document_id"])' "$out")"
     smoke_wait_complete "$doc_id" >&2 || {
-        curl -s -o /dev/null -X DELETE "$BASE/documents/$doc_id" || true
+        curl -s -o /dev/null -X DELETE "$BASE/documents/$doc_id?delete_notes=true" || true
         return 1
     }
     echo "$doc_id"

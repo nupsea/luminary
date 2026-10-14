@@ -95,7 +95,7 @@ fi
 
 # Delete the document however this script exits, so a run does not leave one
 # behind in the library -- these scripts have been depositing one per run.
-cleanup_doc() { curl -s -o /dev/null -X DELETE "${BASE}/documents/${DOC_ID}" || true; rm -rf "$SMOKE_TMPDIR"; }
+cleanup_doc() { curl -s -o /dev/null -X DELETE "${BASE}/documents/${DOC_ID}?delete_notes=true" || true; rm -rf "$SMOKE_TMPDIR"; }
 trap cleanup_doc EXIT
 
 echo "Ingested document id=${DOC_ID}, waiting for stage=complete..."

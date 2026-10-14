@@ -9,6 +9,7 @@ import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import type { ContentType } from "@/components/library/types"
 import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
 import { ApiError, apiDelete, apiGet, apiPost, apiPut, request } from "@/lib/apiClient"
+import { deleteNote } from "@/lib/notesApi"
 import { API_BASE } from "@/lib/config"
 import { logger } from "@/lib/logger"
 import { toggleDocumentFavorite } from "@/pages/Learning/api"
@@ -341,12 +342,20 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   // Header "Delete" -> removes the open document without a trip back to the library.
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // Notes are the user's writing: kept as standalone notes unless this is ticked.
+  const [deleteNotesToo, setDeleteNotesToo] = useState(false)
   const deleteDocumentMutation = useMutation({
-    mutationFn: () => apiDelete(`/documents/${documentId}`),
-    onSuccess: () => {
+    mutationFn: ({ deleteNotes }: { deleteNotes: boolean; noteCount: number }) =>
+      apiDelete(`/documents/${documentId}${deleteNotes ? "?delete_notes=true" : ""}`),
+    onSuccess: (_data, { deleteNotes, noteCount }) => {
       void qc.invalidateQueries({ queryKey: ["documents"] })
       void qc.invalidateQueries({ queryKey: ["documents-recent"] })
-      toast.success("Document deleted")
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+      toast.success(
+        !deleteNotes && noteCount > 0
+          ? `Document deleted. ${noteCount} note${noteCount === 1 ? "" : "s"} kept in Notes.`
+          : "Document deleted",
+      )
       // The document this view is bound to no longer exists, so leave it.
       onBack()
     },
@@ -1189,6 +1198,20 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     }
   }, [documentId, qc])
 
+  const [confirmingNoteId, setConfirmingNoteId] = useState<string | null>(null)
+  async function handleDeleteNote(id: string) {
+    setConfirmingNoteId(null)
+    try {
+      await deleteNote(id)
+      void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+      void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+      toast.success("Note deleted")
+    } catch {
+      toast.error("Could not delete note")
+    }
+  }
+
   useEffect(() => {
     if (!highlightsPanelOpen) return
     function handleClick(e: MouseEvent) {
@@ -1434,7 +1457,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           </button>
           <div className="relative">
             <button
-              onClick={() => setConfirmDelete((open) => !open)}
+              onClick={() => {
+                setConfirmDelete((open) => !open)
+                setDeleteNotesToo(false)
+              }}
               className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-colors"
               title="Delete this document"
             >
@@ -1447,12 +1473,27 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                   Delete <span className="font-semibold">{doc.title}</span>?
                 </p>
                 <p className="mb-2 text-xs text-muted-foreground">
-                  This also deletes the uploaded file itself, along with its
-                  chunks, vectors, highlights and notes. It cannot be undone.
+                  This deletes the uploaded file, its highlights, cards and
+                  search index. It cannot be undone.
+                  {(docNotes?.length ?? 0) > 0 && !deleteNotesToo &&
+                    " Your notes on it are kept in Notes."}
                 </p>
+                {(docNotes?.length ?? 0) > 0 && (
+                  <label className="mb-2 flex items-center gap-2 text-xs text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={deleteNotesToo}
+                      onChange={(e) => setDeleteNotesToo(e.target.checked)}
+                    />
+                    Also delete my {docNotes?.length} note{docNotes?.length === 1 ? "" : "s"}
+                  </label>
+                )}
                 <div className="flex justify-end gap-2">
                   <button
-                    onClick={() => setConfirmDelete(false)}
+                    onClick={() => {
+                      setConfirmDelete(false)
+                      setDeleteNotesToo(false)
+                    }}
                     className="rounded border border-border px-2.5 py-1 text-xs hover:bg-accent"
                   >
                     Cancel
@@ -1460,7 +1501,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                   <button
                     onClick={() => {
                       setConfirmDelete(false)
-                      deleteDocumentMutation.mutate()
+                      deleteDocumentMutation.mutate({
+                        deleteNotes: deleteNotesToo,
+                        noteCount: docNotes?.length ?? 0,
+                      })
                     }}
                     disabled={deleteDocumentMutation.isPending}
                     className="rounded bg-destructive px-2.5 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
@@ -1984,19 +2028,49 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                   <ul data-testid="docked-notes-list" className="space-y-2">
                     {docNotes?.map((n) => (
                       <li key={n.id} className="rounded-md border border-border transition-colors hover:border-muted-foreground/30">
-                        <button
-                          type="button"
-                          // A note opened from a document is edited beside it.
-                          onClick={() => {
-                            tabBefore.current = "note"
-                            setOpenNoteId(n.id)
-                          }}
-                          className="w-full rounded-t-md px-3 py-2 text-left hover:bg-muted/50"
-                        >
-                          <p className="truncate text-xs text-foreground">
-                            {n.title?.trim() || stripMarkdown(n.content).slice(0, 90) || "Untitled note"}
-                          </p>
-                        </button>
+                        <div className="group flex items-center">
+                          <button
+                            type="button"
+                            // A note opened from a document is edited beside it.
+                            onClick={() => {
+                              tabBefore.current = "note"
+                              setOpenNoteId(n.id)
+                            }}
+                            className="min-w-0 flex-1 rounded-tl-md px-3 py-2 text-left hover:bg-muted/50"
+                          >
+                            <p className="truncate text-xs text-foreground">
+                              {n.title?.trim() || stripMarkdown(n.content).slice(0, 90) || "Untitled note"}
+                            </p>
+                          </button>
+                          {confirmingNoteId === n.id ? (
+                            <span className="flex shrink-0 items-center gap-1 pr-2">
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingNoteId(null)}
+                                className="rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-accent"
+                              >
+                                Keep
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteNote(n.id)}
+                                className="rounded bg-destructive px-1.5 py-0.5 text-[10px] font-medium text-destructive-foreground hover:bg-destructive/90"
+                              >
+                                Delete note
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmingNoteId(n.id)}
+                              className="mr-1 shrink-0 rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus:opacity-100 group-hover:opacity-100"
+                              title="Delete this note"
+                              aria-label="Delete this note"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </div>
                         {n.section_id && (
                           <button
                             type="button"

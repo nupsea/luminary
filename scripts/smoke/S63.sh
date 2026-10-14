@@ -27,7 +27,7 @@ RESP1=$(curl -s -X POST "${BASE}/documents/ingest" -F "file=@${TMP1};filename=s6
 rm -f "$TMP1"
 echo "$RESP1" | grep -q "document_id" || { echo "FAIL: expected document_id, got: $RESP1"; exit 1; }
 AUTO_ID=$(echo "$RESP1" | python3 -c "import sys,json; print(json.load(sys.stdin)['document_id'])")
-curl -s -o /dev/null -X DELETE "${BASE}/documents/${AUTO_ID}"
+curl -s -o /dev/null -X DELETE "${BASE}/documents/${AUTO_ID}?delete_notes=true"
 echo "PASS: omitted content_type accepted (classification runs)"
 
 echo "[S63] Test 2: POST /documents/ingest with invalid content_type returns 422"
@@ -61,6 +61,6 @@ echo "PASS: PATCH content_type returned updated=true with re-ingest note"
 
 # The script creates a document in Test 3; leaving one behind per run
 # accumulates in whatever library the smoke suite is pointed at.
-curl -s -o /dev/null -X DELETE "${BASE}/documents/${DOC_ID}"
+curl -s -o /dev/null -X DELETE "${BASE}/documents/${DOC_ID}?delete_notes=true"
 
 echo "[S63] All smoke tests passed."

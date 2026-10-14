@@ -1848,9 +1848,11 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
             doc = result.scalar_one_or_none()
             if doc is None:
                 continue
-            await svc.delete_sqlite_cascade(session, doc)
+            await svc.delete_sqlite_cascade(session, doc, delete_notes=body.delete_notes)
             await session.commit()
-        await asyncio.to_thread(svc.delete_lancedb_vectors, document_id)
+        await asyncio.to_thread(
+            svc.delete_lancedb_vectors, document_id, delete_notes=body.delete_notes
+        )
         svc.delete_filesystem_assets(document_id)
         deleted.append(document_id)
     if deleted:
@@ -1959,7 +1961,8 @@ async def patch_document_tags(document_id: str, body: PatchTagsRequest):
 
 
 @router.delete("/{document_id}", status_code=204)
-async def delete_document(document_id: str):
+async def delete_document(document_id: str, delete_notes: bool = False):
+    """Delete a document; its notes are kept as standalone notes unless `delete_notes`."""
     # Cancel any in-flight ingestion task before tearing down rows. The workflow
     # writes to chunks / sections / embeddings as it progresses; if we delete
     # while it is mid-stage, SQLite holds locks and the workflow can also write
@@ -1974,10 +1977,10 @@ async def delete_document(document_id: str):
     svc = get_document_deletion_service()
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
-        await svc.delete_sqlite_cascade(session, doc)
+        await svc.delete_sqlite_cascade(session, doc, delete_notes=delete_notes)
         await session.commit()  # cascade service took the session; commit completes the transaction
 
-    await asyncio.to_thread(svc.delete_lancedb_vectors, document_id)
+    await asyncio.to_thread(svc.delete_lancedb_vectors, document_id, delete_notes=delete_notes)
     svc.delete_filesystem_assets(document_id)
     _schedule_library_summary_refresh()
     logger.info("Deleted document %s", document_id)

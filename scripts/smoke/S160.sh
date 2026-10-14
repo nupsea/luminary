@@ -4,7 +4,7 @@ source "$(dirname "$0")/lib.sh"
 
 # A fresh fixture has no cards, so every section is uncovered and fill-uncovered runs (#221).
 DOC_ID=$(smoke_ingest_fixture)
-trap 'curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC_ID" || true' EXIT
+trap 'curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC_ID?delete_notes=true" || true' EXIT
 
 # GET /flashcards/health/{document_id}
 RESP=$(curl -sf "$BASE/flashcards/health/$DOC_ID")

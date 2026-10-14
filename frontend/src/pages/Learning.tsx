@@ -229,6 +229,7 @@ export default function Learning() {
       setBulkConfirm(false)
       void queryClient.invalidateQueries({ queryKey: ["documents"] })
       void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
+      void queryClient.invalidateQueries({ queryKey: ["notes"] })
       toast.success(`Deleted ${ids.length} document${ids.length === 1 ? "" : "s"}`)
     },
     onError: () => toast.error("Failed to delete documents. Please try again."),
@@ -239,6 +240,7 @@ export default function Learning() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["documents"] })
       void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
+      void queryClient.invalidateQueries({ queryKey: ["notes"] })
       toast.success("Document deleted")
     },
     onError: () => toast.error("Failed to delete document. Please try again."),
@@ -773,7 +775,7 @@ export default function Learning() {
             </DialogTitle>
             <DialogDescription>
               This action cannot be undone. All related data (chunks, flashcards, summaries) will
-              be permanently deleted.
+              be permanently deleted. Your notes on them are kept in Notes.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
