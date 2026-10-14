@@ -86,6 +86,8 @@ class DocumentListResponse(BaseModel):
 
 class BulkDeleteRequest(BaseModel):
     ids: list[str]
+    # Notes outlive their document unless the user asks for them to go too.
+    delete_notes: bool = False
 
 
 class PatchTagsRequest(BaseModel):

@@ -35,7 +35,7 @@ DOC_ID=$(echo "$INGEST_RESP" | python3 -c "import sys,json; print(json.load(sys.
 
 # Delete it however this exits: the script ingested a document per run and left
 # every one of them in the library.
-trap 'curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC_ID" || true' EXIT
+trap 'curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC_ID?delete_notes=true" || true' EXIT
 echo "Created document: $DOC_ID"
 
 smoke_wait_complete "$DOC_ID"

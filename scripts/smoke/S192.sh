@@ -41,7 +41,7 @@ fi
 # Step 3: ingest the fixture document the remaining steps act on
 echo "[3/5] Ingesting the smoke fixture..."
 DOC_ID=$(smoke_ingest_fixture)
-trap 'curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC_ID" || true; rm -rf "$SMOKE_TMPDIR"' EXIT
+trap 'curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC_ID?delete_notes=true" || true; rm -rf "$SMOKE_TMPDIR"' EXIT
 echo "  Fixture document: $DOC_ID"
 # Step 4: POST /collections/auto/{doc_id} -> 201
 echo "[4/5] POST /collections/auto/{doc_id} -> 201"

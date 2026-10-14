@@ -59,6 +59,11 @@ thread.
 - A second selection appends into the open draft (`appendCapture`).
 - Opening a note from the panel edits it in place, with autosave bound to that note. An existing note
   is never discarded for being emptied; only a new draft is.
+- Each note in the Notes face has its own delete, confirmed inline. Without it the only delete in
+  reach was the document's, and a user removed a book (and its notes) trying to remove a note.
+- Deleting the document keeps its notes as standalone notes unless "Also delete my N notes" is
+  ticked (`DELETE /documents/{id}?delete_notes=true`). `test_document_delete_keeps_notes.py` guards
+  both modes.
 - Expanding to the full note page sets `from` to `/library?doc=…&note=…`, so Back returns to the
   reader with the note open. A `from` with a query is a place, not a history step.
 - That place belongs to the document it arrived with (`arrivalFor`). The library holds it after the

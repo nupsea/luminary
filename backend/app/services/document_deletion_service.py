@@ -64,6 +64,7 @@ from app.models import (
     WebReferenceModel,
 )
 from app.repos.collection_repo import CollectionRepo
+from app.repos.note_repo import NoteRepo
 
 # indirect: get_lancedb_service is patched in tests
 from app.services import vector_store as _vector_store_module
@@ -89,7 +90,6 @@ _DOCUMENT_ID_CHILD_TABLES: tuple[type, ...] = (
     FlashcardModel,
     MisconceptionModel,
     NoteSourceModel,
-    NoteModel,
     QAHistoryModel,
     ReadingProgressModel,
     AnnotationModel,
@@ -112,6 +112,7 @@ _SPECIAL_CASE_TABLES: tuple[type, ...] = (
     ReadingPositionModel,
     StudySessionModel,
     CollectionMemberModel,
+    NoteModel,
 )
 
 # Carries a document_id and is deliberately kept. The learner record outlives the
@@ -137,11 +138,33 @@ async def _retire_auto_collection(session: AsyncSession, document_id: str) -> No
         await session.delete(col)
 
 
+async def _release_notes(session: AsyncSession, document_id: str, *, delete_notes: bool) -> None:
+    """Detach the document's notes, or delete them with their index and memberships."""
+    from app.services.notes_service import fts_delete, fts_update, sync_tag_index
+
+    repo = NoteRepo(session)
+    notes = await repo.contents_for_document(document_id)
+    if not delete_notes:
+        for note_id, content in notes:
+            await fts_update(note_id, content, None, session)
+        await repo.detach_from_document(document_id)
+        return
+    for note_id, _ in notes:
+        await fts_delete(note_id, session)
+        await sync_tag_index(note_id, [], session)
+    await repo.delete_for_document(document_id, [note_id for note_id, _ in notes])
+
+
 class DocumentDeletionService:
     """Orchestrates the multi-system cascade for deleting a single document."""
 
-    async def delete_sqlite_cascade(self, session: AsyncSession, doc: DocumentModel) -> None:
+    async def delete_sqlite_cascade(
+        self, session: AsyncSession, doc: DocumentModel, *, delete_notes: bool = False
+    ) -> None:
         """Delete the document row + every child row keyed by document_id.
+
+        The document's notes are the user's writing, so by default they survive
+        as standalone notes; `delete_notes` removes them with it.
 
         Caller owns the session (so this can run inside the existing transaction
         used by bulk-delete) and is responsible for `await session.commit()`.
@@ -185,6 +208,7 @@ class DocumentDeletionService:
             await session.execute(
                 delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
             )
+        await _release_notes(session, document_id, delete_notes=delete_notes)
 
         # ReadingPositionModel and StudySessionModel are separated because their
         # FK relationship to DocumentModel uses a different column name in some
@@ -290,12 +314,18 @@ class DocumentDeletionService:
             out[label] = int(result.scalar_one() or 0)
         return out
 
-    def delete_lancedb_vectors(self, document_id: str) -> None:
-        """Drop chunk + image vectors. Non-fatal: failures are logged."""
+    def delete_lancedb_vectors(self, document_id: str, *, delete_notes: bool = False) -> None:
+        """Drop chunk + image vectors and release note vectors. Non-fatal: failures are logged."""
         try:
             _vector_store_module.get_lancedb_service().delete_document(document_id)
         except Exception:
             logger.warning("Failed to delete LanceDB vectors for document %s", document_id)
+        try:
+            _vector_store_module.get_lancedb_service().release_document_notes(
+                document_id, delete_notes=delete_notes
+            )
+        except Exception:
+            logger.warning("Failed to release note vectors for document %s", document_id)
 
     def delete_filesystem_assets(self, document_id: str) -> None:
         """Drop extracted images dir + raw file. Non-fatal."""

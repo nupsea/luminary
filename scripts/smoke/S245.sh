@@ -20,7 +20,7 @@ DOC_ID=""
 # the residue smoke scripts have left before.
 cleanup() {
   rm -f "$TMP"
-  [ -n "$DOC_ID" ] && curl -sf -m 30 -X DELETE "${BASE}/documents/${DOC_ID}" >/dev/null 2>&1 || true
+  [ -n "$DOC_ID" ] && curl -sf -m 30 -X DELETE "${BASE}/documents/${DOC_ID}?delete_notes=true" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 

@@ -1224,7 +1224,10 @@ export interface paths {
         get: operations["get_document_documents__document_id__get"];
         put?: never;
         post?: never;
-        /** Delete Document */
+        /**
+         * Delete Document
+         * @description Delete a document; its notes are kept as standalone notes unless `delete_notes`.
+         */
         delete: operations["delete_document_documents__document_id__delete"];
         options?: never;
         head?: never;
@@ -11989,6 +11992,11 @@ export interface components {
         app__schemas__documents__BulkDeleteRequest: {
             /** Ids */
             ids: string[];
+            /**
+             * Delete Notes
+             * @default false
+             */
+            delete_notes: boolean;
         };
         /** BulkDeleteRequest */
         app__schemas__flashcards__BulkDeleteRequest: {
@@ -14310,7 +14318,9 @@ export interface operations {
     };
     delete_document_documents__document_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                delete_notes?: boolean;
+            };
             header?: never;
             path: {
                 document_id: string;

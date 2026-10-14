@@ -15,7 +15,7 @@ echo "${FILTER_RESP}" | grep -q '"items"' || { echo "FAIL: video filter rejected
 EMPTY="$SMOKE_TMP/s121-empty.mp4"
 : > "$EMPTY"
 DOC_ID=""
-trap '[ -n "$DOC_ID" ] && curl -s -m 30 -X DELETE "${BASE}/documents/${DOC_ID}" >/dev/null 2>&1 || true' EXIT
+trap '[ -n "$DOC_ID" ] && curl -s -m 30 -X DELETE "${BASE}/documents/${DOC_ID}?delete_notes=true" >/dev/null 2>&1 || true' EXIT
 # No -f: a 422 is an accepted answer, and -f under set -e would end the script
 # silently before the status is read.
 INGEST_STATUS=$(curl -s -X POST "${BASE}/documents/ingest" \

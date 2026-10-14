@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import NamedTuple
 
 from fastapi import Depends
-from sqlalchemy import case, delete, func, select
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -157,6 +157,30 @@ class NoteRepo:
         )
         await self.session.execute(delete(NoteModel).where(NoteModel.id == note_id))
         await self.session.commit()
+
+    # -- a deleted document's notes (caller commits) -------------------------
+
+    async def contents_for_document(self, document_id: str) -> list[tuple[str, str]]:
+        rows = await self.session.execute(
+            select(NoteModel.id, NoteModel.content).where(NoteModel.document_id == document_id)
+        )
+        return [(r.id, r.content) for r in rows]
+
+    async def detach_from_document(self, document_id: str) -> None:
+        await self.session.execute(
+            update(NoteModel)
+            .where(NoteModel.document_id == document_id)
+            .values(document_id=None, chunk_id=None, section_id=None)
+        )
+
+    async def delete_for_document(self, document_id: str, note_ids: Sequence[str]) -> None:
+        await self.session.execute(
+            delete(CollectionMemberModel).where(
+                CollectionMemberModel.member_id.in_(note_ids),
+                CollectionMemberModel.member_type == "note",
+            )
+        )
+        await self.session.execute(delete(NoteModel).where(NoteModel.document_id == document_id))
 
     # -- collection / source membership reads ------------------------------
 

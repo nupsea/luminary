@@ -26,8 +26,8 @@ DOC2=$(curl -sf -X POST "$BASE/documents/ingest" \
 
 # Both documents go however this exits; the script had been leaving two per run.
 cleanup_docs() {
-  curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC1" || true
-  curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC2" || true
+  curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC1?delete_notes=true" || true
+  curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC2?delete_notes=true" || true
 }
 trap cleanup_docs EXIT
 
