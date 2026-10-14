@@ -32,7 +32,12 @@ from app.services import embedder as _embedder_module  # indirect: get_embedding
 from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
-from app.services.llm import LLMUnavailableError, get_llm_service, missing_model_from
+from app.services.llm import (
+    LLMTimeoutError,
+    LLMUnavailableError,
+    get_llm_service,
+    missing_model_from,
+)
 from app.services.llm_json import parse_llm_json_object, salvage_llm_json_object
 from app.services.prompt_spec import NO_FENCES, PromptSpec, render_for, step_decomposition
 from app.services.settings_service import get_vision_model
@@ -116,6 +121,12 @@ def _get_enrich_sem() -> asyncio.Semaphore:
         sem = asyncio.Semaphore(max(1, min(n, max(1, slots))))
         _ENRICH_SEMS[loop] = sem
     return sem
+
+
+# A figure the reader cannot finish is that figure's failure: one in a 206-figure
+# PDF looped to the timeout three times and failed the job for all of them. Every
+# figure timing out is the server's, and fails the job. 3 sits between those cases.
+_MAX_CONSECUTIVE_FIGURE_TIMEOUTS = 3
 
 
 # One color covering more than this fraction of pixels means a near-blank capture
@@ -377,6 +388,7 @@ class ImageEnricherService:
             contexts = {}
 
         processed = 0
+        consecutive_timeouts = 0
         embedder = _embedder_module.get_embedding_service()
         lancedb_svc = _vector_store_module.get_lancedb_service()
 
@@ -400,6 +412,7 @@ class ImageEnricherService:
                         parsed = await _call_vision_llm(
                             abs_path, settings, contexts.get(img.id, "")
                         )
+                        consecutive_timeouts = 0
                         image_type = parsed.get("image_type") or "other"
                         description = _merge_labels(parsed) or ""
                         if not description.strip():
@@ -444,6 +457,21 @@ class ImageEnricherService:
                     processed += 1
                     logger.info("image_enricher: analyzed image_id=%s type=%s", img.id, image_type)
 
+                except LLMTimeoutError as exc:
+                    consecutive_timeouts += 1
+                    if consecutive_timeouts >= _MAX_CONSECUTIVE_FIGURE_TIMEOUTS:
+                        logger.warning(
+                            "image_enricher: figure reader timed out on %d figures in a row",
+                            consecutive_timeouts,
+                        )
+                        raise
+                    logger.warning(
+                        "image_enricher: figure reader timed out on image_id=%s, "
+                        "leaving it for retry: %s",
+                        img.id,
+                        exc,
+                    )
+                    continue
                 except LLMUnavailableError as exc:
                     # An unpulled model arrives as a connection error, so saying
                     # "unreachable" sent users after a server that was fine.

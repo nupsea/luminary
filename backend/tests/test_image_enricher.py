@@ -456,6 +456,102 @@ async def test_decorative_image_skips_llm(session_factory, tmp_path: Path) -> No
         assert row.image_type == "decorative"
 
 
+async def _add_varied_images(session_factory, data_dir: Path, doc_id: str, n: int) -> list[str]:
+    ids = [f"img-extra-{i}" for i in range(n)]
+    async with session_factory() as session:
+        for i, image_id in enumerate(ids):
+            _make_varied_png(data_dir / "images" / doc_id / f"{i + 1}_0.png")
+            session.add(
+                ImageModel(
+                    id=image_id,
+                    document_id=doc_id,
+                    chunk_id=None,
+                    page=i + 1,
+                    path=f"images/{doc_id}/{i + 1}_0.png",
+                    width=200,
+                    height=200,
+                    content_hash=f"extra{i}",
+                    image_type=None,
+                    description=None,
+                )
+            )
+        await session.commit()
+    return ids
+
+
+def _vision_timeout():
+    import litellm as _litellm  # noqa: PLC0415
+
+    return _litellm.Timeout(message="timed out", model="qwen2.5vl:7b", llm_provider="ollama")
+
+
+async def _enrich_with_llm(doc_id, session_factory, data_dir: Path, side_effect) -> int:
+    mock_embedder = MagicMock()
+    mock_embedder.encode.return_value = [[0.1] * 384]
+    with (
+        patch(
+            "app.services.llm.litellm.acompletion",
+            new_callable=AsyncMock,
+            side_effect=side_effect,
+        ),
+        patch("app.database.get_session_factory", return_value=session_factory),
+        patch("app.config.get_settings") as mock_settings,
+        patch("app.services.vector_store.get_lancedb_service", return_value=MagicMock()),
+        patch("app.services.embedder.get_embedding_service", return_value=mock_embedder),
+    ):
+        settings = MagicMock()
+        settings.DATA_DIR = str(data_dir)
+        settings.VISION_MODEL = "ollama/llava:7b"
+        settings.OLLAMA_URL = "http://localhost:11434"
+        settings.LITELLM_DEFAULT_MODEL = "ollama/gemma4"
+        mock_settings.return_value = settings
+        return await ImageEnricherService().enrich(doc_id)
+
+
+@pytest.mark.asyncio
+async def test_one_figure_timing_out_does_not_fail_the_others(
+    doc_and_image, session_factory
+) -> None:
+    """A figure the reader loops on is skipped; the figures after it are still read."""
+    doc_id, first_id, _, data_dir = doc_and_image
+    later_ids = await _add_varied_images(session_factory, data_dir, doc_id, 2)
+
+    described = MagicMock()
+    described.choices[0].message.content = '{"image_type": "chart", "description": "Bars"}'
+
+    async def _reader(*_args, **_kwargs):
+        _reader.calls += 1
+        if _reader.calls == 1:
+            raise _vision_timeout()
+        return described
+
+    _reader.calls = 0
+
+    count = await _enrich_with_llm(doc_id, session_factory, data_dir, _reader)
+
+    assert count == 2
+    from sqlalchemy import select  # noqa: PLC0415
+
+    async with session_factory() as session:
+        rows = {
+            r.id: r.description for r in (await session.execute(select(ImageModel))).scalars()
+        }
+    assert rows[first_id] is None, "The timed-out figure stays in the retry set"
+    assert all(rows[i] == "Bars" for i in later_ids)
+
+
+@pytest.mark.asyncio
+async def test_every_figure_timing_out_fails_the_job(doc_and_image, session_factory) -> None:
+    """Consecutive timeouts are the server's failure and reach the queue's retry."""
+    import litellm as _litellm  # noqa: PLC0415
+
+    doc_id, _, _, data_dir = doc_and_image
+    await _add_varied_images(session_factory, data_dir, doc_id, 4)
+
+    with pytest.raises(_litellm.Timeout):
+        await _enrich_with_llm(doc_id, session_factory, data_dir, _vision_timeout())
+
+
 @pytest.mark.asyncio
 async def test_offline_503_propagates(doc_and_image, session_factory, tmp_path: Path) -> None:
     """When vision model returns 503, ServiceUnavailableError propagates."""
