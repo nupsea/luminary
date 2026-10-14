@@ -92,7 +92,6 @@ from app.services.components import (
     get_component,
     running_in_container,
 )
-from app.services.content_classifier import classify_content
 from app.services.document_deletion_service import get_document_deletion_service
 from app.services.document_search import get_document_search_service
 from app.services.document_tagger import enrich_document_tags, prune_auto_entity_tags
@@ -133,6 +132,7 @@ from app.services.remote_source import (
 from app.services.summarizer import PREGENERATE_MODES
 from app.services.transcript_fix import fix_term
 from app.services.transcript_vocabulary import vocabulary_from_metadata
+from app.services.type_detection import detect_content_type
 from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
 from app.types import DocumentProfile
@@ -704,36 +704,17 @@ async def detect_document_type(file: UploadFile = File(...)):
 
     content = await file.read()
     fmt = ext if ext in ("pdf", "docx", "txt", "md", "markdown") else "txt"
-    suffix = f".{fmt}"
-    tmp = Path(tempfile.gettempdir()) / f"detect-{uuid.uuid4()}{suffix}"
+    tmp = Path(tempfile.gettempdir()) / f"detect-{uuid.uuid4()}.{fmt}"
     try:
         tmp.write_bytes(content)
-        # Parsing is CPU-bound and one worker serves every request (I-2), and it
-        # is unbounded in the document's size: a 44MB PDF measured over 300s with
-        # no answer, which leaves the dialog saying "Reading the document..."
-        # indefinitely. Detection is a convenience -- ingestion classifies again
-        # regardless -- so it is bounded here and gives up rather than hanging.
-        parsed = await asyncio.wait_for(
-            asyncio.to_thread(_parser.parse, tmp, fmt), timeout=_DETECT_TIMEOUT_SECONDS
+        # Detection is a convenience -- ingestion classifies again regardless --
+        # so it is bounded and gives up rather than leaving the dialog waiting.
+        content_type = await detect_content_type(
+            tmp, fmt, file.filename or "", timeout=_DETECT_TIMEOUT_SECONDS
         )
-        content_type = classify_content(
-            parsed.raw_text,
-            [s.__dict__ for s in parsed.sections],
-            parsed.word_count,
-            fmt,
-            file.filename or "",
-        )
-        return {"content_type": content_type, "detected": True}
-    except TimeoutError:
-        logger.info("detect-type gave up on %s after %ss", file.filename, _DETECT_TIMEOUT_SECONDS)
-        return {"content_type": None, "detected": False}
-    except Exception as exc:
-        # A detection failure must not block the upload: the pipeline classifies
-        # again during ingestion anyway, so the dialog just shows nothing.
-        logger.warning("detect-type failed for %s: %s", file.filename, exc)
-        return {"content_type": None, "detected": False}
     finally:
         tmp.unlink(missing_ok=True)
+    return {"content_type": content_type, "detected": content_type is not None}
 
 
 @router.post("/ingest", response_model=IngestResponse)
