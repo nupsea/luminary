@@ -1,0 +1,9 @@
+# Step 4 measured on these; no judge calibration or checker selection may see them.
+# One "doc<TAB>chapter" per line, both matched as whole words inside a card's doc and chapter
+# heading, case- and punctuation-insensitive, so "book x" matches "BOOK X AEOLUS" and not
+# "BOOK XIX". DDIA is listed under each likely form of its title and heading.
+ddia	chapter 6
+ddia	partitioning
+designing data intensive	chapter 6
+designing data intensive	partitioning
+odyssey	book x

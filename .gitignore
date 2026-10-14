@@ -82,6 +82,9 @@ evals/scores_history.jsonl
 # Per-database document ids (#143); ensure_ingested rebuilds it.
 evals/golden/manifest.json
 evals/.realign_*.txt
+# Card-quality labels and their verdicts quote copyrighted text (DDIA); local only, never committed.
+evals/card_quality/labels/
+evals/card_quality/verdicts/
 
 # Design system reference inputs (local-only)
 REF/
