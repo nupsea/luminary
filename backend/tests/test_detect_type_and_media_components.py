@@ -117,26 +117,32 @@ async def test_detect_type_failure_does_not_block_the_upload() -> None:
 async def test_detect_type_kills_the_parse_it_gives_up_on(monkeypatch, tmp_path) -> None:
     """A parse left running after the timeout stalled the upload that followed it
     by ~38s on an 81MB PDF, because PyMuPDF holds the GIL the event loop needs."""
-    import os
+    import asyncio
     import time
 
     from app.services import type_detection
 
-    pid_file = tmp_path / "pid"
-    sleeper = "import os,sys,time; open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(60)"
+    spawned = []
+    real_exec = asyncio.create_subprocess_exec
+
+    async def recording_exec(*args, **kwargs):
+        spawned.append(await real_exec(*args, **kwargs))
+        return spawned[-1]
+
     monkeypatch.setattr(
         type_detection,
         "_child_argv",
-        lambda *_: [sys.executable, "-c", sleeper, str(pid_file)],
+        lambda *_: [sys.executable, "-c", "import time; time.sleep(60)"],
     )
+    monkeypatch.setattr(type_detection.asyncio, "create_subprocess_exec", recording_exec)
     started = time.monotonic()
     result = await type_detection.detect_content_type(
         tmp_path / "x.pdf", "pdf", "x.pdf", timeout=1.0
     )
     assert result is None
     assert time.monotonic() - started < 10
-    with pytest.raises(ProcessLookupError):
-        os.kill(int(pid_file.read_text()), 0)
+    # An exit code means the child was killed and reaped, not left running.
+    assert spawned and spawned[0].returncode is not None
 
 
 @pytest.mark.anyio
