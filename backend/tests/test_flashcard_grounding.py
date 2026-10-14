@@ -84,6 +84,62 @@ class TestQuoteEdges:
         assert not excerpt_is_verbatim("the weaving was never done and the suitors left", _PASSAGE)
 
 
+class TestFormattingIsNotContent:
+    """A model quotes what a reader sees. Each shape here rejected real quotes from a
+    markdown book and a PDF book; each is paired with a content change that must fail."""
+
+    _MARKDOWN = (
+        "Looms were *slow*, so she *secretly* undid the day's work.[^loom]\n"
+        "* The suitors waited in the hall.\n"
+        "* They suspected [:nothing at all](#suitors) for three years.\n"
+        "A cost of 2*3*4 drachmas, or a * b in the ledger."
+    )
+    _PDF = (
+        "Each night she undid the day’s weav‐\ning, "
+        "and the shroud of Laer­ tes stayed un‐finished."
+    )
+
+    @pytest.mark.parametrize(
+        "quote",
+        [
+            "Looms were slow, so she secretly undid the day's work.",
+            "The suitors waited in the hall. They suspected nothing at all for three years.",
+            "Each night she undid the day's weaving, and the shroud of Laertes stayed",
+        ],
+    )
+    def test_markup_and_line_breaks_are_formatting(self, quote):
+        assert excerpt_is_verbatim(quote, self._MARKDOWN + "\n" + self._PDF)
+
+    @pytest.mark.parametrize(
+        "quote",
+        [
+            "Looms were slow, so she openly undid the day's work.",
+            "They suspected the nurse at all for three years.",
+            "Each night she undid the day's weaving, and the shroud of Odysseus stayed",
+            # Separate list items stitched into one sentence are not one span.
+            "Looms were slow. The suitors waited in the hall.",
+        ],
+    )
+    def test_changed_content_still_fails(self, quote):
+        assert not excerpt_is_verbatim(quote, self._MARKDOWN + "\n" + self._PDF)
+
+    @pytest.mark.parametrize(
+        ("quote", "verbatim"),
+        [
+            # A lone * is content: dropping it would make 2*3*4 equal 234.
+            ("A cost of 2*3*4 drachmas", True),
+            ("A cost of 234 drachmas", False),
+            ("or a * b in the ledger", True),
+            ("or a b in the ledger", False),
+            # A typeset break joins; a hyphen inside a line survives as one.
+            ("of Laertes stayed unfinished", False),
+            ("of Laertes stayed un-finished", True),
+        ],
+    )
+    def test_a_lone_asterisk_and_a_real_hyphen_are_content(self, quote, verbatim):
+        assert excerpt_is_verbatim(quote, self._MARKDOWN + "\n" + self._PDF) is verbatim
+
+
 @pytest.fixture()
 async def test_db(tmp_path, monkeypatch):
     engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'grounding.db'}")

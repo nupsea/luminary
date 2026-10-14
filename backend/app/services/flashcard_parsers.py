@@ -315,25 +315,38 @@ _QUOTE_CHARS = str.maketrans(
         "\u2019": "'",
         "\u201c": '"',
         "\u201d": '"',
+        "\u2010": "-",
         "\u2013": "-",
         "\u2014": "-",
         "\u2026": "...",
     }
 )
 
+# PDF text breaks words at line ends with U+2010 or a soft hyphen ("mem\u2010\nory"), and
+# a model quotes the word whole. An ASCII "-" at a line end stays: "well-\nknown" is a
+# real hyphen, so only the two characters a typesetter inserts are joined.
+_PDF_LINE_BREAK = re.compile(r"[\u2010\u00ad]\s+")
 
-# Markdown emphasis renders away, so a model quoting a bolded sentence returns the
-# sentence a reader sees rather than the source bytes. Notes are written in markdown
-# and are the worst affected. Only `**` and code spans go: a lone `*` or `_` carries
-# content (`snake_case`, `a * b`), and dropping those would let two different strings
-# compare equal.
+# Markdown renders away, so a model quoting a marked-up sentence returns the sentence
+# a reader sees rather than the source bytes. Notes are written in markdown and are the
+# worst affected. A lone `*` or `_` carries content (`snake_case`, `a * b`, `2*3*4`), so
+# a single `*` goes only as a pair hugging its text (`*skillfully*`), as markdown reads
+# it. Links keep their text (a Nutshell expandable, `[:text](#id)`, is a link), footnote
+# markers and list bullets go.
 _MD_EMPHASIS = re.compile(r"\*\*|`")
+_MD_SINGLE_EMPHASIS = re.compile(r"(?<![\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])")
+_MD_LINK = re.compile(r"\[:?([^\]\n]*)\]\([^)\s]*\)")
+_MD_FOOTNOTE_REF = re.compile(r"\[\^[^\]\s]+\]:?")
+_MD_BULLET = re.compile(r"^[ \t]*[*+-][ \t]+", re.MULTILINE)
 
 
 def _normalise_for_match(text: str) -> str:
-    """Lowercased, whitespace-collapsed, punctuation- and emphasis-unified."""
-    unmarked = _MD_EMPHASIS.sub("", (text or "").translate(_QUOTE_CHARS))
-    return re.sub(r"\s+", " ", unmarked).strip().lower()
+    """Lowercased, whitespace-collapsed, punctuation-, markup- and line-break-unified."""
+    # Bullets before dashes are unified, so a line opening with an em dash keeps it.
+    text = _MD_BULLET.sub("", _PDF_LINE_BREAK.sub("", text or "")).translate(_QUOTE_CHARS)
+    text = _MD_SINGLE_EMPHASIS.sub(r"\1", _MD_EMPHASIS.sub("", text))
+    text = _MD_FOOTNOTE_REF.sub("", _MD_LINK.sub(r"\1", text))
+    return re.sub(r"\s+", " ", text).strip().lower()
 
 
 # A model closes the sentence it quoted. Measured over the 392 checkable cards in
