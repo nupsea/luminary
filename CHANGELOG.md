@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-10-15
+
+### Added
+- **Mod-Shift-C turns a list item into a checkbox and back in the note editor** (#301).
+
+### Changed
+- **Deleting a document keeps its notes.** They stay as standalone notes unless "Also delete my N notes" is ticked, and each note in the reader's Notes face now has its own delete (#303).
+
+### Fixed
+- **The upload dialog sat on "Uploading..." for about 40 seconds on a large PDF.** Type detection now runs in a child process killed on timeout; on an 81 MB PDF the ingest request went from 42.3s to 0.44s (#304).
+- **One figure the vision model timed out on failed the whole figure job**, so about 195 figures of a 206-figure PDF were never read. That figure is now skipped and retried by the next job (#302).
+- **Card source checks refused real quotes from markdown and PDF books** because of emphasis, links and line-break hyphens (#305).
+- **PDF words broken across a page, column or figure stayed split** ("poten- tially"). On one book, split words went from 24 to 8; existing documents pick this up when reprocessed (#305).
+- **A chapter card could pass with an answer that restated its own evidence.** Such cards are now refused (#290).
+
 ## [0.16.0] - 2026-10-14
 
 ### Security

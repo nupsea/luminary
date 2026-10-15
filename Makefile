@@ -647,8 +647,9 @@ eval-matrix:
 # own cards.
 eval-flashcards:
 	@echo "Flashcard eval across content kinds..."
-	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_flashcard_eval.py \
+	$(UV) run --project $(CURDIR)/backend python evals/run_flashcard_eval.py \
 		--backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) \
+		$(if $(DATASET),--dataset $(DATASET),) \
 		$(if $(SKIP_JUDGE),--skip-judge,) --assert-thresholds
 
 # Rebuild the flashcard golden by sampling passages from the live index. Fixed
