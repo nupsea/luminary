@@ -300,3 +300,35 @@ async def test_conversation_metadata_endpoint_returns_roster(test_db):
     assert "total_turns" in data
     assert "has_timestamps" in data
     assert len(data["speakers"]) > 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("text", [PLAIN_SPEAKER_TEXT, BOOK_TEXT], ids=["speakers", "splitter"])
+async def test_every_chunk_belongs_to_a_section(test_db, text):
+    """#286: chunks written with no section left a dialogue's sections empty, so it had no
+    chapters to practise."""
+    _engine, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_conv_doc(doc_id))
+        await session.commit()
+
+    state = _make_conv_state(doc_id, text)
+    await _chunk_conversation(state, state["parsed_document"], doc_id)
+
+    async with factory() as session:
+        chunks = (
+            (await session.execute(select(ChunkModel).where(ChunkModel.document_id == doc_id)))
+            .scalars()
+            .all()
+        )
+    assert chunks
+    assert all(c.section_id is not None for c in chunks)
+
+
+def test_chunks_are_owned_by_the_section_at_their_position():
+    from app.workflows.ingestion_nodes.chunk import _owners_by_position
+
+    assert _owners_by_position([10, 10, 10, 10], [20, 20]) == [0, 0, 1, 1]
+    assert _owners_by_position([5, 5], [100]) == [0, 0]
+    assert _owners_by_position([5], [0, 0]) == [1]
