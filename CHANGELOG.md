@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A markdown book's study topics listed every heading in it** (241 for *Dive into Deep Learning*, against its 7 chapters). The technical-book chunker stored every unnumbered heading at one level; headings keep their own level now. Existing documents pick this up when reprocessed (#307).
+- **Cards for a technical book could quiz its preface and contributor list, and a novel's cards skipped any section named like "Indexing".** Front and back matter are now recognised from the sections themselves, for every kind of document (#252).
+- **A story could be classified as an essay from one reflective passage**, and get technical card prompts. The register is now a majority of three passages from the body (#286).
+- **A document classified as a conversation had sections with no text to practise from**, so it never got chapter cards (#286).
+
+### Changed
+- **No API route runs SQL of its own any more**; every query is in `repos/`, ahead of the library scope 0.17.0 adds to each of them. No behaviour change.
+
 ## [0.16.1] - 2026-10-15
 
 ### Added
