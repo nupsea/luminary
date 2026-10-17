@@ -18,6 +18,8 @@ export type ContentTypeValue =
 export interface IngestionStatus {
   stage: string
   progress_pct: number
+  /** How far a long stage (download, transcription) has got; null for the rest. */
+  stage_pct?: number | null
   done: boolean
   /** Background indexing is being held back for an in-flight question. */
   paused_for_interaction?: boolean

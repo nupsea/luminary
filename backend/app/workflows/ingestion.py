@@ -7,7 +7,6 @@ from app.telemetry import trace_chain
 from app.workflows.ingestion_nodes._shared import (
     CHUNK_CONFIGS,  # noqa: F401  re-exported for back-compat
     ENTITY_TAIL_MAX,  # noqa: F401  re-exported for back-compat
-    STAGE_PROGRESS,  # noqa: F401  re-exported for routers/documents.py
     ContentType,  # noqa: F401  re-exported for back-compat
     IngestionState,
     _background_tasks,  # noqa: F401  re-exported for tests/test_integration.py

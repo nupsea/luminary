@@ -1,8 +1,11 @@
 import { useIngestionTracker } from "@/hooks/ingestionTrackerCore"
+import { withStagePct } from "@/lib/ingestionStatus"
 
 const STAGE_LABELS: Record<string, string> = {
+  downloading: "Downloading audio",
   parsing: "Parsing document",
   transcribing: "Transcribing audio",
+  correcting: "Checking transcript terms",
   classifying: "Classifying content",
   chunking: "Chunking text",
   embedding: "Generating embeddings",
@@ -76,7 +79,7 @@ export function IngestionProgressPills() {
             </span>
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">
-                {STAGE_LABELS[job.stage] ?? job.stage}
+                {withStagePct(STAGE_LABELS[job.stage] ?? job.stage, job.stagePct)}
               </span>
               <span className="text-[10px] text-muted-foreground/60">
                 {elapsed(job.startedAt)}

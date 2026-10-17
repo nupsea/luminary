@@ -549,6 +549,10 @@ class DeckHealthReport(TypedDict):
     hotspot_sections: list[HealthSection]
 
 
+# Audio files ingestion transcribes. FLAC is how YouTube audio is stored (`download_audio`).
+AUDIO_EXTENSIONS = ("mp3", "m4a", "wav", "flac")
+
+
 # Technical-content gate
 
 

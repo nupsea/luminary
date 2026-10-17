@@ -17,7 +17,7 @@ from pathlib import Path
 from app.services.content_classifier import classify_content, classify_form
 from app.services.llm_admission import awaited
 from app.telemetry import trace_ingestion_node
-from app.types import TECHNICAL_CONTENT_TYPES, register_for_form
+from app.types import AUDIO_EXTENSIONS, TECHNICAL_CONTENT_TYPES, register_for_form
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _parser,
@@ -37,7 +37,7 @@ async def parse_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "parse", "doc_id": state["document_id"]})
     # Audio/video files: DocumentParser cannot handle them; transcribe_node takes over.
     # EPUB and other text-based formats are handled by DocumentParser below.
-    if Path(state["file_path"]).suffix.lstrip(".").lower() in ("mp3", "m4a", "wav", "mp4"):
+    if Path(state["file_path"]).suffix.lstrip(".").lower() in (*AUDIO_EXTENSIONS, "mp4"):
         return {**state, "parsed_document": None, "status": "classifying"}
     with trace_ingestion_node("parse", state):
         try:

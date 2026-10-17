@@ -7,6 +7,7 @@ export interface IngestionJob {
   filename: string
   stage: string
   progressPct: number
+  stagePct: number | null
   status: IngestionJobStatus
   errorMessage: string | null
   /** Consecutive status polls that failed for a reason other than deletion.

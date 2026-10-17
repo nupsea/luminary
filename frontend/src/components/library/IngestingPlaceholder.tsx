@@ -82,7 +82,7 @@ export function IngestingPlaceholder({
     },
   })
 
-  const label = stageLabel(stage, progress)
+  const label = stageLabel(stage, progress, status?.stage_pct)
   const paused = pauseNote({
     stage,
     paused_for_interaction: status?.paused_for_interaction ?? false,

@@ -1,8 +1,10 @@
 import type { IngestionStatus } from "@/lib/ingestionApi"
 
 const STAGE_LABELS: Record<string, string> = {
+  downloading: "Downloading audio",
   parsing: "Parsing document",
   transcribing: "Transcribing",
+  correcting: "Checking transcript terms",
   classifying: "Classifying content",
   chunking: "Chunking text",
   embedding: "Generating embeddings",
@@ -13,8 +15,14 @@ const STAGE_LABELS: Record<string, string> = {
   error: "Failed",
 }
 
-export function stageLabel(stage: string, progressPct: number): string {
-  return STAGE_LABELS[stage] ?? `Processing (${progressPct}%)`
+export function stageLabel(stage: string, progressPct: number, stagePct?: number | null): string {
+  const label = STAGE_LABELS[stage]
+  return label ? withStagePct(label, stagePct) : `Processing (${progressPct}%)`
+}
+
+/** A long stage (download, transcription) says how far it has got. */
+export function withStagePct(label: string, stagePct: number | null | undefined): string {
+  return stagePct == null ? label : `${label} (${stagePct}%)`
 }
 
 /**

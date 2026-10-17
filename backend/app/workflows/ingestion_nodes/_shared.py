@@ -94,8 +94,10 @@ def build_entity_tail(canonical_names: set[str] | list[str] | tuple[str, ...]) -
 
 
 STAGE_PROGRESS: dict[str, int] = {
+    "downloading": 2,
     "parsing": 10,
     "transcribing": 15,
+    "correcting": 32,
     "classifying": 25,
     "chunking": 40,
     "entity_extract": 60,
@@ -106,6 +108,18 @@ STAGE_PROGRESS: dict[str, int] = {
     "complete": 100,
     "error": 0,
 }
+
+# Where a stage that reports its own progress hands over. Correction ends at
+# chunking, not at "classifying": classify runs before transcription and writes no stage.
+_STAGE_END: dict[str, int] = {"downloading": 10, "transcribing": 32, "correcting": 40}
+
+
+def stage_progress_pct(stage: str, fraction: float | None) -> int:
+    start = STAGE_PROGRESS.get(stage, 0)
+    end = _STAGE_END.get(stage)
+    if fraction is None or end is None:
+        return start
+    return start + int(fraction * (end - start))
 
 
 class IngestionState(TypedDict):

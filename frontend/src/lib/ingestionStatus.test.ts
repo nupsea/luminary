@@ -9,6 +9,12 @@ describe("stageLabel", () => {
   it("falls back to the percentage for an unknown stage", () => {
     expect(stageLabel("web_refs", 72)).toBe("Processing (72%)")
   })
+
+  it("says how far a long stage has got", () => {
+    expect(stageLabel("downloading", 6, 50)).toBe("Downloading audio (50%)")
+    expect(stageLabel("transcribing", 15, 0)).toBe("Transcribing (0%)")
+    expect(stageLabel("transcribing", 15, null)).toBe("Transcribing")
+  })
 })
 
 describe("pauseNote", () => {

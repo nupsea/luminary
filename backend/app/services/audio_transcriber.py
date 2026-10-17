@@ -5,6 +5,7 @@ Returns (segments, duration_seconds) where segments is a list of
 """
 
 import logging
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
@@ -69,11 +70,16 @@ class AudioTranscriber:
         logger.info("AudioTranscriber: loaded model_size=%s from local cache", model_size)
 
     def transcribe(
-        self, file_path: Path, *, hotwords: str | None = None
+        self,
+        file_path: Path,
+        *,
+        hotwords: str | None = None,
+        on_progress: Callable[[float], None] | None = None,
     ) -> tuple[list[dict], float]:
         """Return (segments, duration_seconds).
 
         segments: list of {"start": float, "end": float, "text": str}
+        `on_progress` receives the fraction of the audio transcribed so far.
 
         `hotwords` primes every 30 s window, unlike `initial_prompt`, which only
         reaches the first. A primed model can emit its prompt over silence (see
@@ -82,11 +88,12 @@ class AudioTranscriber:
         segments_iter, info = self._model.transcribe(
             str(file_path), beam_size=1, hotwords=hotwords, vad_filter=hotwords is not None
         )
-        result = [
-            {"start": seg.start, "end": seg.end, "text": seg.text.strip()}
-            for seg in segments_iter
-            if seg.text.strip()
-        ]
+        result = []
+        for seg in segments_iter:
+            if on_progress is not None and info.duration:
+                on_progress(seg.end / info.duration)
+            if seg.text.strip():
+                result.append({"start": seg.start, "end": seg.end, "text": seg.text.strip()})
         logger.info(
             "AudioTranscriber: transcribed %d segments, duration=%.1fs",
             len(result),

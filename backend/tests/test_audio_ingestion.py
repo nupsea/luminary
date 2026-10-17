@@ -98,7 +98,9 @@ async def test_transcribe_node_populates_parsed_document(test_db, tmp_path):
         def is_whole_word(self, word: str) -> bool:
             return True
 
-        def transcribe(self, file_path: Path, *, hotwords=None) -> tuple[list[dict], float]:
+        def transcribe(
+            self, file_path: Path, *, hotwords=None, on_progress=None
+        ) -> tuple[list[dict], float]:
             return (
                 [
                     {"start": 0.0, "end": 5.0, "text": "Hello"},
@@ -244,3 +246,35 @@ async def test_media_without_a_content_type_reaches_transcription(test_db, ext, 
     }
     result = await classify_node(state)
     assert result["content_type"] == expected
+
+
+def _flac_header(rate: int, channels: int, depth: int, samples: int) -> bytes:
+    """`fLaC`, a STREAMINFO block header, then the block up to its sample count."""
+    packed = (rate << 44) | ((channels - 1) << 41) | ((depth - 1) << 36) | samples
+    return b"fLaC" + b"\x00\x00\x00\x22" + b"\x10\x00" * 2 + b"\x00" * 6 + packed.to_bytes(8, "big")
+
+
+def test_flac_duration_is_read_from_streaminfo(tmp_path):
+    """YouTube audio is stored as FLAC, which `wave` cannot open."""
+    from app.workflows.ingestion_nodes.transcribe import _audio_duration
+
+    talk = tmp_path / "talk.flac"
+    talk.write_bytes(_flac_header(48000, 2, 16, 258_226_887) + b"\x00" * 64)
+    assert _audio_duration(talk) == pytest.approx(5379.727, abs=0.001)
+
+    not_flac = tmp_path / "bad.flac"
+    not_flac.write_bytes(b"RIFF" + b"\x00" * 40)
+    assert _audio_duration(not_flac) is None
+
+
+async def test_parse_node_hands_flac_to_transcription(tmp_path):
+    from app.workflows.ingestion_nodes.parse import parse_node
+
+    talk = tmp_path / "talk.flac"
+    talk.write_bytes(b"fLaC")
+    state = {"document_id": "d1", "file_path": str(talk), "format": "flac"}
+
+    out = await parse_node(state)
+
+    assert out["parsed_document"] is None
+    assert out["status"] == "classifying"
