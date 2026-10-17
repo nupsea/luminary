@@ -25,8 +25,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db, get_session_factory
 from app.models import (
     ChunkModel,
+    CodeSnippetModel,
     DocumentModel,
     EnrichmentJobModel,
+    ImageModel,
+    LearningObjectiveModel,
     ReadingPositionModel,
     ReadingProgressModel,
     SectionModel,
@@ -61,6 +64,15 @@ class DocumentRepo:
         chunks = await self.session.execute(select(func.count(ChunkModel.id)))
         return int(documents.scalar_one() or 0), int(chunks.scalar_one() or 0)
 
+    async def get(self, document_id: str) -> DocumentModel | None:
+        return await self.session.get(DocumentModel, document_id)
+
+    async def complete_ids(self) -> list[str]:
+        result = await self.session.execute(
+            select(DocumentModel.id).where(DocumentModel.stage == "complete")
+        )
+        return list(result.scalars())
+
     async def find_by_file_hash(self, file_hash: str) -> DocumentModel | None:
         result = await self.session.execute(
             select(DocumentModel).where(DocumentModel.file_hash == file_hash)
@@ -76,6 +88,74 @@ class DocumentRepo:
             .order_by(SectionModel.section_order)
         )
         return result.scalars().all()
+
+    async def section_ids(self, document_id: str) -> list[str]:
+        result = await self.session.execute(
+            select(SectionModel.id)
+            .where(SectionModel.document_id == document_id)
+            .order_by(SectionModel.section_order)
+        )
+        return list(result.scalars())
+
+    async def section_count(self, document_id: str) -> int:
+        result = await self.session.execute(
+            select(func.count(SectionModel.id)).where(SectionModel.document_id == document_id)
+        )
+        return result.scalar_one() or 0
+
+    async def chunk_count(self, document_id: str) -> int:
+        result = await self.session.execute(
+            select(func.count(ChunkModel.id)).where(ChunkModel.document_id == document_id)
+        )
+        return result.scalar_one() or 0
+
+    async def fts_chunk_count(self, document_id: str) -> int:
+        result = await self.session.execute(
+            text("SELECT COUNT(*) FROM chunks_fts WHERE document_id = :did"),
+            {"did": document_id},
+        )
+        return result.scalar_one() or 0
+
+    async def chunk_page_labels(
+        self, document_id: str
+    ) -> list[tuple[str | None, str | None, int | None]]:
+        """(section_id, pdf_page_label, pdf_page_number) per chunk, in reading order."""
+        result = await self.session.execute(
+            select(ChunkModel.section_id, ChunkModel.pdf_page_label, ChunkModel.pdf_page_number)
+            .where(ChunkModel.document_id == document_id)
+            .order_by(ChunkModel.chunk_index)
+        )
+        return [tuple(r) for r in result.all()]
+
+    async def first_figure_path(self, document_id: str) -> str | None:
+        """The earliest non-decorative image's stored path, for a cover."""
+        result = await self.session.execute(
+            select(ImageModel.path)
+            .where(ImageModel.document_id == document_id)
+            .where((ImageModel.image_type != "decorative") | (ImageModel.image_type.is_(None)))
+            .order_by(ImageModel.page.asc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def code_snippets(self, document_id: str) -> Sequence[CodeSnippetModel]:
+        result = await self.session.execute(
+            select(CodeSnippetModel)
+            .where(CodeSnippetModel.document_id == document_id)
+            .order_by(CodeSnippetModel.created_at)
+        )
+        return result.scalars().all()
+
+    async def learning_objectives(self, document_id: str) -> Sequence[LearningObjectiveModel]:
+        result = await self.session.execute(
+            select(LearningObjectiveModel)
+            .where(LearningObjectiveModel.document_id == document_id)
+            .order_by(LearningObjectiveModel.created_at)
+        )
+        return result.scalars().all()
+
+    async def reading_position(self, document_id: str) -> ReadingPositionModel | None:
+        return await self.session.get(ReadingPositionModel, document_id)
 
     async def chunks_for_document(
         self,

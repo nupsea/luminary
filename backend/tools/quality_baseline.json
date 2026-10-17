@@ -110,7 +110,6 @@
     "app/routers/chat_meta.py": 7,
     "app/routers/collections.py": 19,
     "app/routers/concepts.py": 10,
-    "app/routers/documents.py": 24,
     "app/routers/evals.py": 9,
     "app/routers/flashcards.py": 16,
     "app/routers/home.py": 16,

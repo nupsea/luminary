@@ -89,6 +89,12 @@ class SummaryRepo:
         )
         return list(result.scalars())
 
+    async def modes(self, document_id: str) -> set[str]:
+        result = await self.session.execute(
+            select(SummaryModel.mode).where(SummaryModel.document_id == document_id)
+        )
+        return set(result.scalars())
+
     async def latest(self, document_id: str, mode: str) -> SummaryModel | None:
         result = await self.session.execute(
             select(SummaryModel)

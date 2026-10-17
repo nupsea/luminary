@@ -14,19 +14,13 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import func, select, text
 
 from app.config import Settings, get_settings
 from app.database import get_session_factory
 from app.models import (
-    ChunkModel,
-    CodeSnippetModel,
     DocumentModel,
-    ImageModel,
     LearningObjectiveModel,
     ReadingPositionModel,
-    SectionModel,
-    SummaryModel,
 )
 from app.repos._helpers import get_or_404
 from app.repos.collection_repo import CollectionRepo
@@ -37,6 +31,7 @@ from app.repos.document_list_repo import (
     DocumentSort,
 )
 from app.repos.document_repo import DocumentRepo
+from app.repos.summary_repo import SummaryRepo
 from app.schemas.documents import (
     AssignCollectionsRequest,
     BulkDeleteRequest,
@@ -534,16 +529,7 @@ async def ingest_document(
                 # background task was GC'd before completing all modes).
 
                 async with get_session_factory()() as _s:
-                    existing_modes = {
-                        row[0]
-                        for row in (
-                            await _s.execute(
-                                select(SummaryModel.mode).where(
-                                    SummaryModel.document_id == existing.id
-                                )
-                            )
-                        ).all()
-                    }
+                    existing_modes = await SummaryRepo(_s).modes(existing.id)
                 missing = [m for m in PREGENERATE_MODES if m not in existing_modes]
                 if missing:
                     launch_followup(existing.id, _ingestion_module._run_pregenerate(existing.id))
@@ -997,15 +983,7 @@ async def get_document(document_id: str):
         # chunk rather than a second column: the chunk already records it, and
         # a section's label is by definition its first chunk's. Empty for a
         # document whose sheets and printed pages agree, which is most of them.
-        label_rows = await session.execute(
-            select(
-                ChunkModel.section_id,
-                ChunkModel.pdf_page_label,
-                ChunkModel.pdf_page_number,
-            )
-            .where(ChunkModel.document_id == document_id)
-            .order_by(ChunkModel.chunk_index)
-        )
+        label_rows = await repo.chunk_page_labels(document_id)
         section_page_labels: dict[str, str] = {}
         # A section's printed page is the one its *first* chunk sits on. Labels
         # are stored only where they differ from the sheet, so filtering to
@@ -1351,15 +1329,7 @@ async def get_document_cover(document_id: str) -> Response:
                 return FileResponse(str(cached_cover), media_type="image/webp")
 
         # 2. If article/figures exist in ImageModel
-        img_row = (
-            await session.execute(
-                select(ImageModel.path)
-                .where(ImageModel.document_id == document_id)
-                .where((ImageModel.image_type != "decorative") | (ImageModel.image_type.is_(None)))
-                .order_by(ImageModel.page.asc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
+        img_row = await DocumentRepo(session).first_figure_path(document_id)
 
         if img_row:
             img_abs = (Path(settings.DATA_DIR).expanduser() / img_row).resolve()
@@ -1405,11 +1375,7 @@ async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
                 status_code=400,
                 detail=f"Document is not a PDF (format={doc.format})",
             )
-        # Shares session with the get_or_404 check above; single-table count.
-        section_count_result = await session.execute(
-            select(func.count(SectionModel.id)).where(SectionModel.document_id == document_id)
-        )
-        section_count = section_count_result.scalar_one() or 0
+        section_count = await DocumentRepo(session).section_count(document_id)
 
     return PDFMetaResponse(
         page_count=doc.page_count,
@@ -1478,14 +1444,8 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
         if not fp.exists():
             raise HTTPException(status_code=404, detail="EPUB file not found on disk")
 
-        # Section IDs needed to map chapter index to section IDs; shares session with
-        # the get_or_404 check above.
-        sections_result = await session.execute(
-            select(SectionModel.id)
-            .where(SectionModel.document_id == document_id)
-            .order_by(SectionModel.section_order)
-        )
-        all_section_ids = [row[0] for row in sections_result.all()]
+        # Section IDs needed to map chapter index to section IDs.
+        all_section_ids = await DocumentRepo(session).section_ids(document_id)
 
     # Compute total chapters first (needed to slice sections)
     try:
@@ -1597,10 +1557,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
         async with get_session_factory()() as session:
             # Existence check + cascade delete share one session per document;
             # delete_sqlite_cascade uses the session directly for multi-table cleanup.
-            result = await session.execute(
-                select(DocumentModel).where(DocumentModel.id == document_id)
-            )
-            doc = result.scalar_one_or_none()
+            doc = await DocumentRepo(session).get(document_id)
             if doc is None:
                 continue
             await svc.delete_sqlite_cascade(session, doc, delete_notes=body.delete_notes)
@@ -1683,10 +1640,7 @@ async def retag_all_documents():
     whose tag set has already stabilised.
     """
     async with get_session_factory()() as session:
-        rows = (
-            await session.execute(select(DocumentModel.id).where(DocumentModel.stage == "complete"))
-        ).all()
-    doc_ids = [r[0] for r in rows]
+        doc_ids = await DocumentRepo(session).complete_ids()
     for did in doc_ids:
         task = asyncio.create_task(enrich_document_tags(did))
         _background_tasks.add(task)
@@ -1875,19 +1829,9 @@ async def get_document_diagnostics(document_id: str):
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # Two counts share a session with the get_or_404 guard; FTS5 virtual table
-        # requires raw SQL so both stay here rather than going through a repo.
-        chunk_result = await session.execute(
-            select(func.count(ChunkModel.id)).where(ChunkModel.document_id == document_id)
-        )
-        chunk_count = chunk_result.scalar_one() or 0
-
-        # FTS5 count
-        fts_result = await session.execute(
-            text("SELECT COUNT(*) FROM chunks_fts WHERE document_id = :did"),
-            {"did": document_id},
-        )
-        fts_count = fts_result.scalar_one() or 0
+        repo = DocumentRepo(session)
+        chunk_count = await repo.chunk_count(document_id)
+        fts_count = await repo.fts_chunk_count(document_id)
 
     # LanceDB vector count (0 if store unavailable)
     try:
@@ -1982,13 +1926,7 @@ async def get_code_snippets(document_id: str) -> list[CodeSnippetItem]:
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # Shares session with get_or_404; simple document-scoped read-only list.
-        snippets_result = await session.execute(
-            select(CodeSnippetModel)
-            .where(CodeSnippetModel.document_id == document_id)
-            .order_by(CodeSnippetModel.created_at)
-        )
-        snippets = snippets_result.scalars().all()
+        snippets = await DocumentRepo(session).code_snippets(document_id)
 
     return [
         CodeSnippetItem(
@@ -2013,13 +1951,7 @@ async def get_objectives(document_id: str) -> LearningObjectivesResponse:
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # Shares session with get_or_404; simple document-scoped read-only list.
-        result = await session.execute(
-            select(LearningObjectiveModel)
-            .where(LearningObjectiveModel.document_id == document_id)
-            .order_by(LearningObjectiveModel.created_at)
-        )
-        objectives = result.scalars().all()
+        objectives = await DocumentRepo(session).learning_objectives(document_id)
 
     return LearningObjectivesResponse(
         document_id=document_id,
@@ -2147,12 +2079,8 @@ async def save_reading_position(
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # Upsert: read then insert-or-update in one session to avoid a second connection;
-        # ReadingPositionModel is keyed by document_id (one row per doc).
-        result = await session.execute(
-            select(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
-        )
-        row = result.scalar_one_or_none()
+        # One row per document, keyed by document_id.
+        row = await DocumentRepo(session).reading_position(document_id)
         now = datetime.now(UTC)
         if row is None:
             row = ReadingPositionModel(
@@ -2185,11 +2113,7 @@ async def get_reading_position(document_id: str) -> ReadingPositionResponse:
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # Shares session with get_or_404; single-row read.
-        result = await session.execute(
-            select(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
-        )
-        row = result.scalar_one_or_none()
+        row = await DocumentRepo(session).reading_position(document_id)
 
     if row is None:
         raise HTTPException(status_code=404, detail="No reading position saved for this document")
@@ -2205,7 +2129,7 @@ async def set_bookmark(document_id: str, body: SetBookmarkRequest) -> ReadingPos
     """
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
-        row = await session.get(ReadingPositionModel, document_id)
+        row = await DocumentRepo(session).reading_position(document_id)
         if row is None:
             row = ReadingPositionModel(document_id=document_id, updated_at=datetime.now(UTC))
             session.add(row)
@@ -2224,7 +2148,7 @@ async def clear_bookmark(document_id: str) -> None:
     """
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
-        row = await session.get(ReadingPositionModel, document_id)
+        row = await DocumentRepo(session).reading_position(document_id)
         if row is not None and row.pdf_bookmark_page is not None:
             row.pdf_bookmark_page = None
             await session.commit()
