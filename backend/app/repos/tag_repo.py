@@ -1,19 +1,17 @@
 """Repository for `CanonicalTagModel` and related tag tables.
 
-Owns all `session.execute / add / commit / delete` calls for the simple
-tag CRUD endpoints. The merge / normalization-accept / migrate-naming
-endpoints in `routers/tags.py` are kept inline because they are
-multi-entity transactional flows with bespoke rollback semantics
-(same exception applied to `CollectionRepo.migrate-naming`).
+The uncommitted writes serve the multi-step flows (merge, migrate-naming) that
+commit once at their end.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import Depends
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -24,6 +22,12 @@ from app.models import (
     TagAliasModel,
 )
 from app.repos._helpers import get_or_404
+
+# Fixed table and column names: the only text interpolated into the scoped queries.
+_SCOPE_INDEX = {
+    "note": ("note_tag_index", "note_id"),
+    "document": ("document_tag_index", "document_id"),
+}
 
 
 class TagRepo:
@@ -54,6 +58,57 @@ class TagRepo:
             select(CanonicalTagModel).order_by(CanonicalTagModel.id)
         )
         return result.scalars().all()
+
+    async def all_in_storage_order(self) -> list[CanonicalTagModel]:
+        """Every tag, unsorted: the naming migration's tie-break follows this order."""
+        return list((await self.session.execute(select(CanonicalTagModel))).scalars().all())
+
+    async def scoped_counts(self, scope: Literal["note", "document"]) -> dict[str, int]:
+        """{tag id: distinct notes or documents carrying it}."""
+        table, member = _SCOPE_INDEX[scope]
+        rows = (
+            await self.session.execute(
+                text(
+                    f"SELECT tag_full, COUNT(DISTINCT {member}) "  # noqa: S608
+                    f"FROM {table} GROUP BY tag_full"
+                )
+            )
+        ).all()
+        return {tag: int(n) for tag, n in rows}
+
+    async def scoped_tags(self, scope: Literal["note", "document"]) -> list[tuple]:
+        """(id, display_name, parent_tag, usage_count, created_at, scoped count) of tags used
+        in the scope, most used there first, so a note-heavy tag does not outrank a
+        document-heavy one when the scope is documents."""
+        table, member = _SCOPE_INDEX[scope]
+        rows = await self.session.execute(
+            text(
+                "SELECT t.id, t.display_name, t.parent_tag, t.usage_count, "  # noqa: S608
+                "t.created_at, "
+                f"(SELECT COUNT(DISTINCT idx.{member}) FROM {table} idx "
+                "  WHERE idx.tag_full = t.id) AS scoped_count "
+                "FROM canonical_tags t "
+                f"WHERE EXISTS (SELECT 1 FROM {table} idx2 WHERE idx2.tag_full = t.id) "
+                "ORDER BY scoped_count DESC, t.usage_count DESC"
+            )
+        )
+        return [tuple(r) for r in rows.all()]
+
+    async def cross_content_counts(self, tag_id: str) -> tuple[int, int]:
+        """(documents, notes) carrying exactly this tag."""
+        row = (
+            await self.session.execute(
+                text(
+                    "SELECT "
+                    "  (SELECT COUNT(DISTINCT document_id) FROM document_tag_index "
+                    "   WHERE tag_full = :tag) AS doc_count, "
+                    "  (SELECT COUNT(DISTINCT note_id) FROM note_tag_index "
+                    "   WHERE tag_full = :tag) AS note_count"
+                ),
+                {"tag": tag_id},
+            )
+        ).first()
+        return (int(row[0] or 0), int(row[1] or 0)) if row else (0, 0)
 
     async def autocomplete(self, prefix: str, *, limit: int = 10) -> Sequence[CanonicalTagModel]:
         result = await self.session.execute(
@@ -130,6 +185,30 @@ class TagRepo:
         await self.session.commit()
         await self.session.refresh(tag)
         return tag
+
+    async def drop_with_note_index(self, tag_id: str) -> None:
+        """Delete a tag and its note index rows, uncommitted."""
+        await self.session.execute(
+            delete(NoteTagIndexModel).where(NoteTagIndexModel.tag_full == tag_id)
+        )
+        await self.session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
+
+    async def insert_if_absent(self, tag_id: str, usage_count: int) -> None:
+        """Create a tag named by its slug's last segment, uncommitted; an existing id wins."""
+        segments = tag_id.split("/")
+        await self.session.execute(
+            text(
+                "INSERT OR IGNORE INTO canonical_tags"
+                " (id, display_name, parent_tag, usage_count, created_at)"
+                " VALUES (:id, :display_name, :parent_tag, :usage_count, datetime('now'))"
+            ),
+            {
+                "id": tag_id,
+                "display_name": segments[-1],
+                "parent_tag": "/".join(segments[:-1]) if len(segments) > 1 else None,
+                "usage_count": usage_count,
+            },
+        )
 
     async def delete_with_aliases(self, tag_id: str) -> None:
         """Delete the canonical tag and any aliases pointing to it.

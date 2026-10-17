@@ -109,6 +109,52 @@ async def test_tag_migration_merges_duplicates(test_db):
 
 
 @pytest.mark.anyio
+async def test_tag_migration_renames_a_lone_tag(test_db):
+    """A tag with no duplicate is re-created under its normalized id, and its notes' tag
+    lists are normalized and de-duplicated."""
+    _, factory, _ = test_db
+    note_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            NoteModel(
+                id=note_id,
+                content="Note",
+                tags=["Machine_Learning", "machine-learning", "Other Tag"],
+                document_id=None,
+                group_name="manual",
+            )
+        )
+        session.add(
+            CanonicalTagModel(
+                id="Machine_Learning",
+                display_name="Machine_Learning",
+                parent_tag=None,
+                usage_count=7,
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.execute(
+            text(
+                "INSERT INTO note_tag_index (note_id, tag_full, tag_root, tag_parent)"
+                " VALUES (:nid, 'Machine_Learning', 'Machine_Learning', '')"
+            ),
+            {"nid": note_id},
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        data = (await client.post("/tags/migrate-naming")).json()
+    assert data == {"renamed": 1, "merged": 0}
+
+    async with factory() as session:
+        tags = {t.id: t for t in (await session.execute(select(CanonicalTagModel))).scalars()}
+        assert "Machine_Learning" not in tags
+        assert "machine-learning" in tags
+        note = await session.get(NoteModel, note_id)
+        assert note.tags == ["machine-learning", "other-tag"]
+
+
+@pytest.mark.anyio
 async def test_collection_migration_merges_duplicates(test_db):
     """POST /collections/migrate-naming merges 'My Notes' and 'MY-NOTES'."""
     _, factory, _ = test_db

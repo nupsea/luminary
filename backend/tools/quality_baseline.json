@@ -3,7 +3,6 @@
     "app/main.py::lifespan",
     "app/routers/documents.py::ingest_document",
     "app/routers/documents.py::ingest_url",
-    "app/routers/tags.py::migrate_tag_naming",
     "app/runtime/chat_nodes/comparative.py::comparative_node",
     "app/runtime/chat_nodes/notes.py::notes_gap_node",
     "app/runtime/chat_nodes/search.py::search_node",
@@ -55,7 +54,6 @@
     "app/routers/evals.py::_run_eval_subprocess",
     "app/routers/evals.py::_run_generated_eval_subprocess",
     "app/routers/study.py::get_study_stats",
-    "app/routers/tags.py::migrate_tag_naming",
     "app/runtime/chat_graph.py::_resolve_targeted_document",
     "app/runtime/chat_nodes/confidence.py::augment_node",
     "app/runtime/chat_nodes/search.py::search_node",
@@ -106,7 +104,6 @@
   "sql_outside_repos": {
     "app/main.py": 1,
     "app/routers/notes.py": 24,
-    "app/routers/tags.py": 23,
     "app/runtime/chat_graph.py": 2,
     "app/runtime/chat_nodes/comparative.py": 2,
     "app/runtime/chat_nodes/notes.py": 4,
