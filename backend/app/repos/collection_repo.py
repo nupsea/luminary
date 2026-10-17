@@ -207,6 +207,10 @@ class CollectionRepo:
         )
         return [(cid, pid) for cid, pid in result.all()]
 
+    async def ids_by_name(self) -> dict[str, str]:
+        result = await self.session.execute(select(CollectionModel.id, CollectionModel.name))
+        return {name: cid for cid, name in result.all()}
+
     async def names(self, collection_ids: Sequence[str]) -> dict[str, str]:
         if not collection_ids:
             return {}

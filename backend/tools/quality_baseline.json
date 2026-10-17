@@ -107,7 +107,6 @@
   "sql_outside_repos": {
     "app/main.py": 1,
     "app/routers/collections.py": 19,
-    "app/routers/flashcards.py": 16,
     "app/routers/notes.py": 24,
     "app/routers/tags.py": 23,
     "app/runtime/chat_graph.py": 2,

@@ -31,18 +31,15 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
 from app.models import (
-    ChunkModel,
-    CollectionModel,
-    DocumentModel,
     FlashcardModel,
     ReviewEventModel,
-    SectionModel,
 )
+from app.repos.collection_repo import CollectionRepo
+from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo, get_flashcard_repo
 from app.repos.study_repo import StudyRepo
 from app.schemas.flashcards import (
@@ -206,10 +203,7 @@ async def grounding_summary(
     its own number rather than folded into a pass rate -- a card nobody has
     audited is not a card that passed.
     """
-    stmt = select(FlashcardModel.grounding, func.count()).group_by(FlashcardModel.grounding)
-    if document_id is not None:
-        stmt = stmt.where(FlashcardModel.document_id == document_id)
-    counts = dict((await session.execute(stmt)).all())
+    counts = await FlashcardRepo(session).grounding_counts(document_id)
     return GroundingReport(scanned=sum(counts.values()), **counts)
 
 
@@ -542,18 +536,7 @@ async def generate_cloze_flashcards(
 # Bloom's taxonomy coverage audit
 async def _used_chunk_ids(document_id: str, session: AsyncSession) -> set[str]:
     """Chunks some card of this document was written from."""
-    rows = (
-        (
-            await session.execute(
-                select(FlashcardModel.source_chunk_ids).where(
-                    FlashcardModel.document_id == document_id
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return {cid for row in rows for cid in (row or []) if isinstance(cid, str)}
+    return await FlashcardRepo(session).used_chunk_ids(document_id)
 
 
 # NOTE: /audit before /{document_id} — prevents FastAPI treating "audit" as a document_id.
@@ -678,23 +661,8 @@ async def list_flashcard_decks(
     - "note" otherwise (tag-scoped or note_ids-scoped)
     """
 
-    # Custom aggregation + cross-table name lookup; this bespoke shape (GROUP BY deck,
-    # joined against CollectionModel names) lives in the router because no repo owns
-    # both FlashcardModel and CollectionModel in a single query.
-    rows = (
-        await session.execute(
-            select(
-                FlashcardModel.deck,
-                FlashcardModel.source,
-                func.count().label("card_count"),
-                func.max(FlashcardModel.document_id).label("document_id"),
-            ).group_by(FlashcardModel.deck)
-        )
-    ).all()
-
-    # Fetch all collection names in one query
-    coll_result = await session.execute(select(CollectionModel.id, CollectionModel.name))
-    name_to_id = {row[1]: row[0] for row in coll_result.all()}
+    rows = await FlashcardRepo(session).deck_rollup()
+    name_to_id = await CollectionRepo(session).ids_by_name()
 
     items: list[DeckItem] = []
     for deck, source, card_count, doc_id in rows:
@@ -730,9 +698,7 @@ async def export_flashcards_csv(
     repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> StreamingResponse:
     """Export all flashcards for a document as a CSV download."""
-    # Read document title for the CSV header; single-row lookup, no FlashcardRepo method needed.
-    doc_result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-    doc = doc_result.scalar_one_or_none()
+    doc = await DocumentRepo(session).get(document_id)
     document_title = doc.title if doc else ""
 
     cards = list(await repo.list_for_document(document_id))
@@ -1009,22 +975,16 @@ async def get_source_context(
 
     # Hop-by-hop join chain with 404 at each step: chunk → section → document.
     # Sequential reads are intentional -- each result gates whether the next query runs.
-    chunk_result = await session.execute(select(ChunkModel).where(ChunkModel.id == card.chunk_id))
-    chunk = chunk_result.scalar_one_or_none()
+    docs = DocumentRepo(session)
+    chunk = await docs.chunk(card.chunk_id)
     if chunk is None or chunk.section_id is None:
         raise HTTPException(status_code=404, detail="No section found for this flashcard")
 
-    sec_result = await session.execute(
-        select(SectionModel).where(SectionModel.id == chunk.section_id)
-    )
-    section = sec_result.scalar_one_or_none()
+    section = await docs.section(chunk.section_id)
     if section is None:
         raise HTTPException(status_code=404, detail="Section not found")
 
-    doc_result = await session.execute(
-        select(DocumentModel).where(DocumentModel.id == section.document_id)
-    )
-    doc = doc_result.scalar_one_or_none()
+    doc = await docs.get(section.document_id)
     document_title = doc.title if doc else ""
 
     preview = (section.preview or "")[:400]

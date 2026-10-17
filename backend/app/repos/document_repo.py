@@ -76,6 +76,12 @@ class DocumentRepo:
         )
         return bool(count)
 
+    async def chunk(self, chunk_id: str) -> ChunkModel | None:
+        return await self.session.get(ChunkModel, chunk_id)
+
+    async def section(self, section_id: str) -> SectionModel | None:
+        return await self.session.get(SectionModel, section_id)
+
     async def complete_ids(self) -> list[str]:
         result = await self.session.execute(
             select(DocumentModel.id).where(DocumentModel.stage == "complete")
