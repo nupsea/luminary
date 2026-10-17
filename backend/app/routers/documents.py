@@ -10,33 +10,32 @@ import zipfile
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import case, func, select, text
+from sqlalchemy import func, select, text
 
 from app.config import Settings, get_settings
 from app.database import get_session_factory
 from app.models import (
     ChunkModel,
     CodeSnippetModel,
-    CollectionMemberModel,
     DocumentModel,
-    EnrichmentJobModel,
-    FlashcardModel,
     ImageModel,
     LearningObjectiveModel,
-    PredictionEventModel,
     ReadingPositionModel,
-    ReadingProgressModel,
     SectionModel,
-    StudySessionModel,
     SummaryModel,
 )
 from app.repos._helpers import get_or_404
 from app.repos.collection_repo import CollectionRepo
+from app.repos.document_list_repo import (
+    DocumentListFilters,
+    DocumentListRepo,
+    DocumentListRow,
+    DocumentSort,
+)
 from app.repos.document_repo import DocumentRepo
 from app.schemas.documents import (
     AssignCollectionsRequest,
@@ -251,303 +250,78 @@ async def list_documents(
         default=None, description="Restrict to documents in this collection"
     ),
     favorite: bool | None = Query(default=None, description="Filter by favorite status"),
-    sort: Literal[
-        "newest", "oldest", "alphabetical", "most-studied", "last_accessed", "weakest-first"
-    ] = Query(default="newest"),
+    sort: DocumentSort = Query(default="newest"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> DocumentListResponse:
     """Return paginated documents with optional filtering and sorting."""
+    filters = DocumentListFilters(
+        formats=_csv(format),
+        content_types=_csv(content_type),
+        tag=tag,
+        collection_id=collection_id,
+        favorite=favorite,
+    )
     async with get_session_factory()() as session:
-        # Correlated scalar subqueries for derived fields
-        summary_one_sentence_sq = (
-            select(SummaryModel.content)
-            .where(
-                SummaryModel.document_id == DocumentModel.id,
-                SummaryModel.mode == "one_sentence",
-            )
-            .limit(1)
-            .correlate(DocumentModel)
-            .scalar_subquery()
+        total, rows = await DocumentListRepo(session).page(filters, sort, page, page_size)
+        # One batch for the page, so a card renders its collection chips without its own fetch.
+        refs = await CollectionRepo(session).refs_for_members(
+            [r.doc.id for r in rows], member_type="document"
         )
-        flashcard_count_sq = (
-            select(func.count())
-            .where(FlashcardModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        summary_count_sq = (
-            select(func.count())
-            .where(SummaryModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        study_session_count_sq = (
-            select(func.count())
-            .where(StudySessionModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        chunk_count_sq = (
-            select(func.count())
-            .where(ChunkModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        section_count_sq = (
-            select(func.count())
-            .where(SectionModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        read_section_count_sq = (
-            select(func.count())
-            .where(ReadingProgressModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        # The document's enrichment state, aggregated over ALL its jobs.
-        #
-        # This used to report a single job -- image_analyze, else image_extract,
-        # else whichever was newest -- which is not the document's state. Six job
-        # types are registered, so a document whose image work had finished read
-        # "Analysis complete" while its concept_link or web_refs was still queued,
-        # and the card contradicted the enrichment queue that was still counting
-        # the task. A badge that says a document is finished while work is running
-        # is worse than no badge.
-        #
-        # Precedence is by what the reader can act on, not by job type:
-        # outstanding work first, then a failure, then a skip (a model that was
-        # never installed -- actionable, so it must not hide behind "done"), then
-        # done. MIN over the priority keeps it to one correlated subquery.
-        enrichment_priority_sq = (
-            select(
-                func.min(
-                    case(
-                        (EnrichmentJobModel.status.in_(("pending", "running")), 1),
-                        (EnrichmentJobModel.status == "failed", 2),
-                        (EnrichmentJobModel.status == "skipped", 3),
-                        (EnrichmentJobModel.status == "done", 4),
-                        else_=5,
-                    )
-                )
-            )
-            .where(EnrichmentJobModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        objectives_total_sq = (
-            select(func.count())
-            .where(LearningObjectiveModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        objectives_covered_sq = (
-            select(func.count())
-            .where(
-                LearningObjectiveModel.document_id == DocumentModel.id,
-                LearningObjectiveModel.covered.is_(True),
-            )
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
+    items = [_list_item(r, refs.get(r.doc.id, [])) for r in rows]
+    return DocumentListResponse(items=items, total=total, page=page, page_size=page_size)
 
-        # Mastery aggregate: weighted FSRS-stability mean, minus prediction-error penalty.
-        # Mirrors MasteryService._compute_weighted_mastery; clamps each card's stability
-        # at _MASTERY_FULL_DAYS (21) and applies bloom_level>=4 weight of 1.5.
-        _bloom_weight = case((FlashcardModel.bloom_level >= 4, 1.5), else_=1.0)
-        _capped_stability = func.min(FlashcardModel.fsrs_stability / 21.0, 1.0)
-        mastery_sum_contribution_sq = (
-            select(func.sum(_capped_stability * _bloom_weight))
-            .where(FlashcardModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        mastery_sum_weight_sq = (
-            select(func.sum(_bloom_weight))
-            .where(FlashcardModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        prediction_error_count_sq = (
-            select(func.count())
-            .where(
-                PredictionEventModel.document_id == DocumentModel.id,
-                PredictionEventModel.correct.is_(False),
-            )
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
 
-        # Build WHERE filters pushed into SQL.
-        where_clauses = []
-        if format:
-            formats = [f.strip() for f in format.split(",") if f.strip()]
-            if formats:
-                where_clauses.append(DocumentModel.format.in_(formats))
-        if content_type:
-            allowed = [t.strip() for t in content_type.split(",") if t.strip()]
-            if allowed:
-                where_clauses.append(DocumentModel.content_type.in_(allowed))
-        if tag:
-            # Prefix match via the shadow index, matching the note tag filter
-            # semantics: ?tag=science also matches docs tagged 'science/biology'.
-            from sqlalchemy import or_
+def _csv(value: str | None) -> list[str]:
+    return [v.strip() for v in (value or "").split(",") if v.strip()]
 
-            from app.models import DocumentTagIndexModel as _DocTagIdx
 
-            where_clauses.append(
-                select(_DocTagIdx.document_id)
-                .where(
-                    _DocTagIdx.document_id == DocumentModel.id,
-                    or_(
-                        _DocTagIdx.tag_full == tag,
-                        _DocTagIdx.tag_full.like(f"{tag}/%"),
-                    ),
-                )
-                .exists()
-            )
-        if collection_id:
-            where_clauses.append(
-                select(CollectionMemberModel.id)
-                .where(
-                    CollectionMemberModel.collection_id == collection_id,
-                    CollectionMemberModel.member_id == DocumentModel.id,
-                    CollectionMemberModel.member_type == "document",
-                )
-                .exists()
-            )
-        if favorite is not None:
-            where_clauses.append(DocumentModel.is_favorite == favorite)
-
-        # Total count under the same filters.
-        count_stmt = select(func.count()).select_from(DocumentModel)
-        for clause in where_clauses:
-            count_stmt = count_stmt.where(clause)
-        total = int((await session.execute(count_stmt)).scalar_one())
-
-        # learning_status sort key, derived in SQL from the count subqueries.
-        learning_status_order_sq = case(
-            (study_session_count_sq > 0, 3),
-            (flashcard_count_sq > 0, 2),
-            (summary_count_sq > 0, 1),
-            else_=0,
-        )
-
-        if sort == "newest":
-            order_clauses = [DocumentModel.created_at.desc()]
-        elif sort == "oldest":
-            order_clauses = [DocumentModel.created_at.asc()]
-        elif sort == "alphabetical":
-            order_clauses = [func.lower(DocumentModel.title).asc()]
-        elif sort == "last_accessed":
-            order_clauses = [DocumentModel.last_accessed_at.desc()]
-        elif sort == "weakest-first":
-            # Docs with cards sorted ascending by mastery (nulls/no-cards last).
-            # mastery_sum_weight==0 means no cards; treat as highest mastery so
-            # they sink to the bottom and don't crowd out real weak docs.
-            order_clauses = [
-                case((mastery_sum_weight_sq > 0, 0), else_=1).asc(),
-                (mastery_sum_contribution_sq / mastery_sum_weight_sq).asc(),
-                DocumentModel.created_at.desc(),
-            ]
-        else:  # most-studied
-            order_clauses = [learning_status_order_sq.desc(), DocumentModel.created_at.desc()]
-
-        stmt = select(
-            DocumentModel,
-            summary_one_sentence_sq.label("summary_one_sentence"),
-            flashcard_count_sq.label("flashcard_count"),
-            summary_count_sq.label("summary_count"),
-            study_session_count_sq.label("study_session_count"),
-            chunk_count_sq.label("chunk_count"),
-            section_count_sq.label("section_count"),
-            read_section_count_sq.label("read_section_count"),
-            enrichment_priority_sq.label("enrichment_priority"),
-            objectives_total_sq.label("objectives_total"),
-            objectives_covered_sq.label("objectives_covered"),
-            mastery_sum_contribution_sq.label("mastery_sum_contribution"),
-            mastery_sum_weight_sq.label("mastery_sum_weight"),
-            prediction_error_count_sq.label("prediction_error_count"),
-        )
-        for clause in where_clauses:
-            stmt = stmt.where(clause)
-        stmt = stmt.order_by(*order_clauses).limit(page_size).offset((page - 1) * page_size)
-
-        result = await session.execute(stmt)
-        rows = result.all()
-
-        # Batch-fetch collection memberships for the current page so
-        # DocumentCard can render membership chips without per-card fetches
-        # (plan 2E.5). The id list is only known after the page query runs.
-        page_doc_ids = [row[0].id for row in rows]
-        collection_refs_by_doc = await CollectionRepo(session).refs_for_members(
-            page_doc_ids, member_type="document"
-        )
-
-    page_items: list[DocumentListItem] = []
-    for row in rows:
-        doc = row[0]
-        summary_one_sentence = row[1]
-        flashcard_count = row[2] or 0
-        summary_count = row[3] or 0
-        study_session_count = row[4] or 0
-        chunk_count = row[5] or 0
-        section_count = row[6] or 0
-        read_section_count = row[7] or 0
-        enrichment_status = _ENRICHMENT_STATUS_BY_PRIORITY.get(row[8])
-        objectives_total = row[9] or 0
-        objectives_covered = row[10] or 0
-        mastery_sum_contribution = row[11]
-        mastery_sum_weight = row[12]
-        prediction_error_count = row[13] or 0
-        reading_progress_pct = (read_section_count / section_count) if section_count > 0 else 0.0
-        objective_progress_pct: float | None = None
-        if objectives_total > 0:
-            objective_progress_pct = round(objectives_covered / objectives_total * 100.0, 1)
-        mastery_pct: float | None = None
-        if mastery_sum_weight and mastery_sum_weight > 0:
-            weighted_mean = float(mastery_sum_contribution or 0.0) / float(mastery_sum_weight)
-            penalty = min(prediction_error_count * 0.05, 0.20)
-            mastery_pct = round(max(0.0, weighted_mean - penalty) * 100.0, 1)
-        page_items.append(
-            DocumentListItem(
-                id=doc.id,
-                title=doc.title,
-                format=doc.format,
-                content_type=doc.content_type,
-                facets=_facets(doc),
-                word_count=doc.word_count,
-                page_count=doc.page_count,
-                stage=doc.stage,
-                tags=_safe_tags(doc.tags),
-                created_at=doc.created_at,
-                last_accessed_at=doc.last_accessed_at,
-                summary_one_sentence=summary_one_sentence,
-                flashcard_count=flashcard_count,
-                learning_status=_derive_learning_status(
-                    study_session_count, flashcard_count, summary_count
-                ),
-                chapter_count=doc.chapter_count,
-                chunk_count=chunk_count,
-                reading_progress_pct=reading_progress_pct,
-                audio_duration_seconds=doc.audio_duration_seconds,
-                source_url=doc.source_url,
-                video_title=doc.video_title,
-                channel_name=doc.channel_name,
-                youtube_url=doc.youtube_url,
-                enrichment_status=enrichment_status,
-                objective_progress_pct=objective_progress_pct,
-                mastery_pct=mastery_pct,
-                is_favorite=bool(doc.is_favorite),
-                collections=[
-                    CollectionRef(id=cid, name=name, color=color)
-                    for cid, name, color in collection_refs_by_doc.get(doc.id, [])
-                ],
-            )
-        )
-
-    return DocumentListResponse(items=page_items, total=total, page=page, page_size=page_size)
+def _list_item(row: DocumentListRow, collections: list[tuple]) -> DocumentListItem:
+    doc = row.doc
+    reading_progress_pct = (
+        row.read_section_count / row.section_count if row.section_count > 0 else 0.0
+    )
+    objective_progress_pct: float | None = None
+    if row.objectives_total > 0:
+        objective_progress_pct = round(row.objectives_covered / row.objectives_total * 100.0, 1)
+    mastery_pct: float | None = None
+    if row.mastery_sum_weight and row.mastery_sum_weight > 0:
+        weighted_mean = float(row.mastery_sum_contribution or 0.0) / float(row.mastery_sum_weight)
+        penalty = min(row.prediction_error_count * 0.05, 0.20)
+        mastery_pct = round(max(0.0, weighted_mean - penalty) * 100.0, 1)
+    return DocumentListItem(
+        id=doc.id,
+        title=doc.title,
+        format=doc.format,
+        content_type=doc.content_type,
+        facets=_facets(doc),
+        word_count=doc.word_count,
+        page_count=doc.page_count,
+        stage=doc.stage,
+        tags=_safe_tags(doc.tags),
+        created_at=doc.created_at,
+        last_accessed_at=doc.last_accessed_at,
+        summary_one_sentence=row.summary_one_sentence,
+        flashcard_count=row.flashcard_count,
+        learning_status=_derive_learning_status(
+            row.study_session_count, row.flashcard_count, row.summary_count
+        ),
+        chapter_count=doc.chapter_count,
+        chunk_count=row.chunk_count,
+        reading_progress_pct=reading_progress_pct,
+        audio_duration_seconds=doc.audio_duration_seconds,
+        source_url=doc.source_url,
+        video_title=doc.video_title,
+        channel_name=doc.channel_name,
+        youtube_url=doc.youtube_url,
+        enrichment_status=_ENRICHMENT_STATUS_BY_PRIORITY.get(row.enrichment_priority),
+        objective_progress_pct=objective_progress_pct,
+        mastery_pct=mastery_pct,
+        is_favorite=bool(doc.is_favorite),
+        collections=[
+            CollectionRef(id=cid, name=name, color=color) for cid, name, color in collections
+        ],
+    )
 
 
 @router.post("/parse")

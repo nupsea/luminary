@@ -196,3 +196,90 @@ async def test_alphabetical_sort_with_pagination(test_db):
         assert titles == ["alpha", "Bravo", "Charlie"]
         r2 = (await c.get("/documents?sort=alphabetical&page=2&page_size=3")).json()
         assert [i["title"] for i in r2["items"]] == ["delta", "Echo"]
+
+
+@pytest.mark.anyio
+async def test_every_sort_and_filter_orders_and_counts_as_before(test_db):
+    """Characterization net for the list query's move into `DocumentListRepo`."""
+    from app.models import (
+        DocumentTagIndexModel,
+        FlashcardModel,
+        StudySessionModel,
+        SummaryModel,
+    )
+
+    _, factory = test_db
+    base = datetime.now(UTC)
+    # created oldest first: a, b, c, d
+    a = _make_doc(title="delta", created_at=base - timedelta(days=4))
+    b = _make_doc(title="Alpha", created_at=base - timedelta(days=3), content_type="paper")
+    c = _make_doc(title="charlie", created_at=base - timedelta(days=2))
+    d = _make_doc(title="Bravo", created_at=base - timedelta(days=1))
+    a.last_accessed_at = base - timedelta(hours=1)
+    b.last_accessed_at = base - timedelta(hours=3)
+    c.last_accessed_at = base - timedelta(hours=2)
+    d.last_accessed_at = base - timedelta(hours=4)
+    d.is_favorite = True
+
+    def card(doc, stability: float, bloom: int = 1) -> FlashcardModel:
+        return FlashcardModel(
+            id=str(uuid.uuid4()),
+            document_id=doc.id,
+            question="q",
+            answer="a",
+            source_excerpt="s",
+            fsrs_stability=stability,
+            bloom_level=bloom,
+        )
+
+    async with factory() as s:
+        s.add_all([a, b, c, d])
+        s.add_all([card(a, 21.0), card(b, 2.0, bloom=4), card(c, 10.0)])
+        s.add(StudySessionModel(id=str(uuid.uuid4()), document_id=c.id, mode="flashcard"))
+        s.add(
+            SummaryModel(id=str(uuid.uuid4()), document_id=d.id, mode="one_sentence", content="x")
+        )
+        s.add(
+            DocumentTagIndexModel(
+                document_id=a.id,
+                tag_full="science/biology",
+                tag_root="science",
+                tag_parent="science",
+            )
+        )
+        coll = _make_collection()
+        s.add(coll)
+        s.add(
+            CollectionMemberModel(
+                id=str(uuid.uuid4()), collection_id=coll.id, member_id=b.id, member_type="document"
+            )
+        )
+        await s.commit()
+
+    async def titles(query: str) -> tuple[int, list[str]]:
+        body = (await client.get(f"/documents?{query}")).json()
+        return body["total"], [i["title"] for i in body["items"]]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        assert await titles("sort=newest") == (4, ["Bravo", "charlie", "Alpha", "delta"])
+        assert await titles("sort=oldest") == (4, ["delta", "Alpha", "charlie", "Bravo"])
+        assert await titles("sort=alphabetical") == (4, ["Alpha", "Bravo", "charlie", "delta"])
+        assert await titles("sort=last_accessed") == (4, ["delta", "charlie", "Alpha", "Bravo"])
+        assert await titles("sort=weakest-first") == (4, ["Alpha", "charlie", "delta", "Bravo"])
+        assert await titles("sort=most-studied") == (4, ["charlie", "Alpha", "delta", "Bravo"])
+        assert await titles("content_type=paper") == (1, ["Alpha"])
+        assert await titles("format=txt,pdf&sort=oldest") == (
+            4,
+            ["delta", "Alpha", "charlie", "Bravo"],
+        )
+        assert await titles("tag=science") == (1, ["delta"])
+        assert await titles(f"collection_id={coll.id}") == (1, ["Alpha"])
+        assert await titles("favorite=true") == (1, ["Bravo"])
+        assert await titles("favorite=false&sort=oldest") == (3, ["delta", "Alpha", "charlie"])
+
+        items = {i["title"]: i for i in (await client.get("/documents")).json()["items"]}
+        assert items["Bravo"]["summary_one_sentence"] == "x"
+        assert items["delta"]["mastery_pct"] == 100.0
+        assert items["Alpha"]["mastery_pct"] == round(2.0 / 21.0 * 100, 1)
+        assert items["charlie"]["learning_status"] != items["Bravo"]["learning_status"]
+        assert items["Bravo"]["mastery_pct"] is None

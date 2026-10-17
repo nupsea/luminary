@@ -1,10 +1,8 @@
 """Repository for `DocumentModel` reads and writes.
 
 Owns simple `session.execute / commit` calls for the documents router.
-The cascading delete (18 child tables, LanceDB + filesystem
-side-effects) and the heavily denormalized `list_documents` query (10+
-correlated scalar subqueries) stay inline -- both are bespoke
-orchestrations, not reusable repo methods.
+The cascading delete lives in `document_deletion_service`, and the library
+list query in `document_list_repo`.
 
 Many documents endpoints use `async with get_session_factory()() as
 session:` rather than `Depends(get_db)`. `DocumentRepo(session)` works
