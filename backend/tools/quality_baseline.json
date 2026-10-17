@@ -1,7 +1,6 @@
 {
   "long_functions": [
     "app/main.py::lifespan",
-    "app/routers/collections.py::migrate_collection_naming",
     "app/routers/documents.py::ingest_document",
     "app/routers/documents.py::ingest_url",
     "app/routers/tags.py::migrate_tag_naming",
@@ -106,7 +105,6 @@
   ],
   "sql_outside_repos": {
     "app/main.py": 1,
-    "app/routers/collections.py": 19,
     "app/routers/notes.py": 24,
     "app/routers/tags.py": 23,
     "app/runtime/chat_graph.py": 2,

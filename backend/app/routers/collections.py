@@ -12,17 +12,15 @@ Routes:
 
 import logging
 import re
-import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import CollectionMemberModel, CollectionModel, DocumentModel
+from app.models import CollectionModel, DocumentModel
 from app.repos._helpers import get_or_404
 from app.repos.collection_repo import CollectionRepo, get_collection_repo
 from app.schemas.home import (
@@ -356,11 +354,8 @@ async def migrate_collection_naming(
     Merges duplicates that collapse to the same normalized form
     (keeps the collection with more members, reassigns members from the other).
     """
-    # Bespoke multi-table merge: reads all collections, groups by normalized name,
-    # then reassigns members and deletes duplicates atomically. Too many conditional
-    # writes (INSERT OR IGNORE, cascading deletes) to express via CollectionRepo.
-    all_cols_result = await session.execute(select(CollectionModel))
-    all_cols = list(all_cols_result.scalars().all())
+    repo = CollectionRepo(session)
+    all_cols = await repo.all_in_storage_order()
 
     # Group by normalized name
     groups: dict[str, list[CollectionModel]] = {}
@@ -393,15 +388,7 @@ async def migrate_collection_naming(
         else:
             # Multiple collections collapse to same name -- merge
             # Count members for each to find keeper
-            member_counts: list[tuple[CollectionModel, int]] = []
-            for col in col_group:
-                count_result = await session.execute(
-                    select(func.count(CollectionMemberModel.member_id)).where(
-                        CollectionMemberModel.collection_id == col.id
-                    )
-                )
-                count = count_result.scalar() or 0
-                member_counts.append((col, count))
+            member_counts = [(col, await repo.count_members(col.id)) for col in col_group]
 
             # Sort by member count desc -- keeper is first
             member_counts.sort(key=lambda x: x[1], reverse=True)
@@ -410,60 +397,8 @@ async def migrate_collection_naming(
             keeper.updated_at = datetime.now(UTC)
             session.add(keeper)
 
-            # Move members from losers to keeper, then delete losers
             for loser, _ in member_counts[1:]:
-                # Get all members from loser
-                loser_members_result = await session.execute(
-                    select(
-                        CollectionMemberModel.member_id,
-                        CollectionMemberModel.member_type,
-                    ).where(CollectionMemberModel.collection_id == loser.id)
-                )
-                loser_members = loser_members_result.all()
-
-                # Reassign to keeper (idempotent via INSERT OR IGNORE)
-                for member_id, member_type in loser_members:
-                    await session.execute(
-                        text(
-                            "INSERT OR IGNORE INTO collection_members"
-                            " (id, member_id, collection_id, member_type, added_at)"
-                            " VALUES (:id, :member_id, :collection_id, :member_type, :added_at)"
-                        ),
-                        {
-                            "id": str(uuid.uuid4()),
-                            "member_id": member_id,
-                            "collection_id": keeper.id,
-                            "member_type": member_type,
-                            "added_at": datetime.now(UTC).isoformat(),
-                        },
-                    )
-
-                # Delete loser's members and the loser itself
-                await session.execute(
-                    delete(CollectionMemberModel).where(
-                        CollectionMemberModel.collection_id == loser.id
-                    )
-                )
-                # Also delete child collections of loser. Read their ids first:
-                # a bulk delete leaves the session's loaded instances behind, and
-                # those are what a later group would try to rename.
-                child_ids = list(
-                    (
-                        await session.execute(
-                            select(CollectionModel.id).where(
-                                CollectionModel.parent_collection_id == loser.id
-                            )
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-                await session.execute(
-                    delete(CollectionModel).where(CollectionModel.parent_collection_id == loser.id)
-                )
-                await session.execute(delete(CollectionModel).where(CollectionModel.id == loser.id))
-                deleted_ids.update(child_ids)
-                deleted_ids.add(loser.id)
+                deleted_ids |= await repo.merge_into(loser.id, keeper.id)
 
             merged_count += 1
 
@@ -555,12 +490,7 @@ async def export_collection(
     try:
         if format == "markdown":
             data = await svc.export_collection_markdown(collection_id, session)
-            # Fetch collection name for filename slug; not covered by export service return value.
-            col = (
-                await session.execute(
-                    select(CollectionModel).where(CollectionModel.id == collection_id)
-                )
-            ).scalar_one_or_none()
+            col = await CollectionRepo(session).find(collection_id)
             slug = col.name.lower().replace(" ", "-") if col else collection_id[:8]
             slug = re.sub(r"[^\w-]", "", slug)[:40] or "vault"
             filename = f"{slug}-vault.zip"
@@ -571,12 +501,7 @@ async def export_collection(
             )
         else:
             data, card_count = await svc.export_collection_anki(collection_id, session)
-            # Fetch collection name for filename slug; not covered by export service return value.
-            col = (
-                await session.execute(
-                    select(CollectionModel).where(CollectionModel.id == collection_id)
-                )
-            ).scalar_one_or_none()
+            col = await CollectionRepo(session).find(collection_id)
             slug = col.name.lower().replace(" ", "-") if col else collection_id[:8]
             slug = re.sub(r"[^\w-]", "", slug)[:40] or "deck"
             filename = f"{slug}.apkg"
@@ -611,34 +536,6 @@ async def get_collection_overview(
     """
     await repo.get_or_404(collection_id)
 
-    recent_rows = (
-        await session.execute(
-            text(
-                """
-                SELECT 'document' AS member_type, ca.member_id, d.title AS title,
-                       NULL AS preview, ca.last_meaningful_at
-                FROM collection_members cm
-                JOIN content_activity ca
-                  ON ca.member_id = cm.member_id AND ca.member_type = cm.member_type
-                JOIN documents d ON d.id = cm.member_id
-                WHERE cm.collection_id = :cid AND cm.member_type = 'document'
-                UNION ALL
-                SELECT 'note' AS member_type, ca.member_id,
-                       COALESCE(NULLIF(n.title, ''), substr(n.content, 1, 60)) AS title,
-                       substr(n.content, 1, 120) AS preview,
-                       ca.last_meaningful_at
-                FROM collection_members cm
-                JOIN content_activity ca
-                  ON ca.member_id = cm.member_id AND ca.member_type = cm.member_type
-                JOIN notes n ON n.id = cm.member_id
-                WHERE cm.collection_id = :cid AND cm.member_type = 'note' AND n.archived = 0
-                ORDER BY last_meaningful_at DESC
-                LIMIT :recent_limit
-                """
-            ),
-            {"cid": collection_id, "recent_limit": recent_limit},
-        )
-    ).all()
     recent_items = [
         RecentItem(
             member_type=row[0],
@@ -647,63 +544,13 @@ async def get_collection_overview(
             preview=row[3],
             last_meaningful_at=row[4],
         )
-        for row in recent_rows
+        for row in await repo.recent_member_activity(collection_id, recent_limit)
     ]
-
-    # Tag chips: union of doc + note tags from this collection's members,
-    # counted by how many *members* carry them (so a tag on 2 docs + 1 note
-    # ranks as 3, regardless of how many index rows exist).
-    tag_rows = (
-        await session.execute(
-            text(
-                """
-                SELECT t.id, t.display_name, COUNT(*) AS hit_count
-                FROM (
-                    SELECT dti.tag_full AS tag_id
-                    FROM collection_members cm
-                    JOIN document_tag_index dti ON dti.document_id = cm.member_id
-                    WHERE cm.collection_id = :cid AND cm.member_type = 'document'
-                    UNION ALL
-                    SELECT nti.tag_full AS tag_id
-                    FROM collection_members cm
-                    JOIN note_tag_index nti ON nti.note_id = cm.member_id
-                    WHERE cm.collection_id = :cid AND cm.member_type = 'note'
-                ) AS hits
-                JOIN canonical_tags t ON t.id = hits.tag_id
-                GROUP BY t.id, t.display_name
-                ORDER BY hit_count DESC, t.id
-                LIMIT :tag_limit
-                """
-            ),
-            {"cid": collection_id, "tag_limit": tag_limit},
-        )
-    ).all()
-    tags = [CollectionTagChip(id=r[0], display_name=r[1], count=int(r[2])) for r in tag_rows]
-
-    # Member counts for the mini-stat row at the top of the tab.
-    count_rows = (
-        await session.execute(
-            text(
-                """
-                SELECT
-                  (SELECT COUNT(*) FROM collection_members
-                    WHERE collection_id = :cid AND member_type = 'document') AS doc_count,
-                  (SELECT COUNT(*) FROM collection_members
-                    WHERE collection_id = :cid AND member_type = 'note') AS note_count,
-                  (SELECT COUNT(DISTINCT fc.id) FROM collection_members cm
-                    JOIN flashcards fc ON (
-                      (cm.member_type = 'document' AND fc.document_id = cm.member_id)
-                      OR (cm.member_type = 'note' AND fc.note_id = cm.member_id)
-                    )
-                    WHERE cm.collection_id = :cid) AS fc_count
-                """
-            ),
-            {"cid": collection_id},
-        )
-    ).first()
-    doc_count = int(count_rows[0] or 0) if count_rows else 0
-    note_count = int(count_rows[1] or 0) if count_rows else 0
-    fc_count = int(count_rows[2] or 0) if count_rows else 0
+    tags = [
+        CollectionTagChip(id=tid, display_name=name, count=n)
+        for tid, name, n in await repo.member_tags(collection_id, tag_limit)
+    ]
+    doc_count, note_count, fc_count = await repo.overview_counts(collection_id)
 
     return CollectionOverviewResponse(
         recent_items=recent_items,

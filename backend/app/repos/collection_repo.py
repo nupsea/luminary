@@ -30,7 +30,14 @@ class CollectionRepo:
         )
         return result.scalar_one_or_none()
 
+    async def find(self, collection_id: str) -> CollectionModel | None:
+        return await self.session.get(CollectionModel, collection_id)
+
     # -- list reads --------------------------------------------------------
+
+    async def all_in_storage_order(self) -> list[CollectionModel]:
+        """Every collection, unsorted: the naming migration's tie-break follows this order."""
+        return list((await self.session.execute(select(CollectionModel))).scalars().all())
 
     async def list_all(self) -> Sequence[CollectionModel]:
         result = await self.session.execute(
@@ -176,6 +183,129 @@ class CollectionRepo:
             added += 1
         await self.session.commit()
         return added
+
+    async def merge_into(self, loser_id: str, keeper_id: str) -> set[str]:
+        """Move a collection's members to another, then delete it and its children.
+
+        Uncommitted, for a caller merging many. Returns the ids deleted; the child ids are
+        read first because a bulk delete leaves loaded instances behind.
+        """
+        members = (
+            await self.session.execute(
+                select(CollectionMemberModel.member_id, CollectionMemberModel.member_type).where(
+                    CollectionMemberModel.collection_id == loser_id
+                )
+            )
+        ).all()
+        for member_id, member_type in members:
+            await self.session.execute(
+                text(
+                    "INSERT OR IGNORE INTO collection_members"
+                    " (id, member_id, collection_id, member_type, added_at)"
+                    " VALUES (:id, :member_id, :collection_id, :member_type, :added_at)"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "member_id": member_id,
+                    "collection_id": keeper_id,
+                    "member_type": member_type,
+                    "added_at": datetime.now(UTC).isoformat(),
+                },
+            )
+        await self.session.execute(
+            delete(CollectionMemberModel).where(CollectionMemberModel.collection_id == loser_id)
+        )
+        child_ids = await self.child_ids(loser_id)
+        await self.session.execute(
+            delete(CollectionModel).where(CollectionModel.parent_collection_id == loser_id)
+        )
+        await self.session.execute(delete(CollectionModel).where(CollectionModel.id == loser_id))
+        return {*child_ids, loser_id}
+
+    # -- overview ----------------------------------------------------------
+
+    async def recent_member_activity(self, collection_id: str, limit: int) -> list:
+        """(member_type, member_id, title, preview, last_meaningful_at), as on the home hub."""
+        result = await self.session.execute(
+            text(
+                """
+                SELECT 'document' AS member_type, ca.member_id, d.title AS title,
+                       NULL AS preview, ca.last_meaningful_at
+                FROM collection_members cm
+                JOIN content_activity ca
+                  ON ca.member_id = cm.member_id AND ca.member_type = cm.member_type
+                JOIN documents d ON d.id = cm.member_id
+                WHERE cm.collection_id = :cid AND cm.member_type = 'document'
+                UNION ALL
+                SELECT 'note' AS member_type, ca.member_id,
+                       COALESCE(NULLIF(n.title, ''), substr(n.content, 1, 60)) AS title,
+                       substr(n.content, 1, 120) AS preview,
+                       ca.last_meaningful_at
+                FROM collection_members cm
+                JOIN content_activity ca
+                  ON ca.member_id = cm.member_id AND ca.member_type = cm.member_type
+                JOIN notes n ON n.id = cm.member_id
+                WHERE cm.collection_id = :cid AND cm.member_type = 'note' AND n.archived = 0
+                ORDER BY last_meaningful_at DESC
+                LIMIT :recent_limit
+                """
+            ),
+            {"cid": collection_id, "recent_limit": limit},
+        )
+        return list(result.all())
+
+    async def member_tags(self, collection_id: str, limit: int) -> list[tuple[str, str, int]]:
+        """(tag id, display name, members carrying it): a tag on 2 docs and 1 note counts 3."""
+        result = await self.session.execute(
+            text(
+                """
+                SELECT t.id, t.display_name, COUNT(*) AS hit_count
+                FROM (
+                    SELECT dti.tag_full AS tag_id
+                    FROM collection_members cm
+                    JOIN document_tag_index dti ON dti.document_id = cm.member_id
+                    WHERE cm.collection_id = :cid AND cm.member_type = 'document'
+                    UNION ALL
+                    SELECT nti.tag_full AS tag_id
+                    FROM collection_members cm
+                    JOIN note_tag_index nti ON nti.note_id = cm.member_id
+                    WHERE cm.collection_id = :cid AND cm.member_type = 'note'
+                ) AS hits
+                JOIN canonical_tags t ON t.id = hits.tag_id
+                GROUP BY t.id, t.display_name
+                ORDER BY hit_count DESC, t.id
+                LIMIT :tag_limit
+                """
+            ),
+            {"cid": collection_id, "tag_limit": limit},
+        )
+        return [(tid, name, int(n)) for tid, name, n in result.all()]
+
+    async def overview_counts(self, collection_id: str) -> tuple[int, int, int]:
+        """(documents, notes, cards) in a collection."""
+        row = (
+            await self.session.execute(
+                text(
+                    """
+                    SELECT
+                      (SELECT COUNT(*) FROM collection_members
+                        WHERE collection_id = :cid AND member_type = 'document') AS doc_count,
+                      (SELECT COUNT(*) FROM collection_members
+                        WHERE collection_id = :cid AND member_type = 'note') AS note_count,
+                      (SELECT COUNT(DISTINCT fc.id) FROM collection_members cm
+                        JOIN flashcards fc ON (
+                          (cm.member_type = 'document' AND fc.document_id = cm.member_id)
+                          OR (cm.member_type = 'note' AND fc.note_id = cm.member_id)
+                        )
+                        WHERE cm.collection_id = :cid) AS fc_count
+                    """
+                ),
+                {"cid": collection_id},
+            )
+        ).first()
+        if row is None:
+            return 0, 0, 0
+        return int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
 
     async def remove_member(
         self,
