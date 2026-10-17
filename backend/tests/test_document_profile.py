@@ -319,11 +319,11 @@ class TestProfileOfStoredDocument:
     def test_the_measured_form_decides_over_the_label(self) -> None:
         textbook = DocumentProfile.of(self._row("book", form="reference"))
         assert textbook.form == "reference"
-        assert not textbook.has_front_matter
+        assert not textbook.is_narrative_prose
         assert not textbook.expands_context
 
         novel = DocumentProfile.of(self._row("tech_article", form="prose"))
-        assert novel.has_front_matter
+        assert novel.is_narrative_prose
 
     def test_a_row_from_before_the_facets_reads_its_label(self) -> None:
         assert DocumentProfile.of(self._row("book")).form == "prose"
@@ -337,8 +337,8 @@ class TestProfileOfStoredDocument:
         measured = DocumentProfile.of(self._row("tech_book", form="reference", domain="general"))
         assert measured.domain == "general"
 
-    def test_no_document_has_no_front_matter(self) -> None:
-        assert not DocumentProfile.of(None).has_front_matter
+    def test_no_document_is_not_narrative_prose(self) -> None:
+        assert not DocumentProfile.of(None).is_narrative_prose
 
 
 class TestWithMeasuredForm:

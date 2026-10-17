@@ -25,7 +25,6 @@ from app.models import (
     ChunkModel,
     CollectionMemberModel,
     CollectionModel,
-    DocumentModel,
     FlashcardModel,
     NoteModel,
     SectionModel,
@@ -158,11 +157,7 @@ async def generate_technical(
 
     llm = _get_llm_service()
 
-    doc_result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-    doc = doc_result.scalar_one_or_none()
-    front_matter = DocumentProfile.of(doc).has_front_matter
-
-    chunks = await _fetch_chunks(document_id, scope, section_heading, session, front_matter)
+    chunks = await _fetch_chunks(document_id, scope, section_heading, session)
     if not chunks:
         return []
 
@@ -975,9 +970,7 @@ async def generate(
         )
         first_chunk_id = first_chunk_result.scalar_one_or_none()
     else:
-        chunks = await _fetch_chunks(
-            document_id, scope, section_heading, session, profile.has_front_matter
-        )
+        chunks = await _fetch_chunks(document_id, scope, section_heading, session)
         if not chunks:
             return []
 
@@ -1038,7 +1031,7 @@ async def generate(
             resolved_section_heading = _resolve_section_heading(eligible_chunks[0], section_ctx)
 
     extra_instructions = ""
-    if profile.has_front_matter:
+    if profile.is_narrative_prose:
         extra_instructions = _BOOK_CONTENT_GUIDELINE
         entity_names = await _get_entity_names_for_document(
             document_id, types=["PERSON", "PLACE"], limit=5

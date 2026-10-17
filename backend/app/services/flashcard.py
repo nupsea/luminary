@@ -8,12 +8,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from sqlalchemy import false, or_, select, text
+from sqlalchemy import false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     ChunkModel,
-    DocumentModel,
     FlashcardModel,
     SectionModel,
 )
@@ -59,7 +58,6 @@ from app.services.llm import (
     LLMServiceUnavailableError,
     get_llm_service,
 )
-from app.types import DocumentProfile
 
 # Re-exported for back-compat (tests + routers import these here).
 __all__ = [
@@ -279,16 +277,14 @@ async def _fetch_chunks(
     scope: Literal["full", "section"],
     section_heading: str | None,
     session: AsyncSession,
-    skip_front_matter: bool = False,
 ) -> list[ChunkModel]:
     """Return ordered chunks for the document, filtered by section when scope='section'.
 
-    A whole-document read leaves out reference lists: a card asking where a cited paper
-    appeared tests nothing the document teaches. A section the reader chose is read as is.
+    A whole-document read leaves out front matter, back matter and reference lists: a card
+    asking who sent in typo reports or where a cited paper appeared tests nothing the
+    document teaches. A section the reader chose is read as is.
     """
-    chunks = await _fetch_document_chunks(
-        document_id, scope, section_heading, session, skip_front_matter
-    )
+    chunks = await _fetch_document_chunks(document_id, scope, section_heading, session)
     return await _drop_reference_lists(chunks, session) if scope == "full" else chunks
 
 
@@ -297,11 +293,7 @@ async def _fetch_document_chunks(
     scope: Literal["full", "section"],
     section_heading: str | None,
     session: AsyncSession,
-    skip_front_matter: bool = False,
 ) -> list[ChunkModel]:
-    """If scope='full' and skip_front_matter, skips preface/introduction sections
-    to avoid metadata-heavy flashcards.
-    """
     if scope == "section" and section_heading:
         sec_result = await session.execute(
             select(SectionModel)
@@ -319,68 +311,20 @@ async def _fetch_document_chunks(
             )
             return list(result.scalars().all())
 
-    # Full scope
-    if skip_front_matter:
-        # Identify sections to skip (preface, intro, etc.)
-        skip_terms = [
-            "preface",
-            "introduction",
-            "prologue",
-            "foreword",
-            "about the author",
-            "copyright",
-            "translator",
-            "table of contents",
-            "appendix",
-            "index",
-            "bibliography",
-        ]
-        sections_result = await session.execute(
-            select(SectionModel)
-            .where(SectionModel.document_id == document_id)
-            .order_by(SectionModel.section_order)
-        )
-        sections = list(sections_result.scalars().all())
-
-        if sections:
-            valid_section_ids = [
-                s.id for s in sections if not any(term in s.heading.lower() for term in skip_terms)
-            ]
-            # If we filtered everything out, fall back to all sections
-            if not valid_section_ids:
-                valid_section_ids = [s.id for s in sections]
-
-            result = await session.execute(
-                select(ChunkModel)
-                .where(ChunkModel.document_id == document_id)
-                .where(ChunkModel.section_id.in_(valid_section_ids))
-                .order_by(ChunkModel.chunk_index)
-            )
-            return list(result.scalars().all())
-
     result = await session.execute(
         select(ChunkModel)
         .where(ChunkModel.document_id == document_id)
         .order_by(ChunkModel.chunk_index)
     )
     all_chunks = list(result.scalars().all())
+    if scope != "full":
+        return all_chunks
 
-    # If it's a book and we don't have sections (or skip logic didn't trigger),
-    # skip the first 5% which is usually front matter/preface.
-    if skip_front_matter and all_chunks:
-        # Check if first chunk has a section heading that was missed
-        # If no sections at all, skip first 5%
-        sections_count_result = await session.execute(
-            select(text("COUNT(*)"))
-            .select_from(SectionModel)
-            .where(SectionModel.document_id == document_id)
-        )
-        count = sections_count_result.scalar()
-        if count == 0:
-            skip_count = max(1, len(all_chunks) // 20)
-            return all_chunks[skip_count:]
+    from app.services.chapters import document_extents, matter_section_ids  # noqa: PLC0415
 
-    return all_chunks
+    skip = matter_section_ids(await document_extents(document_id, session))
+    kept = [c for c in all_chunks if c.section_id not in skip]
+    return kept or all_chunks
 
 
 def _build_text(chunks: list[ChunkModel]) -> tuple[str, str, list[str]]:
@@ -796,11 +740,6 @@ class FlashcardService(FlashcardSearchService):
         """
         from app.repos.flashcard_repo import FlashcardRepo  # noqa: PLC0415
 
-        doc = (
-            await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        ).scalar_one_or_none()
-        skip_front_matter = DocumentProfile.of(doc).has_front_matter
-
         if section_id:
             chunks = list(
                 (
@@ -819,7 +758,7 @@ class FlashcardService(FlashcardSearchService):
         else:
             # The same reader `generate` uses, so a book's skipped front matter
             # is not counted as material anyone can be questioned on.
-            chunks = await _fetch_chunks(document_id, "full", None, session, skip_front_matter)
+            chunks = await _fetch_chunks(document_id, "full", None, session)
             decks = list(
                 (
                     await session.execute(

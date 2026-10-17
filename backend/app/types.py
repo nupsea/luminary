@@ -146,8 +146,8 @@ class DocumentProfile:
         return self.form in _EXPANDING_FORMS
 
     @property
-    def has_front_matter(self) -> bool:
-        """Whether a preface and front pages precede the work, for cards to skip."""
+    def is_narrative_prose(self) -> bool:
+        """Whether cards are written about a story's characters and plot."""
         return self.form == "prose"
 
     @property

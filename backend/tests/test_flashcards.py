@@ -854,3 +854,33 @@ def test_build_text_samples_across_range():
         f"{runs} place(s) in the document, which is what produced duplicate cards"
     )
     assert runs <= _SAMPLE_WINDOWS
+
+
+async def test_a_technical_book_s_preface_is_skipped_and_its_indexing_chapter_kept(test_db):
+    """#252: the skip is decided by the sections, not by the book being prose."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    sections = [
+        ("Preface", "Many readers sent in corrections; thanks to all contributors."),
+        ("Contributor List", "Jane Doe found a typo on page 12."),
+        # Long enough that the front matter sits in the book's opening 15%, as in a real one.
+        ("Indexing", "A B-tree index keeps keys sorted so lookups take log time. " * 20),
+        ("Index", "B-tree, 12; hash index, 14"),
+    ]
+    async with factory() as session:
+        session.add(_make_doc(doc_id, content_type="tech_book"))
+        for order, (heading, body) in enumerate(sections):
+            sid = str(uuid.uuid4())
+            session.add(
+                SectionModel(
+                    id=sid, document_id=doc_id, heading=heading, level=1, section_order=order
+                )
+            )
+            session.add(_make_chunk(doc_id=doc_id, section_id=sid, text=body, chunk_index=order))
+        await session.commit()
+
+    from app.services.flashcard import _fetch_chunks
+
+    async with factory() as session:
+        texts = [c.text for c in await _fetch_chunks(doc_id, "full", None, session)]
+    assert texts == [sections[2][1]]
