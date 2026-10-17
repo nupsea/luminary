@@ -13,11 +13,11 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import ConceptModel, FlashcardModel, NoteModel
+from app.models import ConceptModel, NoteModel
+from app.repos.concept_repo import ConceptRepo
 from app.services.concept_service import get_concept_service
 
 _LEXICAL_SCAN_CAP = 500
@@ -148,7 +148,7 @@ async def purge_junk_concepts(
     """
     from app.workflows.concept_nodes._shared import is_junk_entity  # noqa: PLC0415
 
-    rows = (await session.execute(select(ConceptModel.id, ConceptModel.label))).all()
+    rows = await ConceptRepo(session).id_labels()
     matches = [(cid, label) for cid, label in rows if is_junk_entity(label)]
     labels = sorted(label for _cid, label in matches)
     deleted = 0
@@ -241,25 +241,11 @@ async def concepts_for_note(
     if note is None:
         raise HTTPException(status_code=404, detail="note not found")
 
-    mapped_ids = {
-        cid
-        for cid in (
-            await session.execute(
-                select(FlashcardModel.concept_id).where(
-                    FlashcardModel.note_id == note_id,
-                    FlashcardModel.concept_id.is_not(None),
-                )
-            )
-        )
-        .scalars()
-        .all()
-        if cid
-    }
+    repo = ConceptRepo(session)
+    mapped_ids = await repo.ids_on_note_cards(note_id)
 
     text = f"{note.title or ''}\n{note.content or ''}".lower()
-    candidates = (
-        (await session.execute(select(ConceptModel).limit(_LEXICAL_SCAN_CAP))).scalars().all()
-    )
+    candidates = await repo.first(_LEXICAL_SCAN_CAP)
 
     out: list[ConceptModel] = []
     seen: set[str] = set()
@@ -271,12 +257,7 @@ async def concepts_for_note(
     # include mapped concepts that fell outside the lexical scan cap
     missing = mapped_ids - seen
     if missing:
-        extra = (
-            (await session.execute(select(ConceptModel).where(ConceptModel.id.in_(missing))))
-            .scalars()
-            .all()
-        )
-        out.extend(extra)
+        out.extend(await repo.by_ids(missing))
 
     out.sort(key=lambda c: c.mastery)  # weakest first
     return [_out(c) for c in out]
@@ -287,8 +268,4 @@ async def list_concepts(
     status: str | None = None, session: AsyncSession = Depends(get_db)
 ) -> list[ConceptOut]:
     """List concepts, optionally filtered by status (e.g. ?status=proposed for review)."""
-    stmt = select(ConceptModel)
-    if status:
-        stmt = stmt.where(ConceptModel.status == status)
-    rows = (await session.execute(stmt.order_by(ConceptModel.mastery.asc()))).scalars().all()
-    return [_out(r) for r in rows]
+    return [_out(r) for r in await ConceptRepo(session).listed(status)]

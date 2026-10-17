@@ -41,6 +41,7 @@ from app.services.llm import (
 from app.services.llm_json import parse_llm_json_object, salvage_llm_json_object
 from app.services.prompt_spec import NO_FENCES, PromptSpec, render_for, step_decomposition
 from app.services.settings_service import get_vision_model
+from app.storage import library_root
 
 logger = logging.getLogger(__name__)
 
@@ -363,7 +364,7 @@ class ImageEnricherService:
         from sqlalchemy import update as _update
 
         settings = _config_module.get_settings()
-        data_dir = Path(settings.DATA_DIR).expanduser()
+        data_dir = library_root(settings)
 
         # Load all ImageModel rows with description=null for this document
         async with _database_module.get_session_factory()() as session:

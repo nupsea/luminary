@@ -13,12 +13,12 @@ from datetime import UTC, datetime, timedelta
 import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.models import ChunkModel, DocumentModel, QAHistoryModel
+from app.repos.document_repo import DocumentRepo
+from app.repos.qa_repo import QAHistoryRepo
 from app.services.llm_admission import admission_stats
 from app.services.model_router import resolve
 
@@ -174,22 +174,9 @@ async def get_overview(
     """Return aggregated monitoring stats from SQLite and Phoenix health check."""
     settings = get_settings()
 
-    # Total documents
-    doc_result = await db.execute(select(func.count()).select_from(DocumentModel))
-    total_documents = doc_result.scalar_one() or 0
-
-    # Total chunks
-    chunk_result = await db.execute(select(func.count()).select_from(ChunkModel))
-    total_chunks = chunk_result.scalar_one() or 0
-
-    # QA calls today (UTC midnight)
+    total_documents, total_chunks = await DocumentRepo(db).corpus_counts()
     today_start = datetime.now(tz=UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    qa_result = await db.execute(
-        select(func.count())
-        .select_from(QAHistoryModel)
-        .where(QAHistoryModel.created_at >= today_start)
-    )
-    qa_calls_today = qa_result.scalar_one() or 0
+    qa_calls_today = await QAHistoryRepo(db).calls_since(today_start)
 
     # Phoenix health
     phoenix_running = await _check_phoenix_running() if settings.PHOENIX_ENABLED else False
@@ -281,12 +268,7 @@ async def get_metrics(
     # QA activity per UTC day, zero-filled over the trailing 7 days.
     today = datetime.now(tz=UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     since = today - timedelta(days=6)
-    result = await db.execute(
-        select(func.date(QAHistoryModel.created_at).label("day"), func.count())
-        .where(QAHistoryModel.created_at >= since.replace(tzinfo=None))
-        .group_by("day")
-    )
-    counts_by_day = {str(row[0]): row[1] for row in result.all()}
+    counts_by_day = await QAHistoryRepo(db).daily_calls_since(since.replace(tzinfo=None))
     qa_daily = [
         QADailyCount(
             date=(since + timedelta(days=i)).strftime("%Y-%m-%d"),
@@ -322,10 +304,5 @@ async def get_model_usage(
     db: AsyncSession = Depends(get_db),
 ) -> list[ModelUsageItem]:
     """Return call counts per model from QA history."""
-    result = await db.execute(
-        select(QAHistoryModel.model_used, func.count().label("call_count"))
-        .group_by(QAHistoryModel.model_used)
-        .order_by(func.count().desc())
-    )
-    rows = result.all()
-    return [ModelUsageItem(model=row.model_used, call_count=row.call_count) for row in rows]
+    rows = await QAHistoryRepo(db).calls_by_model()
+    return [ModelUsageItem(model=model, call_count=n) for model, n in rows]

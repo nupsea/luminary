@@ -15,13 +15,14 @@ from datetime import datetime
 from typing import NamedTuple
 
 from fastapi import Depends
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import case, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import (
     CollectionMemberModel,
     CollectionModel,
+    FlashcardModel,
     NoteLinkModel,
     NoteModel,
     NoteSourceModel,
@@ -206,6 +207,144 @@ class NoteRepo:
             .distinct()
         )
         result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def listed(
+        self,
+        *,
+        document_id: str | None,
+        group: str | None,
+        tag: str | None,
+        collection_id: str | None,
+        favorite: bool | None,
+        page: int,
+        page_size: int | None,
+    ) -> list[NoteModel]:
+        """Unarchived notes, most recently updated first, under every filter given."""
+        stmt = (
+            select(NoteModel)
+            .where(NoteModel.archived.is_(False))
+            .order_by(NoteModel.updated_at.desc())
+        )
+        if document_id:
+            # The legacy document_id column, or the note_sources pivot.
+            stmt = stmt.where(
+                or_(
+                    NoteModel.document_id == document_id,
+                    NoteModel.id.in_(
+                        select(NoteSourceModel.note_id).where(
+                            NoteSourceModel.document_id == document_id
+                        )
+                    ),
+                )
+            )
+        if group:
+            stmt = stmt.where(NoteModel.group_name == group)
+        if tag:
+            # Prefix match: 'science' also matches 'science/biology'.
+            stmt = stmt.where(
+                NoteModel.id.in_(
+                    select(NoteTagIndexModel.note_id).where(
+                        or_(
+                            NoteTagIndexModel.tag_full == tag,
+                            NoteTagIndexModel.tag_full.like(f"{tag}/%"),
+                        )
+                    )
+                )
+            )
+        if collection_id:
+            stmt = stmt.where(
+                NoteModel.id.in_(
+                    select(CollectionMemberModel.member_id).where(
+                        CollectionMemberModel.collection_id == collection_id,
+                        CollectionMemberModel.member_type == "note",
+                    )
+                )
+            )
+        if favorite is not None:
+            stmt = stmt.where(NoteModel.is_favorite == favorite)
+        if page_size is not None:
+            stmt = stmt.limit(page_size).offset((page - 1) * page_size)
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def source_document_ids_by_note(self, note_ids: Sequence[str]) -> dict[str, list[str]]:
+        result = await self.session.execute(
+            select(NoteSourceModel.note_id, NoteSourceModel.document_id).where(
+                NoteSourceModel.note_id.in_(note_ids)
+            )
+        )
+        out: dict[str, list[str]] = {}
+        for note_id, document_id in result.all():
+            out.setdefault(note_id, []).append(document_id)
+        return out
+
+    async def group_counts(self) -> list[tuple[str, int]]:
+        result = await self.session.execute(
+            select(NoteModel.group_name, func.count(NoteModel.id))
+            .where(NoteModel.group_name.isnot(None))
+            .group_by(NoteModel.group_name)
+            .order_by(NoteModel.group_name)
+        )
+        return [(g, n) for g, n in result.all()]
+
+    async def tag_counts(self) -> list[tuple[str, int]]:
+        """(tag, notes) from each note's own tag array, archived notes included."""
+        result = await self.session.execute(
+            text(
+                "SELECT j.value, COUNT(*) as cnt "
+                "FROM notes, json_each(notes.tags) AS j "
+                "GROUP BY j.value "
+                "ORDER BY j.value"
+            )
+        )
+        return [(t, n) for t, n in result.all()]
+
+    async def count_unarchived(self) -> int:
+        result = await self.session.execute(
+            select(func.count()).select_from(NoteModel).where(NoteModel.archived.is_(False))
+        )
+        return result.scalar_one()
+
+    async def count_needing_description(self, *, force: bool) -> int:
+        """Unarchived notes of 40+ characters; with `force` False, only those with none yet."""
+        query = (
+            select(func.count())
+            .select_from(NoteModel)
+            .where(func.length(NoteModel.content) >= 40)
+            .where(NoteModel.archived.is_(False))
+        )
+        if not force:
+            query = query.where(NoteModel.description.is_(None))
+        return (await self.session.execute(query)).scalar_one()
+
+    async def note_member_count(self, collection_id: str) -> int:
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(CollectionMemberModel)
+            .where(
+                CollectionMemberModel.collection_id == collection_id,
+                CollectionMemberModel.member_type == "note",
+            )
+        )
+        return result.scalar_one()
+
+    async def covered_note_count(self, deck: str) -> int:
+        """Distinct note contents a deck already has cards for."""
+        result = await self.session.execute(
+            select(func.count(FlashcardModel.source_content_hash.distinct())).where(
+                FlashcardModel.deck == deck,
+                FlashcardModel.source == "note",
+                FlashcardModel.source_content_hash.is_not(None),
+            )
+        )
+        return result.scalar_one()
+
+    async def note_flashcards(self) -> list[FlashcardModel]:
+        result = await self.session.execute(
+            select(FlashcardModel)
+            .where(FlashcardModel.source == "note")
+            .order_by(FlashcardModel.created_at.desc())
+        )
         return list(result.scalars().all())
 
     async def collection_ids_for(self, note_id: str) -> list[str]:

@@ -20,6 +20,7 @@ LAYER_ORDER: dict[str, int] = {
     "models": 1,
     "exceptions": 0,
     "paths": 1,
+    "storage": 1,
     "repo": 2,
     "service": 3,
     "workflow": 4,

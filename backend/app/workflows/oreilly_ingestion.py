@@ -18,6 +18,7 @@ from app.services.oreilly_service import (
     parse_oreilly_book_id,
     parse_oreilly_target_chapter,
 )
+from app.storage import library_root
 from app.workflows.ingestion import run_ingestion
 
 logger = logging.getLogger(__name__)
@@ -114,7 +115,7 @@ async def start_oreilly_ingestion(
     doc_tags = [normalize_tag_slug(t) for t in doc_tags]
 
     doc_id = str(uuid.uuid4())
-    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir = library_root(settings)
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     dest_epub = raw_dir / f"{doc_id}.epub"

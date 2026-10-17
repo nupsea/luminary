@@ -5,11 +5,11 @@ from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from sqlalchemy import select
 
 from app.database import get_session_factory
-from app.models import DocumentModel, SectionSummaryModel, SummaryModel
+from app.models import DocumentModel
 from app.repos._helpers import get_or_404
+from app.repos.summary_repo import SummaryRepo
 from app.services.library_summary import get_library_summary_service
 from app.services.summarizer import get_summarization_service
 from app.streaming import StreamingResponse
@@ -39,20 +39,8 @@ async def get_section_summaries(document_id: str) -> list[dict]:
     documents where section summarization was skipped due to Ollama being offline).
     """
     async with get_session_factory()() as session:
-        # Custom 3-column projection for this endpoint's list response; no SectionSummaryRepo
-        # method would be cleaner given the caller shapes the columns.
-        rows = await session.execute(
-            select(
-                SectionSummaryModel.unit_index,
-                SectionSummaryModel.heading,
-                SectionSummaryModel.content,
-            )
-            .where(SectionSummaryModel.document_id == document_id)
-            .order_by(SectionSummaryModel.unit_index)
-        )
-        return [
-            {"unit_index": r.unit_index, "heading": r.heading, "content": r.content} for r in rows
-        ]
+        rows = await SummaryRepo(session).section_summaries(document_id)
+    return [{"unit_index": r.unit_index, "heading": r.heading, "content": r.content} for r in rows]
 
 
 @router.get("/{document_id}/cached")
@@ -63,20 +51,8 @@ async def get_cached_summaries(document_id: str) -> dict:
     a pre-loaded summary or a Generate button.
     """
     async with get_session_factory()() as session:
-        # Custom projection + dedup-by-mode fold; the caller owns the fold logic so this stays
-        # in the router rather than being wrapped in a SummaryRepo method.
-        rows = await session.execute(
-            select(SummaryModel.mode, SummaryModel.id, SummaryModel.content)
-            .where(SummaryModel.document_id == document_id)
-            .order_by(SummaryModel.created_at.desc())
-        )
-        # One entry per mode (most recent wins)
-        seen: set[str] = set()
-        summaries: dict[str, dict] = {}
-        for row in rows:
-            if row.mode not in seen:
-                seen.add(row.mode)
-                summaries[row.mode] = {"id": row.id, "content": row.content}
+        latest = await SummaryRepo(session).latest_by_mode(document_id)
+    summaries = {mode: {"id": row.id, "content": row.content} for mode, row in latest.items()}
     return {"document_id": document_id, "summaries": summaries}
 
 

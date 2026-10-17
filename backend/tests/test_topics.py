@@ -213,3 +213,33 @@ async def test_messy_doc_falls_back_to_llm_outline(test_db, monkeypatch):
     assert body["source"] == "outline"
     titles = [t["title"] for t in body["topics"]]
     assert titles == ["Real Topic A", "Real Topic B"]  # LLM-suggested "Copyright" still filtered
+
+
+def test_markdown_marks_are_stripped_from_titles():
+    from app.services.topic_service import _clean_title
+
+    assert _clean_title("[**Training**]") == "Training"
+    assert _clean_title("(**Vanishing Gradients**)") == "Vanishing Gradients"
+    assert _clean_title("**Bold** and **bold**") == "**Bold** and **bold**"
+
+
+async def test_a_markdown_book_s_topics_are_its_top_level_headings(test_db):
+    """#307: d2l, through the parser and the tech-book level pass, yields the eval's golden."""
+    import json
+    from pathlib import Path
+
+    from app.services.parser import DocumentParser
+    from app.services.tech_section_parser import assign_parent_headings_dicts
+
+    root = Path(__file__).resolve().parents[2]
+    golden = json.loads((root / "evals/golden/topics/d2l.json").read_text())
+    parsed = DocumentParser().parse(root / golden["source_file"], "md")
+    raw = [{"heading": s.heading, "level": s.level} for s in parsed.sections]
+    assign_parent_headings_dicts(raw)
+    await _doc(test_db, "d2l", [(s["heading"], s["level"]) for s in raw])
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/study/topics/d2l")).json()
+    assert body["source"] == "sections"
+    assert [t["title"] for t in body["topics"]] == golden["expected_topics"]

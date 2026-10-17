@@ -398,12 +398,10 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
 
         await session.flush()
 
-        # Resolve parent_section_id: build heading->id map, then update
-        heading_to_id: dict[str, str] = {sm.heading: sm.id for sm in section_models}
-        for s, sm in zip(raw_sections, section_models, strict=False):
-            ph = s.get("parent_heading")
-            if ph:
-                sm.parent_section_id = heading_to_id.get(ph)
+        # By index: headings repeat ("Summary"), so a heading map picks the wrong parent.
+        for s, sm in zip(raw_sections, section_models, strict=True):
+            if s.get("parent_index") is not None:
+                sm.parent_section_id = section_models[s["parent_index"]].id
         await session.flush()
 
         chunks: list[dict] = []
@@ -533,6 +531,26 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
     return {**state, "chunks": chunks, "status": "embedding"}
 
 
+def _owners_by_position(chunk_chars: list[int], section_chars: list[int]) -> list[int]:
+    """The section each chunk falls in, by its midpoint's share of the text.
+
+    Speaker chunks are rebuilt from parsed turns, so their offsets in the source are lost;
+    position is what is left. With one section, every chunk is its own (#286).
+    """
+    total_sections = sum(section_chars) or 1
+    total_chunks = sum(chunk_chars) or 1
+    bounds, run = [], 0
+    for chars in section_chars:
+        run += chars
+        bounds.append(run / total_sections)
+    owners, seen = [], 0
+    for chars in chunk_chars:
+        mid = (seen + chars / 2) / total_chunks
+        owners.append(next((i for i, b in enumerate(bounds) if mid <= b), len(bounds) - 1))
+        seen += chars
+    return owners
+
+
 async def _chunk_conversation(
     state: IngestionState, pd: dict | None, doc_id: str
 ) -> IngestionState:
@@ -590,13 +608,17 @@ async def _chunk_conversation(
 
         if chunker.detect(raw_text):
             conv_chunks = chunker.chunk(raw_text)
+            owners = _owners_by_position(
+                [len(cc.text) for cc in conv_chunks],
+                [len(sm.body or "") for sm in section_models],
+            )
             for idx, cc in enumerate(conv_chunks):
                 chunk_id = str(uuid.uuid4())
                 chunk_models.append(
                     ChunkModel(
                         id=chunk_id,
                         document_id=doc_id,
-                        section_id=None,
+                        section_id=section_models[owners[idx]].id,
                         text=cc.text,
                         token_count=len(cc.text) // 4,
                         page_number=0,
@@ -617,15 +639,19 @@ async def _chunk_conversation(
             splitter = _splitter_cls()(
                 chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
             )
-            all_texts = [s["text"] for s in raw_sections if s["text"]]
-            raw_chunks_text = splitter.split_text("\n\n".join(all_texts) or raw_text)
-            for idx, text in enumerate(raw_chunks_text):
+            pieces = [
+                (sm.id, text)
+                for sm in section_models
+                if sm.body
+                for text in splitter.split_text(sm.body)
+            ] or [(section_models[0].id, text) for text in splitter.split_text(raw_text)]
+            for idx, (section_id, text) in enumerate(pieces):
                 chunk_id = str(uuid.uuid4())
                 chunk_models.append(
                     ChunkModel(
                         id=chunk_id,
                         document_id=doc_id,
-                        section_id=None,
+                        section_id=section_id,
                         text=text,
                         token_count=len(text.split()),
                         page_number=0,

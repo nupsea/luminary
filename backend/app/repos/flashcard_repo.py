@@ -131,6 +131,31 @@ class FlashcardRepo:
         )
         return {card.id: card for card in result.scalars().all()}
 
+    async def grounding_counts(self, document_id: str | None = None) -> dict[str, int]:
+        stmt = select(FlashcardModel.grounding, func.count()).group_by(FlashcardModel.grounding)
+        if document_id is not None:
+            stmt = stmt.where(FlashcardModel.document_id == document_id)
+        return dict((await self.session.execute(stmt)).tuples().all())
+
+    async def used_chunk_ids(self, document_id: str) -> set[str]:
+        """Chunks some card of this document was written from."""
+        result = await self.session.execute(
+            select(FlashcardModel.source_chunk_ids).where(FlashcardModel.document_id == document_id)
+        )
+        return {cid for row in result.scalars() for cid in (row or []) if isinstance(cid, str)}
+
+    async def deck_rollup(self) -> list[tuple[str | None, str, int, str | None]]:
+        """(deck, a source, cards, a document_id) per deck."""
+        result = await self.session.execute(
+            select(
+                FlashcardModel.deck,
+                FlashcardModel.source,
+                func.count(),
+                func.max(FlashcardModel.document_id),
+            ).group_by(FlashcardModel.deck)
+        )
+        return [tuple(r) for r in result.all()]
+
     async def list_existing_ids_in(self, card_ids: Sequence[str]) -> list[str]:
         if not card_ids:
             return []

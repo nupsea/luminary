@@ -83,9 +83,18 @@ def _norm(heading: str) -> str:
     return re.sub(r"\s+", " ", h).strip()
 
 
+_WRAPPING_MARKS = re.compile(r"^[\[(]?(\*{1,2}|_{1,2})([^*_]+)\1[\])]?$")
+
+
 def _clean_title(heading: str) -> str:
-    """Strip markdown markers + a trailing colon + collapse whitespace for display."""
+    """Strip markdown markers + a trailing colon + collapse whitespace for display.
+
+    d2l writes headings as `[**Training**]` and `(**Vanishing Gradients**)` (#307).
+    """
     t = re.sub(r"\s+", " ", re.sub(r"^#+\s*", "", (heading or "").strip())).strip()
+    m = _WRAPPING_MARKS.match(t)
+    if m:
+        t = m.group(2).strip()
     return t.rstrip(":; ").strip() or t
 
 

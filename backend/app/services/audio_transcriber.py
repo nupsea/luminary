@@ -12,12 +12,13 @@ from pathlib import Path
 from app.config import get_settings
 from app.exceptions import ModelNotDownloaded
 from app.full_extras import require_extra
+from app.storage import machine_root
 
 logger = logging.getLogger(__name__)
 
 
 def _cache_dir() -> Path:
-    return Path(get_settings().DATA_DIR).expanduser() / "models" / "whisper"
+    return machine_root() / "models" / "whisper"
 
 
 def weights_cached() -> bool:

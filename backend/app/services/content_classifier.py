@@ -160,6 +160,14 @@ def sample_body(raw_text: str, window: int = 6000) -> str:
     )
 
 
+def body_windows(raw_text: str, fractions: tuple[float, ...], window: int) -> list[str]:
+    """One window of the body starting at each fraction; the whole body when it is short."""
+    body = strip_boilerplate(raw_text)
+    if len(body) <= window * len(fractions):
+        return [body]
+    return [body[int(len(body) * f) : int(len(body) * f) + window].strip() for f in fractions]
+
+
 _CONTENTS_MARKER = re.compile(r"table of contents|^\s*contents\s*$", re.I | re.M)
 _DOTTED_LEADER = re.compile(r"\.{4,}")
 _NUMERIC_LINE = re.compile(r"^\s*[\d.]+\s*$", re.M)

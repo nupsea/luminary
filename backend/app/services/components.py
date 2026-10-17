@@ -48,6 +48,7 @@ from app.model_registry import (
 from app.paths import engine_source_path
 from app.services import model_prefetch, network_errors, python_extras, storage_errors
 from app.services.component_download import install_archive_subset
+from app.storage import machine_root
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ def engine_source() -> dict | None:
 def engine_lib_dir() -> Path:
     """The relocated engine's runners. Keep in step with `engine_dir` and
     `OLLAMA_LIBRARY_DIR` in `src-tauri/src/stage.rs`."""
-    return Path(get_settings().DATA_DIR).expanduser() / "engine" / "ollama" / "lib" / "ollama"
+    return machine_root() / "engine" / "ollama" / "lib" / "ollama"
 
 
 def _engine_runner_component(source: dict) -> Component:
@@ -339,7 +340,7 @@ def component_for_model(model: str) -> Component | None:
 
 def tool_bin_dir() -> Path:
     """Where user-installed executables live: writable, and outside the bundle."""
-    return Path(get_settings().DATA_DIR).expanduser() / "bin"
+    return machine_root() / "bin"
 
 
 # Where the package managers put things, searched after PATH.
@@ -842,7 +843,7 @@ async def install_engine_runner(comp: Component) -> AsyncIterator[dict]:
         }
         return
 
-    downloads = Path(get_settings().DATA_DIR).expanduser() / "downloads"
+    downloads = machine_root() / "downloads"
     async for event in install_archive_subset(
         url=source["url"],
         sha256=source["sha256"],

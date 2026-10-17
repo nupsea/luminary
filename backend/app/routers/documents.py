@@ -10,34 +10,28 @@ import zipfile
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import case, func, select, text
 
 from app.config import Settings, get_settings
 from app.database import get_session_factory
 from app.models import (
-    ChunkModel,
-    CodeSnippetModel,
-    CollectionMemberModel,
     DocumentModel,
-    EnrichmentJobModel,
-    FlashcardModel,
-    ImageModel,
     LearningObjectiveModel,
-    PredictionEventModel,
     ReadingPositionModel,
-    ReadingProgressModel,
-    SectionModel,
-    StudySessionModel,
-    SummaryModel,
 )
 from app.repos._helpers import get_or_404
 from app.repos.collection_repo import CollectionRepo
+from app.repos.document_list_repo import (
+    DocumentListFilters,
+    DocumentListRepo,
+    DocumentListRow,
+    DocumentSort,
+)
 from app.repos.document_repo import DocumentRepo
+from app.repos.summary_repo import SummaryRepo
 from app.schemas.documents import (
     AssignCollectionsRequest,
     BulkDeleteRequest,
@@ -134,6 +128,7 @@ from app.services.transcript_vocabulary import vocabulary_from_metadata
 from app.services.type_detection import detect_content_type
 from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
+from app.storage import library_root
 from app.types import DocumentProfile
 from app.workflows import ingestion as _ingestion_module  # indirect: _run_pregenerate is patched
 from app.workflows.ingestion import (
@@ -250,303 +245,78 @@ async def list_documents(
         default=None, description="Restrict to documents in this collection"
     ),
     favorite: bool | None = Query(default=None, description="Filter by favorite status"),
-    sort: Literal[
-        "newest", "oldest", "alphabetical", "most-studied", "last_accessed", "weakest-first"
-    ] = Query(default="newest"),
+    sort: DocumentSort = Query(default="newest"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> DocumentListResponse:
     """Return paginated documents with optional filtering and sorting."""
+    filters = DocumentListFilters(
+        formats=_csv(format),
+        content_types=_csv(content_type),
+        tag=tag,
+        collection_id=collection_id,
+        favorite=favorite,
+    )
     async with get_session_factory()() as session:
-        # Correlated scalar subqueries for derived fields
-        summary_one_sentence_sq = (
-            select(SummaryModel.content)
-            .where(
-                SummaryModel.document_id == DocumentModel.id,
-                SummaryModel.mode == "one_sentence",
-            )
-            .limit(1)
-            .correlate(DocumentModel)
-            .scalar_subquery()
+        total, rows = await DocumentListRepo(session).page(filters, sort, page, page_size)
+        # One batch for the page, so a card renders its collection chips without its own fetch.
+        refs = await CollectionRepo(session).refs_for_members(
+            [r.doc.id for r in rows], member_type="document"
         )
-        flashcard_count_sq = (
-            select(func.count())
-            .where(FlashcardModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        summary_count_sq = (
-            select(func.count())
-            .where(SummaryModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        study_session_count_sq = (
-            select(func.count())
-            .where(StudySessionModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        chunk_count_sq = (
-            select(func.count())
-            .where(ChunkModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        section_count_sq = (
-            select(func.count())
-            .where(SectionModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        read_section_count_sq = (
-            select(func.count())
-            .where(ReadingProgressModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        # The document's enrichment state, aggregated over ALL its jobs.
-        #
-        # This used to report a single job -- image_analyze, else image_extract,
-        # else whichever was newest -- which is not the document's state. Six job
-        # types are registered, so a document whose image work had finished read
-        # "Analysis complete" while its concept_link or web_refs was still queued,
-        # and the card contradicted the enrichment queue that was still counting
-        # the task. A badge that says a document is finished while work is running
-        # is worse than no badge.
-        #
-        # Precedence is by what the reader can act on, not by job type:
-        # outstanding work first, then a failure, then a skip (a model that was
-        # never installed -- actionable, so it must not hide behind "done"), then
-        # done. MIN over the priority keeps it to one correlated subquery.
-        enrichment_priority_sq = (
-            select(
-                func.min(
-                    case(
-                        (EnrichmentJobModel.status.in_(("pending", "running")), 1),
-                        (EnrichmentJobModel.status == "failed", 2),
-                        (EnrichmentJobModel.status == "skipped", 3),
-                        (EnrichmentJobModel.status == "done", 4),
-                        else_=5,
-                    )
-                )
-            )
-            .where(EnrichmentJobModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        objectives_total_sq = (
-            select(func.count())
-            .where(LearningObjectiveModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        objectives_covered_sq = (
-            select(func.count())
-            .where(
-                LearningObjectiveModel.document_id == DocumentModel.id,
-                LearningObjectiveModel.covered.is_(True),
-            )
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
+    items = [_list_item(r, refs.get(r.doc.id, [])) for r in rows]
+    return DocumentListResponse(items=items, total=total, page=page, page_size=page_size)
 
-        # Mastery aggregate: weighted FSRS-stability mean, minus prediction-error penalty.
-        # Mirrors MasteryService._compute_weighted_mastery; clamps each card's stability
-        # at _MASTERY_FULL_DAYS (21) and applies bloom_level>=4 weight of 1.5.
-        _bloom_weight = case((FlashcardModel.bloom_level >= 4, 1.5), else_=1.0)
-        _capped_stability = func.min(FlashcardModel.fsrs_stability / 21.0, 1.0)
-        mastery_sum_contribution_sq = (
-            select(func.sum(_capped_stability * _bloom_weight))
-            .where(FlashcardModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        mastery_sum_weight_sq = (
-            select(func.sum(_bloom_weight))
-            .where(FlashcardModel.document_id == DocumentModel.id)
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
-        prediction_error_count_sq = (
-            select(func.count())
-            .where(
-                PredictionEventModel.document_id == DocumentModel.id,
-                PredictionEventModel.correct.is_(False),
-            )
-            .correlate(DocumentModel)
-            .scalar_subquery()
-        )
 
-        # Build WHERE filters pushed into SQL.
-        where_clauses = []
-        if format:
-            formats = [f.strip() for f in format.split(",") if f.strip()]
-            if formats:
-                where_clauses.append(DocumentModel.format.in_(formats))
-        if content_type:
-            allowed = [t.strip() for t in content_type.split(",") if t.strip()]
-            if allowed:
-                where_clauses.append(DocumentModel.content_type.in_(allowed))
-        if tag:
-            # Prefix match via the shadow index, matching the note tag filter
-            # semantics: ?tag=science also matches docs tagged 'science/biology'.
-            from sqlalchemy import or_
+def _csv(value: str | None) -> list[str]:
+    return [v.strip() for v in (value or "").split(",") if v.strip()]
 
-            from app.models import DocumentTagIndexModel as _DocTagIdx
 
-            where_clauses.append(
-                select(_DocTagIdx.document_id)
-                .where(
-                    _DocTagIdx.document_id == DocumentModel.id,
-                    or_(
-                        _DocTagIdx.tag_full == tag,
-                        _DocTagIdx.tag_full.like(f"{tag}/%"),
-                    ),
-                )
-                .exists()
-            )
-        if collection_id:
-            where_clauses.append(
-                select(CollectionMemberModel.id)
-                .where(
-                    CollectionMemberModel.collection_id == collection_id,
-                    CollectionMemberModel.member_id == DocumentModel.id,
-                    CollectionMemberModel.member_type == "document",
-                )
-                .exists()
-            )
-        if favorite is not None:
-            where_clauses.append(DocumentModel.is_favorite == favorite)
-
-        # Total count under the same filters.
-        count_stmt = select(func.count()).select_from(DocumentModel)
-        for clause in where_clauses:
-            count_stmt = count_stmt.where(clause)
-        total = int((await session.execute(count_stmt)).scalar_one())
-
-        # learning_status sort key, derived in SQL from the count subqueries.
-        learning_status_order_sq = case(
-            (study_session_count_sq > 0, 3),
-            (flashcard_count_sq > 0, 2),
-            (summary_count_sq > 0, 1),
-            else_=0,
-        )
-
-        if sort == "newest":
-            order_clauses = [DocumentModel.created_at.desc()]
-        elif sort == "oldest":
-            order_clauses = [DocumentModel.created_at.asc()]
-        elif sort == "alphabetical":
-            order_clauses = [func.lower(DocumentModel.title).asc()]
-        elif sort == "last_accessed":
-            order_clauses = [DocumentModel.last_accessed_at.desc()]
-        elif sort == "weakest-first":
-            # Docs with cards sorted ascending by mastery (nulls/no-cards last).
-            # mastery_sum_weight==0 means no cards; treat as highest mastery so
-            # they sink to the bottom and don't crowd out real weak docs.
-            order_clauses = [
-                case((mastery_sum_weight_sq > 0, 0), else_=1).asc(),
-                (mastery_sum_contribution_sq / mastery_sum_weight_sq).asc(),
-                DocumentModel.created_at.desc(),
-            ]
-        else:  # most-studied
-            order_clauses = [learning_status_order_sq.desc(), DocumentModel.created_at.desc()]
-
-        stmt = select(
-            DocumentModel,
-            summary_one_sentence_sq.label("summary_one_sentence"),
-            flashcard_count_sq.label("flashcard_count"),
-            summary_count_sq.label("summary_count"),
-            study_session_count_sq.label("study_session_count"),
-            chunk_count_sq.label("chunk_count"),
-            section_count_sq.label("section_count"),
-            read_section_count_sq.label("read_section_count"),
-            enrichment_priority_sq.label("enrichment_priority"),
-            objectives_total_sq.label("objectives_total"),
-            objectives_covered_sq.label("objectives_covered"),
-            mastery_sum_contribution_sq.label("mastery_sum_contribution"),
-            mastery_sum_weight_sq.label("mastery_sum_weight"),
-            prediction_error_count_sq.label("prediction_error_count"),
-        )
-        for clause in where_clauses:
-            stmt = stmt.where(clause)
-        stmt = stmt.order_by(*order_clauses).limit(page_size).offset((page - 1) * page_size)
-
-        result = await session.execute(stmt)
-        rows = result.all()
-
-        # Batch-fetch collection memberships for the current page so
-        # DocumentCard can render membership chips without per-card fetches
-        # (plan 2E.5). The id list is only known after the page query runs.
-        page_doc_ids = [row[0].id for row in rows]
-        collection_refs_by_doc = await CollectionRepo(session).refs_for_members(
-            page_doc_ids, member_type="document"
-        )
-
-    page_items: list[DocumentListItem] = []
-    for row in rows:
-        doc = row[0]
-        summary_one_sentence = row[1]
-        flashcard_count = row[2] or 0
-        summary_count = row[3] or 0
-        study_session_count = row[4] or 0
-        chunk_count = row[5] or 0
-        section_count = row[6] or 0
-        read_section_count = row[7] or 0
-        enrichment_status = _ENRICHMENT_STATUS_BY_PRIORITY.get(row[8])
-        objectives_total = row[9] or 0
-        objectives_covered = row[10] or 0
-        mastery_sum_contribution = row[11]
-        mastery_sum_weight = row[12]
-        prediction_error_count = row[13] or 0
-        reading_progress_pct = (read_section_count / section_count) if section_count > 0 else 0.0
-        objective_progress_pct: float | None = None
-        if objectives_total > 0:
-            objective_progress_pct = round(objectives_covered / objectives_total * 100.0, 1)
-        mastery_pct: float | None = None
-        if mastery_sum_weight and mastery_sum_weight > 0:
-            weighted_mean = float(mastery_sum_contribution or 0.0) / float(mastery_sum_weight)
-            penalty = min(prediction_error_count * 0.05, 0.20)
-            mastery_pct = round(max(0.0, weighted_mean - penalty) * 100.0, 1)
-        page_items.append(
-            DocumentListItem(
-                id=doc.id,
-                title=doc.title,
-                format=doc.format,
-                content_type=doc.content_type,
-                facets=_facets(doc),
-                word_count=doc.word_count,
-                page_count=doc.page_count,
-                stage=doc.stage,
-                tags=_safe_tags(doc.tags),
-                created_at=doc.created_at,
-                last_accessed_at=doc.last_accessed_at,
-                summary_one_sentence=summary_one_sentence,
-                flashcard_count=flashcard_count,
-                learning_status=_derive_learning_status(
-                    study_session_count, flashcard_count, summary_count
-                ),
-                chapter_count=doc.chapter_count,
-                chunk_count=chunk_count,
-                reading_progress_pct=reading_progress_pct,
-                audio_duration_seconds=doc.audio_duration_seconds,
-                source_url=doc.source_url,
-                video_title=doc.video_title,
-                channel_name=doc.channel_name,
-                youtube_url=doc.youtube_url,
-                enrichment_status=enrichment_status,
-                objective_progress_pct=objective_progress_pct,
-                mastery_pct=mastery_pct,
-                is_favorite=bool(doc.is_favorite),
-                collections=[
-                    CollectionRef(id=cid, name=name, color=color)
-                    for cid, name, color in collection_refs_by_doc.get(doc.id, [])
-                ],
-            )
-        )
-
-    return DocumentListResponse(items=page_items, total=total, page=page, page_size=page_size)
+def _list_item(row: DocumentListRow, collections: list[tuple]) -> DocumentListItem:
+    doc = row.doc
+    reading_progress_pct = (
+        row.read_section_count / row.section_count if row.section_count > 0 else 0.0
+    )
+    objective_progress_pct: float | None = None
+    if row.objectives_total > 0:
+        objective_progress_pct = round(row.objectives_covered / row.objectives_total * 100.0, 1)
+    mastery_pct: float | None = None
+    if row.mastery_sum_weight and row.mastery_sum_weight > 0:
+        weighted_mean = float(row.mastery_sum_contribution or 0.0) / float(row.mastery_sum_weight)
+        penalty = min(row.prediction_error_count * 0.05, 0.20)
+        mastery_pct = round(max(0.0, weighted_mean - penalty) * 100.0, 1)
+    return DocumentListItem(
+        id=doc.id,
+        title=doc.title,
+        format=doc.format,
+        content_type=doc.content_type,
+        facets=_facets(doc),
+        word_count=doc.word_count,
+        page_count=doc.page_count,
+        stage=doc.stage,
+        tags=_safe_tags(doc.tags),
+        created_at=doc.created_at,
+        last_accessed_at=doc.last_accessed_at,
+        summary_one_sentence=row.summary_one_sentence,
+        flashcard_count=row.flashcard_count,
+        learning_status=_derive_learning_status(
+            row.study_session_count, row.flashcard_count, row.summary_count
+        ),
+        chapter_count=doc.chapter_count,
+        chunk_count=row.chunk_count,
+        reading_progress_pct=reading_progress_pct,
+        audio_duration_seconds=doc.audio_duration_seconds,
+        source_url=doc.source_url,
+        video_title=doc.video_title,
+        channel_name=doc.channel_name,
+        youtube_url=doc.youtube_url,
+        enrichment_status=_ENRICHMENT_STATUS_BY_PRIORITY.get(row.enrichment_priority),
+        objective_progress_pct=objective_progress_pct,
+        mastery_pct=mastery_pct,
+        is_favorite=bool(doc.is_favorite),
+        collections=[
+            CollectionRef(id=cid, name=name, color=color) for cid, name, color in collections
+        ],
+    )
 
 
 @router.post("/parse")
@@ -556,7 +326,7 @@ async def parse_document(
 ):
     doc_id = str(uuid.uuid4())
     ext = Path(file.filename or "upload.txt").suffix.lstrip(".")
-    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir = library_root(settings)
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     if ext and ext not in _ALLOWED_EXTENSIONS:
@@ -759,16 +529,7 @@ async def ingest_document(
                 # background task was GC'd before completing all modes).
 
                 async with get_session_factory()() as _s:
-                    existing_modes = {
-                        row[0]
-                        for row in (
-                            await _s.execute(
-                                select(SummaryModel.mode).where(
-                                    SummaryModel.document_id == existing.id
-                                )
-                            )
-                        ).all()
-                    }
+                    existing_modes = await SummaryRepo(_s).modes(existing.id)
                 missing = [m for m in PREGENERATE_MODES if m not in existing_modes]
                 if missing:
                     launch_followup(existing.id, _ingestion_module._run_pregenerate(existing.id))
@@ -813,7 +574,7 @@ async def ingest_document(
 
         # New file — write to disk and create a fresh document record.
         doc_id = str(uuid.uuid4())
-        data_dir = Path(settings.DATA_DIR).expanduser()
+        data_dir = library_root(settings)
         raw_dir = data_dir / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
         dest = raw_dir / f"{doc_id}.{ext}"
@@ -886,7 +647,7 @@ async def ingest_kindle(
             ),
         )
 
-    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir = library_root(settings)
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
@@ -940,7 +701,7 @@ async def _ingest_remote_pdf(doc_id: str, remote: RemoteDocument, settings: Sett
     because nothing yet knows whether it is a paper or a book; classify_node
     reads the parsed text and resolves it.
     """
-    raw_dir = Path(settings.DATA_DIR).expanduser() / "raw"
+    raw_dir = library_root(settings) / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     dest = raw_dir / f"{doc_id}.pdf"
     await asyncio.to_thread(dest.write_bytes, remote.content)
@@ -1009,7 +770,7 @@ async def ingest_url(
             logger.exception("Article extraction failed for %s", body.url)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        data_dir = Path(settings.DATA_DIR).expanduser()
+        data_dir = library_root(settings)
         raw_dir = data_dir / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
         dest = raw_dir / f"{doc_id}.md"
@@ -1142,7 +903,7 @@ async def ingest_url(
     channel_name = meta.get("uploader") or meta.get("channel") or None
     doc_id = str(uuid.uuid4())
 
-    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir = library_root(settings)
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     dest_stem = raw_dir / doc_id  # yt-dlp appends the extension
@@ -1211,15 +972,7 @@ async def get_document(document_id: str):
         # chunk rather than a second column: the chunk already records it, and
         # a section's label is by definition its first chunk's. Empty for a
         # document whose sheets and printed pages agree, which is most of them.
-        label_rows = await session.execute(
-            select(
-                ChunkModel.section_id,
-                ChunkModel.pdf_page_label,
-                ChunkModel.pdf_page_number,
-            )
-            .where(ChunkModel.document_id == document_id)
-            .order_by(ChunkModel.chunk_index)
-        )
+        label_rows = await repo.chunk_page_labels(document_id)
         section_page_labels: dict[str, str] = {}
         # A section's printed page is the one its *first* chunk sits on. Labels
         # are stored only where they differ from the sheet, so filtering to
@@ -1540,7 +1293,7 @@ async def get_document_cover(document_id: str) -> Response:
     - Returns 204 if no image can be produced for this document, 404 if it does not exist.
     """
     settings = get_settings()
-    covers_dir = Path(settings.DATA_DIR).expanduser() / "covers"
+    covers_dir = library_root(settings) / "covers"
     cached_cover = covers_dir / f"{document_id}.webp"
     if cached_cover.is_file():
         return FileResponse(str(cached_cover), media_type="image/webp")
@@ -1565,18 +1318,10 @@ async def get_document_cover(document_id: str) -> Response:
                 return FileResponse(str(cached_cover), media_type="image/webp")
 
         # 2. If article/figures exist in ImageModel
-        img_row = (
-            await session.execute(
-                select(ImageModel.path)
-                .where(ImageModel.document_id == document_id)
-                .where((ImageModel.image_type != "decorative") | (ImageModel.image_type.is_(None)))
-                .order_by(ImageModel.page.asc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
+        img_row = await DocumentRepo(session).first_figure_path(document_id)
 
         if img_row:
-            img_abs = (Path(settings.DATA_DIR).expanduser() / img_row).resolve()
+            img_abs = (library_root(settings) / img_row).resolve()
             if img_abs.is_file():
                 ext = img_abs.suffix.lstrip(".").lower()
                 valid_exts = ("png", "jpg", "jpeg", "webp")
@@ -1584,7 +1329,7 @@ async def get_document_cover(document_id: str) -> Response:
                 return FileResponse(str(img_abs), media_type=media_type)
 
         # 3. Check for local mirrored article images
-        article_img_dir = (Path(settings.DATA_DIR).expanduser() / "images" / document_id).resolve()
+        article_img_dir = (library_root(settings) / "images" / document_id).resolve()
         if article_img_dir.is_dir():
             first_img = next(
                 (
@@ -1619,11 +1364,7 @@ async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
                 status_code=400,
                 detail=f"Document is not a PDF (format={doc.format})",
             )
-        # Shares session with the get_or_404 check above; single-table count.
-        section_count_result = await session.execute(
-            select(func.count(SectionModel.id)).where(SectionModel.document_id == document_id)
-        )
-        section_count = section_count_result.scalar_one() or 0
+        section_count = await DocumentRepo(session).section_count(document_id)
 
     return PDFMetaResponse(
         page_count=doc.page_count,
@@ -1692,14 +1433,7 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
         if not fp.exists():
             raise HTTPException(status_code=404, detail="EPUB file not found on disk")
 
-        # Section IDs needed to map chapter index to section IDs; shares session with
-        # the get_or_404 check above.
-        sections_result = await session.execute(
-            select(SectionModel.id)
-            .where(SectionModel.document_id == document_id)
-            .order_by(SectionModel.section_order)
-        )
-        all_section_ids = [row[0] for row in sections_result.all()]
+        all_section_ids = await DocumentRepo(session).section_ids(document_id)
 
     # Compute total chapters first (needed to slice sections)
     try:
@@ -1780,7 +1514,7 @@ async def get_document_asset(document_id: str, asset_path: str) -> Response:
             )
 
     settings = get_settings()
-    img_dir = (Path(settings.DATA_DIR).expanduser() / "images" / document_id).resolve()
+    img_dir = (library_root(settings) / "images" / document_id).resolve()
     candidate = (img_dir / filename).resolve()
     mime, _ = mimetypes.guess_type(candidate.name)
     if (
@@ -1811,10 +1545,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
         async with get_session_factory()() as session:
             # Existence check + cascade delete share one session per document;
             # delete_sqlite_cascade uses the session directly for multi-table cleanup.
-            result = await session.execute(
-                select(DocumentModel).where(DocumentModel.id == document_id)
-            )
-            doc = result.scalar_one_or_none()
+            doc = await DocumentRepo(session).get(document_id)
             if doc is None:
                 continue
             await svc.delete_sqlite_cascade(session, doc, delete_notes=body.delete_notes)
@@ -1897,10 +1628,7 @@ async def retag_all_documents():
     whose tag set has already stabilised.
     """
     async with get_session_factory()() as session:
-        rows = (
-            await session.execute(select(DocumentModel.id).where(DocumentModel.stage == "complete"))
-        ).all()
-    doc_ids = [r[0] for r in rows]
+        doc_ids = await DocumentRepo(session).complete_ids()
     for did in doc_ids:
         task = asyncio.create_task(enrich_document_tags(did))
         _background_tasks.add(task)
@@ -2091,19 +1819,9 @@ async def get_document_diagnostics(document_id: str):
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # Two counts share a session with the get_or_404 guard; FTS5 virtual table
-        # requires raw SQL so both stay here rather than going through a repo.
-        chunk_result = await session.execute(
-            select(func.count(ChunkModel.id)).where(ChunkModel.document_id == document_id)
-        )
-        chunk_count = chunk_result.scalar_one() or 0
-
-        # FTS5 count
-        fts_result = await session.execute(
-            text("SELECT COUNT(*) FROM chunks_fts WHERE document_id = :did"),
-            {"did": document_id},
-        )
-        fts_count = fts_result.scalar_one() or 0
+        repo = DocumentRepo(session)
+        chunk_count = await repo.chunk_count(document_id)
+        fts_count = await repo.fts_chunk_count(document_id)
 
     # LanceDB vector count (0 if store unavailable)
     try:
@@ -2198,13 +1916,7 @@ async def get_code_snippets(document_id: str) -> list[CodeSnippetItem]:
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # Shares session with get_or_404; simple document-scoped read-only list.
-        snippets_result = await session.execute(
-            select(CodeSnippetModel)
-            .where(CodeSnippetModel.document_id == document_id)
-            .order_by(CodeSnippetModel.created_at)
-        )
-        snippets = snippets_result.scalars().all()
+        snippets = await DocumentRepo(session).code_snippets(document_id)
 
     return [
         CodeSnippetItem(
@@ -2229,13 +1941,7 @@ async def get_objectives(document_id: str) -> LearningObjectivesResponse:
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # Shares session with get_or_404; simple document-scoped read-only list.
-        result = await session.execute(
-            select(LearningObjectiveModel)
-            .where(LearningObjectiveModel.document_id == document_id)
-            .order_by(LearningObjectiveModel.created_at)
-        )
-        objectives = result.scalars().all()
+        objectives = await DocumentRepo(session).learning_objectives(document_id)
 
     return LearningObjectivesResponse(
         document_id=document_id,
@@ -2363,12 +2069,8 @@ async def save_reading_position(
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # Upsert: read then insert-or-update in one session to avoid a second connection;
-        # ReadingPositionModel is keyed by document_id (one row per doc).
-        result = await session.execute(
-            select(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
-        )
-        row = result.scalar_one_or_none()
+        # One row per document, keyed by document_id.
+        row = await DocumentRepo(session).reading_position(document_id)
         now = datetime.now(UTC)
         if row is None:
             row = ReadingPositionModel(
@@ -2401,11 +2103,7 @@ async def get_reading_position(document_id: str) -> ReadingPositionResponse:
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # Shares session with get_or_404; single-row read.
-        result = await session.execute(
-            select(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
-        )
-        row = result.scalar_one_or_none()
+        row = await DocumentRepo(session).reading_position(document_id)
 
     if row is None:
         raise HTTPException(status_code=404, detail="No reading position saved for this document")
@@ -2421,7 +2119,7 @@ async def set_bookmark(document_id: str, body: SetBookmarkRequest) -> ReadingPos
     """
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
-        row = await session.get(ReadingPositionModel, document_id)
+        row = await DocumentRepo(session).reading_position(document_id)
         if row is None:
             row = ReadingPositionModel(document_id=document_id, updated_at=datetime.now(UTC))
             session.add(row)
@@ -2440,7 +2138,7 @@ async def clear_bookmark(document_id: str) -> None:
     """
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
-        row = await session.get(ReadingPositionModel, document_id)
+        row = await DocumentRepo(session).reading_position(document_id)
         if row is not None and row.pdf_bookmark_page is not None:
             row.pdf_bookmark_page = None
             await session.commit()

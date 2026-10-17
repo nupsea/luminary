@@ -50,11 +50,8 @@ _RE_SECTION_NM = re.compile(r"^\d+\.\d+\s")  # "1.1 Overview"
 _RE_SECTION_N = re.compile(r"^\d+\.\s")  # "1. Introduction"
 
 
-def classify_section_level(heading: str) -> int:
-    """Return 1=Part, 2=Chapter, 3=Section (N.M), 4=Subsection (N.M.P).
-
-    Defaults to level 2 (chapter) if none of the patterns match.
-    """
+def classify_section_level(heading: str) -> int | None:
+    """Return 1=Part, 2=Chapter, 3=Section (N.M), 4=Subsection (N.M.P), None if unnumbered."""
     if _RE_PART.match(heading):
         return 1
     if _RE_CHAPTER.match(heading):
@@ -65,38 +62,30 @@ def classify_section_level(heading: str) -> int:
         return 3
     if _RE_SECTION_N.match(heading):
         return 2
-    return 2
+    return None
 
 
 def assign_parent_headings_dicts(sections: list[dict]) -> list[dict]:
-    """Enrich section dicts with 'level' and 'parent_heading' based on hierarchy.
+    """Set each section dict's 'level', 'parent_heading' and 'parent_index' in place.
 
-    Modifies each dict in-place (also returns the list for convenience).
-
-    Rules:
-    - level=1 (Part): no parent
-    - level=2 (Chapter or N.): parent is the most recent level=1 section
-    - level=3 (N.M section): parent is the most recent level=2 section
-    - level=4 (N.M.P subsection): parent is the most recent level=3 section
-    If no ancestor exists at the required level, parent_heading stays None.
+    A numbered heading's mark decides its level; an unnumbered one keeps the level the
+    parser read from the source (default 2). Overwriting that with 2 flattened every
+    markdown book into one level, so its topics were all 241 headings (#307).
+    The parent is the most recent section one level up, else None.
     """
-    # Track most recent heading seen at each level
-    level_stack: dict[int, str | None] = {1: None, 2: None, 3: None, 4: None}
+    stack: dict[int, int] = {}  # level -> index of the most recent section at it
 
-    for s in sections:
-        heading = s.get("heading", "")
-        level = classify_section_level(heading)
+    for i, s in enumerate(sections):
+        level = classify_section_level(s.get("heading", "")) or s.get("level") or 2
         s["level"] = level
 
-        # Determine parent: look one level up
-        parent_level = level - 1
-        parent_heading = level_stack.get(parent_level) if parent_level >= 1 else None
-        s["parent_heading"] = parent_heading
+        parent = stack.get(level - 1)
+        s["parent_index"] = parent
+        s["parent_heading"] = sections[parent].get("heading", "") if parent is not None else None
 
-        # Update the stack at this level; invalidate deeper levels
-        level_stack[level] = heading
-        for deeper in range(level + 1, 5):
-            level_stack[deeper] = None
+        stack[level] = i
+        for deeper in [lv for lv in stack if lv > level]:
+            del stack[deeper]
 
     return sections
 

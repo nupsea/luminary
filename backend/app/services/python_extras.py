@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from app.config import get_settings
+from app.storage import machine_root
 
 if TYPE_CHECKING:
     from app.services.components import Component
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 def extras_dir() -> Path:
     """Where user-installed Python packages live: writable, and outside the bundle."""
-    return Path(get_settings().DATA_DIR).expanduser() / "extras"
+    return machine_root() / "extras"
 
 
 def activate_extras() -> bool:

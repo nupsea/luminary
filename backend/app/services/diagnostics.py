@@ -28,6 +28,7 @@ from app.models import CollectionModel, DocumentModel
 from app.paths import app_version, is_packaged
 from app.services.settings_service import get_local_chat_model, get_vision_model
 from app.services.storage_errors import folder_problem
+from app.storage import library_root, machine_root
 
 # Reports can come from a work computer, so anything naming a person, an organisation or a
 # place is removed before the user sees it. The key shapes match the desktop shell's report.rs.
@@ -238,7 +239,7 @@ async def _ollama() -> list[str]:
 
 def _storage() -> str:
     """Whether this account can write the library and model folders, and the free space."""
-    data_dir = Path(get_settings().DATA_DIR).expanduser()
+    data_dir = library_root()
     parts = []
     for label, folder in (("library", data_dir), ("models", data_dir / "ollama" / "models")):
         if folder.exists():
@@ -257,7 +258,7 @@ async def environment_report() -> str:
     install = "desktop app" if is_packaged() else "source or CLI install"
     lines = [
         f"version   {app_version()} ({install})",
-        f"library   {_scrub(str(Path(settings.DATA_DIR).expanduser()))}",
+        f"library   {_scrub(str(library_root(settings)))}",
         f"os        {_os_name()}",
         f"kernel    {_kernel()}",
         f"python    {platform.python_version()}",
@@ -311,7 +312,7 @@ def report_text(report: dict) -> str:
 
 def _reports_dir() -> Path:
     log = os.environ.get("LUMINARY_LOG_FILE", "")
-    return Path(log).parent if log else Path(get_settings().DATA_DIR).expanduser() / "reports"
+    return Path(log).parent if log else machine_root() / "reports"
 
 
 def _open_in_editor(path: Path) -> bool:

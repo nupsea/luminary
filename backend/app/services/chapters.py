@@ -39,7 +39,8 @@ _FRONT_MATTER = re.compile(
     r"^\W*(?:title page|half title|copyright|dedication|preface|foreword"
     r"|acknowledge?ments?|contributors?(?: list)?|(?:table of )?contents|about this book"
     r"|praise for|conventions used|using code examples|how to contact us|who this book is for"
-    r"|o.reilly online learning)\b",
+    r"|o.reilly online learning|(?:editor|translator).?s? (?:introduction|preface|note)"
+    r"|introduction by the (?:editor|translator))\b",
     re.I,
 )
 
@@ -173,6 +174,31 @@ def _front_matter_end(ordered: Sequence[SectionExtent]) -> int:
     return end if end < len(ordered) else 0
 
 
+def matter_section_ids(sections: Sequence[SectionExtent]) -> set[str]:
+    """Sections about the book rather than of it: the opening front matter and back matter.
+
+    Decided by the sections, for every form (#252): a technical book's preface and
+    contributor list are as untestable as a novel's.
+    """
+    ordered = sorted((s for s in sections if s.chars > 0), key=lambda s: s.first_chunk)
+    if not ordered:
+        return set()
+    front = {s.id for s in ordered[: _front_matter_end(ordered)]}
+    return front | {s.id for s in ordered[1:] if _BACK_MATTER.match(s.heading)}
+
+
+async def document_extents(document_id: str, session: AsyncSession) -> list[SectionExtent]:
+    from app.repos.document_repo import DocumentRepo  # noqa: PLC0415
+
+    repo = DocumentRepo(session)
+    extents = await repo.section_extents(document_id)
+    return [
+        SectionExtent(s.id, s.heading, *extents[s.id])
+        for s in await repo.sections_for_document(document_id)
+        if s.id in extents
+    ]
+
+
 def _starts(ordered: Sequence[SectionExtent]) -> tuple[list[int], bool]:
     """Indexes opening each chapter, and whether they came from heading marks.
 
@@ -223,13 +249,4 @@ def detect_chapters(sections: Sequence[SectionExtent], document_title: str) -> l
 async def chapters_for_document(
     document_id: str, document_title: str, session: AsyncSession
 ) -> list[Chapter]:
-    from app.repos.document_repo import DocumentRepo  # noqa: PLC0415
-
-    repo = DocumentRepo(session)
-    extents = await repo.section_extents(document_id)
-    sections = [
-        SectionExtent(s.id, s.heading, *extents[s.id])
-        for s in await repo.sections_for_document(document_id)
-        if s.id in extents
-    ]
-    return detect_chapters(sections, document_title)
+    return detect_chapters(await document_extents(document_id, session), document_title)

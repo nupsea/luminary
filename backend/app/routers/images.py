@@ -17,13 +17,13 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select
-from sqlalchemy import update as _update
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models import ChunkModel, DocumentModel, EnrichmentJobModel, ImageModel
+from app.models import DocumentModel, ImageModel
 from app.repos._helpers import get_or_404
+from app.repos.enrichment_repo import EnrichmentRepo
+from app.storage import library_root
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["images"])
@@ -89,7 +89,7 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
     Returns the __LUMINARY_IMG__ prefixed path for Markdown resolution.
     """
     settings = get_settings()
-    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir = library_root(settings)
     notes_img_dir = data_dir / "images" / "notes"
     notes_img_dir.mkdir(parents=True, exist_ok=True)
 
@@ -157,16 +157,7 @@ async def get_document_images(
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # Read-only list query scoped to this document; shares the same session as the
-        # preceding get_or_404 check so both reads happen in a single connection.
-        # Outer-joins ChunkModel to associate images with their section for non-paginated formats.
-        result = await session.execute(
-            select(ImageModel, ChunkModel.section_id)
-            .outerjoin(ChunkModel, ChunkModel.id == ImageModel.chunk_id)
-            .where(ImageModel.document_id == document_id)
-            .order_by(ImageModel.page, ImageModel.created_at)
-        )
-        all_rows = result.all()
+        all_rows = await EnrichmentRepo(session).images_with_sections(document_id)
 
     total = len(all_rows)
     start = (page - 1) * page_size
@@ -206,7 +197,7 @@ async def serve_image_raw(image_id: str) -> FileResponse:
         img = await get_or_404(session, ImageModel, image_id, name="Image")
 
     settings = get_settings()
-    abs_path = Path(settings.DATA_DIR).expanduser() / img.path
+    abs_path = library_root(settings) / img.path
     if not abs_path.exists():
         raise HTTPException(status_code=404, detail="Image file not found on disk")
 
@@ -221,7 +212,7 @@ async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
     # stops a literal slash but not "..", and percent-encoded "%2e%2e" survives
     # ASGI decoding -- without containment this served anything one level above
     # images/, which is DATA_DIR itself (luminary.db included).
-    root = (Path(settings.DATA_DIR).expanduser() / "images").resolve()
+    root = (library_root(settings) / "images").resolve()
     abs_path = (root / doc_id / filename).resolve()
     if not abs_path.is_relative_to(root) or not abs_path.is_file():
         raise HTTPException(status_code=404, detail="Local image not found")
@@ -251,17 +242,8 @@ async def reextract_document_images(document_id: str) -> ReextractResponse:
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        existing = (
-            await session.execute(
-                select(EnrichmentJobModel)
-                .where(
-                    EnrichmentJobModel.document_id == document_id,
-                    EnrichmentJobModel.job_type == "image_extract",
-                    EnrichmentJobModel.status.in_(["pending", "running"]),
-                )
-                .limit(1)
-            )
-        ).scalar_one_or_none()
+        jobs = EnrichmentRepo(session)
+        existing = await jobs.active_job(document_id, "image_extract")
         if existing is not None:
             return ReextractResponse(job_id=existing.id, queued=False)
 
@@ -273,32 +255,13 @@ async def reextract_document_images(document_id: str) -> ReextractResponse:
         # rasters were queued for a vision call each, and the re-extract that
         # would have retired them sat behind all 77. The handler enqueues a
         # fresh analyze job for whatever survives.
-        superseded = (
-            await session.execute(
-                _update(EnrichmentJobModel)
-                .where(
-                    EnrichmentJobModel.document_id == document_id,
-                    EnrichmentJobModel.job_type == "image_analyze",
-                    EnrichmentJobModel.status == "pending",
-                )
-                .values(
-                    status="done",
-                    error_message=(
-                        "Superseded by a re-extraction; a fresh analyze job "
-                        "covers the images that survived it."
-                    ),
-                )
-                .returning(EnrichmentJobModel.id)
-            )
-        ).all()
-
-        job = EnrichmentJobModel(
-            id=str(uuid.uuid4()),
-            document_id=document_id,
-            job_type="image_extract",
-            status="pending",
+        superseded = await jobs.supersede_pending(
+            document_id,
+            "image_analyze",
+            "Superseded by a re-extraction; a fresh analyze job "
+            "covers the images that survived it.",
         )
-        session.add(job)
+        job = jobs.enqueue(document_id, "image_extract")
         await session.commit()
 
     if superseded:
@@ -321,17 +284,7 @@ async def get_enrichment_queue() -> EnrichmentQueueSummary:
     UI to say so.
     """
     async with get_session_factory()() as session:
-        rows = (
-            await session.execute(
-                select(
-                    EnrichmentJobModel.status,
-                    func.count(),
-                    func.count(func.distinct(EnrichmentJobModel.document_id)),
-                ).group_by(EnrichmentJobModel.status)
-            )
-        ).all()
-
-    by_status = {status: (jobs, docs) for status, jobs, docs in rows}
+        by_status = await EnrichmentRepo(session).queue_counts()
     pending, pending_docs = by_status.get("pending", (0, 0))
     running, running_docs = by_status.get("running", (0, 0))
     return EnrichmentQueueSummary(
@@ -354,13 +307,7 @@ async def get_enrichment_jobs(document_id: str) -> list[EnrichmentJobItem]:
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # Read-only list query; shares the session with the get_or_404 guard above.
-        result = await session.execute(
-            select(EnrichmentJobModel)
-            .where(EnrichmentJobModel.document_id == document_id)
-            .order_by(EnrichmentJobModel.created_at)
-        )
-        jobs = result.scalars().all()
+        jobs = await EnrichmentRepo(session).jobs_for_document(document_id)
 
     return [
         EnrichmentJobItem(

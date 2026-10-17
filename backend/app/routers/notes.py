@@ -11,17 +11,11 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
 from app.models import (
-    CollectionMemberModel,
-    CollectionModel,
-    FlashcardModel,
     NoteModel,
-    NoteSourceModel,
-    NoteTagIndexModel,
 )
 from app.repos.collection_repo import CollectionRepo
 from app.repos.note_repo import NoteRepo, get_note_repo
@@ -297,34 +291,11 @@ async def search_notes(
 @router.get("/groups", response_model=GroupsResponse)
 async def get_groups(session: AsyncSession = Depends(get_db)) -> GroupsResponse:
     """Return distinct group names (with counts) and distinct tags (with counts)."""
-    # Three bespoke aggregations that share a session; the middle one uses SQLite's
-    # json_each extension which is not expressible via SQLAlchemy ORM columns.
-    group_result = await session.execute(
-        select(NoteModel.group_name, func.count(NoteModel.id))
-        .where(NoteModel.group_name.isnot(None))
-        .group_by(NoteModel.group_name)
-        .order_by(NoteModel.group_name)
-    )
-    groups = [GroupInfo(name=row[0], count=row[1]) for row in group_result.fetchall()]
-
-    # Tags — use JSON_EACH to explode the JSON array stored in the tags column
-    tag_result = await session.execute(
-        text(
-            "SELECT j.value, COUNT(*) as cnt "
-            "FROM notes, json_each(notes.tags) AS j "
-            "GROUP BY j.value "
-            "ORDER BY j.value"
-        )
-    )
-    tags = [TagInfo(name=row[0], count=row[1]) for row in tag_result.fetchall()]
-
-    # Total notes count (unarchived)
-    total_result = await session.execute(
-        select(func.count()).select_from(NoteModel).where(NoteModel.archived.is_(False))
-    )
-    total_notes = total_result.scalar_one()
-
-    favorites_count = await NoteRepo(session).favorite_count()
+    repo = NoteRepo(session)
+    groups = [GroupInfo(name=g, count=n) for g, n in await repo.group_counts()]
+    tags = [TagInfo(name=t, count=n) for t, n in await repo.tag_counts()]
+    total_notes = await repo.count_unarchived()
+    favorites_count = await repo.favorite_count()
 
     return GroupsResponse(
         groups=groups, tags=tags, total_notes=total_notes, favorites_count=favorites_count
@@ -352,60 +323,16 @@ async def list_notes(
     session: AsyncSession = Depends(get_db),
 ) -> list[NoteResponse]:
     """List notes with optional filters."""
-    stmt = (
-        select(NoteModel).where(NoteModel.archived.is_(False)).order_by(NoteModel.updated_at.desc())
+    repo = NoteRepo(session)
+    notes = await repo.listed(
+        document_id=document_id,
+        group=group,
+        tag=tag,
+        collection_id=collection_id,
+        favorite=favorite,
+        page=page,
+        page_size=page_size,
     )
-
-    if document_id:
-        # match notes via legacy document_id OR via NoteSourceModel pivot
-        stmt = stmt.where(
-            or_(
-                NoteModel.document_id == document_id,
-                NoteModel.id.in_(
-                    select(NoteSourceModel.note_id).where(
-                        NoteSourceModel.document_id == document_id
-                    )
-                ),
-            )
-        )
-    if group:
-        stmt = stmt.where(NoteModel.group_name == group)
-    if tag:
-        # Filter notes using NoteTagIndexModel prefix query.
-        # 'science' matches notes tagged 'science', 'science/biology', 'science/physics/quantum'.
-        stmt = stmt.where(
-            NoteModel.id.in_(
-                select(NoteTagIndexModel.note_id).where(
-                    or_(
-                        NoteTagIndexModel.tag_full == tag,
-                        NoteTagIndexModel.tag_full.like(f"{tag}/%"),
-                    )
-                )
-            )
-        )
-    if collection_id:
-        stmt = stmt.where(
-            NoteModel.id.in_(
-                select(CollectionMemberModel.member_id).where(
-                    CollectionMemberModel.collection_id == collection_id,
-                    CollectionMemberModel.member_type == "note",
-                )
-            )
-        )
-    if favorite is not None:
-        stmt = stmt.where(NoteModel.is_favorite == favorite)
-
-    if page_size is not None:
-        stmt = stmt.limit(page_size).offset((page - 1) * page_size)
-
-    # Dynamic filter composition built incrementally from query params; the stmt
-    # is too conditional to encapsulate in a NoteRepo.list() without complex args.
-    result = await session.execute(stmt)
-    notes = list(result.scalars().all())
-
-    # Bulk-load collection memberships and source_document_ids in one query each.
-    # The note_ids set is only known after the above list executes, so these two
-    # queries must follow here rather than being folded into the primary query.
     coll_map: dict[str, list[CollectionRef]] = {}
     src_map: dict[str, list[str]] = {}
     if notes:
@@ -415,18 +342,7 @@ async def list_notes(
             nid: [CollectionRef(id=cid, name=name, color=color) for cid, name, color in refs]
             for nid, refs in refs_by_note.items()
         }
-
-        # bulk-load source_document_ids from pivot
-        src_rows = (
-            await session.execute(
-                select(
-                    NoteSourceModel.note_id,
-                    NoteSourceModel.document_id,
-                ).where(NoteSourceModel.note_id.in_(note_ids))
-            )
-        ).all()
-        for row in src_rows:
-            src_map.setdefault(row[0], []).append(row[1])
+        src_map = await repo.source_document_ids_by_note(note_ids)
 
     return [_to_response(n, coll_map.get(n.id, []), src_map.get(n.id, [])) for n in notes]
 
@@ -469,17 +385,8 @@ async def _apply_note_update(
     # shouldn't drag the note up the "recently touched" hub feed.
     if req.content is not None:
         await ActivityService(session).record_note_edit(note.id)
-    # Fetch updated source_document_ids for response; must run after commit to see
-    # the new pivot rows written by _sync_note_sources above.
-    src_rows = (
-        (
-            await session.execute(
-                select(NoteSourceModel.document_id).where(NoteSourceModel.note_id == note.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    # After the commit, so it reads the pivot rows _sync_note_sources wrote.
+    src_rows = await repo.source_document_ids_for(note.id)
     # Delete stale vector synchronously so hybrid search doesn't return the
     # old embedding while the background task re-embeds the new content.
 
@@ -589,33 +496,12 @@ async def preview_note_flashcard_generation(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     """Return {total_notes, already_covered} for a collection without generating"""
-    # Three sequential reads: existence check, then two counts that depend on
-    # collection.name -- all share the session so the name is resolved before use.
-    coll_result = await session.execute(
-        select(CollectionModel).where(CollectionModel.id == collection_id)
-    )
-    collection = coll_result.scalar_one_or_none()
+    collection = await CollectionRepo(session).find(collection_id)
     if collection is None:
         raise HTTPException(status_code=404, detail="Collection not found")
-
-    member_result = await session.execute(
-        select(func.count())
-        .select_from(CollectionMemberModel)
-        .where(
-            CollectionMemberModel.collection_id == collection_id,
-            CollectionMemberModel.member_type == "note",
-        )
-    )
-    total_notes = member_result.scalar_one()
-
-    covered_result = await session.execute(
-        select(func.count(FlashcardModel.source_content_hash.distinct())).where(
-            FlashcardModel.deck == collection.name,
-            FlashcardModel.source == "note",
-            FlashcardModel.source_content_hash.is_not(None),
-        )
-    )
-    already_covered = covered_result.scalar_one()
+    repo = NoteRepo(session)
+    total_notes = await repo.note_member_count(collection_id)
+    already_covered = await repo.covered_note_count(collection.name)
 
     return {"total_notes": total_notes, "already_covered": already_covered}
 
@@ -676,14 +562,7 @@ async def list_note_flashcards(
 ) -> list[NoteFlashcardItem]:
     """Return all flashcards generated from notes (source='note'), newest first."""
 
-    # Read-only cross-model query (FlashcardModel filtered by source); no NoteRepo
-    # method owns FlashcardModel, so the router queries it directly here.
-    result = await session.execute(
-        select(FlashcardModel)
-        .where(FlashcardModel.source == "note")
-        .order_by(FlashcardModel.created_at.desc())
-    )
-    cards = list(result.scalars().all())
+    cards = await NoteRepo(session).note_flashcards()
     return [NoteFlashcardItem.model_validate(c) for c in cards]
 
 
@@ -1044,15 +923,7 @@ async def backfill_descriptions(
     """Manually (re)generate card summaries. Default fills only notes missing
     one; force=True refreshes every eligible note. Runs in the background; the
     response reports how many notes were queued."""
-    query = (
-        select(func.count())
-        .select_from(NoteModel)
-        .where(func.length(NoteModel.content) >= 40)
-        .where(NoteModel.archived.is_(False))
-    )
-    if not force:
-        query = query.where(NoteModel.description.is_(None))
-    queued = (await session.execute(query)).scalar_one()
+    queued = await NoteRepo(session).count_needing_description(force=force)
 
     task = asyncio.create_task(_backfill_missing_descriptions(force=force))
     _background_tasks.add(task)

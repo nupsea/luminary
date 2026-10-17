@@ -5,11 +5,10 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import DocumentModel
+from app.repos.document_repo import DocumentRepo
 from app.services.retriever import HybridRetriever, get_retriever
 
 logger = logging.getLogger(__name__)
@@ -102,12 +101,7 @@ async def search(
     elif content_types:
         type_list = [t.strip() for t in content_types.split(",") if t.strip()]
         if type_list:
-            # Input-dependent filter: content_type list comes from query param, so the
-            # lookup must happen here before retrieval is dispatched.
-            result = await session.execute(
-                select(DocumentModel.id).where(DocumentModel.content_type.in_(type_list))
-            )
-            document_ids = [str(row[0]) for row in result.fetchall()]
+            document_ids = await DocumentRepo(session).ids_of_types(type_list)
             if not document_ids:
                 return SearchResponse(results=[])
 
@@ -132,19 +126,8 @@ async def search(
     if not scored_chunks:
         return SearchResponse(results=[])
 
-    # Fetch document metadata for all matching document IDs; the set of IDs is only
-    # known after retrieval returns, so this join cannot be pre-computed in a repo.
     doc_ids = list({c.document_id for c in scored_chunks})
-    doc_result = await session.execute(
-        select(
-            DocumentModel.id,
-            DocumentModel.title,
-            DocumentModel.content_type,
-        ).where(DocumentModel.id.in_(doc_ids))
-    )
-    doc_map: dict[str, tuple[str, str]] = {
-        str(row[0]): (row[1] or "Untitled", row[2] or "notes") for row in doc_result.fetchall()
-    }
+    doc_map = await DocumentRepo(session).titles_and_types(doc_ids)
 
     # Build grouped results
     groups: dict[str, list[SearchResult]] = {}

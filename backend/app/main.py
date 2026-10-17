@@ -85,6 +85,7 @@ from app.services.settings_service import _cache as _llm_cache
 from app.services.settings_service import load_llm_settings
 from app.services.startup_status import get_startup_status
 from app.services.warmup import run_warmup
+from app.storage import library_root, machine_root
 from app.streaming import StreamingResponse
 from app.surface_manifest import enabled_routers
 from app.telemetry import setup_tracing
@@ -137,7 +138,7 @@ async def lifespan(app: FastAPI):
 
     # Before anything reads the graph tables, so none is read half-filled. Bounded: the
     # dev library's 98k graph rows copy in under a second.
-    await run_graph_import(settings.DATA_DIR)
+    await run_graph_import(str(library_root(settings)))
     await optimize_database(engine)
 
     # NOTE: concept regeneration is a manual offline step (with the server stopped
@@ -147,10 +148,10 @@ async def lifespan(app: FastAPI):
 
     # Telemetry setup
     if settings.PHOENIX_ENABLED:
-        setup_tracing(phoenix_enabled=True, data_dir=settings.DATA_DIR)
+        setup_tracing(phoenix_enabled=True, data_dir=str(machine_root(settings)))
         FastAPIInstrumentor.instrument_app(app)
 
-    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir = library_root(settings)
     data_dir.mkdir(parents=True, exist_ok=True)
     # The library holds the user's documents, notes and (when no keyring is
     # available) API keys. Default mkdir/umask leaves it 0o755 -- readable by
@@ -677,7 +678,7 @@ async def pull_ollama_model(request: OllamaPullRequest) -> StreamingResponse:
 
 @misc_router.get("/settings/storage")
 async def read_storage(settings: Settings = Depends(get_settings)) -> dict:
-    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir = library_root(settings)
 
     def dir_size_mb(path: Path) -> float:
         if not path.exists():

@@ -14,10 +14,10 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.repos.home_repo import HomeRepo
 from app.schemas.home import (
     ActiveCollection,
     ContinueNoteItem,
@@ -121,32 +121,7 @@ async def act_on_recommendation(
 
 
 async def _fetch_recent_items(session: AsyncSession, limit: int) -> list[RecentItem]:
-    # UNION the doc and note paths against the same activity feed so a single
-    # ORDER BY interleaves them by last_meaningful_at.
-    rows = (
-        await session.execute(
-            text(
-                """
-                SELECT 'document' AS member_type, ca.member_id, d.title AS title,
-                       NULL AS preview, ca.last_meaningful_at
-                FROM content_activity ca
-                JOIN documents d ON d.id = ca.member_id
-                WHERE ca.member_type = 'document'
-                UNION ALL
-                SELECT 'note' AS member_type, ca.member_id,
-                       COALESCE(NULLIF(n.title, ''), substr(n.content, 1, 60)) AS title,
-                       substr(n.content, 1, 120) AS preview,
-                       ca.last_meaningful_at
-                FROM content_activity ca
-                JOIN notes n ON n.id = ca.member_id
-                WHERE ca.member_type = 'note' AND n.archived = 0
-                ORDER BY last_meaningful_at DESC
-                LIMIT :limit
-                """
-            ),
-            {"limit": limit},
-        )
-    ).all()
+    rows = await HomeRepo(session).recent_items(limit)
     return [
         RecentItem(
             member_type=row[0],
@@ -160,71 +135,13 @@ async def _fetch_recent_items(session: AsyncSession, limit: int) -> list[RecentI
 
 
 async def _fetch_active_collections(session: AsyncSession) -> list[ActiveCollection]:
-    # Order collections by the most-recent activity timestamp of any member.
-    # A collection with no touched member falls back to its created_at via the
-    # COALESCE so the first-time-user state surfaces newly-created collections.
-    rows = (
-        await session.execute(
-            text(
-                """
-                SELECT c.id, c.name, c.color,
-                       SUM(CASE WHEN cm.member_type = 'document' THEN 1 ELSE 0 END) AS doc_count,
-                       SUM(CASE WHEN cm.member_type = 'note' THEN 1 ELSE 0 END) AS note_count,
-                       COALESCE(MAX(ca.last_meaningful_at), c.created_at) AS sort_key
-                FROM collections c
-                LEFT JOIN collection_members cm ON cm.collection_id = c.id
-                LEFT JOIN content_activity ca
-                       ON ca.member_id = cm.member_id AND ca.member_type = cm.member_type
-                GROUP BY c.id, c.name, c.color, c.created_at
-                ORDER BY sort_key DESC
-                LIMIT :limit
-                """
-            ),
-            {"limit": _ACTIVE_COLLECTIONS_LIMIT},
-        )
-    ).all()
+    repo = HomeRepo(session)
+    rows = await repo.active_collections(_ACTIVE_COLLECTIONS_LIMIT)
     if not rows:
         return []
-    # Flashcard counts come from a separate query so the LEFT JOIN above
-    # doesn't multiply the GROUP BY rows by card count.
     col_ids = [r[0] for r in rows]
-    params = {"col_ids": col_ids}
-    fc_rows = (
-        await session.execute(
-            text(
-                """
-                SELECT cm.collection_id, COUNT(DISTINCT fc.id)
-                FROM collection_members cm
-                JOIN flashcards fc ON (
-                    (cm.member_type = 'document' AND fc.document_id = cm.member_id)
-                    OR (cm.member_type = 'note' AND fc.note_id = cm.member_id)
-                )
-                WHERE cm.collection_id IN :col_ids
-                GROUP BY cm.collection_id
-                """
-            ).bindparams(bindparam("col_ids", expanding=True)),
-            params,
-        )
-    ).all()
-    fc_by_col = dict(fc_rows)
-    due_rows = (
-        await session.execute(
-            text(
-                """
-                SELECT cm.collection_id, COUNT(DISTINCT fc.id)
-                FROM collection_members cm
-                JOIN flashcards fc ON cm.member_type = 'document'
-                                   AND fc.document_id = cm.member_id
-                WHERE cm.collection_id IN :col_ids
-                  AND fc.due_date IS NOT NULL
-                  AND fc.due_date <= datetime('now')
-                GROUP BY cm.collection_id
-                """
-            ).bindparams(bindparam("col_ids", expanding=True)),
-            params,
-        )
-    ).all()
-    due_by_col = {cid: int(count) for cid, count in due_rows}
+    fc_by_col = await repo.collection_card_counts(col_ids)
+    due_by_col = await repo.collection_due_counts(col_ids)
     return [
         ActiveCollection(
             id=r[0],
@@ -232,7 +149,7 @@ async def _fetch_active_collections(session: AsyncSession) -> list[ActiveCollect
             color=r[2],
             document_count=int(r[3] or 0),
             note_count=int(r[4] or 0),
-            flashcard_count=int(fc_by_col.get(r[0], 0)),
+            flashcard_count=fc_by_col.get(r[0], 0),
             due_card_count=due_by_col.get(r[0], 0),
         )
         for r in rows
@@ -240,23 +157,7 @@ async def _fetch_active_collections(session: AsyncSession) -> list[ActiveCollect
 
 
 async def _fetch_recent_tags(session: AsyncSession) -> list[RecentTag]:
-    rows = (
-        await session.execute(
-            text(
-                """
-                SELECT t.id, t.display_name,
-                       (SELECT COUNT(DISTINCT document_id)
-                        FROM document_tag_index WHERE tag_full = t.id) AS doc_count,
-                       (SELECT COUNT(DISTINCT note_id)
-                        FROM note_tag_index WHERE tag_full = t.id) AS note_count
-                FROM canonical_tags t
-                ORDER BY t.usage_count DESC
-                LIMIT :limit
-                """
-            ),
-            {"limit": _RECENT_TAGS_LIMIT},
-        )
-    ).all()
+    rows = await HomeRepo(session).recent_tags(_RECENT_TAGS_LIMIT)
     return [
         RecentTag(
             id=r[0],
@@ -278,36 +179,11 @@ async def _pick_today_action(
     due cards are the recommender's signal there, and re-emitting them here
     would resurrect a dismissed recommendation.
     """
+    repo = HomeRepo(session)
     # 1. Due flashcards beat everything -- spaced repetition is time-sensitive.
-    due_count = 0
-    if include_due_cards:
-        due_row = (
-            await session.execute(
-                text(
-                    "SELECT COUNT(*) FROM flashcards "
-                    "WHERE due_date IS NOT NULL AND due_date <= datetime('now')"
-                )
-            )
-        ).first()
-        due_count = int(due_row[0]) if due_row else 0
+    due_count = await repo.due_card_count() if include_due_cards else 0
     if due_count > 0:
-        top_col = (
-            await session.execute(
-                text(
-                    """
-                    SELECT c.id, c.name, c.color, COUNT(DISTINCT fc.id) AS n
-                    FROM collections c
-                    JOIN collection_members cm ON cm.collection_id = c.id
-                                              AND cm.member_type = 'document'
-                    JOIN flashcards fc ON fc.document_id = cm.member_id
-                    WHERE fc.due_date IS NOT NULL AND fc.due_date <= datetime('now')
-                    GROUP BY c.id, c.name, c.color
-                    ORDER BY n DESC
-                    LIMIT 1
-                    """
-                )
-            )
-        ).first()
+        top_col = await repo.collection_with_most_due()
         return TodayAction(
             kind="review_cards",
             target_id=None,
@@ -322,20 +198,7 @@ async def _pick_today_action(
     for item in recent_items:
         if item.member_type != "document":
             continue
-        prog_row = (
-            await session.execute(
-                text(
-                    "SELECT "
-                    " (SELECT COUNT(*) FROM sections WHERE document_id = :d) AS total, "
-                    " (SELECT COUNT(*) FROM reading_progress WHERE document_id = :d) AS read"
-                ),
-                {"d": item.member_id},
-            )
-        ).first()
-        if prog_row is None:
-            continue
-        total = int(prog_row[0] or 0)
-        read = int(prog_row[1] or 0)
+        total, read = await repo.reading_progress(item.member_id)
         if total == 0 or read < total:
             return TodayAction(
                 kind="continue_reading",
@@ -362,23 +225,7 @@ async def _fetch_continue_reading(session: AsyncSession) -> list[ContinueReading
     (they've actually started), read_count < section_count (not finished).
     Ranks by content_activity recency so warm context wins over stale.
     """
-    rows = (
-        await session.execute(
-            text(
-                """
-                SELECT
-                  d.id, d.title, ca.last_meaningful_at, d.word_count,
-                  (SELECT COUNT(*) FROM sections WHERE document_id = d.id) AS total,
-                  (SELECT COUNT(*) FROM reading_progress WHERE document_id = d.id) AS read
-                FROM content_activity ca
-                JOIN documents d ON d.id = ca.member_id
-                WHERE ca.member_type = 'document'
-                ORDER BY ca.last_meaningful_at DESC
-                LIMIT 30
-                """
-            )
-        )
-    ).all()
+    rows = await HomeRepo(session).recently_active_documents(30)
     out: list[ContinueReadingItem] = []
     for row in rows:
         total = int(row[4] or 0)
@@ -408,21 +255,7 @@ async def _fetch_continue_notes(session: AsyncSession) -> list[ContinueNoteItem]
     debounces note edits, so its row is the last *meaningful* edit where
     updated_at moves on every autosave.
     """
-    rows = (
-        await session.execute(
-            text(
-                """
-                SELECT n.id, n.title, ca.last_meaningful_at
-                FROM content_activity ca
-                JOIN notes n ON n.id = ca.member_id
-                WHERE ca.member_type = 'note'
-                  AND n.archived = 0
-                ORDER BY ca.last_meaningful_at DESC
-                LIMIT :limit
-                """
-            ).bindparams(limit=_CONTINUE_NOTES_LIMIT)
-        )
-    ).all()
+    rows = await HomeRepo(session).recently_active_notes(_CONTINUE_NOTES_LIMIT)
     return [
         ContinueNoteItem(
             note_id=row[0],
@@ -441,21 +274,7 @@ async def _fetch_continue_study(session: AsyncSession) -> ContinueStudyItem | No
     in everything but bookkeeping and is not offered, and neither is one older
     than the decay window.
     """
-    row = (
-        await session.execute(
-            text(
-                """
-                SELECT id, mode, planned_card_ids, cards_reviewed, started_at
-                FROM study_sessions
-                WHERE ended_at IS NULL
-                  AND started_at >= datetime('now', :max_age)
-                ORDER BY started_at DESC
-                LIMIT 1
-                """
-            ),
-            {"max_age": f"-{_CONTINUE_STUDY_MAX_DAYS} days"},
-        )
-    ).first()
+    row = await HomeRepo(session).latest_unended_session(_CONTINUE_STUDY_MAX_DAYS)
     if row is None:
         return None
 
@@ -480,47 +299,8 @@ async def _fetch_continue_study(session: AsyncSession) -> ContinueStudyItem | No
 
 
 async def _fetch_fading_items(session: AsyncSession) -> list[FadingItem]:
-    """Content touched 7-21 days ago and not since.
-
-    Uses content_activity directly (its row IS the most-recent touch by
-    construction). julianday math keeps the SQL portable across SQLite
-    builds; we cast back to whole days for the response.
-    """
-    rows = (
-        await session.execute(
-            text(
-                """
-                SELECT 'document' AS t, ca.member_id, d.title AS title,
-                       ca.last_meaningful_at,
-                       CAST(julianday('now') - julianday(ca.last_meaningful_at)
-                            AS INTEGER) AS days_since
-                FROM content_activity ca
-                JOIN documents d ON d.id = ca.member_id
-                WHERE ca.member_type = 'document'
-                  AND ca.last_meaningful_at <= datetime('now', :min_days)
-                  AND ca.last_meaningful_at >= datetime('now', :max_days)
-                UNION ALL
-                SELECT 'note' AS t, ca.member_id,
-                       COALESCE(NULLIF(n.title, ''), substr(n.content, 1, 60)) AS title,
-                       ca.last_meaningful_at,
-                       CAST(julianday('now') - julianday(ca.last_meaningful_at)
-                            AS INTEGER) AS days_since
-                FROM content_activity ca
-                JOIN notes n ON n.id = ca.member_id
-                WHERE ca.member_type = 'note' AND n.archived = 0
-                  AND ca.last_meaningful_at <= datetime('now', :min_days)
-                  AND ca.last_meaningful_at >= datetime('now', :max_days)
-                ORDER BY last_meaningful_at ASC
-                LIMIT :limit
-                """
-            ),
-            {
-                "min_days": f"-{_FADING_MIN_DAYS} days",
-                "max_days": f"-{_FADING_MAX_DAYS} days",
-                "limit": _FADING_LIMIT,
-            },
-        )
-    ).all()
+    """Content touched 7-21 days ago and not since."""
+    rows = await HomeRepo(session).fading_items(_FADING_MIN_DAYS, _FADING_MAX_DAYS, _FADING_LIMIT)
     return [
         FadingItem(
             member_type=row[0],
@@ -534,62 +314,12 @@ async def _fetch_fading_items(session: AsyncSession) -> list[FadingItem]:
 
 
 async def _fetch_weekly_stats(session: AsyncSession) -> WeeklyStats:
-    """Aggregate the last 7 days into a single one-line summary.
-
-    Each measure is a separate query rather than one giant subquery
-    block; SQLite optimizes them independently and the code stays legible.
-    """
-    minutes_row = (
-        await session.execute(
-            text(
-                """
-                SELECT COALESCE(
-                  SUM(
-                    (julianday(ended_at) - julianday(started_at)) * 24 * 60
-                  ), 0
-                )
-                FROM study_sessions
-                WHERE ended_at IS NOT NULL
-                  AND started_at >= datetime('now', '-7 days')
-                """
-            )
-        )
-    ).first()
-    cards_row = (
-        await session.execute(
-            text(
-                "SELECT COUNT(*) FROM review_events WHERE reviewed_at >= datetime('now', '-7 days')"
-            )
-        )
-    ).first()
-    notes_row = (
-        await session.execute(
-            text(
-                "SELECT COUNT(*) FROM notes "
-                "WHERE archived = 0 AND created_at >= datetime('now', '-7 days')"
-            )
-        )
-    ).first()
-    # Documents actually read, not documents the library acquired.
-    # `content_activity` is deliberately bumped by `record_document_added` so the
-    # hub's recency feeds are not empty on a fresh library, which makes it the
-    # wrong source for a weekly engagement figure: on one library it reported 45
-    # of 48 documents "touched", 28 of them on the day of a bulk ingest.
-    # `reading_progress` is only written when a section has actually held the
-    # screen, so it is the one source here that cannot be inflated by ingesting.
-    docs_row = (
-        await session.execute(
-            text(
-                "SELECT COUNT(DISTINCT document_id) FROM reading_progress "
-                "WHERE last_seen_at >= datetime('now', '-7 days')"
-            )
-        )
-    ).first()
-    seconds_by_activity = await TimeOnTaskService(session).seconds_by_activity(days=7)
+    """The last 7 days in one line."""
+    repo = HomeRepo(session)
     return WeeklyStats(
-        minutes_studied=round(float(minutes_row[0] or 0)) if minutes_row else 0,
-        cards_reviewed=int(cards_row[0] or 0) if cards_row else 0,
-        notes_written=int(notes_row[0] or 0) if notes_row else 0,
-        docs_touched=int(docs_row[0] or 0) if docs_row else 0,
-        seconds_by_activity=seconds_by_activity,
+        minutes_studied=round(await repo.week_study_minutes()),
+        cards_reviewed=await repo.week_cards_reviewed(),
+        notes_written=await repo.week_notes_written(),
+        docs_touched=await repo.week_documents_read(),
+        seconds_by_activity=await TimeOnTaskService(session).seconds_by_activity(days=7),
     )

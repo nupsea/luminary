@@ -16,13 +16,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import delete, select
-from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import get_db, get_session_factory
-from app.models import CanonicalTagModel, NoteModel, NoteTagIndexModel
+from app.models import CanonicalTagModel
 from app.repos._helpers import get_or_404
 from app.repos.tag_repo import TagRepo, get_tag_repo
 from app.routers.notes import _sync_tag_index
@@ -229,17 +227,7 @@ async def get_tag_tree(
     if scope == "all":
         scoped_count_by_id: dict[str, int] = dict(global_count_by_id)
     else:
-        table = "note_tag_index" if scope == "note" else "document_tag_index"
-        member_col = "note_id" if scope == "note" else "document_id"
-        rows = (
-            await session.execute(
-                sa_text(
-                    f"SELECT tag_full, COUNT(DISTINCT {member_col}) "  # noqa: S608
-                    f"FROM {table} GROUP BY tag_full"
-                )
-            )
-        ).all()
-        scoped_count_by_id = {r[0]: int(r[1]) for r in rows}
+        scoped_count_by_id = await repo.scoped_counts("note" if scope == "note" else "document")
 
     children_by_parent: dict[str, list[str]] = {}
     for t in all_tags:
@@ -305,23 +293,7 @@ async def list_tags(
         tags = await repo.list_by_count()
         out = [_to_response(t) for t in tags]
     elif scope in ("note", "document"):
-        table = "note_tag_index" if scope == "note" else "document_tag_index"
-        member_col = "note_id" if scope == "note" else "document_id"
-        # Aggregate the scoped count in the same pass; order by it so a tag
-        # mostly used on notes doesn't outrank doc-heavy tags when scope=document.
-        rows = (
-            await session.execute(
-                sa_text(
-                    "SELECT t.id, t.display_name, t.parent_tag, t.usage_count, "  # noqa: S608
-                    "t.created_at, "
-                    f"(SELECT COUNT(DISTINCT idx.{member_col}) FROM {table} idx "
-                    "  WHERE idx.tag_full = t.id) AS scoped_count "
-                    "FROM canonical_tags t "
-                    f"WHERE EXISTS (SELECT 1 FROM {table} idx2 WHERE idx2.tag_full = t.id) "
-                    "ORDER BY scoped_count DESC, t.usage_count DESC"
-                )
-            )
-        ).all()
+        rows = await repo.scoped_tags(scope)
         out = [
             _to_response(
                 CanonicalTagModel(
@@ -521,14 +493,10 @@ async def accept_normalization_suggestion(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # Validate both tags still exist; these two checks share the session with the
-    # suggestion status update below so all three land in one transaction.
-    source_tag = (
-        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
-    ).scalar_one_or_none()
-    target_tag = (
-        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == target_id))
-    ).scalar_one_or_none()
+    # One session with the suggestion's status update, so all three land in one transaction.
+    tags = TagRepo(session)
+    source_tag = await tags.find_by_id(source_id)
+    target_tag = await tags.find_by_id(target_id)
     if source_tag is None or target_tag is None:
         # Tag was deleted -- mark suggestion rejected and return
         suggestion.status = "rejected"
@@ -574,6 +542,16 @@ async def reject_normalization_suggestion(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+def _normalized_tags(tags: list[str]) -> list[str]:
+    """Each tag normalized, empties dropped, duplicates collapsed in first-seen order."""
+    out: list[str] = []
+    for t in tags:
+        nt = normalize_tag_slug(t)
+        if nt and nt not in out:
+            out.append(nt)
+    return out
+
+
 @router.post("/migrate-naming")
 async def migrate_tag_naming(
     session: AsyncSession = Depends(get_db),
@@ -586,152 +564,40 @@ async def migrate_tag_naming(
     Merges duplicates that collapse to the same normalized form (keeps higher usage_count).
     """
 
-    # Bespoke multi-table normalization migration: rename/merge canonical_tags,
-    # note_tag_index, and NoteModel.tags atomically. Too many conditional writes
-    # (INSERT OR IGNORE, cascading deletes, JSON tag array updates) to express
-    # via existing repo methods.
-    all_tags_result = await session.execute(select(CanonicalTagModel))
-    all_tags = list(all_tags_result.scalars().all())
-
-    # Group by normalized id to detect merges
+    repo = TagRepo(session)
     groups: dict[str, list[CanonicalTagModel]] = {}
-    for tag in all_tags:
+    for tag in await repo.all_in_storage_order():
         normalized = normalize_tag_slug(tag.id)
-        if not normalized:
-            continue
-        groups.setdefault(normalized, []).append(tag)
+        if normalized:
+            groups.setdefault(normalized, []).append(tag)
 
     merged_count = 0
     renamed_count = 0
 
     for normalized_id, tag_group in groups.items():
-        if len(tag_group) == 1:
-            tag = tag_group[0]
-            if tag.id != normalized_id:
-                # Rename: update canonical_tags id, note_tag_index, and NoteModel.tags
-                old_id = tag.id
-                # Update all notes with this tag
-                note_ids_result = await session.execute(
-                    select(NoteTagIndexModel.note_id)
-                    .where(NoteTagIndexModel.tag_full == old_id)
-                    .distinct()
-                )
-                note_ids = [row[0] for row in note_ids_result.all()]
+        if len(tag_group) == 1 and tag_group[0].id == normalized_id:
+            continue
+        # A merge keeps one note per tagged note; a rename keeps the tag's own count.
+        tag_group.sort(key=lambda t: t.usage_count, reverse=True)
+        note_ids: list[str] = []
+        for tag in tag_group:
+            note_ids += await repo.note_ids_with_tag(tag.id)
+        for tag in tag_group:
+            await repo.drop_with_note_index(tag.id)
+        merged = len(tag_group) > 1
+        usage = len(set(note_ids)) if merged else tag_group[0].usage_count
+        await repo.insert_if_absent(normalized_id, usage)
 
-                # Delete old index rows
-                await session.execute(
-                    delete(NoteTagIndexModel).where(NoteTagIndexModel.tag_full == old_id)
-                )
-                # Delete old canonical tag
-                await session.execute(
-                    delete(CanonicalTagModel).where(CanonicalTagModel.id == old_id)
-                )
-                # Recreate canonical tag with normalized id
-                segments = normalized_id.split("/")
-                new_display = segments[-1]
-                new_parent = "/".join(segments[:-1]) if len(segments) > 1 else None
+        for note in await repo.load_notes(sorted(set(note_ids))):
+            note.tags = _normalized_tags(note.tags or [])
+            flag_modified(note, "tags")
+            session.add(note)
+            await _sync_tag_index(note.id, note.tags, session)
 
-                await session.execute(
-                    sa_text(
-                        "INSERT OR IGNORE INTO canonical_tags"
-                        " (id, display_name, parent_tag, usage_count, created_at)"
-                        " VALUES (:id, :display_name, :parent_tag, :usage_count, datetime('now'))"
-                    ),
-                    {
-                        "id": normalized_id,
-                        "display_name": new_display,
-                        "parent_tag": new_parent,
-                        "usage_count": tag.usage_count,
-                    },
-                )
-
-                # Update NoteModel.tags and re-sync index
-                if note_ids:
-                    notes_result = await session.execute(
-                        select(NoteModel).where(NoteModel.id.in_(note_ids))
-                    )
-                    for note in notes_result.scalars().all():
-                        current_tags: list[str] = note.tags or []
-                        new_tags = [normalize_tag_slug(t) for t in current_tags]
-                        # Deduplicate preserving order
-                        seen: set[str] = set()
-                        deduped: list[str] = []
-                        for t in new_tags:
-                            if t and t not in seen:
-                                seen.add(t)
-                                deduped.append(t)
-                        note.tags = deduped
-
-                        flag_modified(note, "tags")
-                        session.add(note)
-                        await _sync_tag_index(note.id, deduped, session)
-
-                renamed_count += 1
-        else:
-            # Multiple tags collapse to same normalized form -- merge
-            # Sort by usage_count desc so merged count reflects the best variant
-            tag_group.sort(key=lambda t: t.usage_count, reverse=True)
-
-            # Collect all note_ids from all variants
-            all_note_ids: set[str] = set()
-            for tag in tag_group:
-                note_ids_result = await session.execute(
-                    select(NoteTagIndexModel.note_id)
-                    .where(NoteTagIndexModel.tag_full == tag.id)
-                    .distinct()
-                )
-                for row in note_ids_result.all():
-                    all_note_ids.add(row[0])
-
-            # Delete all old index rows and canonical tags for all variants
-            for tag in tag_group:
-                await session.execute(
-                    delete(NoteTagIndexModel).where(NoteTagIndexModel.tag_full == tag.id)
-                )
-                await session.execute(
-                    delete(CanonicalTagModel).where(CanonicalTagModel.id == tag.id)
-                )
-
-            # Create the normalized canonical tag
-            segments = normalized_id.split("/")
-            new_display = segments[-1]
-            new_parent = "/".join(segments[:-1]) if len(segments) > 1 else None
-
-            await session.execute(
-                sa_text(
-                    "INSERT OR IGNORE INTO canonical_tags"
-                    " (id, display_name, parent_tag, usage_count, created_at)"
-                    " VALUES (:id, :display_name, :parent_tag, :usage_count, datetime('now'))"
-                ),
-                {
-                    "id": normalized_id,
-                    "display_name": new_display,
-                    "parent_tag": new_parent,
-                    "usage_count": len(all_note_ids),
-                },
-            )
-
-            # Update all notes to use normalized tag
-            if all_note_ids:
-                notes_result = await session.execute(
-                    select(NoteModel).where(NoteModel.id.in_(list(all_note_ids)))
-                )
-                for note in notes_result.scalars().all():
-                    current_tags: list[str] = note.tags or []
-                    new_tags_list: list[str] = []
-                    seen_tags: set[str] = set()
-                    for t in current_tags:
-                        nt = normalize_tag_slug(t)
-                        if nt and nt not in seen_tags:
-                            seen_tags.add(nt)
-                            new_tags_list.append(nt)
-                    note.tags = new_tags_list
-
-                    flag_modified(note, "tags")
-                    session.add(note)
-                    await _sync_tag_index(note.id, new_tags_list, session)
-
+        if merged:
             merged_count += 1
+        else:
+            renamed_count += 1
 
     await session.commit()
     invalidate_tag_graph_cache()
@@ -773,22 +639,8 @@ async def get_tag_cross_content_counts(
     user has narrowed one surface and we want to surface the cross-content
     overflow without making them hop back to ⌘K (plan 2E.4).
     """
-    row = (
-        await session.execute(
-            sa_text(
-                "SELECT "
-                "  (SELECT COUNT(DISTINCT document_id) FROM document_tag_index "
-                "   WHERE tag_full = :tag) AS doc_count, "
-                "  (SELECT COUNT(DISTINCT note_id) FROM note_tag_index "
-                "   WHERE tag_full = :tag) AS note_count"
-            ),
-            {"tag": tag_id},
-        )
-    ).first()
-    return TagCrossContentCounts(
-        document_count=int(row[0] or 0) if row else 0,
-        note_count=int(row[1] or 0) if row else 0,
-    )
+    document_count, note_count = await TagRepo(session).cross_content_counts(tag_id)
+    return TagCrossContentCounts(document_count=document_count, note_count=note_count)
 
 
 @router.put("/{tag_id:path}", response_model=TagResponse)

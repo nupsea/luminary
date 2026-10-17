@@ -89,6 +89,23 @@ class SummaryRepo:
         )
         return list(result.scalars())
 
+    async def latest_by_mode(self, document_id: str) -> dict[str, SummaryModel]:
+        result = await self.session.execute(
+            select(SummaryModel)
+            .where(SummaryModel.document_id == document_id)
+            .order_by(SummaryModel.created_at.desc())
+        )
+        latest: dict[str, SummaryModel] = {}
+        for row in result.scalars():
+            latest.setdefault(row.mode, row)
+        return latest
+
+    async def modes(self, document_id: str) -> set[str]:
+        result = await self.session.execute(
+            select(SummaryModel.mode).where(SummaryModel.document_id == document_id)
+        )
+        return set(result.scalars())
+
     async def latest(self, document_id: str, mode: str) -> SummaryModel | None:
         result = await self.session.execute(
             select(SummaryModel)

@@ -35,6 +35,8 @@ def _mock_session(fetchall_sequence: list[list]) -> AsyncMock:
     for rows in fetchall_sequence:
         r = MagicMock()
         r.fetchall.return_value = rows
+        r.all.return_value = rows
+        r.scalars.return_value = [row[0] for row in rows]
         results.append(r)
     if len(results) == 1:
         mock_session.execute = AsyncMock(return_value=results[0])

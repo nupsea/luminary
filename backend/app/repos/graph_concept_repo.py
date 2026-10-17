@@ -68,6 +68,12 @@ class GraphConceptRepo:
         )
         return bool(result.rowcount)
 
+    async def labels(self, concept_ids: list[str]) -> dict[str, str]:
+        result = await self.session.execute(
+            select(ConceptModel.id, ConceptModel.label).where(ConceptModel.id.in_(concept_ids))
+        )
+        return dict(result.tuples().all())
+
     async def neighbors(self, concept_id: str, limit: int = 10) -> list[str]:
         """Ids of concepts related to `concept_id`, in either direction."""
         edge = GraphConceptEdgeModel

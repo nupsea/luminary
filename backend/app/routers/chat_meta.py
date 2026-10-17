@@ -5,10 +5,11 @@ import re
 
 from fastapi import APIRouter, Path, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import func, select
 
 from app.database import get_session_factory
-from app.models import ChatSuggestionHistoryModel, DocumentModel, SectionModel
+from app.models import DocumentModel
+from app.repos.document_repo import DocumentRepo
+from app.repos.suggestion_repo import SuggestionRepo
 from app.services.graph import get_graph_service
 from app.services.llm import LLMUnavailableError
 
@@ -176,14 +177,8 @@ async def _library_has_ready_documents() -> bool:
     populated corpus with no cross-document entity overlap must NOT be told to
     "upload a document to get started".
     """
-    factory = get_session_factory()
-    async with factory() as session:
-        count = await session.scalar(
-            select(func.count())
-            .select_from(DocumentModel)
-            .where(DocumentModel.stage.in_(("complete", "enriching")))
-        )
-        return bool(count)
+    async with get_session_factory()() as session:
+        return await DocumentRepo(session).has_ready_documents()
 
 
 def _template_to_items(suggestions: list[str]) -> list[SuggestionItem]:
@@ -261,23 +256,8 @@ async def get_suggestions_cached(
     This lets the frontend show suggestions immediately on tab switch,
     while a background refresh via GET /chat/suggestions can update them.
     """
-    factory = get_session_factory()
-    async with factory() as session:
-        query = (
-            select(
-                ChatSuggestionHistoryModel.id,
-                ChatSuggestionHistoryModel.suggestion_text,
-            )
-            .where(
-                ChatSuggestionHistoryModel.was_asked.is_(False),
-                ChatSuggestionHistoryModel.document_id == document_id,
-            )
-            .order_by(ChatSuggestionHistoryModel.shown_at.desc())
-            .limit(4)
-        )
-        # Inline query for a custom 2-column projection not exposed by ChatRepo.
-        result = await session.execute(query)
-        rows = result.all()
+    async with get_session_factory()() as session:
+        rows = await SuggestionRepo(session).unasked(document_id, limit=4)
 
     if not rows:
         return SuggestionResponse(suggestions=[])
@@ -342,11 +322,8 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
     """Handle single-document suggestions."""
     session_factory = get_session_factory()
     async with session_factory() as session:
-        # Existence check before building suggestion context; uses the same session
-        # as the section headings query below to avoid opening a second connection.
-        doc = (
-            await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        ).scalar_one_or_none()
+        repo = DocumentRepo(session)
+        doc = await repo.get(document_id)
 
         # Stale/missing doc id (e.g. the selected document was deleted): no pills
         # rather than onboarding chips that submit their own text as a dead question.
@@ -355,15 +332,7 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
 
         content_type = doc.content_type or "unknown"
 
-        # Heading preview for suggestion context; must share session with doc lookup above
-        # so both reads are in the same transaction.
-        sections_result = await session.execute(
-            select(SectionModel.heading)
-            .where(SectionModel.document_id == document_id)
-            .order_by(SectionModel.section_order)
-            .limit(5)
-        )
-        headings = [r[0] for r in sections_result.all() if r[0]]
+        headings = await repo.first_headings(document_id, limit=5)
 
     entities = await get_graph_service().get_entities_by_type_for_document(document_id)
 

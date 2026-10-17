@@ -163,18 +163,11 @@ async def ask_grounded(
         query=None if req.concept_id else req.question,
     )
     context = await okf.build_concept_context(session, concept_ids)
-    from sqlalchemy import select  # noqa: PLC0415
-
-    from app.models import ConceptModel  # noqa: PLC0415
+    from app.repos.graph_concept_repo import GraphConceptRepo  # noqa: PLC0415
 
     concepts: list[GroundedConcept] = []
     if concept_ids:
-        rows = (
-            await session.execute(
-                select(ConceptModel.id, ConceptModel.label).where(ConceptModel.id.in_(concept_ids))
-            )
-        ).all()
-        label_of = dict(rows)
+        label_of = await GraphConceptRepo(session).labels(concept_ids)
         concepts = [
             GroundedConcept(id=cid, label=label_of[cid]) for cid in concept_ids if cid in label_of
         ]

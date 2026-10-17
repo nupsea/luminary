@@ -29,6 +29,7 @@ from app.models import ChunkModel, DocumentModel, EnrichmentJobModel, ImageModel
 from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
+from app.storage import library_root
 
 logger = logging.getLogger(__name__)
 
@@ -691,7 +692,7 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
     """
 
     settings = _config_module.get_settings()
-    images_dir = Path(settings.DATA_DIR).expanduser() / "images"
+    images_dir = library_root(settings) / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
     async with _database_module.get_session_factory()() as session:
@@ -842,7 +843,7 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
                 )
 
         if retired_ids:
-            data_dir = Path(settings.DATA_DIR).expanduser()
+            data_dir = library_root(settings)
             for _image_id, rel_path in stale:
                 try:
                     (data_dir / rel_path).unlink(missing_ok=True)

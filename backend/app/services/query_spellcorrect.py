@@ -18,9 +18,8 @@ import re
 import sqlite3
 import threading
 import time
-from pathlib import Path
 
-from app.config import get_settings
+from app.storage import library_root
 
 _WORD = re.compile(r"[a-z]{2,}")
 _TOKEN = re.compile(r"[A-Za-z]{2,}")
@@ -34,7 +33,7 @@ _lock = threading.Lock()
 
 
 def _build_vocab() -> dict[str, int]:
-    db = Path(get_settings().DATA_DIR).expanduser() / "luminary.db"
+    db = library_root() / "luminary.db"
     vocab: dict[str, int] = {}
     try:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)

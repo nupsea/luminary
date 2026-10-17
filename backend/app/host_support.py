@@ -169,9 +169,9 @@ _offload: Offload | None | object = _UNREAD
 
 
 def _offload_path() -> Path:
-    from app.config import get_settings  # noqa: PLC0415
+    from app.storage import machine_root  # noqa: PLC0415
 
-    return Path(get_settings().DATA_DIR) / _OFFLOAD_FILE
+    return machine_root() / _OFFLOAD_FILE
 
 
 def measured_offload() -> Offload | None:

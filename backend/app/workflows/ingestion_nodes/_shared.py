@@ -241,7 +241,7 @@ async def detect_technical_content(raw_text: str) -> bool | None:
     )
     try:
         with awaited():
-            raw = await get_llm_service().generate(prompt, background=True)
+            raw = await get_llm_service().generate(prompt, background=True, temperature=0)
     except Exception as exc:
         logger.warning("domain detection failed (non-fatal): %s", exc)
         return None
@@ -257,24 +257,40 @@ async def detect_technical_content(raw_text: str) -> bool | None:
 detect_technical_transcript = detect_technical_content
 
 
+# Mid-body: a Gutenberg novel still opens on a preface after its licence is stripped.
+_REGISTER_WINDOWS = (0.30, 0.50, 0.70)
+_REGISTER_WINDOW_CHARS = 2000
+
+
 async def detect_register(raw_text: str) -> str | None:
     """Whether the text tells a story or explains a subject. None when undecided.
 
     Read from the text: a story and an essay share their vocabulary, and what
     differs is what the sentences are doing, so no word list can carry it.
 
-    **Sampled from the body, where the domain probe reads the opening.** A work
-    states its subject early but opens with front matter -- after the licence is
-    stripped a Gutenberg novel still begins with a preface, which is expository
-    however the book reads. Body sampling scored 18/19 against 15/19, recovering
-    The Odyssey, Sherlock Holmes, The Time Machine and The Gita.
+    A majority of separately judged body windows, at temperature 0 (#286). One
+    sample decided the whole book, and a reflective passage in "The Fall of the
+    House of Usher" read it as expository on 3 of 4 runs. Stops once two windows
+    agree, so a consistent book costs two calls and a mixed one three.
     """
-    from app.services.content_classifier import sample_body  # noqa: PLC0415
+    from app.services.content_classifier import body_windows  # noqa: PLC0415
+
+    windows = [w for w in body_windows(raw_text, _REGISTER_WINDOWS, _REGISTER_WINDOW_CHARS) if w]
+    need = len(windows) // 2 + 1
+    votes: list[str | None] = []
+    for snippet in windows:
+        votes.append(await _judge_register(snippet))
+        for register in ("narrative", "expository"):
+            if votes.count(register) >= need:
+                logger.info("register %s by votes %s", register, votes)
+                return register
+    logger.info("register undecided by votes %s", votes)
+    return None
+
+
+async def _judge_register(snippet: str) -> str | None:
     from app.services.llm import get_llm_service  # noqa: PLC0415
 
-    snippet = sample_body(raw_text, window=2000).strip()
-    if not snippet:
-        return None
     prompt = (
         "Does this text mainly tell a story, or mainly explain a subject?\n\n"
         f"Excerpt:\n{snippet}\n\n"
@@ -282,7 +298,7 @@ async def detect_register(raw_text: str) -> str | None:
     )
     try:
         with awaited():
-            raw = await get_llm_service().generate(prompt, background=True)
+            raw = await get_llm_service().generate(prompt, background=True, temperature=0)
     except Exception as exc:
         logger.warning("register detection failed (non-fatal): %s", exc)
         return None

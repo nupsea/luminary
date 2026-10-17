@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.services import connectivity
 from app.services import settings_service as ss
 from app.services.llm import LLMService
 
@@ -32,7 +33,9 @@ USER_PROMPT = "[S1] Raft elects a leader per term.\n\nQuestion: How does leader 
 
 
 @pytest.fixture
-def hybrid_with_key():
+def hybrid_with_key(monkeypatch):
+    # The offline fallback checks the provider's host; on an offline machine hybrid routes local.
+    monkeypatch.setattr(connectivity, "provider_reachable", lambda model: True)
     original = dict(ss._cache)
     ss._cache.update(
         {
