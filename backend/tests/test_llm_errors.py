@@ -66,3 +66,24 @@ def test_a_cloud_outage_is_not_blamed_on_the_local_server(monkeypatch):
         request=httpx.Request("POST", "https://api.openai.com"),
     )
     assert llm_errors.describe(exc)[0] == "provider_down"
+
+
+def _gemini_not_found() -> Exception:
+    return litellm.NotFoundError(
+        message=(
+            'GeminiException - {\n  "error": {\n    "code": 404,\n    "message": '
+            '"models/gemini-1.5-flash is not found for API version v1beta",\n'
+            '    "status": "NOT_FOUND"\n  }\n}\n'
+        ),
+        llm_provider="gemini",
+        model="gemini/gemini-1.5-flash",
+    )
+
+
+def test_a_cloud_model_the_provider_does_not_offer_carries_its_reason(monkeypatch):
+    """The setup screen showed only `litellm.NotFoundError: GeminiException - {`."""
+    monkeypatch.setattr(llm_errors, "_routes_locally", lambda: False)
+    reason, text = llm_errors.describe(_gemini_not_found())
+    assert reason == "cloud_model_missing"
+    assert "gemini-1.5-flash is not found" in text
+    assert "Settings" in text

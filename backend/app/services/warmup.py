@@ -192,7 +192,13 @@ async def _warm_llm() -> None:
                 # normal state of a fresh install, and the fix is an install
                 # button. Ollama reports it inside a connection error, so the
                 # distinction has to be read out of the message.
-                if _model_not_installed(exc):
+                if fg and not fg.startswith(("ollama/", "ollama_chat/")):
+                    # Nothing to install for a cloud model, and its error's first line is
+                    # "...Exception - {" with the provider's reason after it.
+                    from app.services.llm_errors import describe  # noqa: PLC0415
+
+                    status.set_state("chat_model", "failed", describe(exc)[1])
+                elif _model_not_installed(exc):
                     status.set_state("chat_model", "missing", model or "")
                 else:
                     status.set_state("chat_model", "failed", _friendly(exc, engine=True))

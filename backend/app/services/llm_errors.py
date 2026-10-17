@@ -10,6 +10,7 @@ from app.exceptions import DependencyUnavailable
 from app.paths import is_packaged
 from app.services.llm import (
     LLMAuthenticationError,
+    LLMNotFoundError,
     LLMRateLimitError,
     LLMTimeoutError,
     missing_model_from,
@@ -17,6 +18,8 @@ from app.services.llm import (
 
 # Ollama's own reason, e.g. {"error":"llama runner process has terminated: ..."}.
 _PROVIDER_REASON = re.compile(r"\"error\"\s*:\s*\"([^\"]{3,200})\"")
+# A cloud provider's own reason, e.g. Gemini's {"error": {"message": "models/x is not found"}}.
+_CLOUD_REASON = re.compile(r"\"message\"\s*:\s*\"([^\"]{3,200})\"")
 
 
 def _chain(exc: BaseException) -> list[BaseException]:
@@ -72,6 +75,13 @@ def describe(exc: BaseException) -> tuple[str, str]:
             "model_missing",
             f"The model {_bare(missing)} is not installed on this computer. Pick an "
             "installed model, or install one in Settings > Models & components.",
+        )
+    if not local and any(isinstance(e, LLMNotFoundError) for e in chain):
+        said = match.group(1) if (match := _CLOUD_REASON.search(text)) else ""
+        return (
+            "cloud_model_missing",
+            "The cloud provider does not offer the chosen model. Pick another model in "
+            "Settings." + (f" The provider said: {said}" if said else ""),
         )
     if any(isinstance(e, LLMTimeoutError) for e in chain):
         return (

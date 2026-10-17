@@ -879,3 +879,33 @@ def test_missing_packages_without_pip_say_how_to_get_them(monkeypatch):
     assert spawned == [] and fetched == []
     assert events[-1]["state"] == "failed"
     assert "uv sync --group media" in events[-1]["detail"]
+
+
+def test_a_cloud_chat_model_failure_shows_the_provider_s_reason(monkeypatch):
+    """The first line of a LiteLLM cloud error is `...Exception - {`; the reason follows."""
+    import litellm
+
+    from app.services import llm, llm_errors, llm_routing, settings_service, warmup
+    from app.services.startup_status import get_startup_status
+
+    class _Refusing:
+        async def generate(self, *a, **k):
+            raise litellm.NotFoundError(
+                message='GeminiException - {\n "error": {"message": "models/gone is not found"}}',
+                llm_provider="gemini",
+                model="gemini/gone",
+            )
+
+    monkeypatch.setattr(llm, "get_llm_service", lambda: _Refusing())
+    monkeypatch.setattr(
+        settings_service, "get_effective_routing", lambda background=False: ("gemini/gone", None)
+    )
+    monkeypatch.setattr(llm_errors, "_routes_locally", lambda: False)
+    monkeypatch.setattr(llm_routing, "refusal", lambda *a: None)
+    monkeypatch.setattr(warmup, "_unavailable_here", lambda *a: False)
+
+    asyncio.run(warmup._warm_llm())
+
+    phase = next(p for p in get_startup_status().snapshot()["phases"] if p["key"] == "chat_model")
+    assert phase["state"] == "failed"
+    assert "models/gone is not found" in phase["detail"]
