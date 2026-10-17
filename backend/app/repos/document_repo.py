@@ -73,6 +73,21 @@ class DocumentRepo:
         )
         return list(result.scalars())
 
+    async def ids_of_types(self, content_types: Sequence[str]) -> list[str]:
+        result = await self.session.execute(
+            select(DocumentModel.id).where(DocumentModel.content_type.in_(content_types))
+        )
+        return list(result.scalars())
+
+    async def titles_and_types(self, document_ids: Sequence[str]) -> dict[str, tuple[str, str]]:
+        """{id: (title, type)}, with the defaults search has always shown."""
+        result = await self.session.execute(
+            select(DocumentModel.id, DocumentModel.title, DocumentModel.content_type).where(
+                DocumentModel.id.in_(document_ids)
+            )
+        )
+        return {i: (t or "Untitled", ct or "notes") for i, t, ct in result.all()}
+
     async def find_by_file_hash(self, file_hash: str) -> DocumentModel | None:
         result = await self.session.execute(
             select(DocumentModel).where(DocumentModel.file_hash == file_hash)
@@ -323,6 +338,18 @@ class DocumentRepo:
             )
         )
         return bool(result.scalar_one())
+
+    async def latest_enrichment_status(self, document_id: str, job_type: str) -> str | None:
+        result = await self.session.execute(
+            select(EnrichmentJobModel.status)
+            .where(
+                EnrichmentJobModel.document_id == document_id,
+                EnrichmentJobModel.job_type == job_type,
+            )
+            .order_by(EnrichmentJobModel.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def first_chapters_queued(self, since: datetime) -> bool:
         """Whether ingestion-time chapter cards queued since *since* are still unwritten."""

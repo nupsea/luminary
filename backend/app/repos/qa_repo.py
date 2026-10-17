@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
@@ -61,3 +63,35 @@ async def insert_qa_history(
         )
         await session.commit()
     return qa_id
+
+
+class QAHistoryRepo:
+    """Aggregates over answered questions, for monitoring."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def calls_since(self, since: datetime) -> int:
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(QAHistoryModel)
+            .where(QAHistoryModel.created_at >= since)
+        )
+        return result.scalar_one() or 0
+
+    async def daily_calls_since(self, since: datetime) -> dict[str, int]:
+        """{'YYYY-MM-DD': calls} for days with any, from `since` (naive UTC)."""
+        result = await self.session.execute(
+            select(func.date(QAHistoryModel.created_at).label("day"), func.count())
+            .where(QAHistoryModel.created_at >= since)
+            .group_by("day")
+        )
+        return {str(day): n for day, n in result.all()}
+
+    async def calls_by_model(self) -> list[tuple[str, int]]:
+        result = await self.session.execute(
+            select(QAHistoryModel.model_used, func.count())
+            .group_by(QAHistoryModel.model_used)
+            .order_by(func.count().desc())
+        )
+        return [(model, n) for model, n in result.all()]

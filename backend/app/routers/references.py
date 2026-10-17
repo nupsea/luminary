@@ -14,11 +14,11 @@ from datetime import UTC, datetime, timedelta
 from fastapi import Query
 from fastapi.routing import APIRouter
 from pydantic import BaseModel
-from sqlalchemy import select
 
 from app.database import get_session_factory
-from app.models import DocumentModel, EnrichmentJobModel, WebReferenceModel
+from app.models import DocumentModel, WebReferenceModel
 from app.repos._helpers import get_or_404
+from app.repos.document_repo import DocumentRepo
 from app.repos.reference_repo import ReferenceRepo
 
 logger = logging.getLogger(__name__)
@@ -122,16 +122,7 @@ async def get_web_refs_job_status(document_id: str) -> dict:
     """
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
-        result = await session.execute(
-            select(EnrichmentJobModel.status)
-            .where(
-                EnrichmentJobModel.document_id == document_id,
-                EnrichmentJobModel.job_type == "web_refs",
-            )
-            .order_by(EnrichmentJobModel.created_at.desc())
-            .limit(1)
-        )
-        status = result.scalar_one_or_none()
+        status = await DocumentRepo(session).latest_enrichment_status(document_id, "web_refs")
     return {"status": status}
 
 
