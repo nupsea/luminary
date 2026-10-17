@@ -26,6 +26,7 @@ from ebooklib import epub
 
 from app.config import get_settings
 from app.exceptions import LuminaryError
+from app.storage import library_root
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +207,7 @@ def parse_cookies_input(cookie_input: str | dict | list) -> dict[str, str]:
 
 def _cookies_file_path() -> Path:
     settings = get_settings()
-    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir = library_root(settings)
     return data_dir / "oreilly_cookies.json"
 
 

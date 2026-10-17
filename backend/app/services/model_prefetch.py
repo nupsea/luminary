@@ -30,6 +30,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.exceptions import ModelNotDownloaded
+from app.storage import machine_root
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,7 @@ def spec_for(key: str) -> ModelSpec | None:
 
 
 def models_root() -> Path:
-    return Path(get_settings().DATA_DIR).expanduser() / "models"
+    return machine_root() / "models"
 
 
 def cache_dir(spec: ModelSpec, root: Path | None = None) -> Path:

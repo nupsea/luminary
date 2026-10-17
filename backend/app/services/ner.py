@@ -33,6 +33,7 @@ from pathlib import Path
 from app.config import get_settings
 from app.services import model_prefetch
 from app.services.model_loading import MODEL_LOAD_LOCK, offline_model_load
+from app.storage import machine_root
 from app.types import is_technical_content
 
 logger = logging.getLogger(__name__)
@@ -395,7 +396,7 @@ def get_entity_extractor() -> "EntityExtractor":
     global _extractor
     if _extractor is None:
         settings = get_settings()
-        _extractor = EntityExtractor(settings.DATA_DIR)
+        _extractor = EntityExtractor(str(machine_root(settings)))
     return _extractor
 
 

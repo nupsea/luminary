@@ -129,6 +129,7 @@ from app.services.transcript_vocabulary import vocabulary_from_metadata
 from app.services.type_detection import detect_content_type
 from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
+from app.storage import library_root
 from app.types import DocumentProfile
 from app.workflows import ingestion as _ingestion_module  # indirect: _run_pregenerate is patched
 from app.workflows.ingestion import (
@@ -326,7 +327,7 @@ async def parse_document(
 ):
     doc_id = str(uuid.uuid4())
     ext = Path(file.filename or "upload.txt").suffix.lstrip(".")
-    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir = library_root(settings)
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     if ext and ext not in _ALLOWED_EXTENSIONS:
@@ -574,7 +575,7 @@ async def ingest_document(
 
         # New file — write to disk and create a fresh document record.
         doc_id = str(uuid.uuid4())
-        data_dir = Path(settings.DATA_DIR).expanduser()
+        data_dir = library_root(settings)
         raw_dir = data_dir / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
         dest = raw_dir / f"{doc_id}.{ext}"
@@ -647,7 +648,7 @@ async def ingest_kindle(
             ),
         )
 
-    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir = library_root(settings)
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
@@ -701,7 +702,7 @@ async def _ingest_remote_pdf(doc_id: str, remote: RemoteDocument, settings: Sett
     because nothing yet knows whether it is a paper or a book; classify_node
     reads the parsed text and resolves it.
     """
-    raw_dir = Path(settings.DATA_DIR).expanduser() / "raw"
+    raw_dir = library_root(settings) / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     dest = raw_dir / f"{doc_id}.pdf"
     await asyncio.to_thread(dest.write_bytes, remote.content)
@@ -770,7 +771,7 @@ async def ingest_url(
             logger.exception("Article extraction failed for %s", body.url)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        data_dir = Path(settings.DATA_DIR).expanduser()
+        data_dir = library_root(settings)
         raw_dir = data_dir / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
         dest = raw_dir / f"{doc_id}.md"
@@ -903,7 +904,7 @@ async def ingest_url(
     channel_name = meta.get("uploader") or meta.get("channel") or None
     doc_id = str(uuid.uuid4())
 
-    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir = library_root(settings)
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     dest_stem = raw_dir / doc_id  # yt-dlp appends .wav
@@ -1304,7 +1305,7 @@ async def get_document_cover(document_id: str) -> Response:
     - Returns 204 if no image can be produced for this document, 404 if it does not exist.
     """
     settings = get_settings()
-    covers_dir = Path(settings.DATA_DIR).expanduser() / "covers"
+    covers_dir = library_root(settings) / "covers"
     cached_cover = covers_dir / f"{document_id}.webp"
     if cached_cover.is_file():
         return FileResponse(str(cached_cover), media_type="image/webp")
@@ -1332,7 +1333,7 @@ async def get_document_cover(document_id: str) -> Response:
         img_row = await DocumentRepo(session).first_figure_path(document_id)
 
         if img_row:
-            img_abs = (Path(settings.DATA_DIR).expanduser() / img_row).resolve()
+            img_abs = (library_root(settings) / img_row).resolve()
             if img_abs.is_file():
                 ext = img_abs.suffix.lstrip(".").lower()
                 valid_exts = ("png", "jpg", "jpeg", "webp")
@@ -1340,7 +1341,7 @@ async def get_document_cover(document_id: str) -> Response:
                 return FileResponse(str(img_abs), media_type=media_type)
 
         # 3. Check for local mirrored article images
-        article_img_dir = (Path(settings.DATA_DIR).expanduser() / "images" / document_id).resolve()
+        article_img_dir = (library_root(settings) / "images" / document_id).resolve()
         if article_img_dir.is_dir():
             first_img = next(
                 (
@@ -1525,7 +1526,7 @@ async def get_document_asset(document_id: str, asset_path: str) -> Response:
             )
 
     settings = get_settings()
-    img_dir = (Path(settings.DATA_DIR).expanduser() / "images" / document_id).resolve()
+    img_dir = (library_root(settings) / "images" / document_id).resolve()
     candidate = (img_dir / filename).resolve()
     mime, _ = mimetypes.guess_type(candidate.name)
     if (

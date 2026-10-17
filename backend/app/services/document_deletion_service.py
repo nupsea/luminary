@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-from pathlib import Path
 
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,6 +69,7 @@ from app.repos.note_repo import NoteRepo
 from app.services import vector_store as _vector_store_module
 from app.services.documents_service import delete_raw_file
 from app.services.flashcard_search import _delete_flashcard_fts
+from app.storage import library_root
 
 logger = logging.getLogger(__name__)
 
@@ -330,7 +330,7 @@ class DocumentDeletionService:
     def delete_filesystem_assets(self, document_id: str) -> None:
         """Drop extracted images dir + raw file. Non-fatal."""
         settings = get_settings()
-        images_dir = Path(settings.DATA_DIR).expanduser() / "images" / document_id
+        images_dir = library_root(settings) / "images" / document_id
         if images_dir.exists():
             shutil.rmtree(images_dir, ignore_errors=True)
         delete_raw_file(document_id)

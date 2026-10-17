@@ -2,12 +2,12 @@ import logging
 import re
 import threading
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
 
 from app.config import get_settings
+from app.storage import library_root
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +130,7 @@ class LanceDBService:
         import lancedb
 
         settings = get_settings()
-        vectors_dir = Path(settings.DATA_DIR).expanduser() / "vectors"
+        vectors_dir = library_root(settings) / "vectors"
         vectors_dir.mkdir(parents=True, exist_ok=True)
         self._db = lancedb.connect(str(vectors_dir))
         logger.info("LanceDB connected at %s", vectors_dir)

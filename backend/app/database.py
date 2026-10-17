@@ -1,6 +1,5 @@
 import logging
 import time
-from pathlib import Path
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
@@ -13,6 +12,7 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import StaticPool
 
 from app.config import get_settings
+from app.storage import library_root
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class Base(DeclarativeBase):
 
 def get_db_url() -> str:
     settings = get_settings()
-    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir = library_root(settings)
     data_dir.mkdir(parents=True, exist_ok=True)
     return f"sqlite+aiosqlite:///{data_dir}/luminary.db"
 

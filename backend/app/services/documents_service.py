@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 
 from app.config import get_settings
+from app.storage import library_root
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 def delete_raw_file(document_id: str) -> None:
     """Remove any raw uploaded file matching ~/.luminary/raw/{doc_id}.*"""
     settings = get_settings()
-    raw_dir = Path(settings.DATA_DIR).expanduser() / "raw"
+    raw_dir = library_root(settings) / "raw"
     for match in raw_dir.glob(f"{document_id}.*"):
         try:
             match.unlink()

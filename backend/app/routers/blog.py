@@ -40,6 +40,7 @@ from app.schemas.blog import (
 from app.services import blog_service
 from app.services.llm_admission import awaited
 from app.services.note_refiner import RefineDroppedContentError, get_note_refiner
+from app.storage import library_root
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ def _asset_root(kind: str) -> Path:
 
 
 def _images_root() -> Path:
-    return Path(get_settings().DATA_DIR).expanduser() / "images"
+    return library_root() / "images"
 
 
 def _within(path: Path, root: Path) -> bool:

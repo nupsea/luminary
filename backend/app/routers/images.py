@@ -23,6 +23,7 @@ from app.database import get_session_factory
 from app.models import DocumentModel, ImageModel
 from app.repos._helpers import get_or_404
 from app.repos.enrichment_repo import EnrichmentRepo
+from app.storage import library_root
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["images"])
@@ -88,7 +89,7 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
     Returns the __LUMINARY_IMG__ prefixed path for Markdown resolution.
     """
     settings = get_settings()
-    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir = library_root(settings)
     notes_img_dir = data_dir / "images" / "notes"
     notes_img_dir.mkdir(parents=True, exist_ok=True)
 
@@ -196,7 +197,7 @@ async def serve_image_raw(image_id: str) -> FileResponse:
         img = await get_or_404(session, ImageModel, image_id, name="Image")
 
     settings = get_settings()
-    abs_path = Path(settings.DATA_DIR).expanduser() / img.path
+    abs_path = library_root(settings) / img.path
     if not abs_path.exists():
         raise HTTPException(status_code=404, detail="Image file not found on disk")
 
@@ -211,7 +212,7 @@ async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
     # stops a literal slash but not "..", and percent-encoded "%2e%2e" survives
     # ASGI decoding -- without containment this served anything one level above
     # images/, which is DATA_DIR itself (luminary.db included).
-    root = (Path(settings.DATA_DIR).expanduser() / "images").resolve()
+    root = (library_root(settings) / "images").resolve()
     abs_path = (root / doc_id / filename).resolve()
     if not abs_path.is_relative_to(root) or not abs_path.is_file():
         raise HTTPException(status_code=404, detail="Local image not found")

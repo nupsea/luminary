@@ -3,7 +3,6 @@ import hashlib
 import logging
 import re
 from html import unescape
-from pathlib import Path
 from urllib.parse import urljoin
 
 import httpx
@@ -13,6 +12,7 @@ from app.config import get_settings
 from app.full_extras import require_extra
 from app.services.html_region import region_is_plausible, select_region
 from app.services.html_to_markdown import to_markdown
+from app.storage import library_root
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
@@ -534,7 +534,7 @@ class ArticleExtractor:
         svgs = soup.find_all("svg")
         if not svgs:
             return
-        images_dir = Path(get_settings().DATA_DIR).expanduser() / "images" / doc_id
+        images_dir = library_root() / "images" / doc_id
         for svg in svgs:
             if any(p.name in _SVG_CHROME_ANCESTORS for p in svg.parents):
                 continue
@@ -689,7 +689,7 @@ class ArticleExtractor:
 
         img_re = re.compile(r"!\[(.*?)\]\((.*?)\)")
         settings = get_settings()
-        images_dir = Path(settings.DATA_DIR).expanduser() / "images" / doc_id
+        images_dir = library_root(settings) / "images" / doc_id
         images_dir.mkdir(parents=True, exist_ok=True)
 
         async def replace_match(match):

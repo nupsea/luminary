@@ -19,11 +19,10 @@ import asyncio
 import json
 import logging
 import sys
-from pathlib import Path
 
-from app.config import get_settings
 from app.database import get_engine
 from app.db_init import create_all_tables
+from app.storage import library_root
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,7 @@ def _dump_diagnostics(diagnostics: dict) -> None:
     print("\n===== concept pipeline diagnostics (dry run) =====")
     print(json.dumps(diagnostics, indent=2, default=str))
     try:
-        out_dir = Path(get_settings().DATA_DIR).expanduser() / "concepts"
+        out_dir = library_root() / "concepts"
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "last_run.json").write_text(json.dumps(diagnostics, indent=2, default=str))
         print(f"\n(report written to {out_dir / 'last_run.json'})")
