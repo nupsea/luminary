@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from app.database import get_session_factory
 from app.models import DocumentModel, WebReferenceModel
 from app.repos._helpers import get_or_404
-from app.repos.document_repo import DocumentRepo
+from app.repos.enrichment_repo import EnrichmentRepo
 from app.repos.reference_repo import ReferenceRepo
 
 logger = logging.getLogger(__name__)
@@ -122,7 +122,7 @@ async def get_web_refs_job_status(document_id: str) -> dict:
     """
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
-        status = await DocumentRepo(session).latest_enrichment_status(document_id, "web_refs")
+        status = await EnrichmentRepo(session).latest_status(document_id, "web_refs")
     return {"status": status}
 
 

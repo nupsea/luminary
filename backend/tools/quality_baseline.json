@@ -106,13 +106,9 @@
   ],
   "sql_outside_repos": {
     "app/main.py": 1,
-    "app/routers/chat_meta.py": 7,
     "app/routers/collections.py": 19,
-    "app/routers/concepts.py": 10,
-    "app/routers/evals.py": 9,
     "app/routers/flashcards.py": 16,
     "app/routers/home.py": 16,
-    "app/routers/images.py": 9,
     "app/routers/notes.py": 24,
     "app/routers/tags.py": 23,
     "app/runtime/chat_graph.py": 2,

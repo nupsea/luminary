@@ -67,6 +67,15 @@ class DocumentRepo:
     async def get(self, document_id: str) -> DocumentModel | None:
         return await self.session.get(DocumentModel, document_id)
 
+    async def has_ready_documents(self) -> bool:
+        """Whether any document has reached a queryable stage."""
+        count = await self.session.scalar(
+            select(func.count())
+            .select_from(DocumentModel)
+            .where(DocumentModel.stage.in_(("complete", "enriching")))
+        )
+        return bool(count)
+
     async def complete_ids(self) -> list[str]:
         result = await self.session.execute(
             select(DocumentModel.id).where(DocumentModel.stage == "complete")
@@ -111,6 +120,16 @@ class DocumentRepo:
             .order_by(SectionModel.section_order)
         )
         return list(result.scalars())
+
+    async def first_headings(self, document_id: str, limit: int) -> list[str]:
+        """The first `limit` sections' headings, the empty ones left out."""
+        result = await self.session.execute(
+            select(SectionModel.heading)
+            .where(SectionModel.document_id == document_id)
+            .order_by(SectionModel.section_order)
+            .limit(limit)
+        )
+        return [h for h in result.scalars() if h]
 
     async def section_count(self, document_id: str) -> int:
         result = await self.session.execute(
@@ -338,18 +357,6 @@ class DocumentRepo:
             )
         )
         return bool(result.scalar_one())
-
-    async def latest_enrichment_status(self, document_id: str, job_type: str) -> str | None:
-        result = await self.session.execute(
-            select(EnrichmentJobModel.status)
-            .where(
-                EnrichmentJobModel.document_id == document_id,
-                EnrichmentJobModel.job_type == job_type,
-            )
-            .order_by(EnrichmentJobModel.created_at.desc())
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
 
     async def first_chapters_queued(self, since: datetime) -> bool:
         """Whether ingestion-time chapter cards queued since *since* are still unwritten."""

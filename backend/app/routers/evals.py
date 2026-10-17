@@ -18,12 +18,12 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db, get_session_factory
-from app.models import DocumentModel, EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
+from app.models import DocumentModel, EvalRunModel, GoldenDatasetModel
+from app.repos.eval_repo import EvalRepo
 from app.services import llm_output_stats
 from app.services.background import fire_and_forget, task_registry
 from app.services.dataset_generator_service import (
@@ -476,44 +476,6 @@ def _last_run_payload(run: EvalRunModel | None) -> dict[str, Any] | None:
     }
 
 
-async def _question_document_ids(db: AsyncSession, dataset_id: str) -> set[str]:
-    """Distinct source_document_id over a dataset's included questions — the
-    ids /search is actually scoped to at eval time."""
-    result = await db.execute(
-        select(GoldenQuestionModel.source_document_id)
-        .where(
-            GoldenQuestionModel.dataset_id == dataset_id,
-            GoldenQuestionModel.included.is_(True),
-        )
-        .distinct()
-    )
-    return {row[0] for row in result.fetchall() if row[0]}
-
-
-async def _missing_document_ids(db: AsyncSession, doc_ids: set[str]) -> set[str]:
-    if not doc_ids:
-        return set()
-    result = await db.execute(select(DocumentModel.id).where(DocumentModel.id.in_(doc_ids)))
-    alive = {row[0] for row in result.fetchall()}
-    return doc_ids - alive
-
-
-async def _dataset_missing_document_ids(db: AsyncSession, dataset_id: str) -> set[str]:
-    # Single LEFT JOIN instead of two round-trips — this runs per dataset on
-    # the list endpoint, which the UI polls while a generation is in flight.
-    result = await db.execute(
-        select(GoldenQuestionModel.source_document_id)
-        .outerjoin(DocumentModel, DocumentModel.id == GoldenQuestionModel.source_document_id)
-        .where(
-            GoldenQuestionModel.dataset_id == dataset_id,
-            GoldenQuestionModel.included.is_(True),
-            DocumentModel.id.is_(None),
-        )
-        .distinct()
-    )
-    return {row[0] for row in result.fetchall() if row[0]}
-
-
 def _dataset_to_item(
     dataset: GoldenDatasetModel,
     question_count: int,
@@ -655,24 +617,13 @@ async def get_eval_runs(
     db: AsyncSession = Depends(get_db),
 ) -> list[EvalRunListItem]:
     """Return paginated eval_runs ordered by run_at DESC with optional filters."""
-    query = select(EvalRunModel).order_by(EvalRunModel.run_at.desc())
-    if dataset_name is not None:
-        query = query.where(EvalRunModel.dataset_name == dataset_name)
-    if eval_kind is not None:
-        query = query.where(EvalRunModel.eval_kind == eval_kind)
-    if model is not None:
-        query = query.where(EvalRunModel.model_used == model)
-    query = query.offset(offset).limit(limit)
-    result = await db.execute(query)
-    runs = result.scalars().all()
+    repo = EvalRepo(db)
+    runs = await repo.runs(
+        dataset_name=dataset_name, eval_kind=eval_kind, model=model, offset=offset, limit=limit
+    )
     id_to_name: dict[str, str] = {}
     if runs:
-        id_names_result = await db.execute(
-            select(GoldenDatasetModel.id, GoldenDatasetModel.name).where(
-                GoldenDatasetModel.id.in_({r.dataset_name for r in runs})
-            )
-        )
-        id_to_name = {row[0]: row[1] for row in id_names_result.fetchall()}
+        id_to_name = await repo.dataset_names({r.dataset_name for r in runs})
     return [
         EvalRunListItem(
             id=r.id,
@@ -931,17 +882,13 @@ async def get_datasets(
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Return generated datasets plus legacy JSONL golden datasets."""
-    query = select(GoldenDatasetModel).order_by(GoldenDatasetModel.created_at.desc())
-    if status:
-        query = query.where(GoldenDatasetModel.status == status)
-    result = await db.execute(query)
-    datasets = list(result.scalars().all())
+    datasets = await EvalRepo(db).datasets(status)
 
     items: list[dict[str, Any]] = []
     for dataset in datasets:
         question_count = await count_questions(db, dataset.id)
         last_run = await latest_run_for_dataset(db, dataset.id)
-        missing = await _dataset_missing_document_ids(db, dataset.id)
+        missing = await EvalRepo(db).dataset_missing_document_ids(dataset.id)
         items.append(_dataset_to_item(dataset, question_count, last_run, missing).model_dump())
 
     golden_dir = _EVALS_DIR / "golden"
@@ -1014,13 +961,7 @@ async def get_golden_dataset(
     dataset = await db.get(GoldenDatasetModel, dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    result = await db.execute(
-        select(GoldenQuestionModel)
-        .where(GoldenQuestionModel.dataset_id == dataset_id)
-        .order_by(GoldenQuestionModel.created_at)
-        .offset(offset)
-        .limit(limit)
-    )
+    rows = await EvalRepo(db).questions(dataset_id, offset=offset, limit=limit)
     questions = [
         GoldenQuestionResponse(
             id=q.id,
@@ -1032,11 +973,11 @@ async def get_golden_dataset(
             quality_score=q.quality_score,
             included=q.included,
         )
-        for q in result.scalars().all()
+        for q in rows
     ]
     question_count = await count_questions(db, dataset_id)
     last_run = await latest_run_for_dataset(db, dataset_id)
-    missing = await _dataset_missing_document_ids(db, dataset_id)
+    missing = await EvalRepo(db).dataset_missing_document_ids(dataset_id)
     item = _dataset_to_item(dataset, question_count, last_run, missing)
     return GoldenDatasetDetailResponse(
         **item.model_dump(),
@@ -1084,7 +1025,7 @@ async def relink_golden_dataset(
     if target is None:
         raise HTTPException(status_code=422, detail="Target document does not exist")
 
-    question_docs = await _question_document_ids(db, dataset_id)
+    question_docs = await EvalRepo(db).question_document_ids(dataset_id)
     if not question_docs:
         raise HTTPException(status_code=409, detail="Dataset has no included questions")
     if req.from_document_id is not None:
@@ -1105,14 +1046,7 @@ async def relink_golden_dataset(
             ),
         )
 
-    result = await db.execute(
-        update(GoldenQuestionModel)
-        .where(
-            GoldenQuestionModel.dataset_id == dataset_id,
-            GoldenQuestionModel.source_document_id.in_(old_ids),
-        )
-        .values(source_document_id=req.document_id, source_chunk_id="")
-    )
+    relinked = await EvalRepo(db).relink_questions(dataset_id, old_ids, req.document_id)
     new_source_ids = [d for d in (dataset.source_document_ids or []) if d not in old_ids]
     if req.document_id not in new_source_ids:
         new_source_ids.append(req.document_id)
@@ -1123,13 +1057,13 @@ async def relink_golden_dataset(
         dataset_id,
         sorted(old_ids),
         req.document_id,
-        result.rowcount,
+        relinked,
     )
-    missing = await _dataset_missing_document_ids(db, dataset_id)
+    missing = await EvalRepo(db).dataset_missing_document_ids(dataset_id)
     return {
         "dataset_id": dataset_id,
         "document_id": req.document_id,
-        "relinked_questions": result.rowcount,
+        "relinked_questions": relinked,
         "missing_document_ids": sorted(missing),
     }
 
@@ -1142,14 +1076,7 @@ async def get_golden_dataset_rows(
     dataset = await db.get(GoldenDatasetModel, dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    result = await db.execute(
-        select(GoldenQuestionModel)
-        .where(
-            GoldenQuestionModel.dataset_id == dataset_id,
-            GoldenQuestionModel.included.is_(True),
-        )
-        .order_by(GoldenQuestionModel.created_at)
-    )
+    rows = await EvalRepo(db).questions(dataset_id, included_only=True)
     return [
         {
             "question": q.question,
@@ -1159,7 +1086,7 @@ async def get_golden_dataset_rows(
             "source_document_id": q.source_document_id,
             "source_chunk_id": q.source_chunk_id,
         }
-        for q in result.scalars().all()
+        for q in rows
     ]
 
 
@@ -1177,8 +1104,8 @@ async def run_generated_dataset_eval(
     # Refuse to measure a dataset whose questions all point at deleted
     # documents: retrieval scoped to a dead id returns nothing, so the run
     # would record an all-zero score that looks like a retrieval regression.
-    question_docs = await _question_document_ids(db, dataset_id)
-    missing = await _missing_document_ids(db, question_docs)
+    question_docs = await EvalRepo(db).question_document_ids(dataset_id)
+    missing = await EvalRepo(db).missing_document_ids(question_docs)
     if question_docs and missing == question_docs:
         raise HTTPException(
             status_code=409,
@@ -1227,11 +1154,7 @@ async def get_generated_dataset_runs(
     dataset = await db.get(GoldenDatasetModel, dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    result = await db.execute(
-        select(EvalRunModel)
-        .where(EvalRunModel.dataset_name == dataset_id)
-        .order_by(EvalRunModel.run_at.desc())
-    )
+    runs = await EvalRepo(db).runs_for_dataset(dataset_id)
     return [
         {
             "id": run.id,
@@ -1247,7 +1170,7 @@ async def get_generated_dataset_runs(
             "status": getattr(run, "status", None) or "complete",
             "error_message": run.error_message,
         }
-        for run in result.scalars().all()
+        for run in runs
     ]
 
 
