@@ -631,7 +631,7 @@ counts `content_type` references per file, shrink-only.
 
 *Built in 0.16.0:* policy reads the measured facets. `DocumentProfile.of(doc)` takes the stored
 `form`, `domain` and `register`, and the legacy columns answer only what was never measured;
-chunking dispatches on the form (`chunk_node`), and context expansion and front-matter skipping
+chunking dispatches on the form (`chunk_node`), and context expansion and the story card prompt
 follow it. Two `classify_form` defects surfaced in the measurement and are fixed from what the form
 means: `entries` needs dated units that divide the text, not dates anywhere (timestamps in a
 book's query examples made the Iceberg book a journal and cut it into 199-character chunks), and a

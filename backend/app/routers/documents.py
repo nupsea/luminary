@@ -1444,7 +1444,6 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
         if not fp.exists():
             raise HTTPException(status_code=404, detail="EPUB file not found on disk")
 
-        # Section IDs needed to map chapter index to section IDs.
         all_section_ids = await DocumentRepo(session).section_ids(document_id)
 
     # Compute total chapters first (needed to slice sections)
