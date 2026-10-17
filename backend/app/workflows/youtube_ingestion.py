@@ -34,7 +34,7 @@ def _remove_partial_files(dest_stem: Path) -> None:
 async def download_and_ingest(
     doc_id: str, url: str, dest_stem: Path, caption_track: str | None
 ) -> None:
-    dest = dest_stem.with_suffix(".wav")
+    dest = dest_stem.with_suffix(_yt.AUDIO_SUFFIX)
     completed = False
     try:
         await _yt.download_audio(
@@ -57,4 +57,5 @@ async def download_and_ingest(
         if not completed:
             _remove_partial_files(dest_stem)
     # run_ingestion records its own failures on the document.
-    await run_ingestion(doc_id, str(dest), "wav", "audio", parsed_document=None)
+    fmt = _yt.AUDIO_SUFFIX.lstrip(".")
+    await run_ingestion(doc_id, str(dest), fmt, "audio", parsed_document=None)

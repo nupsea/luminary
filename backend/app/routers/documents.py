@@ -1145,14 +1145,14 @@ async def ingest_url(
     data_dir = Path(settings.DATA_DIR).expanduser()
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
-    dest_stem = raw_dir / doc_id  # yt-dlp appends .wav
-    dest = dest_stem.with_suffix(".wav")
+    dest_stem = raw_dir / doc_id  # yt-dlp appends the extension
+    dest = dest_stem.with_suffix(_yt_module.AUDIO_SUFFIX)
 
     async with get_session_factory()() as session:
         doc = DocumentModel(
             id=doc_id,
             title=video_title,
-            format="wav",
+            format=_yt_module.AUDIO_SUFFIX.lstrip("."),
             content_type="audio",
             word_count=0,
             page_count=0,
@@ -1395,7 +1395,7 @@ async def serve_audio_file(document_id: str) -> FileResponse:
     if not fp.exists():
         raise HTTPException(status_code=404, detail="Audio file not found on disk")
     ext = fp.suffix.lower().lstrip(".")
-    mime_map = {"mp3": "audio/mpeg", "m4a": "audio/mp4", "wav": "audio/wav"}
+    mime_map = {"mp3": "audio/mpeg", "m4a": "audio/mp4", "wav": "audio/wav", "flac": "audio/flac"}
     mime = mime_map.get(ext, "audio/mpeg")
     return FileResponse(str(fp), media_type=mime)
 

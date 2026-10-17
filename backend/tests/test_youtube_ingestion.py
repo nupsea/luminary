@@ -144,7 +144,7 @@ async def test_ingest_url_success_creates_document(test_db, monkeypatch):
 
     async def _fake_download_audio(url: str, dest_stem: Path, on_progress=None) -> None:
         # Simulate yt-dlp writing the wav file to the expected location
-        dest_stem.with_suffix(".wav").write_bytes(b"\x00" * 100)
+        dest_stem.with_suffix(".flac").write_bytes(b"\x00" * 100)
 
     with (
         patch(
@@ -187,7 +187,7 @@ async def test_ingest_url_success_creates_document(test_db, monkeypatch):
     assert doc.source_url == "https://www.youtube.com/watch?v=abc123"
     assert doc.video_title == "Test YouTube Video"
     assert doc.content_type == "audio"
-    assert doc.format == "wav"
+    assert doc.format == "flac"
 
 
 async def test_document_list_includes_source_url(test_db):
@@ -359,7 +359,7 @@ async def test_ingest_url_stores_channel_name(test_db, monkeypatch):
     monkeypatch.setattr("app.workflows.youtube_ingestion.run_ingestion", _mock_run_ingestion)
 
     async def _fake_download_audio(url: str, dest_stem: Path, on_progress=None) -> None:
-        dest_stem.with_suffix(".wav").write_bytes(b"\x00" * 100)
+        dest_stem.with_suffix(".flac").write_bytes(b"\x00" * 100)
 
     with (
         patch(
@@ -502,7 +502,7 @@ async def test_ingest_url_returns_before_the_download_finishes(test_db, monkeypa
         on_progress(0.5)
         halfway.set()
         await release.wait()
-        dest_stem.with_suffix(".wav").write_bytes(b"\x00" * 100)
+        dest_stem.with_suffix(".flac").write_bytes(b"\x00" * 100)
 
     with _youtube_ready(_slow_download):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -526,7 +526,7 @@ async def test_ingest_url_returns_before_the_download_finishes(test_db, monkeypa
     async with factory() as session:
         doc = await session.get(DocumentModel, doc_id)
     ingested.assert_awaited_once()
-    assert ingested.call_args.args[:4] == (doc_id, doc.file_path, "wav", "audio")
+    assert ingested.call_args.args[:4] == (doc_id, doc.file_path, "flac", "audio")
     assert after["stage_pct"] is None
 
 
@@ -577,6 +577,26 @@ async def test_download_reports_progress(monkeypatch, tmp_path):
     await yt.download_audio("https://youtu.be/x", tmp_path / "out", on_progress=seen.append)
 
     assert seen == [0.25, 0.25, 1.0]
+
+
+async def test_download_keeps_16_bit_flac(monkeypatch, tmp_path):
+    """FLAC is lossless only against the WAV it replaces at 16 bits: ffmpeg's default for
+    decoded Opus is 24-bit, whose samples differ (decoded PCM checksums did not match)."""
+    import app.services.youtube_downloader as yt
+
+    captured: list[str] = []
+
+    async def _fake_exec(*args, **kwargs):
+        captured.extend(args)
+        return _FakeYtDlp()
+
+    monkeypatch.setattr(yt, "resolve_tool", lambda name: None)
+    monkeypatch.setattr(yt.asyncio, "create_subprocess_exec", _fake_exec)
+
+    await yt.download_audio("https://youtu.be/x", tmp_path / "out")
+
+    assert captured[captured.index("--audio-format") + 1] == "flac"
+    assert captured[captured.index("--postprocessor-args") + 1] == "ExtractAudio:-sample_fmt s16"
 
 
 async def test_download_failure_still_names_yt_dlps_reason(monkeypatch, tmp_path):

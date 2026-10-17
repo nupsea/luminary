@@ -253,7 +253,7 @@ async def test_youtube_ingest_keeps_the_vocabulary_and_fetches_captions(
     monkeypatch.setattr("app.workflows.youtube_ingestion.run_ingestion", _no_ingestion)
 
     async def _fake_download_audio(url: str, dest_stem: Path, on_progress=None) -> None:
-        dest_stem.with_suffix(".wav").write_bytes(b"\x00" * 100)
+        dest_stem.with_suffix(".flac").write_bytes(b"\x00" * 100)
 
     fetch_captions = AsyncMock(return_value=True)
     meta = {**_TALK, "id": "abc", "language": "en", "subtitles": {"en": []}}

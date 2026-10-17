@@ -89,8 +89,22 @@ def _chunk_audio(
     return chunks
 
 
-def _wav_duration(path: Path) -> float | None:
+def _flac_duration(path: Path) -> float | None:
+    """From STREAMINFO, the first metadata block: 20-bit sample rate, then 3 + 5 bits
+    of channels and depth, then a 36-bit sample count."""
+    with path.open("rb") as f:
+        head = f.read(26)
+    if len(head) < 26 or head[:4] != b"fLaC":
+        return None
+    bits = int.from_bytes(head[18:26], "big")
+    rate, samples = bits >> 44, bits & (2**36 - 1)
+    return samples / rate if rate and samples else None
+
+
+def _audio_duration(path: Path) -> float | None:
     try:
+        if path.suffix.lower() == ".flac":
+            return _flac_duration(path)
         with contextlib.closing(wave.open(str(path), "rb")) as w:
             return w.getnframes() / w.getframerate()
     except (wave.Error, OSError, EOFError, ZeroDivisionError):
@@ -104,7 +118,7 @@ async def _transcript(doc_id: str, source: Path, audio: Path) -> tuple[list[dict
     segments = parse_vtt(captions.read_text(encoding="utf-8")) if captions.exists() else []
     if segments:
         segments = await correct_transcript(doc_id, segments, ordinary=None)
-        return segments, _wav_duration(audio) or segments[-1]["end"], "captions"
+        return segments, _audio_duration(audio) or segments[-1]["end"], "captions"
     vocabulary, _, _ = await fetch_transcript_inputs(doc_id)
     transcriber = _audio_transcriber_module.get_audio_transcriber()
     # CPU-bound -- run in thread pool to keep event loop free for status polls

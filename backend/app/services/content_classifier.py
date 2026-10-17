@@ -25,6 +25,8 @@ import itertools
 import re
 from collections import defaultdict
 
+from app.types import AUDIO_EXTENSIONS
+
 # Gutenberg wraps every text in a licence. The markers are stable across the
 # corpus and are the only reliable way to find where the actual work starts.
 _GUTENBERG_START = re.compile(r"\*\*\*\s*START OF (?:THE|THIS) PROJECT GUTENBERG.*?\*\*\*", re.I)
@@ -299,7 +301,7 @@ def classify_content(
 ) -> str:
     """The document's content type, decided by scoring rather than by ordering."""
     ext = (file_ext or "").lower().lstrip(".")
-    if ext in ("mp3", "m4a", "wav"):
+    if ext in AUDIO_EXTENSIONS:
         return "audio"
     if ext == "mp4":
         return "video"
@@ -451,7 +453,7 @@ def classify_form(
     ext = (file_ext or "").lower().lstrip(".")
     if ext in _CODE_EXTENSIONS:
         return "source_code"
-    if ext in ("mp3", "m4a", "wav", "mp4"):
+    if ext in (*AUDIO_EXTENSIONS, "mp4"):
         return "dialogue"
 
     head = raw_text[:20000]
