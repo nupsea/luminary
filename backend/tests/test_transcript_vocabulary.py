@@ -12,6 +12,7 @@ from sqlalchemy import select
 from app.main import app
 from app.models import DocumentModel
 from app.services.captions import captions_path, parse_vtt
+from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.transcript_vocabulary import hotwords, vocabulary_from_metadata
 from app.services.youtube_downloader import uploader_caption_language
 
@@ -141,7 +142,7 @@ class _RecordingTranscriber:
     def is_whole_word(self, word: str) -> bool:
         return True  # nothing is proposed, so no model is asked
 
-    def transcribe(self, file_path: Path, *, hotwords=None):
+    def transcribe(self, file_path: Path, *, hotwords=None, on_progress=None):
         self.hotwords.append(hotwords)
         return [{"start": 0.0, "end": 4.0, "text": "we store vectors in lance db"}], 4.0
 
@@ -249,9 +250,9 @@ async def test_youtube_ingest_keeps_the_vocabulary_and_fetches_captions(
     async def _no_ingestion(*_args, **_kwargs):
         pass
 
-    monkeypatch.setattr("app.routers.documents.run_ingestion", _no_ingestion)
+    monkeypatch.setattr("app.workflows.youtube_ingestion.run_ingestion", _no_ingestion)
 
-    async def _fake_download_audio(url: str, dest_stem: Path) -> None:
+    async def _fake_download_audio(url: str, dest_stem: Path, on_progress=None) -> None:
         dest_stem.with_suffix(".wav").write_bytes(b"\x00" * 100)
 
     fetch_captions = AsyncMock(return_value=True)
@@ -270,6 +271,8 @@ async def test_youtube_ingest_keeps_the_vocabulary_and_fetches_captions(
             resp = await client.post(
                 "/documents/ingest-url", json={"url": "https://www.youtube.com/watch?v=abc"}
             )
+        # Captions are fetched by the job, after the audio.
+        await get_ingestion_jobs().get(resp.json()["document_id"])
 
     assert resp.status_code == 200, resp.text
     doc_id = resp.json()["document_id"]

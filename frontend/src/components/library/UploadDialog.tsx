@@ -33,12 +33,15 @@ import {
   isKindleClippings,
 } from "@/lib/uploadFileTypes"
 import { ComponentsRequiredError } from "@/lib/apiClient"
+import { withStagePct } from "@/lib/ingestionStatus"
 import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import { useAppStore } from "@/store"
 
 const STAGE_LABELS: Record<string, string> = {
+  downloading: "Downloading audio...",
   parsing: "Parsing document...",
   transcribing: "Transcribing...",
+  correcting: "Checking transcript terms...",
   classifying: "Classifying content...",
   chunking: "Chunking text...",
   embedding: "Generating embeddings...",
@@ -431,9 +434,12 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const stageLabel = useMemo(() => {
     if (mode === "uploading") return "Uploading..."
     if (mode === "success") return "Complete!"
-    if (currentStage) return STAGE_LABELS[currentStage] ?? `Processing (${progress}%)...`
+    if (currentStage) {
+      const label = STAGE_LABELS[currentStage]
+      return label ? withStagePct(label, trackedJob?.stagePct) : `Processing (${progress}%)...`
+    }
     return ""
-  }, [mode, currentStage, progress])
+  }, [mode, currentStage, progress, trackedJob?.stagePct])
 
   function timeEstimate(): string {
     if (mode !== "tracking" || progress >= 95) return ""

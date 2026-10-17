@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from app.services.components import resolve_tool
@@ -96,11 +97,30 @@ def _last_error_line(stderr: bytes | None) -> str:
     return chosen[:300]
 
 
-async def download_audio(url: str, dest_stem: Path) -> None:
+_PROGRESS_PREFIX = b"luminary-progress"
+
+
+def _download_fraction(line: bytes) -> float | None:
+    """Bytes downloaded over the total, from a `--progress-template` line; None when
+    yt-dlp knows neither the total nor an estimate."""
+    parts = line.split()
+    if len(parts) != 4 or parts[0] != _PROGRESS_PREFIX:
+        return None
+    done, total, estimate = parts[1:]
+    size = total if total.isdigit() else estimate
+    if not done.isdigit() or not size.isdigit() or int(size) == 0:
+        return None
+    return int(done) / int(size)
+
+
+async def download_audio(
+    url: str, dest_stem: Path, on_progress: Callable[[float], None] | None = None
+) -> None:
     """Download audio-only WAV to dest_stem.wav using yt-dlp.
 
     dest_stem should NOT include an extension -- yt-dlp appends .wav.
     The actual file written will be at dest_stem.with_suffix('.wav').
+    `on_progress` receives the downloaded fraction as yt-dlp reports it.
 
     Raises RuntimeError on non-zero exit.
     """
@@ -114,6 +134,12 @@ async def download_audio(url: str, dest_stem: Path) -> None:
     location = ["--ffmpeg-location", str(Path(ffmpeg).parent)] if ffmpeg else []
     proc = await asyncio.create_subprocess_exec(
         *_ytdlp_argv(),
+        "--quiet",
+        "--progress",
+        "--newline",
+        "--progress-template",
+        f"download:{_PROGRESS_PREFIX.decode()} %(progress.downloaded_bytes)s "
+        "%(progress.total_bytes)s %(progress.total_bytes_estimate)s",
         "-x",
         "--audio-format",
         "wav",
@@ -126,10 +152,22 @@ async def download_audio(url: str, dest_stem: Path) -> None:
         # read as a flag.
         "--",
         url,
-        stdout=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    _, stderr = await proc.communicate()
+    stderr_read = asyncio.ensure_future(proc.stderr.read())
+    try:
+        async for line in proc.stdout:
+            fraction = _download_fraction(line)
+            if fraction is not None and on_progress is not None:
+                on_progress(fraction)
+        stderr = await stderr_read
+        await proc.wait()
+    finally:
+        # A cancelled job (the document was deleted) must not leave yt-dlp running.
+        if proc.returncode is None:
+            proc.kill()
+        stderr_read.cancel()
     if proc.returncode != 0:
         # yt-dlp says why on stderr and the reason is actionable: a stale binary
         # gets "HTTP Error 403: Forbidden" on every video, a private or removed

@@ -81,11 +81,10 @@ from app.services import graph as _graph_module  # indirect: get_graph_service i
 
 # indirect: tests patch `app.services.youtube_downloader.{check_ytdlp_available,
 # check_ffmpeg_available, fetch_metadata, download_audio}`.
-from app.services import network_errors
+from app.services import ingestion_progress, network_errors
 from app.services import youtube_downloader as _yt_module
 from app.services.activity_service import ActivityService
 from app.services.article_extractor import get_article_extractor
-from app.services.captions import captions_path
 from app.services.components import (
     capabilities,
     ffmpeg_install_command,
@@ -138,14 +137,14 @@ from app.services.youtube_downloader import is_youtube_url
 from app.types import DocumentProfile
 from app.workflows import ingestion as _ingestion_module  # indirect: _run_pregenerate is patched
 from app.workflows.ingestion import (
-    STAGE_PROGRESS,
     ContentType,
     _background_tasks,
     run_ingestion,
 )
-from app.workflows.ingestion_nodes._shared import _persist_extraction_report
+from app.workflows.ingestion_nodes._shared import _persist_extraction_report, stage_progress_pct
 from app.workflows.ingestion_nodes.finalize import launch_followup
 from app.workflows.oreilly_ingestion import start_oreilly_ingestion
+from app.workflows.youtube_ingestion import download_and_ingest
 
 logger = logging.getLogger(__name__)
 
@@ -1147,23 +1146,7 @@ async def ingest_url(
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     dest_stem = raw_dir / doc_id  # yt-dlp appends .wav
-
-    try:
-        await _yt_module.download_audio(body.url, dest_stem)
-    except RuntimeError as exc:
-        logger.exception("yt-dlp download failed")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Audio download failed: {exc}",
-        ) from exc
-
     dest = dest_stem.with_suffix(".wav")
-    if not dest.exists():
-        raise HTTPException(status_code=500, detail="Downloaded audio file not found")
-
-    track = _yt_module.uploader_caption_language(meta)
-    if track:
-        await _yt_module.download_captions(body.url, captions_path(dest), track)
 
     async with get_session_factory()() as session:
         doc = DocumentModel(
@@ -1175,7 +1158,7 @@ async def ingest_url(
             page_count=0,
             file_path=str(dest),
             file_hash=None,
-            stage="parsing",
+            stage="downloading",
             source_url=body.url,
             video_title=video_title,
             channel_name=channel_name,
@@ -1186,8 +1169,13 @@ async def ingest_url(
         session.add(doc)
         await session.commit()
 
+    # The download is part of the job, not the request: a long talk takes minutes,
+    # and until the document exists there is nothing for the UI to show progress on.
     get_ingestion_jobs().launch(
-        doc_id, run_ingestion(doc_id, str(dest), "wav", "audio", parsed_document=None)
+        doc_id,
+        download_and_ingest(
+            doc_id, body.url, dest_stem, _yt_module.uploader_caption_language(meta)
+        ),
     )
     logger.info("YouTube ingestion started", extra={"doc_id": doc_id, "url": body.url})
     return {"document_id": doc_id, "status": "processing"}
@@ -2075,12 +2063,14 @@ async def get_document_status(document_id: str):
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
     stage = doc.stage
-    progress_pct = STAGE_PROGRESS.get(stage, 0)
+    fraction = ingestion_progress.stage_fraction(document_id, stage)
     logger.debug("Status polled", extra={"document_id": document_id, "stage": stage})
     return {
         "document_id": document_id,
         "stage": stage,
-        "progress_pct": progress_pct,
+        "progress_pct": stage_progress_pct(stage, fraction),
+        # How far a long stage (download, transcription) has got; null for the rest.
+        "stage_pct": None if fraction is None else round(fraction * 100),
         "done": stage == "complete",
         # I-10: a pause the user cannot see reads as a hang. True only while a
         # background LLM call is actually being held for interactive work.

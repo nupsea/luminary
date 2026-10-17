@@ -4,6 +4,7 @@ Mocks yt-dlp subprocess calls to avoid requiring a live YouTube connection
 or yt-dlp installation in CI.
 """
 
+import asyncio
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -13,6 +14,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app  # noqa: F401 (used via ASGITransport)
 from app.models import DocumentModel
+from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.youtube_downloader import is_youtube_url
 
 
@@ -23,6 +25,29 @@ def _transcription_installed(monkeypatch):
     from app.services import python_extras
 
     monkeypatch.setitem(python_extras.EXTRA_WEIGHTS, "transcription", (lambda: True, lambda: None))
+
+
+class _FakeYtDlp:
+    """A yt-dlp process: `stdout` lines, then exit; or, with `hang`, never exits."""
+
+    def __init__(self, stdout: bytes = b"", stderr: bytes = b"", returncode: int = 0, hang=False):
+        self.stdout = asyncio.StreamReader()
+        self.stderr = asyncio.StreamReader()
+        self.stdout.feed_data(stdout)
+        self.stderr.feed_data(stderr)
+        if not hang:
+            self.stdout.feed_eof()
+            self.stderr.feed_eof()
+        self._exit = returncode
+        self.returncode = None
+        self.killed = False
+
+    async def wait(self):
+        self.returncode = self._exit
+        return self.returncode
+
+    def kill(self):
+        self.killed = True
 
 
 # Shared DB fixture
@@ -115,9 +140,9 @@ async def test_ingest_url_success_creates_document(test_db, monkeypatch):
     async def _mock_run_ingestion(document_id, file_path, fmt, content_type=None, **_kwargs):
         pass
 
-    monkeypatch.setattr("app.routers.documents.run_ingestion", _mock_run_ingestion)
+    monkeypatch.setattr("app.workflows.youtube_ingestion.run_ingestion", _mock_run_ingestion)
 
-    async def _fake_download_audio(url: str, dest_stem: Path) -> None:
+    async def _fake_download_audio(url: str, dest_stem: Path, on_progress=None) -> None:
         # Simulate yt-dlp writing the wav file to the expected location
         dest_stem.with_suffix(".wav").write_bytes(b"\x00" * 100)
 
@@ -144,6 +169,7 @@ async def test_ingest_url_success_creates_document(test_db, monkeypatch):
                 "/documents/ingest-url",
                 json={"url": "https://www.youtube.com/watch?v=abc123"},
             )
+        await get_ingestion_jobs().get(resp.json()["document_id"])
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -330,9 +356,9 @@ async def test_ingest_url_stores_channel_name(test_db, monkeypatch):
     async def _mock_run_ingestion(document_id, file_path, fmt, content_type=None, **_kwargs):
         pass
 
-    monkeypatch.setattr("app.routers.documents.run_ingestion", _mock_run_ingestion)
+    monkeypatch.setattr("app.workflows.youtube_ingestion.run_ingestion", _mock_run_ingestion)
 
-    async def _fake_download_audio(url: str, dest_stem: Path) -> None:
+    async def _fake_download_audio(url: str, dest_stem: Path, on_progress=None) -> None:
         dest_stem.with_suffix(".wav").write_bytes(b"\x00" * 100)
 
     with (
@@ -364,6 +390,7 @@ async def test_ingest_url_stores_channel_name(test_db, monkeypatch):
                 "/documents/ingest-url",
                 json={"url": "https://www.youtube.com/watch?v=lec001"},
             )
+        await get_ingestion_jobs().get(resp.json()["document_id"])
 
     assert resp.status_code == 200, resp.text
     doc_id = resp.json()["document_id"]
@@ -391,15 +418,9 @@ async def test_download_passes_the_resolved_ffmpeg_location(monkeypatch, tmp_pat
 
     captured: list[str] = []
 
-    class _Proc:
-        returncode = 0
-
-        async def communicate(self):
-            return b"", b""
-
     async def _fake_exec(*args, **kwargs):
         captured.extend(args)
-        return _Proc()
+        return _FakeYtDlp()
 
     # Built through Path rather than hardcoded, so the expected separator
     # matches whatever the code under test normalizes to on this platform --
@@ -419,15 +440,9 @@ async def test_download_omits_the_flag_when_ffmpeg_is_not_found(monkeypatch, tmp
 
     captured: list[str] = []
 
-    class _Proc:
-        returncode = 0
-
-        async def communicate(self):
-            return b"", b""
-
     async def _fake_exec(*args, **kwargs):
         captured.extend(args)
-        return _Proc()
+        return _FakeYtDlp()
 
     monkeypatch.setattr(yt, "resolve_tool", lambda name: None)
     monkeypatch.setattr(yt.asyncio, "create_subprocess_exec", _fake_exec)
@@ -457,3 +472,142 @@ async def test_metadata_failure_names_yt_dlps_reason(monkeypatch):
 
     with pytest.raises(RuntimeError, match="not a bot"):
         await yt.fetch_metadata("https://youtu.be/x")
+
+
+def _youtube_ready(download_audio):
+    """yt-dlp and ffmpeg present, metadata answered, `download_audio` standing in."""
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    for target, kwargs in (
+        ("check_ytdlp_available", {"return_value": True}),
+        ("check_ffmpeg_available", {"return_value": True}),
+        ("fetch_metadata", {"new": AsyncMock(return_value={"title": "Talk", "id": "t1"})}),
+        ("download_audio", {"new": download_audio}),
+    ):
+        stack.enter_context(patch(f"app.services.youtube_downloader.{target}", **kwargs))
+    return stack
+
+
+async def test_ingest_url_returns_before_the_download_finishes(test_db, monkeypatch):
+    """The download used to run inside the request, so no document existed to report on
+    until the whole talk was down. It is the job's first stage now, and it reports."""
+    _, factory, _ = test_db
+    ingested = AsyncMock()
+    monkeypatch.setattr("app.workflows.youtube_ingestion.run_ingestion", ingested)
+    halfway = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _slow_download(url, dest_stem, on_progress=None):
+        on_progress(0.5)
+        halfway.set()
+        await release.wait()
+        dest_stem.with_suffix(".wav").write_bytes(b"\x00" * 100)
+
+    with _youtube_ready(_slow_download):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/documents/ingest-url", json={"url": "https://www.youtube.com/watch?v=t1"}
+            )
+            assert resp.status_code == 200, resp.text
+            doc_id = resp.json()["document_id"]
+            await asyncio.wait_for(halfway.wait(), timeout=5)
+            status = (await client.get(f"/documents/{doc_id}/status")).json()
+
+            assert status["stage"] == "downloading"
+            assert status["stage_pct"] == 50
+            assert status["progress_pct"] == 6  # halfway from 2 to 10
+            ingested.assert_not_called()
+
+            release.set()
+            await get_ingestion_jobs().get(doc_id)
+            after = (await client.get(f"/documents/{doc_id}/status")).json()
+
+    async with factory() as session:
+        doc = await session.get(DocumentModel, doc_id)
+    ingested.assert_awaited_once()
+    assert ingested.call_args.args[:4] == (doc_id, doc.file_path, "wav", "audio")
+    assert after["stage_pct"] is None
+
+
+async def test_failed_download_marks_the_document_and_removes_partial_files(test_db, monkeypatch):
+    _, factory, tmp_path = test_db
+    ingested = AsyncMock()
+    monkeypatch.setattr("app.workflows.youtube_ingestion.run_ingestion", ingested)
+
+    async def _failing_download(url, dest_stem, on_progress=None):
+        dest_stem.with_suffix(".webm.part").write_bytes(b"\x00" * 10)
+        raise RuntimeError("yt-dlp download failed (exit 1): ERROR: Video unavailable")
+
+    with _youtube_ready(_failing_download):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/documents/ingest-url", json={"url": "https://www.youtube.com/watch?v=t1"}
+            )
+            doc_id = resp.json()["document_id"]
+            await get_ingestion_jobs().get(doc_id)
+            status = (await client.get(f"/documents/{doc_id}/status")).json()
+
+    assert status["stage"] == "error"
+    assert "Video unavailable" in status["error_message"]
+    assert list((tmp_path / "raw").glob(f"{doc_id}*")) == []
+    ingested.assert_not_called()
+
+
+async def test_download_reports_progress(monkeypatch, tmp_path):
+    import app.services.youtube_downloader as yt
+
+    captured: list[str] = []
+    lines = (
+        b"luminary-progress 250 1000 NA\n"
+        b"luminary-progress 500 NA 2000\n"  # no total yet: the estimate stands in
+        b"luminary-progress 700 NA NA\n"  # neither: nothing to report
+        b"[ExtractAudio] Destination: out.wav\n"
+        b"luminary-progress 1000 1000 NA\n"
+    )
+
+    async def _fake_exec(*args, **kwargs):
+        captured.extend(args)
+        return _FakeYtDlp(stdout=lines)
+
+    monkeypatch.setattr(yt, "resolve_tool", lambda name: None)
+    monkeypatch.setattr(yt.asyncio, "create_subprocess_exec", _fake_exec)
+    seen: list[float] = []
+
+    await yt.download_audio("https://youtu.be/x", tmp_path / "out", on_progress=seen.append)
+
+    assert seen == [0.25, 0.25, 1.0]
+
+
+async def test_download_failure_still_names_yt_dlps_reason(monkeypatch, tmp_path):
+    import app.services.youtube_downloader as yt
+
+    async def _fake_exec(*args, **kwargs):
+        return _FakeYtDlp(stderr=b"ERROR: [youtube] x: Video unavailable\n", returncode=1)
+
+    monkeypatch.setattr(yt, "resolve_tool", lambda name: None)
+    monkeypatch.setattr(yt.asyncio, "create_subprocess_exec", _fake_exec)
+
+    with pytest.raises(RuntimeError, match="Video unavailable"):
+        await yt.download_audio("https://youtu.be/x", tmp_path / "out")
+
+
+async def test_cancelled_download_kills_yt_dlp(monkeypatch, tmp_path):
+    """Deleting a document cancels its job; the subprocess must not outlive it."""
+    import app.services.youtube_downloader as yt
+
+    proc = _FakeYtDlp(hang=True)
+
+    async def _fake_exec(*args, **kwargs):
+        return proc
+
+    monkeypatch.setattr(yt, "resolve_tool", lambda name: None)
+    monkeypatch.setattr(yt.asyncio, "create_subprocess_exec", _fake_exec)
+
+    task = asyncio.create_task(yt.download_audio("https://youtu.be/x", tmp_path / "out"))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert proc.killed

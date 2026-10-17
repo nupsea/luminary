@@ -245,10 +245,16 @@ def _model_records(chosen: set[Candidate]) -> list[dict]:
     ]
 
 
-async def _judged(segments: list[dict], candidates: list[Candidate]) -> set[Candidate]:
+async def _judged(
+    segments: list[dict],
+    candidates: list[Candidate],
+    on_progress: Callable[[float], None] | None = None,
+) -> set[Candidate]:
     chosen: set[Candidate] = set()
     unjudged = 0
-    for cand in candidates:
+    for i, cand in enumerate(candidates):
+        if on_progress is not None:
+            on_progress(i / len(candidates))
         verdict = await judge(segments, cand)
         if verdict is None:
             unjudged += 1
@@ -264,12 +270,17 @@ async def _judged(segments: list[dict], candidates: list[Candidate]) -> set[Cand
 
 
 async def correct_transcript(
-    document_id: str, segments: list[dict], *, ordinary: Callable[[str], bool] | None
+    document_id: str,
+    segments: list[dict],
+    *,
+    ordinary: Callable[[str], bool] | None,
+    on_progress: Callable[[float], None] | None = None,
 ) -> list[dict]:
     """Re-apply the user's corrections, then the judged glossary pass.
 
     `ordinary` is the speech model's whole-word test; None (captions an uploader
-    wrote) skips the glossary pass, since nothing was misheard.
+    wrote) skips the glossary pass, since nothing was misheard. `on_progress`
+    receives the fraction of candidate spans judged: one model call or two each.
     """
     vocabulary, recorded, personal = await fetch_transcript_inputs(document_id)
     user = [c for c in recorded if c.get("source") == "user"]
@@ -277,7 +288,8 @@ async def correct_transcript(
     chosen: set[Candidate] = set()
     if ordinary is not None:
         terms = glossary(vocabulary, personal)
-        chosen = await _judged(segments, find_candidates(segments, terms, ordinary=ordinary))
+        candidates = find_candidates(segments, terms, ordinary=ordinary)
+        chosen = await _judged(segments, candidates, on_progress)
         segments = _apply_spans(segments, chosen)
     await save_transcript_corrections(document_id, [*records, *_model_records(chosen)])
     return segments

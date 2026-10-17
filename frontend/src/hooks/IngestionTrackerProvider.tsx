@@ -112,6 +112,7 @@ export function IngestionTrackerProvider({ children }: { children: ReactNode }) 
           ...current,
           stage: status.stage,
           progressPct: status.progress_pct,
+          stagePct: status.stage_pct ?? null,
           missedPolls: 0,
         }
 
@@ -149,6 +150,7 @@ export function IngestionTrackerProvider({ children }: { children: ReactNode }) 
         filename,
         stage: "parsing",
         progressPct: 5,
+        stagePct: null,
         status: "processing",
         errorMessage: null,
         missedPolls: 0,
