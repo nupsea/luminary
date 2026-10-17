@@ -33,10 +33,32 @@ def test_classify_section_level_nmp():
     assert classify_section_level("3.2.1 Sub-sub-section") == 4
 
 
-def test_classify_section_level_default():
-    # Headings that match no pattern → level 2
-    assert classify_section_level("Introduction") == 2
-    assert classify_section_level("") == 2
+def test_classify_section_level_unnumbered_is_none():
+    assert classify_section_level("Introduction") is None
+    assert classify_section_level("") is None
+
+
+def test_an_unnumbered_heading_keeps_its_authored_level():
+    """#307: overwriting markdown levels with 2 flattened d2l's 4 levels into one."""
+    sections = [
+        {"heading": "Introduction", "level": 1},
+        {"heading": "Key Components", "level": 2},
+        {"heading": "Data", "level": 3},
+        {"heading": "Summary", "level": 2},
+        {"heading": "Linear Regression", "level": 1},
+        {"heading": "Summary", "level": 2},
+        {"heading": "No level given"},
+    ]
+    result = assign_parent_headings_dicts(sections)
+
+    assert [s["level"] for s in result] == [1, 2, 3, 2, 1, 2, 2]
+    assert [s["parent_index"] for s in result] == [None, 0, 1, 0, None, 4, 4]
+    assert result[2]["parent_heading"] == "Key Components"
+
+
+def test_a_numbered_heading_overrides_the_authored_level():
+    result = assign_parent_headings_dicts([{"heading": "1.1 Overview", "level": 1}])
+    assert result[0]["level"] == 3
 
 
 def test_numbered_hierarchy_levels_and_parent_chain():

@@ -398,12 +398,10 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
 
         await session.flush()
 
-        # Resolve parent_section_id: build heading->id map, then update
-        heading_to_id: dict[str, str] = {sm.heading: sm.id for sm in section_models}
-        for s, sm in zip(raw_sections, section_models, strict=False):
-            ph = s.get("parent_heading")
-            if ph:
-                sm.parent_section_id = heading_to_id.get(ph)
+        # By index: headings repeat ("Summary"), so a heading map picks the wrong parent.
+        for s, sm in zip(raw_sections, section_models, strict=True):
+            if s.get("parent_index") is not None:
+                sm.parent_section_id = section_models[s["parent_index"]].id
         await session.flush()
 
         chunks: list[dict] = []
