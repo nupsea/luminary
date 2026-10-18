@@ -16,10 +16,10 @@ import json
 import logging
 import re
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DocumentModel, SectionModel
+from app.repos.document_repo import DocumentRepo
 from app.services.llm import get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -177,17 +177,7 @@ class TopicService:
         if doc is None:
             return None
 
-        sections = list(
-            (
-                await session.execute(
-                    select(SectionModel)
-                    .where(SectionModel.document_id == document_id)
-                    .order_by(SectionModel.section_order)
-                )
-            )
-            .scalars()
-            .all()
-        )
+        sections = list(await DocumentRepo(session).sections_for_document(document_id))
         content = [s for s in sections if not is_junk_heading(s.heading)]
         tops = _pick_topic_sections(content) if content else None
         if tops:
@@ -220,17 +210,7 @@ class TopicService:
     ) -> list[dict]:
         """All real sub-sections of a document (junk filtered, searchable) for drill-down study,
         e.g. search 'Hardware Faults' under DDIA's Chapter 1. Distinct from the chapter list."""
-        rows = list(
-            (
-                await session.execute(
-                    select(SectionModel)
-                    .where(SectionModel.document_id == document_id)
-                    .order_by(SectionModel.section_order)
-                )
-            )
-            .scalars()
-            .all()
-        )
+        rows = list(await DocumentRepo(session).sections_for_document(document_id))
         needle = (q or "").strip().lower()
         out = []
         for s in rows:

@@ -19,13 +19,13 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models import CollectionModel, DocumentModel
 from app.paths import app_version, is_packaged
+from app.repos.collection_repo import CollectionRepo
+from app.repos.document_repo import DocumentRepo
 from app.services.settings_service import get_local_chat_model, get_vision_model
 from app.services.storage_errors import folder_problem
 from app.storage import library_root, machine_root
@@ -167,9 +167,8 @@ async def _library_names() -> list[str] | None:
     """Document titles, file names and collection names; None if the library is unreadable."""
     try:
         async with get_session_factory()() as session:
-            query = select(DocumentModel.title, DocumentModel.file_path)
-            docs = (await session.execute(query)).all()
-            collections = (await session.execute(select(CollectionModel.name))).scalars().all()
+            docs = await DocumentRepo(session).titles_and_file_paths()
+            collections = list(await CollectionRepo(session).ids_by_name())
     except SQLAlchemyError:
         return None
     names = set(collections)

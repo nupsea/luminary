@@ -1,10 +1,9 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import MisconceptionModel
+from app.repos.misconception_repo import MisconceptionRepo
 
 logger = logging.getLogger(__name__)
 
@@ -13,13 +12,7 @@ _RESOLVING_RATINGS = frozenset({"good", "easy"})
 
 
 async def resolve_for_flashcard(session: AsyncSession, flashcard_id: str) -> int:
-    result = await session.execute(
-        update(MisconceptionModel)
-        .where(MisconceptionModel.flashcard_id == flashcard_id)
-        .where(MisconceptionModel.status == "open")
-        .values(status="resolved", resolved_at=datetime.now(UTC))
-    )
-    resolved = result.rowcount or 0
+    resolved = await MisconceptionRepo(session).resolve_open(flashcard_id, datetime.now(UTC))
     if resolved:
         logger.info(
             "Resolved misconceptions",
@@ -34,21 +27,11 @@ async def resolve_on_review(session: AsyncSession, flashcard_id: str, rating: st
     return await resolve_for_flashcard(session, flashcard_id)
 
 
-async def _count(session: AsyncSession, *conditions) -> int:
-    result = await session.execute(
-        select(func.count()).select_from(MisconceptionModel).where(*conditions)
-    )
-    return int(result.scalar_one())
-
-
 async def get_stats(session: AsyncSession) -> dict:
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
+    repo = MisconceptionRepo(session)
     return {
-        "open_count": await _count(session, MisconceptionModel.status == "open"),
-        "resolved_count": await _count(session, MisconceptionModel.status == "resolved"),
-        "resolved_last_30d": await _count(
-            session,
-            MisconceptionModel.status == "resolved",
-            MisconceptionModel.resolved_at >= cutoff,
-        ),
+        "open_count": await repo.count("open"),
+        "resolved_count": await repo.count("resolved"),
+        "resolved_last_30d": await repo.count("resolved", resolved_since=cutoff),
     }

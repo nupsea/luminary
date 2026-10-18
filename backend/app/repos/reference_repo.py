@@ -43,6 +43,20 @@ class ReferenceRepo:
         )
         return result.scalars().all()
 
+    async def first_for_document(self, document_id: str, limit: int) -> list[WebReferenceModel]:
+        result = await self.session.execute(
+            select(WebReferenceModel)
+            .where(WebReferenceModel.document_id == document_id)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def by_ids(self, ref_ids: Sequence[str]) -> dict[str, WebReferenceModel]:
+        result = await self.session.execute(
+            select(WebReferenceModel).where(WebReferenceModel.id.in_(list(ref_ids)))
+        )
+        return {r.id: r for r in result.scalars().all()}
+
     async def count_for_section(self, document_id: str, section_id: str | None) -> int:
         result = await self.session.execute(
             select(func.count(WebReferenceModel.id)).where(

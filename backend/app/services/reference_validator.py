@@ -9,11 +9,10 @@ import logging
 from datetime import UTC, datetime
 
 import httpx
-from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models import WebReferenceModel
+from app.repos.reference_repo import ReferenceRepo
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +37,7 @@ class ReferenceValidatorService:
         if not link_checks_enabled():
             return {"valid": 0, "invalid": 0}
         async with get_session_factory()() as session:
-            result = await session.execute(
-                select(WebReferenceModel)
-                .where(WebReferenceModel.document_id == document_id)
-                .limit(_MAX_URLS_PER_RUN)
-            )
-            refs = list(result.scalars().all())
+            refs = await ReferenceRepo(session).first_for_document(document_id, _MAX_URLS_PER_RUN)
 
         if not refs:
             return {"valid": 0, "invalid": 0}
@@ -70,11 +64,9 @@ class ReferenceValidatorService:
         invalid_count = 0
 
         async with get_session_factory()() as session:
+            stored = await ReferenceRepo(session).by_ids([ref_id for ref_id, _ in results])
             for ref_id, is_reachable in results:
-                ref_result = await session.execute(
-                    select(WebReferenceModel).where(WebReferenceModel.id == ref_id)
-                )
-                ref = ref_result.scalar_one_or_none()
+                ref = stored.get(ref_id)
                 if ref is None:
                     continue
                 ref.is_valid = is_reachable

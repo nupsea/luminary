@@ -75,6 +75,10 @@ class DocumentRepo:
         )
         return list(result.scalars().all())
 
+    async def titles_and_file_paths(self) -> list[tuple[str, str | None]]:
+        result = await self.session.execute(select(DocumentModel.title, DocumentModel.file_path))
+        return [(title, path) for title, path in result.all()]
+
     async def other_ids(self, document_id: str) -> list[str]:
         """Every document id but this one."""
         result = await self.session.execute(
