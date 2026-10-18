@@ -19,14 +19,12 @@ from __future__ import annotations
 import logging
 import shutil
 
-from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models import (
     AnnotationModel,
     ChapterCardRunModel,
-    ChatSessionModel,
     ChatSuggestionHistoryModel,
     ChunkModel,
     ClipModel,
@@ -47,7 +45,6 @@ from app.models import (
     ImageModel,
     LearningGoalModel,
     LearningObjectiveModel,
-    LibrarySummaryModel,
     MisconceptionModel,
     NoteModel,
     NoteSourceModel,
@@ -63,6 +60,8 @@ from app.models import (
     WebReferenceModel,
 )
 from app.repos.collection_repo import CollectionRepo
+from app.repos.document_cascade_repo import DocumentCascadeRepo
+from app.repos.flashcard_repo import FlashcardRepo
 from app.repos.note_repo import NoteRepo
 
 # indirect: get_lancedb_service is patched in tests
@@ -170,6 +169,7 @@ class DocumentDeletionService:
         used by bulk-delete) and is responsible for `await session.commit()`.
         """
         document_id = doc.id
+        cascade = DocumentCascadeRepo(session)
 
         # Drop document_tag_index rows + decrement canonical_tags counts. Local
         # import keeps notes_service from importing the deletion service.
@@ -177,62 +177,30 @@ class DocumentDeletionService:
 
         await sync_document_tag_index(document_id, [], session)
 
-        # FTS5 virtual tables -- use raw DELETE because they don't have an ORM model.
-        await session.execute(
-            text("DELETE FROM chunks_fts WHERE document_id = :doc_id"),
-            {"doc_id": document_id},
-        )
-        await session.execute(
-            text("DELETE FROM images_fts WHERE document_id = :doc_id"),
-            {"doc_id": document_id},
-        )
+        await cascade.delete_fts_rows(document_id)
 
         # flashcards_fts carries no document_id for the two deletes above to match,
         # and an FTS5 UNINDEXED column cannot be filtered on directly (I-4) -- so the
         # card ids have to be read first. Skipping this is why 228 rows in that index
         # pointed at cards that no longer existed: flashcard search matches the index,
         # so a deleted document's cards kept turning up in results.
-        card_ids = (
-            (
-                await session.execute(
-                    select(FlashcardModel.id).where(FlashcardModel.document_id == document_id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for card_id in card_ids:
+        for card_id in await FlashcardRepo(session).list_ids_for_document(document_id):
             await _delete_flashcard_fts(card_id, session)
 
-        for model in _DOCUMENT_ID_CHILD_TABLES:
-            await session.execute(
-                delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
-            )
+        await cascade.delete_keyed_rows(document_id, _DOCUMENT_ID_CHILD_TABLES)
         await _release_notes(session, document_id, delete_notes=delete_notes)
 
         # ReadingPositionModel and StudySessionModel are separated because their
         # FK relationship to DocumentModel uses a different column name in some
         # historical migrations; safer to spell them out.
-        await session.execute(
-            delete(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
-        )
-        await session.execute(
-            delete(StudySessionModel).where(StudySessionModel.document_id == document_id)
-        )
+        await cascade.delete_keyed_rows(document_id, (ReadingPositionModel, StudySessionModel))
         # Chat sessions hold their scope as a JSON array, so no document_id column
         # exists for the loop above to match. Leaving the id behind is not cosmetic:
         # a chat scoped to a deleted document filters every question down to a row
         # that no longer exists and answers nothing, which is what happened for nine
         # days before it was found. A session left with no documents becomes
         # library-wide rather than scoped to nothing.
-        sessions = (
-            await session.execute(
-                select(ChatSessionModel).where(
-                    ChatSessionModel.document_ids.like(f"%{document_id}%")
-                )
-            )
-        ).scalars()
-        for chat in sessions:
+        for chat in await cascade.chats_mentioning(document_id):
             remaining = [d for d in (chat.document_ids or []) if d != document_id]
             if remaining == list(chat.document_ids or []):
                 continue
@@ -242,16 +210,11 @@ class DocumentDeletionService:
 
         # Keyed on (member_id, member_type), not document_id, so the loop above
         # misses it; orphaned rows inflate every collection's badge.
-        await session.execute(
-            delete(CollectionMemberModel).where(
-                CollectionMemberModel.member_id == document_id,
-                CollectionMemberModel.member_type == "document",
-            )
-        )
+        await cascade.delete_collection_membership(document_id)
         await _retire_auto_collection(session, document_id)
         # The library summary describes every document, so a delete drops it (#140).
         # The caller schedules the regeneration once the transaction commits.
-        await session.execute(delete(LibrarySummaryModel))
+        await cascade.delete_library_summary()
         await session.delete(doc)
 
     async def delete_derived_for_reparse(
@@ -268,31 +231,21 @@ class DocumentDeletionService:
         Nothing here runs unless the caller has already established consent; the
         endpoint reports the counts below before it is invoked a second time.
         """
-        counts: dict[str, int] = {}
-        for model in (
-            ChunkModel,
-            SectionSummaryModel,
-            SectionModel,
-            SummaryModel,
-            ImageModel,
-            LearningObjectiveModel,
-            CodeSnippetModel,
-            WebReferenceModel,
-        ):
-            result = await session.execute(
-                delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
-            )
-            counts[model.__tablename__] = result.rowcount or 0
-
-        # FTS shadow tables are not reached by an ORM delete.
-        await session.execute(
-            text("DELETE FROM chunks_fts WHERE document_id = :doc_id"),
-            {"doc_id": document_id},
+        cascade = DocumentCascadeRepo(session)
+        counts = await cascade.delete_keyed_rows(
+            document_id,
+            (
+                ChunkModel,
+                SectionSummaryModel,
+                SectionModel,
+                SummaryModel,
+                ImageModel,
+                LearningObjectiveModel,
+                CodeSnippetModel,
+                WebReferenceModel,
+            ),
         )
-        await session.execute(
-            text("DELETE FROM images_fts WHERE document_id = :doc_id"),
-            {"doc_id": document_id},
-        )
+        await cascade.delete_fts_rows(document_id)
         return counts
 
     async def count_anchored_rows(self, session: AsyncSession, document_id: str) -> dict[str, int]:
@@ -302,17 +255,15 @@ class DocumentDeletionService:
         replaces. Reporting zero when the answer is "your 40 highlights" would be
         the silent kind of damage this codebase exists to avoid.
         """
-        out: dict[str, int] = {}
-        for label, model in (
-            ("flashcards", FlashcardModel),
-            ("annotations", AnnotationModel),
-            ("clips", ClipModel),
-        ):
-            result = await session.execute(
-                select(func.count()).select_from(model).where(model.document_id == document_id)
+        cascade = DocumentCascadeRepo(session)
+        return {
+            label: await cascade.count_keyed_rows(document_id, model)
+            for label, model in (
+                ("flashcards", FlashcardModel),
+                ("annotations", AnnotationModel),
+                ("clips", ClipModel),
             )
-            out[label] = int(result.scalar_one() or 0)
-        return out
+        }
 
     def delete_lancedb_vectors(self, document_id: str, *, delete_notes: bool = False) -> None:
         """Drop chunk + image vectors and release note vectors. Non-fatal: failures are logged."""
