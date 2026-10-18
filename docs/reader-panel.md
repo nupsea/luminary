@@ -59,6 +59,12 @@ thread.
 - A second selection appends into the open draft (`appendCapture`).
 - Opening a note from the panel edits it in place, with autosave bound to that note. An existing note
   is never discarded for being emptied; only a new draft is.
+- An opened note keeps its own sources. Sending this document instead made opening a note an edit,
+  and the autosave dropped every other source it had.
+- "All notes" and previous/next leave through the same save as Done; switching `noteId` in place
+  would rebind the autosaver and drop an edit still inside its debounce. Each opened note gets its
+  own composer (`key`); a capture keeps one so later selections append. `make verify-note-nav`
+  drives both in a browser.
 - Each note in the Notes face has its own delete, confirmed inline. Without it the only delete in
   reach was the document's, and a user removed a book (and its notes) trying to remove a note.
 - Deleting the document keeps its notes as standalone notes unless "Also delete my N notes" is

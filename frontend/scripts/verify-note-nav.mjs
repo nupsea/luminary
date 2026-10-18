@@ -72,8 +72,11 @@ try {
   check("opening a two-source note keeps both sources",
     after.source_document_ids.length === 2, JSON.stringify(after.source_document_ids))
 
-  const position = await composer.getByText(/\d+ of \d+/).first().innerText()
-  check("the open note shows its place among the document's notes", /\d+ of \d+/.test(position), position)
+  const positionLabel = composer.getByText(/\d+ of \d+/)
+  const hasNav = (await positionLabel.count()) > 0
+  check("the open note shows its place among the document's notes", hasNav,
+    hasNav ? await positionLabel.first().innerText() : "no position shown")
+  if (!hasNav) throw new Error("no note navigation to exercise")
 
   const marker = ` typed-before-next-${stamp}`
   await composer.locator(".cm-content").click()
@@ -96,6 +99,9 @@ try {
   await page.waitForTimeout(1500)
   check("All notes returns to the document's list",
     (await page.locator('[data-testid="docked-notes-list"]').count()) === 1 && (await composer.count()) === 0)
+} catch (e) {
+  // A run cut short by a failed check reports that check; anything else is a crash.
+  if (failures.length === 0) throw e
 } finally {
   for (const n of created) await fetch(`${API}/notes/${n.id}`, { method: "DELETE" })
   console.log(`  (removed ${created.length} note(s) this check created)`)

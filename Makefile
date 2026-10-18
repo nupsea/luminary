@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-reader-switch luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-reader-switch verify-note-nav luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
 
 # install.sh puts uv (and Node on Linux) in ~/.local/bin, which a shell opened
 # before the install does not have on PATH.
@@ -471,6 +471,13 @@ verify-reader-switch:
 	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
 		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
 	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} node scripts/verify-reader-switch.mjs
+
+# A note open in the docked panel leads back to the list and on to the next note,
+# saving first, and opening one keeps its sources. Needs two ingested documents, no model.
+verify-note-nav:
+	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
+		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
+	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} node scripts/verify-note-nav.mjs
 
 measure-ttft:
 	@echo "Measuring time to first token (requires backend on :7820)..."
