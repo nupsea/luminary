@@ -30,18 +30,11 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import LuminaryError
-from app.models import (
-    FlashcardModel,
-    LearningGoalModel,
-    NoteModel,
-    PomodoroSessionModel,
-    QAHistoryModel,
-    ReviewEventModel,
-)
+from app.models import LearningGoalModel, PomodoroSessionModel
+from app.repos.goal_repo import GoalRepo
 
 logger = logging.getLogger(__name__)
 
@@ -93,14 +86,12 @@ class LearningGoalsService:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._repo = GoalRepo(session)
 
     # ------------------------------------------------------------------ helpers
 
     async def _get(self, goal_id: str) -> LearningGoalModel:
-        result = await self._session.execute(
-            select(LearningGoalModel).where(LearningGoalModel.id == goal_id)
-        )
-        row = result.scalar_one_or_none()
+        row = await self._repo.find(goal_id)
         if row is None:
             raise GoalNotFound(f"learning goal {goal_id} not found")
         return row
@@ -146,19 +137,12 @@ class LearningGoalsService:
         return row
 
     async def get_goal(self, goal_id: str) -> LearningGoalModel | None:
-        result = await self._session.execute(
-            select(LearningGoalModel).where(LearningGoalModel.id == goal_id)
-        )
-        return result.scalar_one_or_none()
+        return await self._repo.find(goal_id)
 
     async def list_goals(self, status_filter: str | None = None) -> list[LearningGoalModel]:
-        stmt = select(LearningGoalModel).order_by(LearningGoalModel.created_at.desc())
-        if status_filter is not None:
-            if status_filter not in VALID_STATUSES:
-                raise ValueError(f"invalid status filter: {status_filter}")
-            stmt = stmt.where(LearningGoalModel.status == status_filter)
-        result = await self._session.execute(stmt)
-        return list(result.scalars().all())
+        if status_filter is not None and status_filter not in VALID_STATUSES:
+            raise ValueError(f"invalid status filter: {status_filter}")
+        return await self._repo.list_newest_first(status_filter)
 
     async def update_goal(
         self,
@@ -207,12 +191,7 @@ class LearningGoalsService:
         row = await self.get_goal(goal_id)
         if row is None:
             return False
-        # Equivalent to ON DELETE SET NULL: clear goal_id on every linked session.
-        await self._session.execute(
-            update(PomodoroSessionModel)
-            .where(PomodoroSessionModel.goal_id == goal_id)
-            .values(goal_id=None)
-        )
+        await self._repo.unlink_all_sessions(goal_id)
         await self._session.delete(row)
         await self._session.commit()
         logger.info("Deleted learning goal %s", goal_id)
@@ -223,10 +202,7 @@ class LearningGoalsService:
     async def link_session(self, goal_id: str, session_id: str) -> PomodoroSessionModel:
         # Verify the goal exists -- raises GoalNotFound otherwise.
         await self._get(goal_id)
-        result = await self._session.execute(
-            select(PomodoroSessionModel).where(PomodoroSessionModel.id == session_id)
-        )
-        sess = result.scalar_one_or_none()
+        sess = await self._repo.find_session(session_id)
         if sess is None:
             raise SessionNotFound(f"pomodoro session {session_id} not found")
         sess.goal_id = goal_id
@@ -235,10 +211,7 @@ class LearningGoalsService:
         return sess
 
     async def unlink_session(self, goal_id: str, session_id: str) -> PomodoroSessionModel:
-        result = await self._session.execute(
-            select(PomodoroSessionModel).where(PomodoroSessionModel.id == session_id)
-        )
-        sess = result.scalar_one_or_none()
+        sess = await self._repo.find_session(session_id)
         if sess is None:
             raise SessionNotFound(f"pomodoro session {session_id} not found")
         if sess.goal_id == goal_id:
@@ -251,13 +224,7 @@ class LearningGoalsService:
         self, goal_id: str, limit: int = 20
     ) -> list[PomodoroSessionModel]:
         """Most-recent first, used by the detail panel."""
-        result = await self._session.execute(
-            select(PomodoroSessionModel)
-            .where(PomodoroSessionModel.goal_id == goal_id)
-            .order_by(PomodoroSessionModel.created_at.desc())
-            .limit(limit)
-        )
-        return list(result.scalars().all())
+        return await self._repo.linked_sessions(goal_id, limit)
 
     # ------------------------------------------------------------------ progress
 
@@ -279,23 +246,7 @@ class LearningGoalsService:
         self, goal_id: str, surfaces: str | list[str]
     ) -> list[PomodoroSessionModel]:
         surface_values = [surfaces] if isinstance(surfaces, str) else surfaces
-        result = await self._session.execute(
-            select(PomodoroSessionModel).where(
-                PomodoroSessionModel.goal_id == goal_id,
-                PomodoroSessionModel.status == "completed",
-                PomodoroSessionModel.surface.in_(surface_values),
-            )
-        )
-        return list(result.scalars().all())
-
-    async def _all_completed_sessions(self, goal_id: str) -> list[PomodoroSessionModel]:
-        result = await self._session.execute(
-            select(PomodoroSessionModel).where(
-                PomodoroSessionModel.goal_id == goal_id,
-                PomodoroSessionModel.status == "completed",
-            )
-        )
-        return list(result.scalars().all())
+        return await self._repo.completed_sessions(goal_id, surface_values)
 
     @staticmethod
     def _pct(numerator: float, target: int | None) -> float | None:
@@ -311,7 +262,7 @@ class LearningGoalsService:
         }
 
     async def _progress_studying(self, goal: LearningGoalModel) -> dict[str, Any]:
-        sessions = await self._all_completed_sessions(goal.id)
+        sessions = await self._repo.completed_sessions(goal.id)
         minutes_focused = sum(s.focus_minutes for s in sessions)
         surface_minutes: dict[str, int] = {}
         surface_sessions: dict[str, int] = {}
@@ -359,16 +310,11 @@ class LearningGoalsService:
             window_end = _as_utc(sess.completed_at) if sess.completed_at is not None else None
             if window_start is None or window_end is None:
                 continue
-            stmt = select(ReviewEventModel).where(
-                ReviewEventModel.reviewed_at >= window_start,
-                ReviewEventModel.reviewed_at <= window_end,
-            )
-            result = await self._session.execute(stmt)
-            events = list(result.scalars().all())
+            events = await self._repo.reviews_between(window_start, window_end)
 
             if goal.deck_id is not None:
                 # Filter to flashcards belonging to the deck.
-                deck_card_ids = await self._deck_flashcard_ids(goal.deck_id)
+                deck_card_ids = await self._repo.deck_card_ids(goal.deck_id)
                 events = [e for e in events if e.flashcard_id in deck_card_ids]
 
             for e in events:
@@ -389,12 +335,6 @@ class LearningGoalsService:
             "completed_pct": self._pct(cards_reviewed, goal.target_value),
         }
 
-    async def _deck_flashcard_ids(self, deck_id: str) -> set[str]:
-        result = await self._session.execute(
-            select(FlashcardModel.id).where(FlashcardModel.deck == deck_id)
-        )
-        return set(result.scalars().all())
-
     async def _progress_write(self, goal: LearningGoalModel) -> dict[str, Any]:
         sessions = await self._completed_sessions(goal.id, "write")
         sessions_completed = len(sessions)
@@ -404,15 +344,7 @@ class LearningGoalsService:
             window_end = _as_utc(sess.completed_at) if sess.completed_at is not None else None
             if window_start is None or window_end is None:
                 continue
-            cnt = (
-                await self._session.execute(
-                    select(func.count(NoteModel.id)).where(
-                        NoteModel.created_at >= window_start,
-                        NoteModel.created_at <= window_end,
-                    )
-                )
-            ).scalar_one()
-            notes_created += int(cnt)
+            notes_created += await self._repo.count_notes_between(window_start, window_end)
         return {
             "notes_created": notes_created,
             "sessions_completed": sessions_completed,
@@ -428,15 +360,7 @@ class LearningGoalsService:
             window_end = _as_utc(sess.completed_at) if sess.completed_at is not None else None
             if window_start is None or window_end is None:
                 continue
-            cnt = (
-                await self._session.execute(
-                    select(func.count(QAHistoryModel.id)).where(
-                        QAHistoryModel.created_at >= window_start,
-                        QAHistoryModel.created_at <= window_end,
-                    )
-                )
-            ).scalar_one()
-            turns += int(cnt)
+            turns += await self._repo.count_qa_turns_between(window_start, window_end)
         return {
             "turns": turns,
             "sessions_completed": sessions_completed,

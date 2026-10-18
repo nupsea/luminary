@@ -137,7 +137,6 @@
     "app/services/flashcard_search.py": 16,
     "app/services/fsrs_service.py": 6,
     "app/services/gap_detector.py": 2,
-    "app/services/goal_service.py": 25,
     "app/services/image_enricher.py": 14,
     "app/services/image_extractor.py": 16,
     "app/services/learning_objective_extractor.py": 1,
