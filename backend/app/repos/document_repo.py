@@ -67,6 +67,28 @@ class DocumentRepo:
     async def get(self, document_id: str) -> DocumentModel | None:
         return await self.session.get(DocumentModel, document_id)
 
+    async def by_ids(self, document_ids: Sequence[str]) -> list[DocumentModel]:
+        if not document_ids:
+            return []
+        result = await self.session.execute(
+            select(DocumentModel).where(DocumentModel.id.in_(list(document_ids)))
+        )
+        return list(result.scalars().all())
+
+    async def other_ids(self, document_id: str) -> list[str]:
+        """Every document id but this one."""
+        result = await self.session.execute(
+            select(DocumentModel.id).where(DocumentModel.id != document_id)
+        )
+        return list(result.scalars().all())
+
+    async def set_publication_year(self, document_id: str, year: int) -> None:
+        await self.session.execute(
+            update(DocumentModel)
+            .where(DocumentModel.id == document_id)
+            .values(publication_year=year)
+        )
+
     async def has_ready_documents(self) -> bool:
         """Whether any document has reached a queryable stage."""
         count = await self.session.scalar(

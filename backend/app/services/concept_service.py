@@ -16,10 +16,11 @@ import re
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ConceptModel
+from app.repos.concept_repo import ConceptRepo
+from app.repos.flashcard_repo import FlashcardRepo
 from app.repos.graph_concept_repo import GraphConceptRepo
 from app.services.vector_store import get_lancedb_service
 
@@ -42,8 +43,7 @@ class ConceptService:
         slug = base
         n = 2
         while True:
-            exists = await session.execute(select(ConceptModel.id).where(ConceptModel.slug == slug))
-            if exists.scalar_one_or_none() is None:
+            if await ConceptRepo(session).find_by_slug(slug) is None:
                 return slug
             slug = f"{base}-{n}"
             n += 1
@@ -216,8 +216,6 @@ class ConceptService:
         self, session: AsyncSession, source_id: str, target_id: str
     ) -> ConceptModel | None:
         """Merge source into target: move cards + union evidence, delete source."""
-        from app.models import FlashcardModel  # noqa: PLC0415
-
         if source_id == target_id:
             return await session.get(ConceptModel, target_id)
         source = await session.get(ConceptModel, source_id)
@@ -225,16 +223,7 @@ class ConceptService:
         if source is None or target is None:
             return None
         # reassign the source's mapped cards to the target
-        cards = (
-            (
-                await session.execute(
-                    select(FlashcardModel).where(FlashcardModel.concept_id == source_id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for c in cards:
+        for c in await FlashcardRepo(session).list_for_concept(source_id):
             c.concept_id = target_id
             c.concept_slug = target.slug  # keep the durable binding pointed at the survivor
         # union evidence and refresh the target's centroid vector
@@ -253,24 +242,10 @@ class ConceptService:
         Idempotent: matches concepts by stable slug. Called after a re-parse produces
         fresh proposals. Returns the number of overrides applied.
         """
-        from app.models import OverrideModel  # noqa: PLC0415
-
-        overrides = (
-            (await session.execute(select(OverrideModel).order_by(OverrideModel.created_at.asc())))
-            .scalars()
-            .all()
-        )
+        concepts = ConceptRepo(session)
         applied = 0
-        for ov in overrides:
-            row = (
-                (
-                    await session.execute(
-                        select(ConceptModel).where(ConceptModel.slug == ov.target_key)
-                    )
-                )
-                .scalars()
-                .first()
-            )
+        for ov in await concepts.overrides_oldest_first():
+            row = await concepts.find_by_slug(ov.target_key)
             payload = ov.payload_json or {}
             if ov.kind == "reject_concept":
                 if row is not None:
@@ -288,15 +263,7 @@ class ConceptService:
                 row.status = "confirmed"
                 applied += 1
             elif ov.kind == "merge":
-                target = (
-                    (
-                        await session.execute(
-                            select(ConceptModel).where(ConceptModel.slug == payload.get("into"))
-                        )
-                    )
-                    .scalars()
-                    .first()
-                )
+                target = await concepts.find_by_slug(payload.get("into", ""))
                 if target is not None:
                     await self.merge_concepts(session, row.id, target.id)
                     applied += 1

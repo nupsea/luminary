@@ -9,10 +9,10 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChunkModel, FlashcardModel, SectionModel
+from app.models import FlashcardModel
+from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
 from app.services.flashcard import _parse_llm_response
 from app.services.flashcard_parsers import card_rejection, grounding_state
@@ -71,36 +71,16 @@ class FlashcardAuditService:
         section context. Cards with null bloom_level are counted in total_cards
         but excluded from by_bloom_level and gap computation.
         """
-        # Count all cards for this document (including null bloom_level)
-        all_cards_result = await db.execute(
-            select(FlashcardModel.id, FlashcardModel.bloom_level).where(
-                FlashcardModel.document_id == document_id
-            )
-        )
-        all_rows = all_cards_result.all()
-        total_cards = len(all_rows)
-
-        # One JOIN query: flashcard -> chunk -> section (excludes null chunk_id naturally)
-        stmt = (
-            select(
-                FlashcardModel.bloom_level,
-                ChunkModel.section_id,
-                SectionModel.heading,
-            )
-            .join(ChunkModel, FlashcardModel.chunk_id == ChunkModel.id)
-            .join(SectionModel, ChunkModel.section_id == SectionModel.id)
-            .where(FlashcardModel.document_id == document_id)
-            .where(FlashcardModel.bloom_level.is_not(None))
-        )
-        result = await db.execute(stmt)
-        rows = result.all()
+        repo = FlashcardRepo(db)
+        total_cards = len(await repo.all_for(document_id))
+        rows = await repo.bloom_by_section(document_id)
 
         # Build per-section stats
         by_section: dict[str, BloomSectionStat] = {}
         global_by_level: dict[int, int] = {}
 
         for bloom_level, section_id, section_heading in rows:
-            level = int(bloom_level)
+            level = bloom_level
             global_by_level[level] = global_by_level.get(level, 0) + 1
 
             if section_id not in by_section:
@@ -170,14 +150,10 @@ class FlashcardAuditService:
         # into the deck under a "Source" blockquote. A card is written from a passage
         # or it is not written.
         section_text: dict[str, str] = {}
+        docs = DocumentRepo(db)
         for gap in gaps:
-            rows = await db.execute(
-                select(ChunkModel.text)
-                .where(ChunkModel.document_id == document_id)
-                .where(ChunkModel.section_id == gap["section_id"])
-                .order_by(ChunkModel.chunk_index)
-            )
-            section_text[gap["section_id"]] = "\n\n".join(t for t in rows.scalars().all() if t)
+            chunks = await docs.chunks_in_section(gap["section_id"], document_id)
+            section_text[gap["section_id"]] = "\n\n".join(c.text for c in chunks if c.text)
 
         # AsyncSession is NOT safe for concurrent access. Strategy: run LLM calls
         # concurrently (bounded by llm_sem), collect results, then write DB rows
@@ -225,13 +201,8 @@ class FlashcardAuditService:
         now = datetime.now(UTC)
         for section_id, level, cards_data in llm_results:
             # Look up first chunk for this section to assign chunk_id (sequential DB access)
-            chunk_result = await db.execute(
-                select(ChunkModel.id)
-                .where(ChunkModel.document_id == document_id)
-                .where(ChunkModel.section_id == section_id)
-                .limit(1)
-            )
-            first_chunk_id = chunk_result.scalar_one_or_none()
+            section_chunks = await docs.chunks_in_section(section_id, document_id)
+            first_chunk_id = section_chunks[0].id if section_chunks else None
 
             for item in cards_data:
                 if not isinstance(item, dict):

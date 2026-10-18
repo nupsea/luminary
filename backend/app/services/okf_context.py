@@ -14,10 +14,10 @@ from __future__ import annotations
 import logging
 import re
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChunkModel, ConceptModel
+from app.repos.concept_repo import ConceptRepo
+from app.repos.document_repo import DocumentRepo
 from app.repos.graph_concept_repo import GraphConceptRepo
 
 logger = logging.getLogger(__name__)
@@ -47,13 +47,7 @@ class OkfContextService:
             qt = _tokens(query)
             if not qt:
                 return []
-            rows = (
-                await session.execute(
-                    select(ConceptModel.id, ConceptModel.label).where(
-                        ConceptModel.status != "candidate"
-                    )
-                )
-            ).all()
+            rows = await ConceptRepo(session).id_labels(tracked_only=True)
             scored = []
             for cid, label in rows:
                 ct = _tokens(label)
@@ -76,11 +70,8 @@ class OkfContextService:
         """Assemble an OKF grounding block: per concept, its evidence quotes + related concepts."""
         if not concept_ids:
             return ""
-        concepts = list(
-            (await session.execute(select(ConceptModel).where(ConceptModel.id.in_(concept_ids))))
-            .scalars()
-            .all()
-        )
+        concept_repo = ConceptRepo(session)
+        concepts = list(await concept_repo.by_ids(concept_ids))
         if not concepts:
             return ""
         # keep the caller's order (resolve puts the focal concept first)
@@ -93,12 +84,8 @@ class OkfContextService:
                 wanted_chunks.update((ev.get("chunk_ids") or [])[:max_quotes])
         chunk_text: dict[str, str] = {}
         if wanted_chunks:
-            for cid, text in (
-                await session.execute(
-                    select(ChunkModel.id, ChunkModel.text).where(ChunkModel.id.in_(wanted_chunks))
-                )
-            ).all():
-                chunk_text[cid] = text
+            chunks = await DocumentRepo(session).chunks_by_ids(list(wanted_chunks))
+            chunk_text = {c.id: c.text for c in chunks}
 
         graph = GraphConceptRepo(session)
         neighbours: dict[str, list[str]] = {}
@@ -110,12 +97,7 @@ class OkfContextService:
         label_of = {c.id: c.label for c in concepts}
         missing = [i for i in needed_labels if i not in label_of]
         if missing:
-            for cid, label in (
-                await session.execute(
-                    select(ConceptModel.id, ConceptModel.label).where(ConceptModel.id.in_(missing))
-                )
-            ).all():
-                label_of[cid] = label
+            label_of.update({c.id: c.label for c in await concept_repo.by_ids(missing)})
 
         blocks: list[str] = []
         for c in concepts:

@@ -63,6 +63,13 @@ class SummaryRepo:
         )
         return result.scalar_one_or_none()
 
+    async def delete_section_summaries(self, document_id: str) -> int:
+        """Uncommitted; how many rows went."""
+        result = await self.session.execute(
+            delete(SectionSummaryModel).where(SectionSummaryModel.document_id == document_id)
+        )
+        return result.rowcount or 0
+
     async def summarised_section_ids(self, document_id: str) -> set[str | None]:
         result = await self.session.execute(
             select(SectionSummaryModel.section_id).where(

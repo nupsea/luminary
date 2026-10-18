@@ -80,15 +80,22 @@ class CollectionRepo:
         )
         return [row[0] for row in result.all()]
 
-    async def note_ids(self, collection_id: str) -> list[str]:
-        """Notes directly in this collection, not in its children."""
+    async def _direct_member_ids(self, collection_id: str, member_type: str) -> list[str]:
         result = await self.session.execute(
             select(CollectionMemberModel.member_id).where(
                 CollectionMemberModel.collection_id == collection_id,
-                CollectionMemberModel.member_type == "note",
+                CollectionMemberModel.member_type == member_type,
             )
         )
-        return [row[0] for row in result.all()]
+        return list(result.scalars().all())
+
+    async def note_ids(self, collection_id: str) -> list[str]:
+        """Notes directly in this collection, not in its children."""
+        return await self._direct_member_ids(collection_id, "note")
+
+    async def document_ids(self, collection_id: str) -> list[str]:
+        """Documents directly in this collection, not in its children."""
+        return await self._direct_member_ids(collection_id, "document")
 
     async def child_ids(self, parent_id: str) -> list[str]:
         result = await self.session.execute(

@@ -52,12 +52,6 @@ class MasteryRepo:
     async def concept(self, concept_id: str) -> ConceptModel | None:
         return await self.session.get(ConceptModel, concept_id)
 
-    async def cards_for_concept(self, concept_id: str) -> list[FlashcardModel]:
-        result = await self.session.execute(
-            select(FlashcardModel).where(FlashcardModel.concept_id == concept_id)
-        )
-        return list(result.scalars().all())
-
     # -- heatmap: three grouped reads over a document's chosen sections -----
 
     def _section_chunk_ids(self, document_id: str, section_ids: Sequence[str]):

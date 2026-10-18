@@ -22,10 +22,9 @@ import json
 import logging
 import re
 
-from sqlalchemy import select, update
-
 from app.database import get_session_factory
-from app.models import ChunkModel, DocumentModel, SectionSummaryModel
+from app.repos.document_repo import DocumentRepo
+from app.repos.summary_repo import SummaryRepo
 from app.services.entity_disambiguator import _strip_honorifics
 from app.services.graph import get_graph_service
 from app.services.llm import LLMUnavailableError, get_llm_service
@@ -132,12 +131,7 @@ class ConceptLinkerService:
         of whichever row contains the most case-insensitive occurrences of concept_name.
         Returns None if no section summaries exist.
         """
-        result = await session.execute(
-            select(SectionSummaryModel.content).where(
-                SectionSummaryModel.document_id == document_id
-            )
-        )
-        rows = result.scalars().all()
+        rows = [s.content for s in await SummaryRepo(session).section_summaries(document_id)]
         if not rows:
             return None
 
@@ -231,10 +225,7 @@ class ConceptLinkerService:
         )
 
         # 2. Get all other documents
-        result = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id != document_id)
-        )
-        other_doc_ids = [row[0] for row in result.all()]
+        other_doc_ids = await DocumentRepo(session).other_ids(document_id)
 
         if not other_doc_ids:
             logger.info("concept_linker: no other documents to compare, skipping")
@@ -335,29 +326,14 @@ class ConceptLinkerService:
 
         # 5. Parse and store publication_year for this document if not yet set
         try:
-            doc_result = await session.execute(
-                select(DocumentModel.publication_year, DocumentModel.id).where(
-                    DocumentModel.id == document_id
-                )
-            )
-            doc_row = doc_result.first()
-            if doc_row and doc_row[0] is None:
+            docs = DocumentRepo(session)
+            doc = await docs.get(document_id)
+            if doc is not None and doc.publication_year is None:
                 # Scan first chunk text for year patterns
-                chunk_result = await session.execute(
-                    select(ChunkModel.text)
-                    .where(ChunkModel.document_id == document_id)
-                    .order_by(ChunkModel.chunk_index)
-                    .limit(3)
-                )
-                chunk_texts = chunk_result.scalars().all()
-                combined = " ".join(chunk_texts)[:2000]
+                combined = " ".join(await docs.opening_chunk_texts(document_id, 3))[:2000]
                 year = _parse_year(combined)
                 if year is not None:
-                    await session.execute(
-                        update(DocumentModel)
-                        .where(DocumentModel.id == document_id)
-                        .values(publication_year=year)
-                    )
+                    await docs.set_publication_year(document_id, year)
                     await session.commit()
                     logger.info(
                         "concept_linker: set publication_year=%d for doc=%s",

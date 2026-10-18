@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import FlashcardModel
 from app.repos.document_repo import DocumentRepo
+from app.repos.flashcard_repo import FlashcardRepo
 from app.repos.mastery_repo import MasteryRepo
 from app.services.graph import get_graph_service
 from app.types import ConceptMastery, HeatmapCell, MasteryHeatmapResponse
@@ -127,7 +128,7 @@ class MasteryService:
             row = await repo.concept(cid)
             if row is None:
                 continue
-            cards = await repo.cards_for_concept(cid)
+            cards = await FlashcardRepo(session).list_for_concept(cid)
             if not cards:
                 continue
             weighted = self._compute_weighted_mastery(cards)

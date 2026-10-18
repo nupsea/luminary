@@ -20,9 +20,9 @@ Untoggling is the user's job, via the manual checkbox.
 import logging
 from collections import defaultdict
 
-from sqlalchemy import func, or_, select
-
 from app.database import get_session_factory
+from app.repos.document_repo import DocumentRepo
+from app.repos.flashcard_repo import FlashcardRepo
 
 logger = logging.getLogger(__name__)
 
@@ -46,42 +46,12 @@ class ObjectiveTrackerService:
         here. Manual toggles via PATCH stay in force; only the learner
         can un-mark a goal.
         """
-        from app.models import ChunkModel, FlashcardModel, LearningObjectiveModel  # noqa: PLC0415
-
         async with get_session_factory()() as session:
-            # Compute avg stability per section_id for qualifying flashcards.
-            rows = (
-                await session.execute(
-                    select(ChunkModel.section_id, func.avg(FlashcardModel.fsrs_stability))
-                    .join(ChunkModel, FlashcardModel.chunk_id == ChunkModel.id)
-                    .where(
-                        FlashcardModel.document_id == document_id,
-                        FlashcardModel.fsrs_stability.is_not(None),
-                        or_(
-                            FlashcardModel.flashcard_type.is_(None),
-                            FlashcardModel.flashcard_type != "definition",
-                        ),
-                        ChunkModel.section_id.is_not(None),
-                    )
-                    .group_by(ChunkModel.section_id)
-                )
-            ).all()
-
+            stability = await FlashcardRepo(session).avg_stability_by_section(document_id)
             covered_section_ids = {
-                row[0] for row in rows if row[1] is not None and row[1] >= _COVERAGE_THRESHOLD
+                sid for sid, avg in stability.items() if avg >= _COVERAGE_THRESHOLD
             }
-
-            objs = (
-                (
-                    await session.execute(
-                        select(LearningObjectiveModel).where(
-                            LearningObjectiveModel.document_id == document_id
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            objs = await DocumentRepo(session).learning_objectives(document_id)
 
             if not objs:
                 return
@@ -107,20 +77,9 @@ class ObjectiveTrackerService:
         Returns zeros (not 404) when the document has no learning objectives.
         by_chapter is sorted by SectionModel.section_order.
         """
-        from app.models import LearningObjectiveModel, SectionModel  # noqa: PLC0415
-
         async with get_session_factory()() as session:
-            objs = (
-                (
-                    await session.execute(
-                        select(LearningObjectiveModel).where(
-                            LearningObjectiveModel.document_id == document_id
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            docs = DocumentRepo(session)
+            objs = await docs.learning_objectives(document_id)
 
             if not objs:
                 return {
@@ -133,17 +92,7 @@ class ObjectiveTrackerService:
 
             section_ids = list({obj.section_id for obj in objs})
 
-            sections = (
-                (
-                    await session.execute(
-                        select(SectionModel)
-                        .where(SectionModel.id.in_(section_ids))
-                        .order_by(SectionModel.section_order)
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            sections = (await docs.sections_by_id(section_ids)).values()
 
             heading_by_id = {s.id: s.heading for s in sections}
             order_by_id = {s.id: s.section_order for s in sections}

@@ -21,11 +21,12 @@ import logging
 from collections import Counter
 from collections.abc import Sequence
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import DependencyUnavailable
 from app.models import ChunkModel, FlashcardModel
+from app.repos.document_repo import DocumentRepo
+from app.repos.flashcard_repo import FlashcardRepo
 from app.services.flashcard_parsers import (
     GROUNDING_UNCHECKED,
     GROUNDING_UNVERIFIABLE,
@@ -100,10 +101,7 @@ async def passage_for_card(card: FlashcardModel, session: AsyncSession) -> str:
     """
     ids = card.source_chunk_ids
     if ids:
-        rows = await session.execute(
-            select(ChunkModel.id, ChunkModel.text).where(ChunkModel.id.in_(list(ids)))
-        )
-        by_id = {cid: txt or "" for cid, txt in rows.all()}
+        by_id = {c.id: c.text or "" for c in await DocumentRepo(session).chunks_by_ids(ids)}
         # Reading order is the recorded order, not the query's.
         return "\n\n".join(by_id[cid] for cid in ids if cid in by_id)
     if card.document_id:
@@ -117,12 +115,8 @@ async def _document_text(document_id: str, session: AsyncSession) -> str:
     Order matters: a quote that spans a chunk boundary is real, and joining the
     chunks in whatever order the database returns them would report it as invented.
     """
-    rows = await session.execute(
-        select(ChunkModel.text)
-        .where(ChunkModel.document_id == document_id)
-        .order_by(ChunkModel.chunk_index)
-    )
-    return "\n".join(t for t in rows.scalars().all() if t)
+    chunks = await DocumentRepo(session).chunks_for_document(document_id)
+    return "\n".join(c.text for c in chunks if c.text)
 
 
 async def audit_grounding(session: AsyncSession, document_id: str | None = None) -> dict[str, int]:
@@ -131,10 +125,7 @@ async def audit_grounding(session: AsyncSession, document_id: str | None = None)
     *document_id* limits the audit to one document; omitting it audits the library.
     Returns the resulting state counts plus how many verdicts changed.
     """
-    stmt = select(FlashcardModel)
-    if document_id is not None:
-        stmt = stmt.where(FlashcardModel.document_id == document_id)
-    cards = list((await session.execute(stmt)).scalars().all())
+    cards = await FlashcardRepo(session).all_for(document_id)
 
     by_document: dict[str | None, list[FlashcardModel]] = {}
     for card in cards:
@@ -224,14 +215,8 @@ async def audit_factuality(
             f"asked whether its own card follows from a passage agrees with itself."
         )
 
-    stmt = select(FlashcardModel).where(
-        FlashcardModel.factuality == FACTUALITY_UNCHECKED,
-        FlashcardModel.source_chunk_ids.isnot(None),
-    )
-    if document_id is not None:
-        stmt = stmt.where(FlashcardModel.document_id == document_id)
-    remaining_stmt = stmt
-    cards = list((await session.execute(stmt.limit(limit))).scalars().all())
+    repo = FlashcardRepo(session)
+    cards = await repo.judgeable(FACTUALITY_UNCHECKED, document_id, limit)
 
     llm = get_llm_service()
     counts: Counter[str] = Counter()
@@ -249,7 +234,7 @@ async def audit_factuality(
 
     if counts:
         await session.commit()
-    left = len((await session.execute(remaining_stmt)).scalars().all())
+    left = await repo.count_judgeable(FACTUALITY_UNCHECKED, document_id)
     logger.info(
         "flashcard factuality audit: %d judged, %d skipped, %d left, %s",
         sum(counts.values()),

@@ -22,10 +22,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from itertools import zip_longest
 
-from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChunkModel, CollectionMemberModel, ConceptModel, FlashcardModel
+from app.models import ConceptModel, FlashcardModel
+from app.repos.collection_repo import CollectionRepo
+from app.repos.concept_repo import ConceptRepo
+from app.repos.document_repo import DocumentRepo
+from app.repos.flashcard_repo import FlashcardRepo
 from app.services.scope_resolver import resolve_scope
 
 logger = logging.getLogger(__name__)
@@ -75,31 +78,11 @@ async def _material_ids(
     if scope_type == "note":
         return [], [scope_ref]
     if scope_type == "collection":
-        doc_ids = (
-            (
-                await session.execute(
-                    select(CollectionMemberModel.member_id).where(
-                        CollectionMemberModel.collection_id == scope_ref,
-                        CollectionMemberModel.member_type == "document",
-                    )
-                )
-            )
-            .scalars()
-            .all()
+        collections = CollectionRepo(session)
+        return (
+            await collections.document_ids(scope_ref),
+            await collections.note_ids(scope_ref),
         )
-        note_ids = (
-            (
-                await session.execute(
-                    select(CollectionMemberModel.member_id).where(
-                        CollectionMemberModel.collection_id == scope_ref,
-                        CollectionMemberModel.member_type == "note",
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        return list(doc_ids), list(note_ids)
     return [], []
 
 
@@ -122,24 +105,13 @@ async def assemble(
     doc_ids, note_ids = await _material_ids(session, scope_type, scope_ref)
     budget = items_for_budget(length_min)
 
-    now = datetime.now(UTC)
-    conds = []
-    if concept_ids:
-        conds.append(FlashcardModel.concept_id.in_(concept_ids))
-    if doc_ids:
-        conds.append(FlashcardModel.document_id.in_(doc_ids))
-    if note_ids:
-        conds.append(FlashcardModel.note_id.in_(note_ids))
-
-    cards: list[FlashcardModel] = []
-    if conds:
-        stmt = (
-            select(FlashcardModel)
-            .where(FlashcardModel.due_date <= now, or_(*conds))
-            .order_by(FlashcardModel.due_date.asc())
-            .limit(budget)
-        )
-        cards = list((await session.execute(stmt)).scalars().all())
+    cards = await FlashcardRepo(session).due_in_scope(
+        datetime.now(UTC),
+        budget,
+        concept_ids=concept_ids,
+        document_ids=doc_ids,
+        note_ids=note_ids,
+    )
 
     # Lane B generation. need = the gap to the budget. doc/note generate from their source;
     # a concept (or container that resolved to concepts) generates from concept evidence and
@@ -220,13 +192,9 @@ async def _concept_evidence_text(session: AsyncSession, chunk_ids: list[str]) ->
     """
     if not chunk_ids:
         return ""
-    rows = (
-        await session.execute(
-            select(ChunkModel.document_id, ChunkModel.text).where(ChunkModel.id.in_(chunk_ids))
-        )
-    ).all()
+    chunks = await DocumentRepo(session).chunks_by_ids(chunk_ids)
     by_doc: dict[str, list[str]] = {}
-    for doc_id, text in rows:
+    for doc_id, text in ((c.document_id, c.text) for c in chunks):
         if text:
             by_doc.setdefault(doc_id, []).append(text)
     if not by_doc:
@@ -291,13 +259,5 @@ async def _generate_for_concepts(
 async def _topic_mix(session: AsyncSession, concept_ids: list[str], limit: int = 4) -> list[str]:
     if not concept_ids:
         return []
-    rows = (
-        (
-            await session.execute(
-                select(ConceptModel.label).where(ConceptModel.id.in_(concept_ids[:limit]))
-            )
-        )
-        .scalars()
-        .all()
-    )
+    rows = [c.label for c in await ConceptRepo(session).by_ids(concept_ids[:limit])]
     return list(rows)

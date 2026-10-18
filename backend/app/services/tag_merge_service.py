@@ -22,18 +22,15 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models import (
-    CanonicalTagModel,
-    DocumentModel,
-    DocumentTagIndexModel,
-    NoteModel,
-    NoteTagIndexModel,
     TagAliasModel,
 )
+from app.repos.document_repo import DocumentRepo
+from app.repos.note_repo import NoteRepo
+from app.repos.tag_repo import TagRepo
 from app.services.notes_service import sync_document_tag_index, sync_tag_index
 from app.services.tag_graph import invalidate_tag_graph_cache
 
@@ -85,12 +82,7 @@ class TagMergeService:
         """Rewrite the tags column for every note that contains source_id, and
         re-sync the NoteTagIndexModel rows. Returns the count of notes touched.
         """
-        result = await session.execute(
-            select(NoteTagIndexModel.note_id)
-            .where(NoteTagIndexModel.tag_full == source_id)
-            .distinct()
-        )
-        note_ids = [row[0] for row in result.all()]
+        note_ids = await TagRepo(session).note_ids_with_tag(source_id)
         if not note_ids:
             return 0
 
@@ -98,8 +90,7 @@ class TagMergeService:
         # endpoint did this before the loop; preserved here for parity).
         session.expire_all()
 
-        notes_result = await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids)))
-        notes = list(notes_result.scalars().all())
+        notes = await NoteRepo(session).by_ids(note_ids)
 
         for note in notes:
             current_tags: list[str] = note.tags or []
@@ -124,19 +115,11 @@ class TagMergeService:
         target_id: str,
     ) -> int:
         """Mirror of _update_notes for DocumentModel + DocumentTagIndexModel."""
-        result = await session.execute(
-            select(DocumentTagIndexModel.document_id)
-            .where(DocumentTagIndexModel.tag_full == source_id)
-            .distinct()
-        )
-        doc_ids = [row[0] for row in result.all()]
+        doc_ids = await TagRepo(session).document_ids_with_tag(source_id)
         if not doc_ids:
             return 0
 
-        docs_result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id.in_(doc_ids))
-        )
-        docs = list(docs_result.scalars().all())
+        docs = await DocumentRepo(session).by_ids(doc_ids)
 
         for doc in docs:
             current_tags: list[str] = doc.tags or []
@@ -159,7 +142,7 @@ class TagMergeService:
         session.add(TagAliasModel(alias=source_id, canonical_tag_id=target_id))
 
     async def _delete_source_tag(self, session: AsyncSession, source_id: str) -> None:
-        await session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
+        await TagRepo(session).delete(source_id)
 
 
 def _replace_tag(current: list[str], source_id: str, target_id: str) -> list[str]:

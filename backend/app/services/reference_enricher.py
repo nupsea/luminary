@@ -11,13 +11,14 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.config import get_settings
 from app.database import get_session_factory
 from app.exceptions import DependencyUnavailable
-from app.models import SectionSummaryModel, WebReferenceModel
+from app.models import WebReferenceModel
+from app.repos.reference_repo import ReferenceRepo
+from app.repos.summary_repo import SummaryRepo
 from app.services.llm import LLMUnavailableError, get_llm_service
 from app.services.llm_json import parse_llm_json_array
 from app.services.settings_service import get_llm_error_message
@@ -155,10 +156,7 @@ class ReferenceEnricherService:
         settings = get_settings()
 
         async with get_session_factory()() as session:
-            summaries_result = await session.execute(
-                select(SectionSummaryModel).where(SectionSummaryModel.document_id == document_id)
-            )
-            summaries = list(summaries_result.scalars().all())
+            summaries = await SummaryRepo(session).section_summaries(document_id)
 
         if not summaries:
             logger.info(
@@ -183,13 +181,7 @@ class ReferenceEnricherService:
         for summary in summaries:
             # Idempotency: skip if refs already exist for this (document_id, section_id)
             async with get_session_factory()() as session:
-                existing_count_result = await session.execute(
-                    select(func.count(WebReferenceModel.id)).where(
-                        WebReferenceModel.document_id == document_id,
-                        WebReferenceModel.section_id == summary.section_id,
-                    )
-                )
-                if existing_count_result.scalar_one() > 0:
+                if await ReferenceRepo(session).count_for_section(document_id, summary.section_id):
                     logger.debug(
                         "reference_enricher: skipping section_id=%s (already has refs)",
                         summary.section_id,
@@ -261,27 +253,12 @@ class ReferenceEnricherService:
 
         Returns count of new rows created.
         """
-        # Delete existing refs
         async with get_session_factory()() as session:
-            existing_result = await session.execute(
-                select(WebReferenceModel).where(
-                    WebReferenceModel.document_id == document_id,
-                    WebReferenceModel.section_id == section_id,
-                )
-            )
-            for row in existing_result.scalars().all():
-                await session.delete(row)
+            await ReferenceRepo(session).delete_for_section(document_id, section_id)
             await session.commit()
 
-        # Load the section summary
         async with get_session_factory()() as session:
-            summary_result = await session.execute(
-                select(SectionSummaryModel).where(
-                    SectionSummaryModel.document_id == document_id,
-                    SectionSummaryModel.section_id == section_id,
-                )
-            )
-            summary = summary_result.scalar_one_or_none()
+            summary = await SummaryRepo(session).section_summary(document_id, section_id)
 
         if summary is None:
             logger.warning(
