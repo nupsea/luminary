@@ -90,6 +90,35 @@ class DocumentRepo:
         )
         return list(result.scalars().all())
 
+    async def chunk_snippets(
+        self, document_id: str, fts_query: str, limit: int
+    ) -> list[tuple[str, str]]:
+        """(chunk id, highlighted snippet) of the document's chunks matching `fts_query`.
+
+        snippet() works only in a plain FTS query, with no JOIN, so sections come separately.
+        """
+        rows = await self.session.execute(
+            text(
+                "SELECT chunks_fts.chunk_id, "
+                "       snippet(chunks_fts, 0, '<mark>', '</mark>', '...', 24) AS snippet "
+                "FROM chunks_fts "
+                "WHERE chunks_fts MATCH :query "
+                "  AND chunks_fts.document_id = :doc_id "
+                "LIMIT :inner_limit"
+            ),
+            {"query": fts_query, "doc_id": document_id, "inner_limit": limit},
+        )
+        return [(cid, snippet or "") for cid, snippet in rows.fetchall()]
+
+    async def chunk_section_headings(self, chunk_ids: Sequence[str]) -> list[tuple[str, str, str]]:
+        """(chunk id, section id, heading), with "" for a chunk outside any section."""
+        result = await self.session.execute(
+            select(ChunkModel.id, ChunkModel.section_id, func.coalesce(SectionModel.heading, ""))
+            .outerjoin(SectionModel, ChunkModel.section_id == SectionModel.id)
+            .where(ChunkModel.id.in_(list(chunk_ids)))
+        )
+        return [(cid, sid or "", heading or "") for cid, sid, heading in result.all()]
+
     async def other_ids(self, document_id: str) -> list[str]:
         """Every document id but this one."""
         result = await self.session.execute(

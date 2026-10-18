@@ -327,6 +327,34 @@ class NoteRepo:
     async def find(self, note_id: str) -> NoteModel | None:
         return await self.session.get(NoteModel, note_id)
 
+    async def fts_matches(self, fts_query: str, k: int) -> list:  # noqa: ANN401 -- Rows
+        """(note id, content, document id, bm25 score, tags JSON, group) best first."""
+        rows = await self.session.execute(
+            text(
+                "SELECT nf.note_id, nf.content, nf.document_id, bm25(notes_fts) AS score, "
+                "       n.tags, n.group_name "
+                "FROM notes_fts AS nf "
+                "JOIN notes AS n ON nf.note_id = n.id "
+                "WHERE notes_fts MATCH :query "
+                "ORDER BY score LIMIT :k"
+            ),
+            {"query": fts_query, "k": k},
+        )
+        return list(rows.fetchall())
+
+    async def search_fields(self, note_ids: Sequence[str]) -> dict[str, tuple]:
+        """{id: (id, content, tags, group, document id)} for the notes that still exist."""
+        result = await self.session.execute(
+            select(
+                NoteModel.id,
+                NoteModel.content,
+                NoteModel.tags,
+                NoteModel.group_name,
+                NoteModel.document_id,
+            ).where(NoteModel.id.in_(list(note_ids)))
+        )
+        return {row[0]: tuple(row) for row in result.all()}
+
     async def by_ids(self, note_ids: Sequence[str]) -> list[NoteModel]:
         if not note_ids:
             return []
