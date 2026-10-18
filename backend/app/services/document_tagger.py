@@ -14,17 +14,11 @@ import math
 from datetime import UTC, datetime
 from functools import lru_cache
 
-from sqlalchemy import func, select
-
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models import (
-    ChunkModel,
-    DocumentModel,
-    DocumentTagIndexModel,
-    DocumentTagProvenanceModel,
-)
+from app.repos.document_repo import DocumentRepo
 from app.repos.summary_repo import SummaryRepo
+from app.repos.tag_repo import TagRepo
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched in tests
 from app.services.llm_json import parse_llm_json_array
 from app.services.naming import normalize_tag_slug
@@ -51,11 +45,7 @@ def _entity_tag_budget(num_chunks: int, cap_max: int) -> int:
 
 async def _count_chunks(doc_id: str) -> int:
     async with get_session_factory()() as session:
-        return (
-            await session.execute(
-                select(func.count(ChunkModel.id)).where(ChunkModel.document_id == doc_id)
-            )
-        ).scalar_one() or 0
+        return await DocumentRepo(session).chunk_count(doc_id)
 
 
 # Content-type aware entity-type selection. Tech writing rarely benefits from
@@ -233,24 +223,14 @@ async def _fetch_doc_excerpt(doc_id: str) -> tuple[str, str, str] | None:
     Returns None if the document row is missing.
     """
     async with get_session_factory()() as session:
-        doc = (
-            await session.execute(select(DocumentModel).where(DocumentModel.id == doc_id))
-        ).scalar_one_or_none()
+        doc = await DocumentRepo(session).get(doc_id)
         if doc is None:
             return None
         latest = await SummaryRepo(session).latest(doc_id, "one_sentence")
         summary = latest.content if latest else ""
         # Use the first few chunks as an excerpt to keep the prompt budget
         # tight. Falls back to empty if no chunks have been written yet.
-        excerpt_rows = (
-            await session.execute(
-                select(ChunkModel.text)
-                .where(ChunkModel.document_id == doc_id)
-                .order_by(ChunkModel.chunk_index)
-                .limit(5)
-            )
-        ).all()
-        excerpt = "\n".join((r[0] or "") for r in excerpt_rows)[:2000]
+        excerpt = "\n".join(await DocumentRepo(session).opening_chunk_texts(doc_id, 5))[:2000]
     return doc.title, summary, excerpt
 
 
@@ -354,11 +334,8 @@ async def enrich_document_tags(doc_id: str) -> int:
         # Look up the doc's content_type so the entity query knows whether to
         # include PERSON/PLACE. Cheaper than threading it through _fetch_doc_excerpt.
         async with get_session_factory()() as ct_session:
-            content_type = (
-                await ct_session.execute(
-                    select(DocumentModel.content_type).where(DocumentModel.id == doc_id)
-                )
-            ).scalar_one_or_none()
+            titled = await DocumentRepo(ct_session).titles_and_types([doc_id])
+            content_type = titled[doc_id][1] if doc_id in titled else None
 
         allowed_types = _allowed_entity_types_for(content_type)
         budget = _entity_tag_budget(await _count_chunks(doc_id), settings.AUTO_TAG_ENTITY_CAP_MAX)
@@ -377,9 +354,7 @@ async def enrich_document_tags(doc_id: str) -> int:
             return 0
 
         async with get_session_factory()() as session:
-            doc = (
-                await session.execute(select(DocumentModel).where(DocumentModel.id == doc_id))
-            ).scalar_one_or_none()
+            doc = await DocumentRepo(session).get(doc_id)
             if doc is None:
                 return 0
 
@@ -413,26 +388,9 @@ async def enrich_document_tags(doc_id: str) -> int:
             await sync_document_tag_index(doc_id, doc.tags, session)
 
             now = datetime.now(UTC)
-            for slug in new_llm:
-                session.add(
-                    DocumentTagProvenanceModel(
-                        document_id=doc_id,
-                        tag_full=slug,
-                        source="auto",
-                        tagger_version=LLM_TAGGER_VERSION,
-                        created_at=now,
-                    )
-                )
-            for slug in new_entity:
-                session.add(
-                    DocumentTagProvenanceModel(
-                        document_id=doc_id,
-                        tag_full=slug,
-                        source="auto",
-                        tagger_version=ENTITY_TAGGER_VERSION,
-                        created_at=now,
-                    )
-                )
+            tag_repo = TagRepo(session)
+            await tag_repo.record_auto_provenance(doc_id, new_llm, LLM_TAGGER_VERSION, now)
+            await tag_repo.record_auto_provenance(doc_id, new_entity, ENTITY_TAGGER_VERSION, now)
             await session.commit()
 
         added = len(new_llm) + len(new_entity)
@@ -468,8 +426,6 @@ async def prune_auto_entity_tags() -> dict[str, int]:
 
     Idempotent: a second call with no rule change returns pruned=0.
     """
-    from sqlalchemy import and_, delete  # local: avoid touching the top imports
-
     settings = get_settings()
     min_len = settings.AUTO_TAG_MIN_SLUG_LENGTH
 
@@ -477,29 +433,14 @@ async def prune_auto_entity_tags() -> dict[str, int]:
     docs_touched: set[str] = set()
 
     async with get_session_factory()() as session:
-        # Pull every (doc, tag) shadow-index row.
-        idx_rows = (
-            await session.execute(
-                select(
-                    DocumentTagIndexModel.document_id,
-                    DocumentTagIndexModel.tag_full,
-                )
-            )
-        ).all()
+        tag_repo = TagRepo(session)
+        doc_repo = DocumentRepo(session)
+        idx_rows = await tag_repo.document_index_rows()
 
         # Build fast lookups of provenance source + version per (doc, tag) so
         # the gate loop can decide protection / re-check semantics without an
         # n-query pattern.
-        prov_full_rows = (
-            await session.execute(
-                select(
-                    DocumentTagProvenanceModel.document_id,
-                    DocumentTagProvenanceModel.tag_full,
-                    DocumentTagProvenanceModel.source,
-                    DocumentTagProvenanceModel.tagger_version,
-                )
-            )
-        ).all()
+        prov_full_rows = await tag_repo.document_provenance_rows()
         manual_keys: set[tuple[str, str]] = set()
         llm_keys: set[tuple[str, str]] = set()
         entity_keys: set[tuple[str, str]] = set()
@@ -522,31 +463,13 @@ async def prune_auto_entity_tags() -> dict[str, int]:
             d for d, _t in idx_rows if (d, _t) not in manual_keys
         } & all_doc_ids
         # Fetch content_type per doc to choose allowed entity types.
-        ct_rows = (
-            await session.execute(
-                select(DocumentModel.id, DocumentModel.content_type).where(
-                    DocumentModel.id.in_(docs_with_entity_rows)
-                    if docs_with_entity_rows
-                    else DocumentModel.id.is_(None)  # empty-set guard
-                )
-            )
-        ).all()
-        content_type_by_doc: dict[str, str] = {d: ct or "" for d, ct in ct_rows}
+        titled = await doc_repo.titles_and_types(list(docs_with_entity_rows))
+        content_type_by_doc = {d: ct for d, (_title, ct) in titled.items()}
 
         # Chunk counts per doc so the fresh set uses the SAME budget as
         # enrich_document_tags -- otherwise prune would flag the newly-allowed
         # tags as stale and strip them right back out.
-        chunk_count_by_doc: dict[str, int] = {}
-        if docs_with_entity_rows:
-            chunk_count_by_doc = dict(
-                (
-                    await session.execute(
-                        select(ChunkModel.document_id, func.count(ChunkModel.id))
-                        .where(ChunkModel.document_id.in_(docs_with_entity_rows))
-                        .group_by(ChunkModel.document_id)
-                    )
-                ).all()
-            )
+        chunk_count_by_doc = await doc_repo.chunk_counts(list(docs_with_entity_rows))
 
         # Per-doc set of slugs the CURRENT entity query would produce. Any
         # entity-1 index row for a slug NOT in this set is now stale.
@@ -591,27 +514,10 @@ async def prune_auto_entity_tags() -> dict[str, int]:
             return {"pruned": 0, "docs_touched": 0}
 
         for doc_id, to_drop in by_doc.items():
-            doc = (
-                await session.execute(select(DocumentModel).where(DocumentModel.id == doc_id))
-            ).scalar_one_or_none()
+            doc = await doc_repo.get(doc_id)
             if doc is None:
                 # Stale index row for a deleted doc -- clean up the orphan.
-                await session.execute(
-                    delete(DocumentTagIndexModel).where(
-                        and_(
-                            DocumentTagIndexModel.document_id == doc_id,
-                            DocumentTagIndexModel.tag_full.in_(to_drop),
-                        )
-                    )
-                )
-                await session.execute(
-                    delete(DocumentTagProvenanceModel).where(
-                        and_(
-                            DocumentTagProvenanceModel.document_id == doc_id,
-                            DocumentTagProvenanceModel.tag_full.in_(to_drop),
-                        )
-                    )
-                )
+                await tag_repo.drop_document_index_rows(doc_id, to_drop)
                 pruned_total += len(to_drop)
                 docs_touched.add(doc_id)
                 continue
@@ -620,22 +526,7 @@ async def prune_auto_entity_tags() -> dict[str, int]:
             if len(kept) == len(current):
                 # Index row exists but the JSON column doesn't reference it
                 # (legacy divergence). Clean index + provenance directly.
-                await session.execute(
-                    delete(DocumentTagIndexModel).where(
-                        and_(
-                            DocumentTagIndexModel.document_id == doc_id,
-                            DocumentTagIndexModel.tag_full.in_(to_drop),
-                        )
-                    )
-                )
-                await session.execute(
-                    delete(DocumentTagProvenanceModel).where(
-                        and_(
-                            DocumentTagProvenanceModel.document_id == doc_id,
-                            DocumentTagProvenanceModel.tag_full.in_(to_drop),
-                        )
-                    )
-                )
+                await tag_repo.drop_document_index_rows(doc_id, to_drop)
                 pruned_total += len(to_drop)
                 docs_touched.add(doc_id)
                 continue

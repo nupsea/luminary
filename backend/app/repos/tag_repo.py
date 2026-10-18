@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import (
     CanonicalTagModel,
+    DocumentTagIndexModel,
+    DocumentTagProvenanceModel,
     NoteModel,
     NoteTagIndexModel,
     TagAliasModel,
@@ -265,6 +267,20 @@ class TagRepo:
             {"id": tag, "display_name": segments[-1], "parent_tag": tag_parent or None},
         )
 
+    async def record_auto_provenance(
+        self, document_id: str, tags: list[str], tagger_version: str, at: datetime
+    ) -> None:
+        for tag in tags:
+            self.session.add(
+                DocumentTagProvenanceModel(
+                    document_id=document_id,
+                    tag_full=tag,
+                    source="auto",
+                    tagger_version=tagger_version,
+                    created_at=at,
+                )
+            )
+
     async def record_manual_provenance(self, document_id: str, tag: str) -> None:
         """INSERT OR IGNORE: an existing auto-tagger row stays authoritative."""
         await self.session.execute(
@@ -275,6 +291,32 @@ class TagRepo:
             ),
             {"doc_id": document_id, "tag": tag},
         )
+
+    async def document_index_rows(self) -> list[tuple[str, str]]:
+        """Every (document_id, tag) in the document tag index."""
+        rows = await self.session.execute(
+            select(DocumentTagIndexModel.document_id, DocumentTagIndexModel.tag_full)
+        )
+        return [(d, t) for d, t in rows.all()]
+
+    async def document_provenance_rows(self) -> list[tuple[str, str, str, str | None]]:
+        """Every (document_id, tag, source, tagger_version) provenance row."""
+        rows = await self.session.execute(
+            select(
+                DocumentTagProvenanceModel.document_id,
+                DocumentTagProvenanceModel.tag_full,
+                DocumentTagProvenanceModel.source,
+                DocumentTagProvenanceModel.tagger_version,
+            )
+        )
+        return [(d, t, s, v) for d, t, s, v in rows.all()]
+
+    async def drop_document_index_rows(self, document_id: str, tags: set[str]) -> None:
+        """Index and provenance rows only, uncommitted; canonical usage counts are untouched."""
+        for model in (DocumentTagIndexModel, DocumentTagProvenanceModel):
+            await self.session.execute(
+                delete(model).where(model.document_id == document_id, model.tag_full.in_(tags))
+            )
 
     async def delete_with_aliases(self, tag_id: str) -> None:
         """Delete the canonical tag and any aliases pointing to it.
