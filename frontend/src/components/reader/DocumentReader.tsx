@@ -1978,11 +1978,22 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           <div className={`min-h-0 flex-1 overflow-hidden ${insightsTab === "note" ? "" : "hidden"}`}>
             {noteCaptureOpen ? (
               <NoteComposer
+                // Each opened note gets a fresh composer; a capture keeps one so later
+                // selections append to it.
+                key={openNoteId ?? "capture"}
                 variant="docked"
                 open
                 captureKey={noteCaptureKey}
                 noteId={openNoteId}
                 onClose={closeNoteCapture}
+                noteNav={{
+                  ids: (docNotes ?? []).map((n) => n.id),
+                  onNavigate: (id) => {
+                    setOpenNoteEditor(null)
+                    setDocNoteOpen(false)
+                    setOpenNoteId(id)
+                  },
+                }}
                 onSaved={() => {
                   void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
                   void qc.invalidateQueries({ queryKey: ["notes"] })
