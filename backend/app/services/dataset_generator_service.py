@@ -6,12 +6,13 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models import ChunkModel, EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
+from app.models import GoldenDatasetModel, GoldenQuestionModel
+from app.repos.document_repo import DocumentRepo
+from app.repos.eval_repo import EvalRepo
 from app.services.background import fire_and_forget, task_registry
 from app.services.golden_quality import (
     build_generation_prompt,
@@ -129,15 +130,9 @@ async def _generate_dataset(dataset_id: str) -> None:
                 # Randomize chunk order so we sample across the whole document
                 # (front-matter has heavy bias toward generic "what is X about" Qs).
                 # Oversample 4x so structural-chunk skips don't starve the run.
-                chunk_query = (
-                    select(ChunkModel)
-                    .where(ChunkModel.document_id == document_id)
-                    .order_by(func.random())
+                chunks = await DocumentRepo(session).chunks_in_random_order(
+                    document_id, None if custom_count else chunks_per_doc * 4
                 )
-                if not custom_count:
-                    chunk_query = chunk_query.limit(chunks_per_doc * 4)
-                result = await session.execute(chunk_query)
-                chunks = list(result.scalars().all())
                 for chunk in chunks:
                     if dataset.generated_count >= dataset.target_count:
                         break
@@ -191,36 +186,7 @@ async def delete_dataset(session: AsyncSession, dataset_id: str) -> bool:
     dataset = await session.get(GoldenDatasetModel, dataset_id)
     if dataset is None:
         return False
-    await session.execute(
-        delete(GoldenQuestionModel).where(GoldenQuestionModel.dataset_id == dataset_id)
-    )
+    await EvalRepo(session).delete_questions(dataset_id)
     await session.delete(dataset)
     await session.commit()
     return True
-
-
-async def count_questions(session: AsyncSession, dataset_id: str) -> int:
-    result = await session.execute(
-        select(func.count())
-        .select_from(GoldenQuestionModel)
-        .where(
-            GoldenQuestionModel.dataset_id == dataset_id,
-            GoldenQuestionModel.included.is_(True),
-        )
-    )
-    return int(result.scalar_one())
-
-
-async def latest_run_for_dataset(session: AsyncSession, dataset_name: str) -> EvalRunModel | None:
-    """Latest successful run — failed rows exist for visibility in the Runs tab
-    but must not blank out a dataset's last-known metrics."""
-    result = await session.execute(
-        select(EvalRunModel)
-        .where(
-            EvalRunModel.dataset_name == dataset_name,
-            EvalRunModel.status != "failed",
-        )
-        .order_by(EvalRunModel.run_at.desc())
-        .limit(1)
-    )
-    return result.scalar_one_or_none()

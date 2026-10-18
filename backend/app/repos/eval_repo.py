@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Sequence
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DocumentModel, EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
@@ -66,6 +66,34 @@ class EvalRepo:
             query = query.where(EvalRunModel.model_used == model)
         result = await self.session.execute(query.offset(offset).limit(limit))
         return result.scalars().all()
+
+    async def count_included_questions(self, dataset_id: str) -> int:
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(GoldenQuestionModel)
+            .where(
+                GoldenQuestionModel.dataset_id == dataset_id,
+                GoldenQuestionModel.included.is_(True),
+            )
+        )
+        return int(result.scalar_one())
+
+    async def latest_run(self, dataset_name: str) -> EvalRunModel | None:
+        """Latest successful run: failed rows show in the Runs tab but must not blank out a
+        dataset's last-known metrics."""
+        result = await self.session.execute(
+            select(EvalRunModel)
+            .where(EvalRunModel.dataset_name == dataset_name, EvalRunModel.status != "failed")
+            .order_by(EvalRunModel.run_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def delete_questions(self, dataset_id: str) -> None:
+        """Uncommitted."""
+        await self.session.execute(
+            delete(GoldenQuestionModel).where(GoldenQuestionModel.dataset_id == dataset_id)
+        )
 
     async def runs_for_dataset(self, dataset_id: str) -> Sequence[EvalRunModel]:
         result = await self.session.execute(

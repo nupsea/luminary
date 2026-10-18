@@ -79,6 +79,17 @@ class DocumentRepo:
         result = await self.session.execute(select(DocumentModel.title, DocumentModel.file_path))
         return [(title, path) for title, path in result.all()]
 
+    async def chunks_in_random_order(
+        self, document_id: str, limit: int | None = None
+    ) -> list[ChunkModel]:
+        result = await self.session.execute(
+            select(ChunkModel)
+            .where(ChunkModel.document_id == document_id)
+            .order_by(func.random())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def other_ids(self, document_id: str) -> list[str]:
         """Every document id but this one."""
         result = await self.session.execute(
