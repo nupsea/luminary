@@ -23,8 +23,8 @@ from app.models import (
     DocumentModel,
     DocumentTagIndexModel,
     DocumentTagProvenanceModel,
-    SummaryModel,
 )
+from app.repos.summary_repo import SummaryRepo
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched in tests
 from app.services.llm_json import parse_llm_json_array
 from app.services.naming import normalize_tag_slug
@@ -238,14 +238,8 @@ async def _fetch_doc_excerpt(doc_id: str) -> tuple[str, str, str] | None:
         ).scalar_one_or_none()
         if doc is None:
             return None
-        summary = (
-            await session.execute(
-                select(SummaryModel.content).where(
-                    SummaryModel.document_id == doc_id,
-                    SummaryModel.mode == "one_sentence",
-                )
-            )
-        ).scalar_one_or_none() or ""
+        latest = await SummaryRepo(session).latest(doc_id, "one_sentence")
+        summary = latest.content if latest else ""
         # Use the first few chunks as an excerpt to keep the prompt budget
         # tight. Falls back to empty if no chunks have been written yet.
         excerpt_rows = (

@@ -1,6 +1,7 @@
 """Document auto-tagging (2D.1)."""
 
 import uuid
+from datetime import datetime
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -11,6 +12,7 @@ from app.models import (
     DocumentModel,
     DocumentTagIndexModel,
     DocumentTagProvenanceModel,
+    SummaryModel,
 )
 from app.services import document_tagger as _doc_tagger_module
 from app.services.naming import normalize_tag_slug
@@ -779,3 +781,39 @@ async def test_removing_doc_tag_clears_provenance(test_db, monkeypatch):
             ).all()
         }
         assert prov == {"python"}
+
+
+@pytest.mark.anyio
+async def test_retag_reads_the_newest_one_sentence_summary_when_there_are_two(
+    test_db, monkeypatch
+):
+    """A re-summarised document keeps both rows; the tagger must not fail on the second."""
+    _, factory = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as s:
+        s.add(_make_doc(doc_id))
+        for content, created in (("old summary", "2026-01-01"), ("new summary", "2026-02-01")):
+            s.add(
+                SummaryModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    mode="one_sentence",
+                    content=content,
+                    created_at=datetime.fromisoformat(created),
+                )
+            )
+        await s.commit()
+
+    seen: list[str] = []
+
+    class _Recording(_FakeTagger):
+        async def suggest_tags(self, title: str, summary: str, excerpt: str) -> list[str]:
+            seen.append(summary)
+            return ["python"]
+
+    monkeypatch.setattr(_doc_tagger_module, "get_document_tagger", lambda: _Recording([]))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post(f"/documents/{doc_id}/retag")
+    assert r.json()["added"] == 1
+    assert seen == ["new summary"]

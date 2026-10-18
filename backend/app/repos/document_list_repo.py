@@ -117,6 +117,7 @@ class DocumentListRepo:
                     SummaryModel.document_id == DocumentModel.id,
                     SummaryModel.mode == "one_sentence",
                 )
+                .order_by(SummaryModel.created_at.desc())
                 .limit(1)
                 .correlate(DocumentModel)
                 .scalar_subquery()

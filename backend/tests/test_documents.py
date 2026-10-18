@@ -1,6 +1,7 @@
 """Tests for GET /documents, PATCH /documents/{id}, DELETE /documents/{id}."""
 
 import uuid
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -189,6 +190,29 @@ async def test_list_documents_summary_one_sentence_populated(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents")
     assert resp.json()["items"][0]["summary_one_sentence"] == "Short summary."
+
+
+async def test_list_documents_shows_the_newest_one_sentence_summary(test_db):
+    """Ingestion re-derives it once every section is summarised; the first saw only the opening."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        for content, created in (("Opening only.", "2026-01-01"), ("Whole book.", "2026-02-01")):
+            session.add(
+                SummaryModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    mode="one_sentence",
+                    content=content,
+                    created_at=datetime.fromisoformat(created),
+                )
+            )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/documents")
+    assert resp.json()["items"][0]["summary_one_sentence"] == "Whole book."
 
 
 async def test_list_documents_filter_by_content_type(test_db):
