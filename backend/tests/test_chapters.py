@@ -175,3 +175,29 @@ def test_sections_are_read_in_chunk_order_not_section_order():
         SectionExtent("last", "III — Returns", 90, BIG),
     ]
     assert [c.id for c in detect_chapters(sections, "time_machine")] == ["early", "late", "last"]
+
+
+def test_a_preface_takes_its_subsections_with_it():
+    """Think Stats: "Preface" is followed only by its own level-2 subsections, the second
+    holding the contributor list, so cutting at the last named section kept them in chapter 1."""
+    front = [
+        SectionExtent("title", "", 0, 2000, level=1),
+        SectionExtent("preface", "Preface", 10, 1500, level=1),
+        SectionExtent("how", "How I wrote this book", 20, 3000, level=2),
+        SectionExtent("code", "Using the code", 30, 9000, level=2),
+    ]
+    body = [SectionExtent(f"b{i}", f"Topic {i}", 100 + i * 10, 6000, level=1) for i in range(30)]
+    chapters = detect_chapters(front + body, "thinkstats2")
+    assert chapters[0].id == "b0"
+    assert not {"title", "preface", "how", "code"} & {s for c in chapters for s in c.section_ids}
+
+
+def test_a_preface_over_a_book_of_deeper_chapters_takes_only_itself():
+    """A markdown book whose chapters are all "##" under one "# Preface" is not front matter."""
+    front = [SectionExtent("preface", "Preface", 0, 3000, level=1)]
+    body = [
+        SectionExtent(f"c{i}", f"Chapter topic {i}", 10 + i * 10, 6000, level=2) for i in range(30)
+    ]
+    chapters = detect_chapters(front + body, "book")
+    assert chapters[0].id == "c0"
+    assert "c29" in {s for c in chapters for s in c.section_ids}
