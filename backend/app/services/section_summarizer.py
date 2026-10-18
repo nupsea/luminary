@@ -11,10 +11,10 @@ import math
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select
-
 from app.database import get_session_factory
-from app.models import EnrichmentJobModel, SectionModel, SectionSummaryModel
+from app.models import SectionModel, SectionSummaryModel
+from app.repos.document_repo import DocumentRepo
+from app.repos.enrichment_repo import EnrichmentRepo
 from app.repos.summary_repo import SummaryRepo
 from app.services.llm import LLMUnavailableError, get_llm_service
 
@@ -129,10 +129,7 @@ class SectionSummarizerService:
         the run itself applies rather than a raw section count.
         """
         async with get_session_factory()() as session:
-            result = await session.execute(
-                select(SectionModel).where(SectionModel.document_id == document_id)
-            )
-            sections = list(result.scalars().all())
+            sections = await DocumentRepo(session).sections_for_document(document_id)
         return sum(
             1
             for s in sections
@@ -157,26 +154,19 @@ class SectionSummarizerService:
         await get_summarization_service().invalidate_section_reduce_cache(document_id)
 
         async with get_session_factory()() as session:
-            stale = await session.execute(
-                delete(SectionSummaryModel).where(SectionSummaryModel.document_id == document_id)
-            )
+            stale = await SummaryRepo(session).delete_section_summaries(document_id)
             await session.commit()
-        if stale.rowcount:
+        if stale:
             logger.info(
                 "section_summarizer: replacing %d existing summaries",
-                stale.rowcount,
+                stale,
                 extra={"doc_id": document_id},
             )
 
     async def _fetch_qualifying_sections(self, document_id: str) -> list[SectionModel]:
         """Sections worth summarising: real content, not metadata/legal boilerplate."""
         async with get_session_factory()() as session:
-            result = await session.execute(
-                select(SectionModel)
-                .where(SectionModel.document_id == document_id)
-                .order_by(SectionModel.section_order)
-            )
-            all_sections = list(result.scalars().all())
+            all_sections = await DocumentRepo(session).sections_for_document(document_id)
 
         non_metadata: list[SectionModel] = []
         for s in all_sections:
@@ -419,30 +409,15 @@ class SectionSummarizerService:
         """
         try:
             async with get_session_factory()() as session:
-                dup_result = await session.execute(
-                    select(func.count(EnrichmentJobModel.id)).where(
-                        EnrichmentJobModel.document_id == document_id,
-                        EnrichmentJobModel.job_type == "web_refs",
-                        EnrichmentJobModel.status.in_(["pending", "running"]),
-                    )
-                )
-                if dup_result.scalar_one() > 0:
+                job = await EnrichmentRepo(session).enqueue_unless_active(document_id, "web_refs")
+                if job is None:
                     logger.debug(
                         "section_summarizer: web_refs job already pending/running for doc=%s",
                         document_id,
                     )
                     return
-
-                job = EnrichmentJobModel(
-                    id=str(uuid.uuid4()),
-                    document_id=document_id,
-                    job_type="web_refs",
-                    status="pending",
-                    created_at=datetime.now(UTC),
-                )
-                session.add(job)
                 await session.commit()
-                logger.info("section_summarizer: enqueued web_refs job for doc=%s", document_id)
+            logger.info("section_summarizer: enqueued web_refs job for doc=%s", document_id)
         except Exception as exc:
             logger.warning(
                 "section_summarizer: failed to enqueue web_refs for doc=%s: %s",
