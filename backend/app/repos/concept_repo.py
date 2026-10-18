@@ -14,8 +14,12 @@ class ConceptRepo:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def id_labels(self) -> list[tuple[str, str]]:
-        result = await self.session.execute(select(ConceptModel.id, ConceptModel.label))
+    async def id_labels(self, *, tracked_only: bool = False) -> list[tuple[str, str]]:
+        """(id, label) of every concept, or only those past the candidate stage."""
+        stmt = select(ConceptModel.id, ConceptModel.label)
+        if tracked_only:
+            stmt = stmt.where(ConceptModel.status != "candidate")
+        result = await self.session.execute(stmt)
         return [(cid, label) for cid, label in result.all()]
 
     async def listed(self, status: str | None = None) -> Sequence[ConceptModel]:
