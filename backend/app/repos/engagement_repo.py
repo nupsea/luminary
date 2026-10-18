@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     AchievementModel,
-    FocusSessionModel,
+    PomodoroSessionModel,
     StudyStreakModel,
     XPLedgerModel,
 )
@@ -110,26 +110,21 @@ class EngagementRepo:
 
     # -- focus sessions ----------------------------------------------------
 
-    async def count_completed_focus_sessions(self, min_planned_minutes: int = 0) -> int:
+    async def count_completed_pomodoros(self, min_focus_minutes: int = 0) -> int:
         return await self._scalar(
             select(func.count())
-            .select_from(FocusSessionModel)
+            .select_from(PomodoroSessionModel)
             .where(
-                FocusSessionModel.completed.is_(True),
-                FocusSessionModel.planned_duration_minutes >= min_planned_minutes,
+                PomodoroSessionModel.status == "completed",
+                PomodoroSessionModel.focus_minutes >= min_focus_minutes,
             )
         )
 
-    async def focus_sessions_on(self, day: str) -> list[FocusSessionModel]:
+    async def pomodoros_since(self, start_day: str) -> list[PomodoroSessionModel]:
+        """Sessions started on or after the local day `start_day`, in any status."""
         result = await self.session.execute(
-            select(FocusSessionModel)
-            .where(self._day(FocusSessionModel.started_at) == day)
-            .order_by(FocusSessionModel.started_at.desc())
-        )
-        return list(result.scalars().all())
-
-    async def focus_sessions_since(self, start_day: str) -> list[FocusSessionModel]:
-        result = await self.session.execute(
-            select(FocusSessionModel).where(self._day(FocusSessionModel.started_at) >= start_day)
+            select(PomodoroSessionModel).where(
+                self._day(PomodoroSessionModel.started_at) >= start_day
+            )
         )
         return list(result.scalars().all())

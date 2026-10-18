@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.exceptions import LuminaryError
 from app.models import PomodoroSessionModel
 from app.repos.pomodoro_repo import PomodoroRepo
+from app.services.engagement_service import EngagementService
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +169,7 @@ class PomodoroService:
             row.paused_at = None
         row.status = "completed"
         row.completed_at = _now()
+        await EngagementService(self._session).award_focus_session_xp(row.id)
         await self._session.commit()
         await self._session.refresh(row)
         return row

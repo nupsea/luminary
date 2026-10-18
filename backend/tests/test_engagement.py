@@ -1,15 +1,17 @@
 """Tests for EngagementService -- streaks, XP, achievements, focus sessions."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.models import PomodoroSessionModel
 from app.repos.engagement_repo import EngagementRepo
 from app.services.engagement_service import (
     EngagementService,
     compute_level,
     xp_for_next_level,
 )
+from app.services.pomodoro_service import PomodoroService
 
 # Fixtures
 
@@ -183,65 +185,66 @@ class TestAchievements:
         assert len(recent) >= 1
 
 
-# Focus Sessions
+# Focus sessions: the header timer's pomodoros
 
 
 class TestFocusSessions:
-    @pytest.mark.asyncio
-    async def test_start_session(self, svc, session):
-        fs = await svc.start_focus_session(25, "study")
-        assert fs.id is not None
-        assert fs.planned_duration_minutes == 25
-        assert fs.completed is False
+    """The timer the UI drives writes pomodoro_sessions; XP, the focus achievements and
+    the Study Habits stats all read it. They once read a second table nothing wrote, so a
+    library with 194 completed pomodoros showed zero focus sessions and earned no XP."""
 
     @pytest.mark.asyncio
-    async def test_complete_session(self, svc, session):
-        fs = await svc.start_focus_session(25, "study")
-        result = await svc.complete_focus_session(fs.id)
-        assert result["xp_awarded"] == 20
-        assert result["already_completed"] is False
+    async def test_completing_a_pomodoro_awards_focus_xp(self, svc, session):
+        pomodoros = PomodoroService(session)
+        row = await pomodoros.start_session(focus_minutes=25)
+        await pomodoros.complete_session(row.id)
+        assert (await svc.get_xp_summary())["total_xp"] == 20
 
     @pytest.mark.asyncio
-    async def test_complete_idempotent(self, svc, session):
-        fs = await svc.start_focus_session(25, "study")
-        await svc.complete_focus_session(fs.id)
-        result = await svc.complete_focus_session(fs.id)
-        assert result["already_completed"] is True
+    async def test_an_abandoned_pomodoro_earns_nothing(self, svc, session):
+        pomodoros = PomodoroService(session)
+        row = await pomodoros.start_session(focus_minutes=25)
+        await pomodoros.abandon_session(row.id)
+        assert (await svc.get_xp_summary())["total_xp"] == 0
 
     @pytest.mark.asyncio
-    async def test_cancel_session(self, svc, session):
-        fs = await svc.start_focus_session(25, "study")
-        result = await svc.cancel_focus_session(fs.id)
-        assert result["cancelled"] is True
+    async def test_focus_stats_count_pomodoros(self, svc, session):
+        pomodoros = PomodoroService(session)
+        done = await pomodoros.start_session(focus_minutes=25)
+        await pomodoros.complete_session(done.id)
+        dropped = await pomodoros.start_session(focus_minutes=25)
+        await pomodoros.abandon_session(dropped.id)
 
-    @pytest.mark.asyncio
-    async def test_cancel_no_xp(self, svc, session):
-        fs = await svc.start_focus_session(25, "study")
-        await svc.cancel_focus_session(fs.id)
-        summary = await svc.get_xp_summary()
-        # Should be 0 XP -- cancelled sessions don't award XP
-        assert summary["total_xp"] == 0
-
-    @pytest.mark.asyncio
-    async def test_today_sessions(self, svc, session):
-        await svc.start_focus_session(25, "study")
-        await svc.start_focus_session(15, "notes")
-        sessions = await svc.get_today_sessions()
-        assert len(sessions) == 2
-
-    @pytest.mark.asyncio
-    async def test_focus_stats(self, svc, session):
-        fs = await svc.start_focus_session(25, "study")
-        await svc.complete_focus_session(fs.id)
         stats = await svc.get_focus_stats(days=7)
-        assert stats["total_sessions"] == 1
+        assert stats["total_sessions"] == 2
         assert stats["completed_sessions"] == 1
-        assert stats["completion_rate"] == 1.0
+        assert stats["completion_rate"] == 0.5
 
     @pytest.mark.asyncio
-    async def test_not_found_raises(self, svc):
-        with pytest.raises(ValueError, match="not found"):
-            await svc.complete_focus_session("nonexistent")
+    async def test_focus_minutes_leave_out_paused_time(self, svc, session):
+        start = datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
+        session.add(
+            PomodoroSessionModel(
+                id="p1",
+                started_at=start,
+                completed_at=start + timedelta(minutes=30),
+                pause_accumulated_seconds=5 * 60,
+                status="completed",
+                created_at=start,
+            )
+        )
+        await session.commit()
+        stats = await EngagementService(session).get_focus_stats(days=36500)
+        assert stats["total_focus_minutes"] == 25.0
+
+    @pytest.mark.asyncio
+    async def test_focus_achievements_unlock_from_pomodoros(self, svc, session):
+        await svc.seed_achievements()
+        pomodoros = PomodoroService(session)
+        row = await pomodoros.start_session(focus_minutes=50)
+        await pomodoros.complete_session(row.id)
+        unlocked = {a["key"] for a in await svc.get_achievements() if a["unlocked_at"]}
+        assert "focus_50min" in unlocked
 
 
 # Local-day buckets

@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     AchievementModel,
-    FocusSessionModel,
+    PomodoroSessionModel,
     StudyStreakModel,
     XPLedgerModel,
 )
@@ -79,8 +79,19 @@ def xp_for_next_level(total_xp: int) -> int:
     return (next_level * next_level) * 100
 
 
+def _focused_seconds(row: PomodoroSessionModel) -> float:
+    """Wall time from start to completion, less the time spent paused."""
+    started, completed = (_as_utc(row.started_at), _as_utc(row.completed_at))
+    return max(0.0, (completed - started).total_seconds() - row.pause_accumulated_seconds)
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """SQLite returns naive datetimes; attach UTC if missing."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+
 class EngagementService:
-    """Manages streaks, XP, achievements, and focus sessions.
+    """Manages streaks, XP, achievements, and focus-session stats.
 
     `tz_offset_minutes` matches JS `Date.getTimezoneOffset()` (positive
     west of UTC; PDT=420). It controls how "today" is computed for
@@ -285,9 +296,9 @@ class EngagementService:
         if key.startswith("notes_"):
             return await self._repo.count_xp_actions("note_created")
         if key == "focus_10":
-            return await self._repo.count_completed_focus_sessions()
+            return await self._repo.count_completed_pomodoros()
         if key == "focus_50min":
-            return await self._repo.count_completed_focus_sessions(min_planned_minutes=50)
+            return await self._repo.count_completed_pomodoros(min_focus_minutes=50)
         if key.startswith("xp_"):
             return await self._repo.total_xp()
 
@@ -332,84 +343,13 @@ class EngagementService:
     # Focus Sessions
     # ------------------------------------------------------------------
 
-    async def start_focus_session(
-        self, duration_minutes: int, session_type: str = "study"
-    ) -> FocusSessionModel:
-        session = FocusSessionModel(
-            id=str(uuid.uuid4()),
-            planned_duration_minutes=duration_minutes,
-            session_type=session_type,
-        )
-        self._session.add(session)
-        await self._session.commit()
-        await self._session.refresh(session)
-        return session
-
-    @staticmethod
-    def _ensure_utc(dt: datetime) -> datetime:
-        """SQLite returns naive datetimes; attach UTC if missing."""
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=UTC)
-        return dt
-
-    async def complete_focus_session(self, session_id: str) -> dict:
-        session = await self._session.get(FocusSessionModel, session_id)
-        if session is None:
-            raise ValueError(f"Focus session {session_id} not found")
-        if session.completed:
-            return {
-                "session_id": session_id,
-                "xp_awarded": session.xp_awarded,
-                "already_completed": True,
-            }
-
-        now = datetime.now(UTC)
-        session.ended_at = now
-        started = self._ensure_utc(session.started_at)
-        session.actual_duration_seconds = int((now - started).total_seconds())
-        session.completed = True
-
-        xp = await self.award_focus_session_xp(session_id)
-        session.xp_awarded = xp
-        await self._session.commit()
-
-        return {"session_id": session_id, "xp_awarded": xp, "already_completed": False}
-
-    async def cancel_focus_session(self, session_id: str) -> dict:
-        session = await self._session.get(FocusSessionModel, session_id)
-        if session is None:
-            raise ValueError(f"Focus session {session_id} not found")
-
-        now = datetime.now(UTC)
-        session.ended_at = now
-        started = self._ensure_utc(session.started_at)
-        session.actual_duration_seconds = int((now - started).total_seconds())
-        session.completed = False
-        await self._session.commit()
-
-        return {"session_id": session_id, "cancelled": True}
-
-    async def get_today_sessions(self) -> list[dict]:
-        return [
-            {
-                "id": s.id,
-                "started_at": s.started_at.isoformat(),
-                "ended_at": s.ended_at.isoformat() if s.ended_at else None,
-                "planned_duration_minutes": s.planned_duration_minutes,
-                "actual_duration_seconds": s.actual_duration_seconds,
-                "session_type": s.session_type,
-                "completed": s.completed,
-                "xp_awarded": s.xp_awarded,
-            }
-            for s in await self._repo.focus_sessions_on(str(self._local_today()))
-        ]
-
     async def get_focus_stats(self, days: int = 7) -> dict:
         start_str = str(self._local_today() - timedelta(days=days - 1))
-        sessions = await self._repo.focus_sessions_since(start_str)
+        sessions = await self._repo.pomodoros_since(start_str)
+        done = [s for s in sessions if s.status == "completed" and s.completed_at is not None]
         total = len(sessions)
-        completed = sum(1 for s in sessions if s.completed)
-        total_minutes = sum((s.actual_duration_seconds or 0) / 60 for s in sessions if s.completed)
+        completed = len(done)
+        total_minutes = sum(_focused_seconds(s) for s in done) / 60
         avg_duration = total_minutes / completed if completed > 0 else 0
 
         return {
