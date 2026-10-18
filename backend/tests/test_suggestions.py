@@ -697,3 +697,34 @@ async def test_generation_drops_questions_that_do_not_quote_the_document(db_sess
         )
 
     assert [c["question"] for c in out] == ["Where does Iceberg keep table state?"]
+
+
+@pytest.mark.asyncio
+async def test_cross_document_context_is_one_latest_summary_per_live_document(db_session):
+    """A deleted book's summary outlives it (507 such rows in one library); questions
+    about the whole library must not be drawn from it, nor from a superseded summary."""
+    from datetime import timedelta
+
+    from app.models import DocumentModel, SummaryModel
+
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    db_session.add(
+        DocumentModel(
+            id="doc-live", title="Live", format="txt", content_type="notes", file_path="/x"
+        )
+    )
+    for i, (doc_id, content) in enumerate(
+        [("doc-live", "old live"), ("doc-gone", "deleted book"), ("doc-live", "new live")]
+    ):
+        db_session.add(
+            SummaryModel(
+                id=str(uuid.uuid4()),
+                document_id=doc_id,
+                mode="executive",
+                content=content,
+                created_at=t0 + timedelta(minutes=i),
+            )
+        )
+    await db_session.commit()
+
+    assert await SuggestionService().get_multi_doc_summaries(limit=5) == "new live"

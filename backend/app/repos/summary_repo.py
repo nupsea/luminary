@@ -205,6 +205,24 @@ class SummaryRepo:
                 best[row.document_id] = (prio, row.content)
         return {doc_id: content for doc_id, (_, content) in best.items()}
 
+    async def latest_executive_summaries(self, limit: int) -> list[str]:
+        """The newest executive summary of each live document, newest documents first."""
+        rows = await self.session.execute(
+            select(SummaryModel.document_id, SummaryModel.content)
+            # A summary that outlived its document must not describe the library.
+            .join(DocumentModel, DocumentModel.id == SummaryModel.document_id)
+            .where(SummaryModel.mode == "executive")
+            .order_by(SummaryModel.created_at.desc())
+        )
+        latest: dict[str, str] = {}
+        for document_id, content in rows:
+            if document_id in latest:
+                continue
+            if len(latest) >= limit:
+                break
+            latest[document_id] = content
+        return list(latest.values())
+
     async def titles(self, document_ids: list[str]) -> dict[str, str]:
         rows = await self.session.execute(
             select(DocumentModel.id, DocumentModel.title).where(DocumentModel.id.in_(document_ids))
