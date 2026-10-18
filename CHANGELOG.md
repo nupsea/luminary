@@ -11,10 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cards for a technical book could quiz its preface and contributor list, and a novel's cards skipped any section named like "Indexing".** Front and back matter are now recognised from the sections themselves, for every kind of document (#252).
 - **A story could be classified as an essay from one reflective passage**, and get technical card prompts. The register is now a majority of three passages from the body (#286).
 - **A document classified as a conversation had sections with no text to practise from**, so it never got chapter cards (#286).
+- **A library card showed the summary written from a book's opening chapters**, not the one ingestion rewrites once every section is summarised, and retagging such a document added nothing. Both now read the newest summary.
 - **A cloud chat model the provider no longer offers showed only `litellm.NotFoundError: GeminiException - {` on the setup screen.** It now shows the provider's reason and points to Settings, and is no longer mistaken for a local model to install.
 
 ### Changed
-- **No API route runs SQL of its own any more**; every query is in `repos/`, ahead of the library scope 0.17.0 adds to each of them. No behaviour change.
+- **No API route runs SQL of its own any more**; every query is in `repos/`, ahead of the library scope 0.17.0 adds to each of them. The engagement, progress, notes, document-tagging and goal services followed. No behaviour change.
 
 ## [0.16.1] - 2026-10-15
 
