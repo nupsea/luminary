@@ -72,6 +72,16 @@ class ImageRepo:
             {"image_id": image_id, "document_id": document_id, "body": description},
         )
 
+    async def described(self, document_id: str, image_types: Sequence[str]) -> list[ImageModel]:
+        result = await self.session.execute(
+            select(ImageModel).where(
+                ImageModel.document_id == document_id,
+                ImageModel.image_type.in_(list(image_types)),
+                ImageModel.description.is_not(None),
+            )
+        )
+        return list(result.scalars().all())
+
     async def has_described(self, document_id: str, image_types: Sequence[str]) -> bool:
         result = await self.session.execute(
             select(ImageModel.id)

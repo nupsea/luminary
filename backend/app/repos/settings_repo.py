@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import SettingsModel
@@ -15,11 +14,12 @@ class SettingsRepo:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def find(self, key: str) -> SettingsModel | None:
+        return await self.session.get(SettingsModel, key)
+
     async def get(self, key: str) -> Any:
         """The stored value, or None when unset."""
-        row = (
-            await self.session.execute(select(SettingsModel).where(SettingsModel.key == key))
-        ).scalar_one_or_none()
+        row = await self.find(key)
         return None if row is None else row.value
 
     async def get_flag(self, key: str) -> bool | None:

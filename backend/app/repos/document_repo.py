@@ -15,11 +15,11 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Collection, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import NamedTuple
 
 from fastapi import Depends
-from sqlalchemy import func, select, text, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
@@ -118,6 +118,26 @@ class DocumentRepo:
             .where(ChunkModel.id.in_(list(chunk_ids)))
         )
         return [(cid, sid or "", heading or "") for cid, sid, heading in result.all()]
+
+    async def chunk_texts_in_order(self, document_id: str) -> list[tuple[str, str | None]]:
+        """(chunk id, text) in reading order."""
+        result = await self.session.execute(
+            select(ChunkModel.id, ChunkModel.text)
+            .where(ChunkModel.document_id == document_id)
+            .order_by(ChunkModel.chunk_index)
+        )
+        return [(cid, body) for cid, body in result.all()]
+
+    async def set_entry_date(self, chunk_id: str, entry_date: date) -> None:
+        await self.session.execute(
+            update(ChunkModel).where(ChunkModel.id == chunk_id).values(entry_date=entry_date)
+        )
+
+    async def delete_learning_objectives(self, document_id: str) -> None:
+        """Uncommitted."""
+        await self.session.execute(
+            delete(LearningObjectiveModel).where(LearningObjectiveModel.document_id == document_id)
+        )
 
     async def other_ids(self, document_id: str) -> list[str]:
         """Every document id but this one."""

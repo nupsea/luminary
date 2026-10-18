@@ -13,11 +13,10 @@ import logging
 import re
 from functools import lru_cache
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database as _database_module  # indirect: get_session_factory is patched
-from app.models import NoteModel
+from app.repos.note_repo import NoteRepo
 from app.services import retriever as _retriever_module  # indirect: get_retriever is patched
 from app.services.llm import get_llm_service
 from app.services.mastery_service import get_mastery_service
@@ -78,8 +77,7 @@ class GapDetectorService:
             async with _database_module.get_session_factory()() as s:
                 return await self.detect_gaps(note_ids, document_id, k=k, session=s)
 
-        result = await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids)))
-        notes = list(result.scalars().all())
+        notes = await NoteRepo(session).by_ids(note_ids)
         if not notes:
             raise ValueError("No notes found for given IDs")
 

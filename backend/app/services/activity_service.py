@@ -14,8 +14,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.repos.activity_repo import ActivityRepo
 
 
 class ActivityService:
@@ -63,41 +64,12 @@ class ActivityService:
 
     async def _bump_if_stale(self, member_type: str, member_id: str, debounce: timedelta) -> bool:
         cutoff = datetime.now(UTC) - debounce
-        existing = (
-            await self.session.execute(
-                text(
-                    "SELECT last_meaningful_at FROM content_activity "
-                    "WHERE member_type = :t AND member_id = :i"
-                ),
-                {"t": member_type, "i": member_id},
-            )
-        ).first()
-        if existing is not None:
-            last_at = existing[0]
-            # text() SELECTs return TIMESTAMP columns as ISO strings under
-            # aiosqlite; ORM-backed selects would decode automatically. Parse
-            # here so this helper can be called from raw-SQL paths too.
-            if isinstance(last_at, str):
-                last_at = datetime.fromisoformat(last_at)
-            if last_at.tzinfo is None:
-                last_at = last_at.replace(tzinfo=UTC)
-            if last_at >= cutoff:
-                return False
+        last_at = await ActivityRepo(self.session).last_meaningful_at(member_type, member_id)
+        if last_at is not None and last_at >= cutoff:
+            return False
         await self._bump_unconditional(member_type, member_id)
         return True
 
     async def _bump_unconditional(self, member_type: str, member_id: str) -> None:
-        await self.session.execute(
-            text(
-                "INSERT INTO content_activity (member_type, member_id, last_meaningful_at) "
-                "VALUES (:t, :i, :now) "
-                "ON CONFLICT(member_type, member_id) DO UPDATE SET "
-                "last_meaningful_at = excluded.last_meaningful_at"
-            ),
-            {
-                "t": member_type,
-                "i": member_id,
-                "now": datetime.now(UTC),
-            },
-        )
+        await ActivityRepo(self.session).touch(member_type, member_id, datetime.now(UTC))
         await self.session.commit()

@@ -24,10 +24,8 @@ import asyncio
 import json
 import logging
 
-from sqlalchemy import select
-
 from app.database import get_session_factory
-from app.models import ImageModel
+from app.repos.image_repo import ImageRepo
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.llm import LLMUnavailableError, get_llm_service
 
@@ -132,14 +130,7 @@ class DiagramExtractorService:
         """
 
         async with get_session_factory()() as session:
-            result = await session.execute(
-                select(ImageModel).where(
-                    ImageModel.document_id == document_id,
-                    ImageModel.image_type.in_(list(_QUALIFYING_TYPES)),
-                    ImageModel.description.is_not(None),
-                )
-            )
-            images = list(result.scalars().all())
+            images = await ImageRepo(session).described(document_id, list(_QUALIFYING_TYPES))
 
         if not images:
             logger.info("diagram_extractor: no qualifying diagram images for doc=%s", document_id)

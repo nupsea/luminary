@@ -11,7 +11,8 @@ import re
 from datetime import date
 
 from dateutil import parser as _du
-from sqlalchemy import text
+
+from app.repos.document_repo import DocumentRepo
 
 _MONTHS = r"Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
 # Explicit "Date:"/"Dated:" line -> capture the value.
@@ -57,12 +58,8 @@ async def assign_entry_dates(session, document_id: str) -> int:
     """Forward-fill content dates over a document's chunks (in order) and persist
     to chunks.entry_date -- but ONLY for documents that look like dated-entry
     logs. Returns the number of chunks dated (0 if the doc doesn't qualify)."""
-    rows = (
-        await session.execute(
-            text("SELECT id, text FROM chunks WHERE document_id=:d ORDER BY chunk_index"),
-            {"d": document_id},
-        )
-    ).fetchall()
+    docs = DocumentRepo(session)
+    rows = await docs.chunk_texts_in_order(document_id)
     if not rows:
         return 0
     direct = [(cid, extract_date(body or "")) for cid, body in rows]
@@ -80,9 +77,6 @@ async def assign_entry_dates(session, document_id: str) -> int:
         if found is not None:
             current = found
         if current is not None:
-            await session.execute(
-                text("UPDATE chunks SET entry_date=:e WHERE id=:i"),
-                {"e": current.isoformat(), "i": cid},
-            )
+            await docs.set_entry_date(cid, current)
             dated += 1
     return dated

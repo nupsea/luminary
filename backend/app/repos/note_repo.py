@@ -355,6 +355,13 @@ class NoteRepo:
         )
         return {row[0]: tuple(row) for row in result.all()}
 
+    async def contents_with_documents(self) -> list[tuple[str, str, str | None]]:
+        """(id, content, document id) of every note."""
+        result = await self.session.execute(
+            select(NoteModel.id, NoteModel.content, NoteModel.document_id)
+        )
+        return [(i, c, d) for i, c, d in result.all()]
+
     async def by_ids(self, note_ids: Sequence[str]) -> list[NoteModel]:
         if not note_ids:
             return []
