@@ -19,17 +19,13 @@ import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import DependencyUnavailable, NotFound
-from app.models import (
-    FeynmanSessionModel,
-    FeynmanTurnModel,
-    SectionModel,
-    SectionSummaryModel,
-)
+from app.models import FeynmanSessionModel, FeynmanTurnModel
 from app.repos.document_repo import DocumentRepo
+from app.repos.feynman_repo import FeynmanRepo
+from app.repos.summary_repo import SummaryRepo
 from app.services.feynman_strategies import (
     _FEYNMAN_OPENING_TMPL,
     _FEYNMAN_SYSTEM_TMPL,
@@ -62,22 +58,11 @@ class FeynmanService:
     ) -> str:
         """Fetch section summary or section preview for the tutor system prompt."""
         if section_id:
-            # Try SectionSummaryModel first
-            result = await session.execute(
-                select(SectionSummaryModel)
-                .where(SectionSummaryModel.document_id == document_id)
-                .where(SectionSummaryModel.section_id == section_id)
-                .limit(1)
-            )
-            summary = result.scalar_one_or_none()
+            summary = await SummaryRepo(session).section_summary(document_id, section_id)
             if summary and summary.content:
                 return summary.content[:_SECTION_CONTEXT_CHAR_LIMIT]
 
-            # Fallback to section preview
-            result2 = await session.execute(
-                select(SectionModel).where(SectionModel.id == section_id).limit(1)
-            )
-            section = result2.scalar_one_or_none()
+            section = await DocumentRepo(session).section(section_id)
             if section and section.preview:
                 return section.preview[:_SECTION_CONTEXT_CHAR_LIMIT]
 
@@ -170,21 +155,12 @@ class FeynmanService:
 
         The 'done' payload contains stripped text (gaps: block removed).
         """
-        # Load session
-        result = await db_session.execute(
-            select(FeynmanSessionModel).where(FeynmanSessionModel.id == session_id)
-        )
-        feynman_session = result.scalar_one_or_none()
+        repo = FeynmanRepo(db_session)
+        feynman_session = await repo.find(session_id)
         if feynman_session is None:
             raise NotFound("Feynman session not found")
 
-        # Load all prior turns for conversation history
-        turns_result = await db_session.execute(
-            select(FeynmanTurnModel)
-            .where(FeynmanTurnModel.session_id == session_id)
-            .order_by(FeynmanTurnModel.turn_index)
-        )
-        turns = list(turns_result.scalars().all())
+        turns = await repo.turns(session_id)
         turn_count = len(turns)
 
         # Fetch section context for system prompt
@@ -268,23 +244,14 @@ class FeynmanService:
 
         Returns {"gap_count": N, "flashcard_ids": [...]}
         """
-        result = await db_session.execute(
-            select(FeynmanSessionModel).where(FeynmanSessionModel.id == session_id)
-        )
-        feynman_session = result.scalar_one_or_none()
+        repo = FeynmanRepo(db_session)
+        feynman_session = await repo.find(session_id)
         if feynman_session is None:
             raise NotFound("Feynman session not found")
 
-        # Mark session complete
         feynman_session.status = "complete"
 
-        # Collect all turns (tutor for gaps, learner for rubric transcript)
-        turns_result = await db_session.execute(
-            select(FeynmanTurnModel).where(
-                FeynmanTurnModel.session_id == session_id,
-            )
-        )
-        all_turns = list(turns_result.scalars().all())
+        all_turns = await repo.turns(session_id)
         tutor_turns = [t for t in all_turns if t.role == "tutor"]
         learner_turns = [t for t in all_turns if t.role == "learner"]
 
@@ -370,10 +337,7 @@ class FeynmanService:
 
         Persists model_explanation_text and key_points_json on the session row.
         """
-        result = await db_session.execute(
-            select(FeynmanSessionModel).where(FeynmanSessionModel.id == session_id)
-        )
-        feynman_session = result.scalar_one_or_none()
+        feynman_session = await FeynmanRepo(db_session).find(session_id)
         if feynman_session is None:
             not_found = {"error": "not_found", "message": "Feynman session not found"}
             yield f"data: {json.dumps(not_found)}\n\n"
@@ -443,27 +407,12 @@ class FeynmanService:
         db_session: AsyncSession,
     ) -> list[dict]:
         """Return all Feynman sessions for a document with gap_count per session."""
-        sessions_result = await db_session.execute(
-            select(FeynmanSessionModel)
-            .where(FeynmanSessionModel.document_id == document_id)
-            .order_by(FeynmanSessionModel.created_at.desc())
-        )
-        sessions = list(sessions_result.scalars().all())
-
+        repo = FeynmanRepo(db_session)
+        sessions = await repo.list_for_document(document_id)
         if not sessions:
             return []
 
-        # Fetch all tutor turns for these sessions in one query
-        session_ids = [s.id for s in sessions]
-        turns_result = await db_session.execute(
-            select(FeynmanTurnModel).where(
-                FeynmanTurnModel.session_id.in_(session_ids),
-                FeynmanTurnModel.role == "tutor",
-            )
-        )
-        turns = list(turns_result.scalars().all())
-
-        # Compute gap_count per session
+        turns = await repo.tutor_turns([s.id for s in sessions])
         gap_counts: dict[str, int] = {}
         for turn in turns:
             sid = turn.session_id

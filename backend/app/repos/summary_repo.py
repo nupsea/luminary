@@ -50,6 +50,19 @@ class SummaryRepo:
         )
         return list(result.scalars().all())
 
+    async def section_summary(
+        self, document_id: str, section_id: str
+    ) -> SectionSummaryModel | None:
+        result = await self.session.execute(
+            select(SectionSummaryModel)
+            .where(
+                SectionSummaryModel.document_id == document_id,
+                SectionSummaryModel.section_id == section_id,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def summarised_section_ids(self, document_id: str) -> set[str | None]:
         result = await self.session.execute(
             select(SectionSummaryModel.section_id).where(
