@@ -159,6 +159,18 @@ class FlashcardRepo:
         )
         return [(row[0], row[1]) for row in result.all()]
 
+    async def deck_has_note_content(self, deck: str, content_hash: str) -> bool:
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(FlashcardModel)
+            .where(
+                FlashcardModel.deck == deck,
+                FlashcardModel.source == "note",
+                FlashcardModel.source_content_hash == content_hash,
+            )
+        )
+        return result.scalar_one() > 0
+
     async def list_for_deck(self, deck: str) -> list[FlashcardModel]:
         result = await self.session.execute(
             select(FlashcardModel).where(FlashcardModel.deck == deck)

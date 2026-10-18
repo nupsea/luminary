@@ -335,6 +335,17 @@ class NoteRepo:
         )
         return list(result.scalars().all())
 
+    async def tagged(self, tag: str) -> list[NoteModel]:
+        """Notes whose tags list holds exactly `tag` (no descendants)."""
+        result = await self.session.execute(
+            select(NoteModel).where(
+                text(
+                    "EXISTS (SELECT 1 FROM json_each(notes.tags) WHERE json_each.value = :tag)"
+                ).bindparams(tag=tag)
+            )
+        )
+        return list(result.scalars().all())
+
     async def collection_names_for(self, note_id: str) -> list[str]:
         result = await self.session.execute(
             select(CollectionModel.name)

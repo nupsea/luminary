@@ -294,7 +294,7 @@ async def _fetch_document_chunks(
     if scope == "section" and section_heading:
         section = await repo.first_section_headed(document_id, section_heading)
         if section:
-            return await repo.chunks_in_section(document_id, section.id)
+            return await repo.chunks_in_section(section.id, document_id)
 
     all_chunks = list(await repo.chunks_for_document(document_id))
     if scope != "full":
@@ -702,7 +702,7 @@ class FlashcardService(FlashcardSearchService):
         worked, and the caller keeps its empty-result message for that case.
         """
         if section_id:
-            chunks = await DocumentRepo(session).chunks_in_section(document_id, section_id)
+            chunks = await DocumentRepo(session).chunks_in_section(section_id, document_id)
             rows = await FlashcardRepo(session).list_for_section(document_id, section_id)
             decks = [card for card, _sid in rows]
         else:

@@ -17,19 +17,17 @@ from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models import (
     ChunkModel,
-    CollectionMemberModel,
-    CollectionModel,
     FlashcardModel,
-    NoteModel,
-    SectionModel,
 )
+from app.repos.collection_repo import CollectionRepo
 from app.repos.document_repo import DocumentRepo
+from app.repos.flashcard_repo import FlashcardRepo
+from app.repos.note_repo import NoteRepo
 from app.services import llm_output_stats
 from app.services.enrichment_concurrency import get_enrichment_llm_semaphore
 from app.services.flashcard_factuality import (
@@ -164,13 +162,7 @@ async def generate_technical(
     has_code = any(c.has_code for c in chunks)
     admonition_type: str | None = None
     if scope == "section" and section_heading:
-        sec_result = await session.execute(
-            select(SectionModel)
-            .where(SectionModel.document_id == document_id)
-            .where(SectionModel.heading == section_heading)
-            .limit(1)
-        )
-        sec = sec_result.scalar_one_or_none()
+        sec = await DocumentRepo(session).first_section_headed(document_id, section_heading)
         if sec:
             admonition_type = sec.admonition_type
 
@@ -278,12 +270,7 @@ async def generate_cloze(
 
     llm = _get_llm_service()
 
-    chunk_result = await session.execute(
-        select(ChunkModel)
-        .where(ChunkModel.section_id == section_id)
-        .order_by(ChunkModel.chunk_index)
-    )
-    chunks = list(chunk_result.scalars().all())
+    chunks = await DocumentRepo(session).chunks_in_section(section_id)
     if not chunks:
         return []
 
@@ -933,18 +920,7 @@ async def generate(
     # the content types where the answer changes the prompt.
     has_speakers: bool | None = None
     if doc.content_type in ("audio", "video"):
-        has_speakers = bool(
-            (
-                await session.execute(
-                    select(func.count())
-                    .select_from(ChunkModel)
-                    .where(
-                        ChunkModel.document_id == document_id,
-                        ChunkModel.speaker.isnot(None),
-                    )
-                )
-            ).scalar()
-        )
+        has_speakers = await DocumentRepo(session).has_speaker_turns(document_id)
 
     # infer genre for genre-aware system prompt
     genre = _infer_genre(doc, has_speakers=has_speakers)
@@ -962,13 +938,7 @@ async def generate(
     if context and context.strip():
         combined_text = context.strip()[:_CHUNK_CHAR_LIMIT]
         # The document's first chunk, or none: never the document id, which is not a chunk.
-        first_chunk_result = await session.execute(
-            select(ChunkModel.id)
-            .where(ChunkModel.document_id == document_id)
-            .order_by(ChunkModel.chunk_index)
-            .limit(1)
-        )
-        first_chunk_id = first_chunk_result.scalar_one_or_none()
+        first_chunk_id = await DocumentRepo(session).first_chunk_id(document_id)
     else:
         chunks = await _fetch_chunks(document_id, scope, section_heading, session)
         if not chunks:
@@ -1289,18 +1259,11 @@ async def generate_from_notes(
 
     llm = _get_llm_service()
 
-    if note_ids:
-        result = await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids)))
-        notes = list(result.scalars().all())
-    else:
-        result = await session.execute(
-            select(NoteModel).where(
-                text(
-                    "EXISTS (SELECT 1 FROM json_each(notes.tags) WHERE json_each.value = :tag)"
-                ).bindparams(tag=tag)
-            )
-        )
-        notes = list(result.scalars().all())
+    notes = (
+        await NoteRepo(session).by_ids(note_ids)
+        if note_ids
+        else await NoteRepo(session).tagged(tag)
+    )
 
     if not notes:
         return []
@@ -1410,46 +1373,28 @@ async def generate_from_collection(
 
     llm = _get_llm_service()
 
-    coll_result = await session.execute(
-        select(CollectionModel).where(CollectionModel.id == collection_id)
-    )
-    collection = coll_result.scalar_one_or_none()
+    collections = CollectionRepo(session)
+    collection = await collections.find(collection_id)
     if collection is None:
         raise ValueError(f"Collection {collection_id!r} not found")
 
     deck_name = collection.name
-
-    member_result = await session.execute(
-        select(CollectionMemberModel.member_id).where(
-            CollectionMemberModel.collection_id == collection_id,
-            CollectionMemberModel.member_type == "note",
-        )
-    )
-    note_ids = [row[0] for row in member_result.all()]
+    note_ids = await collections.note_ids(collection_id)
+    notes = NoteRepo(session)
+    cards = FlashcardRepo(session)
 
     created = 0
     skipped = 0
 
     for note_id in note_ids:
-        note_result = await session.execute(select(NoteModel).where(NoteModel.id == note_id))
-        note = note_result.scalar_one_or_none()
+        note = await notes.find(note_id)
         if note is None or not note.content:
             continue
 
         content_hash = hashlib.sha256(note.content[:500].encode()).hexdigest()[:16]
 
         if not force_regenerate:
-            count_result = await session.execute(
-                select(func.count())
-                .select_from(FlashcardModel)
-                .where(
-                    FlashcardModel.deck == deck_name,
-                    FlashcardModel.source == "note",
-                    FlashcardModel.source_content_hash == content_hash,
-                )
-            )
-            existing = count_result.scalar_one()
-            if existing > 0:
+            if await cards.deck_has_note_content(deck_name, content_hash):
                 skipped += 1
                 continue
 
