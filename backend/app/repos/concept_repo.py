@@ -30,6 +30,16 @@ class ConceptRepo:
         result = await self.session.execute(select(ConceptModel).limit(limit))
         return result.scalars().all()
 
+    async def weakest_tracked(self, limit: int) -> list[str]:
+        """Ids of non-candidate concepts, never-reviewed first, then lowest mastery."""
+        result = await self.session.execute(
+            select(ConceptModel.id)
+            .where(ConceptModel.status != "candidate")
+            .order_by(ConceptModel.last_reviewed.is_(None).desc(), ConceptModel.mastery.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def by_ids(self, concept_ids: Collection[str]) -> Sequence[ConceptModel]:
         result = await self.session.execute(
             select(ConceptModel).where(ConceptModel.id.in_(concept_ids))

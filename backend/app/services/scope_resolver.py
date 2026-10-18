@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import CollectionMemberModel, ConceptModel, FlashcardModel
+from app.models import ConceptModel
+from app.repos.collection_repo import CollectionRepo
+from app.repos.concept_repo import ConceptRepo
 from app.repos.graph_concept_repo import GraphConceptRepo
 
 logger = logging.getLogger(__name__)
@@ -29,33 +30,15 @@ async def _weakest_first(session: AsyncSession, concept_ids: list[str]) -> list[
     """Order concept ids coldest/weakest first (the same selection everywhere)."""
     if not concept_ids:
         return []
-    rows = (
-        await session.execute(
-            select(ConceptModel.id, ConceptModel.mastery, ConceptModel.last_reviewed).where(
-                ConceptModel.id.in_(concept_ids)
-            )
-        )
-    ).all()
+    concepts = await ConceptRepo(session).by_ids(concept_ids)
     # never-reviewed (last_reviewed is None) sorts first, then lowest mastery
-    order = sorted(rows, key=lambda r: (r[2] is not None, r[1]))
-    return [r[0] for r in order]
+    order = sorted(concepts, key=lambda c: (c.last_reviewed is not None, c.mastery))
+    return [c.id for c in order]
 
 
 async def resolve_daily(session: AsyncSession, limit: int = _DAILY_LIMIT) -> list[str]:
     """Lumen's cross-collection pick: weakest/coldest tracked concepts."""
-    rows = (
-        (
-            await session.execute(
-                select(ConceptModel.id)
-                .where(ConceptModel.status != "candidate")
-                .order_by(ConceptModel.last_reviewed.is_(None).desc(), ConceptModel.mastery.asc())
-                .limit(limit)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return list(rows)
+    return await ConceptRepo(session).weakest_tracked(limit)
 
 
 async def resolve_concept(session: AsyncSession, concept_id: str) -> list[str]:
@@ -74,25 +57,9 @@ async def resolve_doc(session: AsyncSession, document_id: str) -> list[str]:
     return await _weakest_first(session, ids)
 
 
-async def _collection_document_ids(session: AsyncSession, collection_id: str) -> list[str]:
-    rows = (
-        (
-            await session.execute(
-                select(CollectionMemberModel.member_id).where(
-                    CollectionMemberModel.collection_id == collection_id,
-                    CollectionMemberModel.member_type == "document",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return list(rows)
-
-
 async def resolve_collection(session: AsyncSession, collection_id: str) -> list[str]:
     """Concepts lit by the documents in a collection, weakest first."""
-    doc_ids = await _collection_document_ids(session, collection_id)
+    doc_ids = await CollectionRepo(session).document_ids(collection_id)
     if not doc_ids:
         return []
     ids = await GraphConceptRepo(session).concept_ids_for_documents(doc_ids)
@@ -101,19 +68,9 @@ async def resolve_collection(session: AsyncSession, collection_id: str) -> list[
 
 async def resolve_note(session: AsyncSession, note_id: str) -> list[str]:
     """Concepts a note's already-mapped cards point at (generation wired later)."""
-    rows = (
-        (
-            await session.execute(
-                select(FlashcardModel.concept_id).where(
-                    FlashcardModel.note_id == note_id,
-                    FlashcardModel.concept_id.is_not(None),
-                )
-            )
-        )
-        .scalars()
-        .all()
+    return await _weakest_first(
+        session, list(await ConceptRepo(session).ids_on_note_cards(note_id))
     )
-    return await _weakest_first(session, list({r for r in rows if r}))
 
 
 async def resolve_scope(

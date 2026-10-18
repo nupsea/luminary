@@ -202,6 +202,51 @@ class FlashcardRepo:
         )
         return int(result.scalar_one())
 
+    async def due_in_scope(
+        self,
+        now: datetime,
+        limit: int,
+        *,
+        concept_ids: Sequence[str] = (),
+        document_ids: Sequence[str] = (),
+        note_ids: Sequence[str] = (),
+    ) -> list[FlashcardModel]:
+        """Cards due by `now` on any of these concepts, documents or notes, most overdue first."""
+        conds = []
+        if concept_ids:
+            conds.append(FlashcardModel.concept_id.in_(list(concept_ids)))
+        if document_ids:
+            conds.append(FlashcardModel.document_id.in_(list(document_ids)))
+        if note_ids:
+            conds.append(FlashcardModel.note_id.in_(list(note_ids)))
+        if not conds:
+            return []
+        result = await self.session.execute(
+            select(FlashcardModel)
+            .where(FlashcardModel.due_date <= now, or_(*conds))
+            .order_by(FlashcardModel.due_date.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def avg_stability_by_section(self, document_id: str) -> dict[str, float]:
+        """{section id: mean FSRS stability} over the document's non-definition cards."""
+        result = await self.session.execute(
+            select(ChunkModel.section_id, func.avg(FlashcardModel.fsrs_stability))
+            .join(ChunkModel, FlashcardModel.chunk_id == ChunkModel.id)
+            .where(
+                FlashcardModel.document_id == document_id,
+                FlashcardModel.fsrs_stability.is_not(None),
+                or_(
+                    FlashcardModel.flashcard_type.is_(None),
+                    FlashcardModel.flashcard_type != "definition",
+                ),
+                ChunkModel.section_id.is_not(None),
+            )
+            .group_by(ChunkModel.section_id)
+        )
+        return {sid: float(avg) for sid, avg in result.all() if avg is not None}
+
     async def bloom_by_section(self, document_id: str) -> list[tuple[int, str, str]]:
         """(bloom level, section id, heading) per card anchored in a section of the document."""
         result = await self.session.execute(
