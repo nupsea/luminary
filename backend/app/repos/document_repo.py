@@ -149,6 +149,24 @@ class DocumentRepo:
         )
         return result.scalar_one() or 0
 
+    async def chunk_counts(self, document_ids: Sequence[str]) -> dict[str, int]:
+        """{id: chunks}; documents with none are absent."""
+        result = await self.session.execute(
+            select(ChunkModel.document_id, func.count(ChunkModel.id))
+            .where(ChunkModel.document_id.in_(document_ids))
+            .group_by(ChunkModel.document_id)
+        )
+        return dict(result.all())
+
+    async def opening_chunk_texts(self, document_id: str, limit: int) -> list[str]:
+        result = await self.session.execute(
+            select(ChunkModel.text)
+            .where(ChunkModel.document_id == document_id)
+            .order_by(ChunkModel.chunk_index)
+            .limit(limit)
+        )
+        return [t or "" for t in result.scalars()]
+
     async def fts_chunk_count(self, document_id: str) -> int:
         result = await self.session.execute(
             text("SELECT COUNT(*) FROM chunks_fts WHERE document_id = :did"),

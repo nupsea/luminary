@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import (
     CanonicalTagModel,
+    DocumentTagIndexModel,
+    DocumentTagProvenanceModel,
     NoteModel,
     NoteTagIndexModel,
     TagAliasModel,
@@ -209,6 +211,112 @@ class TagRepo:
                 "usage_count": usage_count,
             },
         )
+
+    # -- per-member tag index (uncommitted, in the member's write transaction) --
+
+    async def indexed_tags(self, scope: Literal["note", "document"], member_id: str) -> set[str]:
+        table, member = _SCOPE_INDEX[scope]
+        rows = await self.session.execute(
+            text(f"SELECT tag_full FROM {table} WHERE {member} = :mid"),  # noqa: S608
+            {"mid": member_id},
+        )
+        return set(rows.scalars().all())
+
+    async def unindex(self, scope: Literal["note", "document"], member_id: str, tag: str) -> None:
+        """Drop one tag from a member and its usage count; a document's provenance goes too."""
+        table, member = _SCOPE_INDEX[scope]
+        params = {"mid": member_id, "tag": tag}
+        await self.session.execute(
+            text(f"DELETE FROM {table} WHERE {member} = :mid AND tag_full = :tag"),  # noqa: S608
+            params,
+        )
+        if scope == "document":
+            await self.session.execute(
+                text(
+                    "DELETE FROM document_tag_provenance"
+                    " WHERE document_id = :mid AND tag_full = :tag"
+                ),
+                params,
+            )
+        await self.session.execute(
+            text("UPDATE canonical_tags SET usage_count = MAX(0, usage_count - 1) WHERE id = :tag"),
+            {"tag": tag},
+        )
+
+    async def index(self, scope: Literal["note", "document"], member_id: str, tag: str) -> None:
+        """Add one tag to a member, creating the canonical tag or counting one more use."""
+        table, member = _SCOPE_INDEX[scope]
+        segments = tag.split("/")
+        tag_parent = "/".join(segments[:-1]) if len(segments) > 1 else ""
+        await self.session.execute(
+            text(
+                f"INSERT OR IGNORE INTO {table}"  # noqa: S608
+                f" ({member}, tag_full, tag_root, tag_parent)"
+                " VALUES (:mid, :tag_full, :tag_root, :tag_parent)"
+            ),
+            {"mid": member_id, "tag_full": tag, "tag_root": segments[0], "tag_parent": tag_parent},
+        )
+        await self.session.execute(
+            text(
+                "INSERT INTO canonical_tags"
+                " (id, display_name, parent_tag, usage_count, created_at)"
+                " VALUES (:id, :display_name, :parent_tag, 1, datetime('now'))"
+                " ON CONFLICT(id) DO UPDATE SET"
+                " usage_count = canonical_tags.usage_count + 1"
+            ),
+            {"id": tag, "display_name": segments[-1], "parent_tag": tag_parent or None},
+        )
+
+    async def record_auto_provenance(
+        self, document_id: str, tags: list[str], tagger_version: str, at: datetime
+    ) -> None:
+        for tag in tags:
+            self.session.add(
+                DocumentTagProvenanceModel(
+                    document_id=document_id,
+                    tag_full=tag,
+                    source="auto",
+                    tagger_version=tagger_version,
+                    created_at=at,
+                )
+            )
+
+    async def record_manual_provenance(self, document_id: str, tag: str) -> None:
+        """INSERT OR IGNORE: an existing auto-tagger row stays authoritative."""
+        await self.session.execute(
+            text(
+                "INSERT OR IGNORE INTO document_tag_provenance"
+                " (document_id, tag_full, source, tagger_version, created_at)"
+                " VALUES (:doc_id, :tag, 'manual', NULL, datetime('now'))"
+            ),
+            {"doc_id": document_id, "tag": tag},
+        )
+
+    async def document_index_rows(self) -> list[tuple[str, str]]:
+        """Every (document_id, tag) in the document tag index."""
+        rows = await self.session.execute(
+            select(DocumentTagIndexModel.document_id, DocumentTagIndexModel.tag_full)
+        )
+        return [(d, t) for d, t in rows.all()]
+
+    async def document_provenance_rows(self) -> list[tuple[str, str, str, str | None]]:
+        """Every (document_id, tag, source, tagger_version) provenance row."""
+        rows = await self.session.execute(
+            select(
+                DocumentTagProvenanceModel.document_id,
+                DocumentTagProvenanceModel.tag_full,
+                DocumentTagProvenanceModel.source,
+                DocumentTagProvenanceModel.tagger_version,
+            )
+        )
+        return [(d, t, s, v) for d, t, s, v in rows.all()]
+
+    async def drop_document_index_rows(self, document_id: str, tags: set[str]) -> None:
+        """Index and provenance rows only, uncommitted; canonical usage counts are untouched."""
+        for model in (DocumentTagIndexModel, DocumentTagProvenanceModel):
+            await self.session.execute(
+                delete(model).where(model.document_id == document_id, model.tag_full.in_(tags))
+            )
 
     async def delete_with_aliases(self, tag_id: str) -> None:
         """Delete the canonical tag and any aliases pointing to it.

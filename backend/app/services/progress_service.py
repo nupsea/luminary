@@ -14,16 +14,9 @@ library headline and the per-concept numbers cannot disagree by construction.
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Integer, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import (
-    DocumentModel,
-    FlashcardModel,
-    NoteModel,
-    ReviewEventModel,
-    TimeOnTaskModel,
-)
+from app.repos.progress_repo import ProgressRepo
 from app.schemas.progress import (
     Metric,
     NotesTimelinePoint,
@@ -75,6 +68,7 @@ class ProgressService:
     def __init__(self, session: AsyncSession, tz_offset_minutes: int = 0) -> None:
         self._session = session
         self._tz_offset_minutes = tz_offset_minutes
+        self._repo = ProgressRepo(session, tz_offset_minutes)
 
     def _naive_cutoff(self, days: int) -> datetime:
         """Window start as a tz-naive UTC datetime.
@@ -84,9 +78,6 @@ class ProgressService:
         """
         return datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
 
-    async def _scalar(self, stmt) -> int:
-        return int((await self._session.execute(stmt)).scalar_one() or 0)
-
     # -- individual metrics --------------------------------------------------
 
     async def _retention(self) -> Metric:
@@ -95,16 +86,7 @@ class ProgressService:
             f"{_RETENTION_WINDOW_DAYS} days."
         )
         cutoff = self._naive_cutoff(_RETENTION_WINDOW_DAYS)
-        row = (
-            await self._session.execute(
-                select(
-                    func.count(ReviewEventModel.id),
-                    func.sum(func.cast(ReviewEventModel.is_correct, Integer)),
-                ).where(ReviewEventModel.reviewed_at >= cutoff)
-            )
-        ).one()
-        total = int(row[0] or 0)
-        correct = int(row[1] or 0)
+        total, correct = await self._repo.review_totals_since(cutoff)
         if total < _MIN_REVIEWS_FOR_RETENTION:
             return _absent(
                 "percent",
@@ -130,11 +112,7 @@ class ProgressService:
         # reps > 0 is load-bearing: a generated-but-never-reviewed card has
         # stability 0.0, so counting new cards would turn this into "share of my
         # library I have got round to", which is not mastery.
-        cards = list(
-            (await self._session.execute(select(FlashcardModel).where(FlashcardModel.reps > 0)))
-            .scalars()
-            .all()
-        )
+        cards = await self._repo.reviewed_cards()
         if len(cards) < _MIN_CARDS_FOR_MASTERY:
             return _absent(
                 "percent",
@@ -160,17 +138,8 @@ class ProgressService:
             f"Cards whose FSRS stability has reached {_MATURE_STABILITY_DAYS:.0f} days "
             "-- ones you would still be likely to recall after three weeks away."
         )
-        reviewed = await self._scalar(
-            select(func.count()).select_from(FlashcardModel).where(FlashcardModel.reps > 0)
-        )
-        mature = await self._scalar(
-            select(func.count())
-            .select_from(FlashcardModel)
-            .where(
-                FlashcardModel.fsrs_state == "review",
-                FlashcardModel.fsrs_stability >= _MATURE_STABILITY_DAYS,
-            )
-        )
+        reviewed = await self._repo.count_reviewed_cards()
+        mature = await self._repo.count_mature_cards(_MATURE_STABILITY_DAYS)
         # Zero is a real answer here, not a missing one: it means no card has got
         # there yet. Only report it once there is something to have got there from.
         if reviewed == 0:
@@ -185,10 +154,8 @@ class ProgressService:
 
     async def _due_today(self) -> Metric:
         now = datetime.now(UTC).replace(tzinfo=None)
-        due = await self._scalar(
-            select(func.count()).select_from(FlashcardModel).where(FlashcardModel.due_date <= now)
-        )
-        total = await self._scalar(select(func.count()).select_from(FlashcardModel))
+        due = await self._repo.count_cards_due_by(now)
+        total = await self._repo.count_cards()
         return Metric(
             value=float(due),
             unit="count",
@@ -226,11 +193,7 @@ class ProgressService:
 
     async def _reviews_30d(self) -> Metric:
         cutoff = self._naive_cutoff(_RETENTION_WINDOW_DAYS)
-        count = await self._scalar(
-            select(func.count())
-            .select_from(ReviewEventModel)
-            .where(ReviewEventModel.reviewed_at >= cutoff)
-        )
+        count = await self._repo.count_reviews_since(cutoff)
         return Metric(
             value=float(count),
             unit="count",
@@ -306,18 +269,7 @@ class ProgressService:
         never had. A day is active if it carries a graded review or a recorded
         interval — two direct observations, no interpolation.
         """
-        cutoff = self._naive_cutoff(_ACTIVITY_WINDOW_DAYS)
-        review_days = await self._session.execute(
-            select(self._local_date_sql(ReviewEventModel.reviewed_at)).where(
-                ReviewEventModel.reviewed_at >= cutoff
-            )
-        )
-        task_days = await self._session.execute(
-            select(self._local_date_sql(TimeOnTaskModel.started_at)).where(
-                TimeOnTaskModel.started_at >= cutoff
-            )
-        )
-        days = {d for (d,) in review_days if d} | {d for (d,) in task_days if d}
+        days = await self._repo.active_days_since(self._naive_cutoff(_ACTIVITY_WINDOW_DAYS))
         return Metric(
             value=float(len(days)),
             unit="days",
@@ -329,7 +281,7 @@ class ProgressService:
         )
 
     async def _documents(self) -> Metric:
-        count = await self._scalar(select(func.count()).select_from(DocumentModel))
+        count = await self._repo.count_documents()
         return Metric(
             value=float(count),
             unit="count",
@@ -339,9 +291,7 @@ class ProgressService:
         )
 
     async def _notes(self) -> Metric:
-        count = await self._scalar(
-            select(func.count()).select_from(NoteModel).where(NoteModel.archived.is_(False))
-        )
+        count = await self._repo.count_live_notes()
         return Metric(
             value=float(count),
             unit="count",
@@ -371,33 +321,9 @@ class ProgressService:
 
     async def notes_timeline(self, months: int = 12) -> NotesTimelineResponse:
         """Notes per local month, grouped in SQL rather than in the browser."""
-        month_expr = self._local_month_sql(NoteModel.created_at)
-        rows = (
-            await self._session.execute(
-                select(month_expr.label("month"), func.count().label("count"))
-                .where(NoteModel.archived.is_(False))
-                .group_by(month_expr)
-                .order_by(month_expr)
-            )
-        ).all()
-        points = [NotesTimelinePoint(month=str(r.month), count=int(r.count)) for r in rows]
+        points = [
+            NotesTimelinePoint(month=month, count=count)
+            for month, count in await self._repo.live_notes_per_month()
+        ]
         total = sum(p.count for p in points)
         return NotesTimelineResponse(points=points[-months:], total_notes=total)
-
-    def _local_date_sql(self, column):
-        """SQL expression: a UTC datetime column as the user's local date.
-
-        Same shift EngagementService applies, so a session at 11pm counts on the
-        day the user had it rather than rolling into tomorrow.
-        """
-        if self._tz_offset_minutes == 0:
-            return func.date(column)
-        modifier = f"{-self._tz_offset_minutes:+d} minutes"
-        return func.date(func.datetime(column, modifier))
-
-    def _local_month_sql(self, column):
-        """SQL expression: a UTC datetime column as the user's local YYYY-MM."""
-        if self._tz_offset_minutes == 0:
-            return func.strftime("%Y-%m", column)
-        modifier = f"{-self._tz_offset_minutes:+d} minutes"
-        return func.strftime("%Y-%m", func.datetime(column, modifier))

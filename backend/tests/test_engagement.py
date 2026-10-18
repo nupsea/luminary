@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from app.repos.engagement_repo import EngagementRepo
 from app.services.engagement_service import (
     EngagementService,
     compute_level,
@@ -241,3 +242,23 @@ class TestFocusSessions:
     async def test_not_found_raises(self, svc):
         with pytest.raises(ValueError, match="not found"):
             await svc.complete_focus_session("nonexistent")
+
+
+# Local-day buckets
+
+
+@pytest.mark.parametrize(
+    ("tz_offset_minutes", "expected_day"),
+    [
+        (0, "2026-10-18"),  # UTC: 03:00 is the same day
+        (420, "2026-10-17"),  # PDT: 03:00 UTC is 20:00 the evening before
+        (-330, "2026-10-18"),  # IST: 08:30 the same morning
+    ],
+)
+async def test_xp_buckets_on_the_users_local_day(session, tz_offset_minutes, expected_day):
+    repo = EngagementRepo(session, tz_offset_minutes)
+    entry = await repo.add_xp("flashcard_review", 10, None)
+    entry.created_at = datetime(2026, 10, 18, 3, 0)
+    await session.flush()
+
+    assert await repo.xp_by_day_since("2026-10-01") == {expected_day: 10}
