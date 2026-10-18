@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from typing import NamedTuple
 
@@ -438,6 +438,37 @@ class DocumentRepo:
             )
         )
         return bool(result.scalar_one())
+
+    async def finish_enriching(self, document_id: str) -> None:
+        """Move the document from 'enriching' to 'complete'; any other stage is left alone."""
+        await self.session.execute(
+            update(DocumentModel)
+            .where(DocumentModel.id == document_id, DocumentModel.stage == "enriching")
+            .values(stage="complete")
+        )
+
+    async def chunk_pages(self, document_id: str) -> list[tuple[str, int]]:
+        """(chunk id, 1-based page) in reading order."""
+        result = await self.session.execute(
+            select(ChunkModel.id, ChunkModel.page_number)
+            .where(ChunkModel.document_id == document_id)
+            .order_by(ChunkModel.page_number, ChunkModel.chunk_index)
+        )
+        return [(chunk_id, page) for chunk_id, page in result.all()]
+
+    async def first_chunk_text_by_page(
+        self, document_id: str, pages: Collection[int]
+    ) -> dict[int, str]:
+        """{1-based page: text of its first chunk} for the pages that have one."""
+        result = await self.session.execute(
+            select(ChunkModel.page_number, ChunkModel.text)
+            .where(ChunkModel.document_id == document_id, ChunkModel.page_number.in_(list(pages)))
+            .order_by(ChunkModel.page_number, ChunkModel.chunk_index)
+        )
+        by_page: dict[int, str] = {}
+        for page, chunk_text in result.all():
+            by_page.setdefault(page, chunk_text)
+        return by_page
 
     async def set_entity_chunks_scanned(self, document_id: str, scanned: int) -> None:
         await self.session.execute(

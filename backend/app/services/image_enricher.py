@@ -15,19 +15,18 @@ The document remains fully accessible without image analysis.
 import asyncio
 import base64
 import logging
-import uuid
 import weakref
-from datetime import UTC
 from io import BytesIO
 from pathlib import Path
 
 import numpy as np
 from PIL import Image as _PILImage
-from sqlalchemy import func, select
 
 from app import config as _config_module  # indirect: get_settings is patched
 from app import database as _database_module  # indirect: get_session_factory is patched
-from app.models import ChunkModel, DocumentModel, EnrichmentJobModel, ImageModel
+from app.repos.document_repo import DocumentRepo
+from app.repos.enrichment_repo import EnrichmentRepo
+from app.repos.image_repo import ImageRepo
 from app.services import embedder as _embedder_module  # indirect: get_embedding_service is patched
 from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
@@ -165,34 +164,19 @@ async def _load_image_contexts(document_id: str, images: list) -> dict[str, str]
     instructs the model to weigh them against the image rather than trust
     any single one."""
     async with _database_module.get_session_factory()() as session:
-        title = (
-            await session.execute(
-                select(DocumentModel.title).where(DocumentModel.id == document_id)
-            )
-        ).scalar_one_or_none() or ""
+        docs = DocumentRepo(session)
+        title = (await docs.titles([document_id])).get(document_id) or ""
 
         chunk_ids = {img.chunk_id for img in images if img.chunk_id}
         chunk_text_by_id: dict[str, str] = {}
         if chunk_ids:
-            rows = await session.execute(
-                select(ChunkModel.id, ChunkModel.text).where(ChunkModel.id.in_(chunk_ids))
-            )
-            chunk_text_by_id = dict(rows.all())
+            chunk_text_by_id = {c.id: c.text for c in await docs.chunks_by_ids(list(chunk_ids))}
 
         # ImageModel.page is 0-based; ChunkModel.page_number is 1-based.
         pages = {img.page + 1 for img in images}
         page_text: dict[int, str] = {}
         if pages:
-            rows = await session.execute(
-                select(ChunkModel.page_number, ChunkModel.text)
-                .where(
-                    ChunkModel.document_id == document_id,
-                    ChunkModel.page_number.in_(pages),
-                )
-                .order_by(ChunkModel.page_number, ChunkModel.chunk_index)
-            )
-            for page_number, text in rows.all():
-                page_text.setdefault(page_number, text)
+            page_text = await docs.first_chunk_text_by_page(document_id, pages)
 
     contexts: dict[str, str] = {}
     for img in images:
@@ -360,21 +344,12 @@ class ImageEnricherService:
 
         Returns the count of images successfully analyzed (decorative or LLM-described).
         """
-        from sqlalchemy import text as _text
-        from sqlalchemy import update as _update
-
         settings = _config_module.get_settings()
         data_dir = library_root(settings)
 
         # Load all ImageModel rows with description=null for this document
         async with _database_module.get_session_factory()() as session:
-            result = await session.execute(
-                select(ImageModel).where(
-                    ImageModel.document_id == document_id,
-                    ImageModel.description.is_(None),
-                )
-            )
-            images = list(result.scalars().all())
+            images = await ImageRepo(session).undescribed(document_id)
 
         if not images:
             logger.info("image_enricher: no un-described images for doc=%s", document_id)
@@ -436,17 +411,8 @@ class ImageEnricherService:
                     # If this commit fails, description stays null and the image will
                     # be retried on the next image_analyze job.
                     async with _database_module.get_session_factory()() as session:
-                        await session.execute(
-                            _update(ImageModel)
-                            .where(ImageModel.id == img.id)
-                            .values(image_type=image_type, description=description)
-                        )
-                        await session.execute(
-                            _text(
-                                "INSERT INTO images_fts(image_id, document_id, body) "
-                                "VALUES (:image_id, :document_id, :body)"
-                            ),
-                            {"image_id": img.id, "document_id": document_id, "body": description},
+                        await ImageRepo(session).describe(
+                            img.id, document_id, image_type, description
                         )
                         await session.commit()
 
@@ -533,57 +499,25 @@ async def image_analyze_handler(document_id: str, job_id: str) -> None:
         "flowchart",
     ]
     try:
-        from datetime import datetime as _dt
-
         async with _database_module.get_session_factory()() as session:
-            # Check if any qualifying diagram images exist for this document
-            has_diagrams_result = await session.execute(
-                select(ImageModel.id)
-                .where(
-                    ImageModel.document_id == document_id,
-                    ImageModel.image_type.in_(_QUALIFYING_DIAGRAM_TYPES),
-                    ImageModel.description.is_not(None),
+            if not await ImageRepo(session).has_described(document_id, _QUALIFYING_DIAGRAM_TYPES):
+                logger.debug(
+                    "image_analyze_handler: no qualifying diagram images for doc=%s, "
+                    "skipping diagram_extract enqueue",
+                    document_id,
                 )
-                .limit(1)
+                return
+            job = await EnrichmentRepo(session).enqueue_unless_active(
+                document_id, "diagram_extract"
             )
-            has_diagrams = has_diagrams_result.scalar_one_or_none() is not None
-
-        if not has_diagrams:
-            logger.debug(
-                "image_analyze_handler: no qualifying diagram images for doc=%s, "
-                "skipping diagram_extract enqueue",
-                document_id,
-            )
-            return
-
-        async with _database_module.get_session_factory()() as session:
-            # Deduplication: skip if a pending/running diagram_extract job already exists
-            dup_result = await session.execute(
-                select(func.count(EnrichmentJobModel.id)).where(
-                    EnrichmentJobModel.document_id == document_id,
-                    EnrichmentJobModel.job_type == "diagram_extract",
-                    EnrichmentJobModel.status.in_(["pending", "running"]),
+            if job is None:
+                logger.debug(
+                    "image_analyze_handler: diagram_extract already queued for doc=%s",
+                    document_id,
                 )
-            )
-            dup_count = dup_result.scalar_one_or_none() or 0
-
-        if dup_count > 0:
-            logger.debug(
-                "image_analyze_handler: diagram_extract already queued for doc=%s", document_id
-            )
-            return
-
-        async with _database_module.get_session_factory()() as session:
-            job = EnrichmentJobModel(
-                id=str(uuid.uuid4()),
-                document_id=document_id,
-                job_type="diagram_extract",
-                status="pending",
-                created_at=_dt.now(UTC),
-            )
-            session.add(job)
+                return
             await session.commit()
-            logger.info("image_analyze_handler: enqueued diagram_extract for doc=%s", document_id)
+        logger.info("image_analyze_handler: enqueued diagram_extract for doc=%s", document_id)
     except Exception as exc:
         # Non-fatal: failure to enqueue diagram_extract should not fail image_analyze
         logger.warning(
