@@ -20,11 +20,9 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import FlashcardModel
-from app.repos.flashcard_repo import _CARD_CHILD_TABLES, FlashcardRepo
+from app.repos.flashcard_repo import FlashcardRepo
 
 logger = logging.getLogger(__name__)
 
@@ -34,42 +32,19 @@ async def repair_flashcard_tables(session: AsyncSession) -> dict[str, int]:
 
     Deterministic and idempotent: a second run reports zeroes.
     """
-    live_ids = set((await session.execute(select(FlashcardModel.id))).scalars().all())
-
-    # c2 is `flashcard_id` -- the virtual table is fts5(question, answer,
-    # flashcard_id UNINDEXED), and an UNINDEXED column cannot be filtered on the
-    # virtual table itself (I-4), so the shadow content table supplies the rowid.
-    indexed: dict[str, int] = {
-        card_id: rowid
-        for rowid, card_id in (
-            await session.execute(text("SELECT rowid, c2 FROM flashcards_fts_content"))
-        ).all()
-    }
+    repo = FlashcardRepo(session)
+    live_ids = await repo.all_ids()
+    indexed = await repo.fts_index()
 
     stale_rowids = [rowid for card_id, rowid in indexed.items() if card_id not in live_ids]
     for rowid in stale_rowids:
-        await session.execute(text("DELETE FROM flashcards_fts WHERE rowid = :rid"), {"rid": rowid})
+        await repo.delete_fts_row(rowid)
 
     missing = live_ids - set(indexed)
-    if missing:
-        cards = (
-            (
-                await session.execute(
-                    select(FlashcardModel).where(FlashcardModel.id.in_(list(missing)))
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for card in cards:
-            await FlashcardRepo(session).sync_fts(card)
+    for card in (await repo.get_many(list(missing))).values():
+        await repo.sync_fts(card)
 
-    orphan_rows = 0
-    for model in _CARD_CHILD_TABLES:
-        result = await session.execute(
-            delete(model).where(model.flashcard_id.notin_(select(FlashcardModel.id)))
-        )
-        orphan_rows += result.rowcount or 0
+    orphan_rows = await repo.delete_orphan_children()
 
     await session.commit()
     report = {

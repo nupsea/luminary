@@ -17,6 +17,7 @@ from app.models import (
     FlashcardModel,
     MisconceptionModel,
     NoteTagIndexModel,
+    SectionModel,
     TeachbackResultModel,
 )
 from app.repos._helpers import get_or_404
@@ -168,6 +169,51 @@ class FlashcardRepo:
             select(FlashcardModel).where(FlashcardModel.deck == deck)
         )
         return list(result.scalars().all())
+
+    async def all_ids(self) -> set[str]:
+        return set((await self.session.execute(select(FlashcardModel.id))).scalars().all())
+
+    async def all_for(self, document_id: str | None) -> list[FlashcardModel]:
+        """Every card of one document, or of the library when `document_id` is None."""
+        stmt = select(FlashcardModel)
+        if document_id is not None:
+            stmt = stmt.where(FlashcardModel.document_id == document_id)
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    def _judgeable(self, factuality: str, document_id: str | None):  # noqa: ANN202 -- a Select
+        stmt = select(FlashcardModel).where(
+            FlashcardModel.factuality == factuality,
+            FlashcardModel.source_chunk_ids.isnot(None),
+        )
+        if document_id is not None:
+            stmt = stmt.where(FlashcardModel.document_id == document_id)
+        return stmt
+
+    async def judgeable(
+        self, factuality: str, document_id: str | None, limit: int
+    ) -> list[FlashcardModel]:
+        """Cards in this factuality state that recorded the passage they were written from."""
+        result = await self.session.execute(self._judgeable(factuality, document_id).limit(limit))
+        return list(result.scalars().all())
+
+    async def count_judgeable(self, factuality: str, document_id: str | None) -> int:
+        result = await self.session.execute(
+            select(func.count()).select_from(self._judgeable(factuality, document_id).subquery())
+        )
+        return int(result.scalar_one())
+
+    async def bloom_by_section(self, document_id: str) -> list[tuple[int, str, str]]:
+        """(bloom level, section id, heading) per card anchored in a section of the document."""
+        result = await self.session.execute(
+            select(FlashcardModel.bloom_level, ChunkModel.section_id, SectionModel.heading)
+            .join(ChunkModel, FlashcardModel.chunk_id == ChunkModel.id)
+            .join(SectionModel, ChunkModel.section_id == SectionModel.id)
+            .where(
+                FlashcardModel.document_id == document_id,
+                FlashcardModel.bloom_level.is_not(None),
+            )
+        )
+        return [(int(level), sid, heading) for level, sid, heading in result.all()]
 
     async def get_many(self, card_ids: Sequence[str]) -> dict[str, FlashcardModel]:
         """The cards among these ids that still exist, by id."""
@@ -377,12 +423,20 @@ class FlashcardRepo:
         ).first()
         return row[0] if row else None
 
+    async def fts_index(self) -> dict[str, int]:
+        """{card id: rowid} for every row in the index."""
+        rows = await self.session.execute(text("SELECT rowid, c2 FROM flashcards_fts_content"))
+        return {card_id: rowid for rowid, card_id in rows.all()}
+
+    async def delete_fts_row(self, rowid: int) -> None:
+        await self.session.execute(
+            text("DELETE FROM flashcards_fts WHERE rowid = :rid"), {"rid": rowid}
+        )
+
     async def delete_fts(self, card_id: str) -> None:
         rowid = await self._fts_rowid(card_id)
         if rowid is not None:
-            await self.session.execute(
-                text("DELETE FROM flashcards_fts WHERE rowid = :rid"), {"rid": rowid}
-            )
+            await self.delete_fts_row(rowid)
 
     async def sync_fts(self, card: FlashcardModel) -> None:
         """Index the card's question and answer, replacing any earlier row."""
@@ -468,6 +522,16 @@ class FlashcardRepo:
         await self.session.commit()
         await self.session.refresh(card)
         return card
+
+    async def delete_orphan_children(self) -> int:
+        """Delete child rows whose card no longer exists; how many went."""
+        removed = 0
+        for model in _CARD_CHILD_TABLES:
+            result = await self.session.execute(
+                delete(model).where(model.flashcard_id.notin_(select(FlashcardModel.id)))
+            )
+            removed += result.rowcount or 0
+        return removed
 
     async def _delete_children_of(self, card_ids: Sequence[str]) -> None:
         for model in _CARD_CHILD_TABLES:
