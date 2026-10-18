@@ -171,7 +171,19 @@ class TagRepo:
         result = await self.session.execute(stmt)
         return [row[0] for row in result.all()]
 
+    async def document_ids_with_tag(self, tag_id: str) -> list[str]:
+        result = await self.session.execute(
+            select(DocumentTagIndexModel.document_id)
+            .where(DocumentTagIndexModel.tag_full == tag_id)
+            .distinct()
+        )
+        return list(result.scalars().all())
+
     # -- writes ------------------------------------------------------------
+
+    async def delete(self, tag_id: str) -> None:
+        """Delete the canonical tag row only, uncommitted."""
+        await self.session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
 
     async def create(
         self,
@@ -218,7 +230,7 @@ class TagRepo:
         await self.session.execute(
             delete(NoteTagIndexModel).where(NoteTagIndexModel.tag_full == tag_id)
         )
-        await self.session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
+        await self.delete(tag_id)
 
     async def insert_if_absent(self, tag_id: str, usage_count: int) -> None:
         """Create a tag named by its slug's last segment, uncommitted; an existing id wins."""
@@ -383,7 +395,7 @@ class TagRepo:
         await self.session.execute(
             delete(TagAliasModel).where(TagAliasModel.canonical_tag_id == tag_id)
         )
-        await self.session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
+        await self.delete(tag_id)
         await self.session.commit()
 
 

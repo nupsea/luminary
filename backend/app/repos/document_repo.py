@@ -67,6 +67,14 @@ class DocumentRepo:
     async def get(self, document_id: str) -> DocumentModel | None:
         return await self.session.get(DocumentModel, document_id)
 
+    async def by_ids(self, document_ids: Sequence[str]) -> list[DocumentModel]:
+        if not document_ids:
+            return []
+        result = await self.session.execute(
+            select(DocumentModel).where(DocumentModel.id.in_(list(document_ids)))
+        )
+        return list(result.scalars().all())
+
     async def has_ready_documents(self) -> bool:
         """Whether any document has reached a queryable stage."""
         count = await self.session.scalar(
