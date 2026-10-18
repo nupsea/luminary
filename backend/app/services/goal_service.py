@@ -36,6 +36,7 @@ from app.exceptions import LuminaryError
 from app.models import LearningGoalModel, PomodoroSessionModel
 from app.repos.goal_repo import GoalRepo
 from app.repos.pomodoro_repo import PomodoroRepo
+from app.types import as_utc
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +76,6 @@ class SessionNotFound(GoalError):
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-def _as_utc(dt: datetime) -> datetime:
-    """SQLite returns tz-naive datetimes; treat them as UTC for arithmetic."""
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 class LearningGoalsService:
@@ -307,8 +303,8 @@ class LearningGoalsService:
         correct_count = 0
         total_events = 0
         for sess in sessions:
-            window_start = _as_utc(sess.started_at) if sess.started_at is not None else None
-            window_end = _as_utc(sess.completed_at) if sess.completed_at is not None else None
+            window_start = as_utc(sess.started_at)
+            window_end = as_utc(sess.completed_at)
             if window_start is None or window_end is None:
                 continue
             events = await self._repo.reviews_between(window_start, window_end)
@@ -341,8 +337,8 @@ class LearningGoalsService:
         sessions_completed = len(sessions)
         notes_created = 0
         for sess in sessions:
-            window_start = _as_utc(sess.started_at) if sess.started_at is not None else None
-            window_end = _as_utc(sess.completed_at) if sess.completed_at is not None else None
+            window_start = as_utc(sess.started_at)
+            window_end = as_utc(sess.completed_at)
             if window_start is None or window_end is None:
                 continue
             notes_created += await self._repo.count_notes_between(window_start, window_end)
@@ -357,8 +353,8 @@ class LearningGoalsService:
         sessions_completed = len(sessions)
         turns = 0
         for sess in sessions:
-            window_start = _as_utc(sess.started_at) if sess.started_at is not None else None
-            window_end = _as_utc(sess.completed_at) if sess.completed_at is not None else None
+            window_start = as_utc(sess.started_at)
+            window_end = as_utc(sess.completed_at)
             if window_start is None or window_end is None:
                 continue
             turns += await self._repo.count_qa_turns_between(window_start, window_end)

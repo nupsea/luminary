@@ -25,6 +25,7 @@ from app.models import (
     XPLedgerModel,
 )
 from app.repos.engagement_repo import EngagementRepo
+from app.types import as_utc
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +82,8 @@ def xp_for_next_level(total_xp: int) -> int:
 
 def _focused_seconds(row: PomodoroSessionModel) -> float:
     """Wall time from start to completion, less the time spent paused."""
-    started, completed = (_as_utc(row.started_at), _as_utc(row.completed_at))
+    started, completed = (as_utc(row.started_at), as_utc(row.completed_at))
     return max(0.0, (completed - started).total_seconds() - row.pause_accumulated_seconds)
-
-
-def _as_utc(dt: datetime) -> datetime:
-    """SQLite returns naive datetimes; attach UTC if missing."""
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 class EngagementService:

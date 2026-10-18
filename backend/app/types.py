@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal, TypedDict, TypeGuard, get_args
+from datetime import UTC, datetime
+from typing import Any, Literal, TypedDict, TypeGuard, get_args, overload
 
 # A card written ahead for a chapter, outside the review schedule until the chapter is practised.
 CARD_HELD = "held"
@@ -582,3 +583,17 @@ class Principal:
 
 
 LOCAL_PRINCIPAL = Principal(kind="local")
+
+
+# Stored timestamps
+
+
+@overload
+def as_utc(dt: datetime) -> datetime: ...
+@overload
+def as_utc(dt: None) -> None: ...
+def as_utc(dt: datetime | None) -> datetime | None:
+    """SQLite hands DateTime columns back tz-naive; what they hold is UTC."""
+    if dt is None or dt.tzinfo is not None:
+        return dt
+    return dt.replace(tzinfo=UTC)

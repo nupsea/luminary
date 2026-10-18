@@ -14,14 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChatMessageModel, ChatSessionModel
 from app.services.llm import get_llm_service
+from app.types import as_utc
 
 logger = logging.getLogger(__name__)
-
-
-def _ensure_utc(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
 
 
 def _new_id() -> str:
@@ -130,9 +125,9 @@ async def list_sessions(
                 "document_ids": s.document_ids or [],
                 "model": s.model,
                 "title_auto": s.title_auto,
-                "created_at": _ensure_utc(s.created_at),
-                "updated_at": _ensure_utc(s.updated_at),
-                "last_message_at": _ensure_utc(s.last_message_at),
+                "created_at": as_utc(s.created_at),
+                "updated_at": as_utc(s.updated_at),
+                "last_message_at": as_utc(s.last_message_at),
                 "preview": preview,
             }
         )
