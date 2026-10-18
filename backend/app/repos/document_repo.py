@@ -111,11 +111,14 @@ class DocumentRepo:
 
     # -- list reads --------------------------------------------------------
 
-    async def sections_for_document(self, document_id: str) -> Sequence[SectionModel]:
+    async def sections_for_document(
+        self, document_id: str, limit: int | None = None
+    ) -> Sequence[SectionModel]:
         result = await self.session.execute(
             select(SectionModel)
             .where(SectionModel.document_id == document_id)
             .order_by(SectionModel.section_order)
+            .limit(limit)
         )
         return result.scalars().all()
 
