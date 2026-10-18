@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A cloud chat model the provider no longer offers showed only `litellm.NotFoundError: GeminiException - {` on the setup screen.** It now shows the provider's reason and points to Settings, and is no longer mistaken for a local model to install.
 
 ### Changed
-- **No API route runs SQL of its own any more**; every query is in `repos/`, ahead of the library scope 0.17.0 adds to each of them. The engagement, progress, notes, document-tagging, goal, export, collection-health, flashcard, mastery, clustering, Feynman, document-deletion, flashcard-search, enrichment-worker, image, pomodoro, tag-normalizer, suggestion, tag-merge, flashcard grounding, repair and audit, study assembly, scope resolution, objective tracking, concept, reference and section-summary services followed. No behaviour change beyond the two fixes above.
+- **No API route runs SQL of its own any more**; every query is in `repos/`, ahead of the library scope 0.17.0 adds to each of them. The engagement, progress, notes, document-tagging, goal, export, collection-health, flashcard, mastery, clustering, Feynman, document-deletion, flashcard-search, enrichment-worker, image, pomodoro, tag-normalizer, suggestion, tag-merge, flashcard grounding, repair and audit, study assembly, scope resolution, objective tracking, concept, reference, section-summary, FSRS, deck-health, chat, time-on-task, recommender, eval-dataset, search, settings, activity and tag-graph services followed: every service but the two on the retrieval path. No behaviour change beyond the two fixes above.
 
 ## [0.16.1] - 2026-10-15
 

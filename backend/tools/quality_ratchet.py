@@ -30,7 +30,8 @@ MAX_COMPLEXITY = 20
 # I-23 freezes the table DDL in one function; splitting it changes nothing.
 LENGTH_EXEMPT = {"app/db_init.py::create_all_tables"}
 
-SQL_RE = re.compile(r"\bselect\(|session\.execute\(")
+# `(?<!\.)` skips method calls named select: LanceDB queries and BeautifulSoup lookups.
+SQL_RE = re.compile(r"(?<!\.)\bselect\(|session\.execute\(")
 # A quarantine marker, or a test that behaves differently on the CI runner.
 UNSTABLE_RE = re.compile(r"pytest\.mark\.unstable\b|GITHUB_ACTIONS")
 # The legacy document kind being retired; new policy reads DocumentProfile.of.
