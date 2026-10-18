@@ -196,7 +196,7 @@ def test_get_code_parser_returns_same_instance():
 
 
 @pytest.mark.asyncio
-async def test_call_graph_endpoint_returns_empty_for_unknown_doc():
+async def test_call_graph_endpoint_returns_empty_for_unknown_doc(memory_db):
     from httpx import ASGITransport, AsyncClient
 
     from app.main import app
@@ -206,7 +206,4 @@ async def test_call_graph_endpoint_returns_empty_for_unknown_doc():
 
     assert resp.status_code == 200
     data = resp.json()
-    assert "nodes" in data
-    assert "edges" in data
-    assert isinstance(data["nodes"], list)
-    assert isinstance(data["edges"], list)
+    assert (data["nodes"], data["edges"]) == ([], [])
