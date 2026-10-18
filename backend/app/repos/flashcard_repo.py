@@ -202,6 +202,12 @@ class FlashcardRepo:
         )
         return int(result.scalar_one())
 
+    async def list_for_concept(self, concept_id: str) -> list[FlashcardModel]:
+        result = await self.session.execute(
+            select(FlashcardModel).where(FlashcardModel.concept_id == concept_id)
+        )
+        return list(result.scalars().all())
+
     async def due_in_scope(
         self,
         now: datetime,

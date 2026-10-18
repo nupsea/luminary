@@ -1,4 +1,4 @@
-"""Reads over `concepts` rows for the concepts router."""
+"""Concepts, and the user overrides replayed onto them."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from collections.abc import Collection, Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ConceptModel, FlashcardModel
+from app.models import ConceptModel, FlashcardModel, OverrideModel
 
 
 class ConceptRepo:
@@ -37,6 +37,16 @@ class ConceptRepo:
             .where(ConceptModel.status != "candidate")
             .order_by(ConceptModel.last_reviewed.is_(None).desc(), ConceptModel.mastery.asc())
             .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def find_by_slug(self, slug: str) -> ConceptModel | None:
+        result = await self.session.execute(select(ConceptModel).where(ConceptModel.slug == slug))
+        return result.scalars().first()
+
+    async def overrides_oldest_first(self) -> list[OverrideModel]:
+        result = await self.session.execute(
+            select(OverrideModel).order_by(OverrideModel.created_at.asc())
         )
         return list(result.scalars().all())
 
