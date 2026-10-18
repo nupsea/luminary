@@ -94,7 +94,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 213,
+  "complexity_over_10": 212,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
@@ -145,7 +145,6 @@
     "app/services/mastery_service.py": 19,
     "app/services/misconceptions.py": 3,
     "app/services/note_search.py": 3,
-    "app/services/notes_service.py": 27,
     "app/services/objective_tracker.py": 8,
     "app/services/okf_context.py": 8,
     "app/services/pomodoro_service.py": 12,

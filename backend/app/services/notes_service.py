@@ -12,18 +12,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
+from typing import Literal
 
-from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session_factory
-from app.models import (
-    DocumentTagIndexModel,
-    DocumentTagProvenanceModel,
-    NoteModel,
-    NoteSourceModel,
-    NoteTagIndexModel,
-)
+from app.models import NoteModel
+from app.repos.note_repo import NoteRepo
+from app.repos.tag_repo import TagRepo
 from app.schemas.membership import CollectionRef
 from app.schemas.notes import NoteResponse
 from app.services import embedder as _embedder_module  # indirect: get_embedding_service is patched
@@ -70,25 +66,11 @@ def to_response(
 async def fts_insert(
     note_id: str, content: str, document_id: str | None, session: AsyncSession
 ) -> None:
-    await session.execute(
-        text("INSERT INTO notes_fts(note_id, content, document_id) VALUES (:nid, :content, :doc)"),
-        {"nid": note_id, "content": content, "doc": document_id or ""},
-    )
+    await NoteRepo(session).fts_insert(note_id, content, document_id)
 
 
 async def fts_delete(note_id: str, session: AsyncSession) -> None:
-    """Delete rows from the FTS5 virtual table for a given note_id.
-
-    Note_id is UNINDEXED. We find the rowid(s) from the virtual table itself
-    and delete by rowid for maximum compatibility.
-    """
-    await session.execute(
-        text(
-            "DELETE FROM notes_fts WHERE rowid IN "
-            "(SELECT rowid FROM notes_fts WHERE note_id = :nid)"
-        ),
-        {"nid": note_id},
-    )
+    await NoteRepo(session).fts_delete(note_id)
 
 
 async def fts_update(
@@ -98,6 +80,25 @@ async def fts_update(
     await fts_insert(note_id, content, document_id, session)
 
 
+async def _sync_index(
+    scope: Literal["note", "document"], member_id: str, tags: list[str], session: AsyncSession
+) -> list[str]:
+    """Move a member's tag index and canonical usage counts to `tags`; returns them normalised."""
+    tags = [normalize_tag_slug(t) for t in tags if normalize_tag_slug(t)]
+    repo = TagRepo(session)
+    old_tags = await repo.indexed_tags(scope, member_id)
+    new_tags = set(tags)
+    removed = old_tags - new_tags
+    added = new_tags - old_tags
+    for tag in removed:
+        await repo.unindex(scope, member_id, tag)
+    for tag in added:
+        await repo.index(scope, member_id, tag)
+    if removed or added:
+        invalidate_tag_graph_cache()
+    return tags
+
+
 async def sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) -> None:
     """Sync NoteTagIndexModel and CanonicalTagModel for a note.
 
@@ -105,74 +106,7 @@ async def sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) -
     Handles create (empty -> new tags), update (old -> new tags), and delete
     (call with tags=[] to remove all rows for this note).
     """
-
-    tags = [normalize_tag_slug(t) for t in tags if normalize_tag_slug(t)]
-
-    old_rows = (
-        (
-            await session.execute(
-                select(NoteTagIndexModel.tag_full).where(NoteTagIndexModel.note_id == note_id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    old_tags: set[str] = set(old_rows)
-    new_tags: set[str] = set(tags)
-
-    removed = old_tags - new_tags
-    added = new_tags - old_tags
-
-    for tag in removed:
-        await session.execute(
-            delete(NoteTagIndexModel).where(
-                NoteTagIndexModel.note_id == note_id,
-                NoteTagIndexModel.tag_full == tag,
-            )
-        )
-        await session.execute(
-            text("UPDATE canonical_tags SET usage_count = MAX(0, usage_count - 1) WHERE id = :tag"),
-            {"tag": tag},
-        )
-
-    for tag in added:
-        segments = tag.split("/")
-        tag_root = segments[0]
-        tag_parent = "/".join(segments[:-1]) if len(segments) > 1 else ""
-        display_name = segments[-1]
-        canonical_parent = tag_parent if tag_parent else None
-
-        await session.execute(
-            text(
-                "INSERT OR IGNORE INTO note_tag_index"
-                " (note_id, tag_full, tag_root, tag_parent)"
-                " VALUES (:note_id, :tag_full, :tag_root, :tag_parent)"
-            ),
-            {
-                "note_id": note_id,
-                "tag_full": tag,
-                "tag_root": tag_root,
-                "tag_parent": tag_parent,
-            },
-        )
-        await session.execute(
-            text(
-                "INSERT INTO canonical_tags"
-                " (id, display_name, parent_tag, usage_count, created_at)"
-                " VALUES (:id, :display_name, :parent_tag, 1, datetime('now'))"
-                " ON CONFLICT(id) DO UPDATE SET"
-                " usage_count = canonical_tags.usage_count + 1"
-            ),
-            {
-                "id": tag,
-                "display_name": display_name,
-                "parent_tag": canonical_parent,
-            },
-        )
-
-    # Invalidate tag graph cache when tag index changes
-    if removed or added:
-        invalidate_tag_graph_cache()
+    await _sync_index("note", note_id, tags, session)
 
 
 async def sync_document_tag_index(
@@ -194,96 +128,11 @@ async def sync_document_tag_index(
     writes its own provenance rows explicitly with the right tagger_version
     and should NOT pass this flag (would cross-label its writes as manual).
     """
-
-    tags = [normalize_tag_slug(t) for t in tags if normalize_tag_slug(t)]
-
-    old_rows = (
-        (
-            await session.execute(
-                select(DocumentTagIndexModel.tag_full).where(
-                    DocumentTagIndexModel.document_id == document_id
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    old_tags: set[str] = set(old_rows)
-    new_tags: set[str] = set(tags)
-
-    removed = old_tags - new_tags
-    added = new_tags - old_tags
-
-    for tag in removed:
-        await session.execute(
-            delete(DocumentTagIndexModel).where(
-                DocumentTagIndexModel.document_id == document_id,
-                DocumentTagIndexModel.tag_full == tag,
-            )
-        )
-        await session.execute(
-            delete(DocumentTagProvenanceModel).where(
-                DocumentTagProvenanceModel.document_id == document_id,
-                DocumentTagProvenanceModel.tag_full == tag,
-            )
-        )
-        await session.execute(
-            text("UPDATE canonical_tags SET usage_count = MAX(0, usage_count - 1) WHERE id = :tag"),
-            {"tag": tag},
-        )
-
-    for tag in added:
-        segments = tag.split("/")
-        tag_root = segments[0]
-        tag_parent = "/".join(segments[:-1]) if len(segments) > 1 else ""
-        display_name = segments[-1]
-        canonical_parent = tag_parent if tag_parent else None
-
-        await session.execute(
-            text(
-                "INSERT OR IGNORE INTO document_tag_index"
-                " (document_id, tag_full, tag_root, tag_parent)"
-                " VALUES (:document_id, :tag_full, :tag_root, :tag_parent)"
-            ),
-            {
-                "document_id": document_id,
-                "tag_full": tag,
-                "tag_root": tag_root,
-                "tag_parent": tag_parent,
-            },
-        )
-        await session.execute(
-            text(
-                "INSERT INTO canonical_tags"
-                " (id, display_name, parent_tag, usage_count, created_at)"
-                " VALUES (:id, :display_name, :parent_tag, 1, datetime('now'))"
-                " ON CONFLICT(id) DO UPDATE SET"
-                " usage_count = canonical_tags.usage_count + 1"
-            ),
-            {
-                "id": tag,
-                "display_name": display_name,
-                "parent_tag": canonical_parent,
-            },
-        )
-
-    if removed or added:
-        invalidate_tag_graph_cache()
-
+    tags = await _sync_index("document", document_id, tags, session)
     if record_manual_provenance:
-        # INSERT OR IGNORE so we don't clobber an existing auto-source row.
-        # If the user is manually re-asserting a tag the auto-tagger also
-        # produced, the auto provenance stays authoritative for now -- a later
-        # slice could promote to manual.
+        repo = TagRepo(session)
         for tag in tags:
-            await session.execute(
-                text(
-                    "INSERT OR IGNORE INTO document_tag_provenance"
-                    " (document_id, tag_full, source, tagger_version, created_at)"
-                    " VALUES (:doc_id, :tag, 'manual', NULL, datetime('now'))"
-                ),
-                {"doc_id": document_id, "tag": tag},
-            )
+            await repo.record_manual_provenance(document_id, tag)
 
 
 async def sync_note_sources(
@@ -293,26 +142,9 @@ async def sync_note_sources(
 
     Deletes rows not in new list; inserts new rows via INSERT OR IGNORE (idempotent).
     """
-    if source_document_ids:
-        await session.execute(
-            delete(NoteSourceModel).where(
-                NoteSourceModel.note_id == note_id,
-                NoteSourceModel.document_id.not_in(source_document_ids),
-            )
-        )
-        now_iso = datetime.now(UTC).isoformat()
-        await session.execute(
-            text(
-                "INSERT OR IGNORE INTO note_sources (note_id, document_id, added_at)"
-                " VALUES (:note_id, :document_id, :added_at)"
-            ),
-            [
-                {"note_id": note_id, "document_id": doc_id, "added_at": now_iso}
-                for doc_id in source_document_ids
-            ],
-        )
-    else:
-        await session.execute(delete(NoteSourceModel).where(NoteSourceModel.note_id == note_id))
+    await NoteRepo(session).replace_sources(
+        note_id, source_document_ids, datetime.now(UTC).isoformat()
+    )
 
 
 async def upsert_note_graph(
@@ -340,9 +172,7 @@ async def embed_and_store_note(note_id: str, content: str, document_id: str | No
         vector = await loop.run_in_executor(None, lambda: embedder.encode([content])[0])
 
         async with get_session_factory()() as session:
-            row = (
-                await session.execute(select(NoteModel.content).where(NoteModel.id == note_id))
-            ).scalar_one_or_none()
+            row = await NoteRepo(session).content_of(note_id)
         if row is None:
             logger.debug("Note %s deleted before embedding completed, skipping", note_id)
             return
@@ -373,9 +203,7 @@ async def generate_and_store_description(note_id: str, content: str) -> None:
         if description is None:
             return  # too short or LLM unavailable -> leave null, card shows snippet
         async with get_session_factory()() as session:
-            note = (
-                await session.execute(select(NoteModel).where(NoteModel.id == note_id))
-            ).scalar_one_or_none()
+            note = await NoteRepo(session).find(note_id)
             if note is None or note.content != content:
                 return
             note.description = description
@@ -402,9 +230,7 @@ async def auto_tag_and_store_note(note_id: str, content: str) -> None:
         if not tags:
             return
         async with get_session_factory()() as session:
-            note = (
-                await session.execute(select(NoteModel).where(NoteModel.id == note_id))
-            ).scalar_one_or_none()
+            note = await NoteRepo(session).find(note_id)
             if note is None or note.content != content or note.tags:
                 return
             note.tags = tags
@@ -422,16 +248,8 @@ async def backfill_missing_descriptions(limit: int = 500, force: bool = False) -
     every eligible note. Sequential and best-effort so it stays a gentle
     background job; notes left null when the LLM is down are retried later.
     """
-    query = (
-        select(NoteModel.id, NoteModel.content)
-        .where(func.length(NoteModel.content) >= 40)
-        .where(NoteModel.archived.is_(False))
-        .limit(limit)
-    )
-    if not force:
-        query = query.where(NoteModel.description.is_(None))
     async with get_session_factory()() as session:
-        rows = (await session.execute(query)).all()
+        rows = await NoteRepo(session).needing_description(force=force, limit=limit)
     done = 0
     for note_id, content in rows:
         await generate_and_store_description(note_id, content)

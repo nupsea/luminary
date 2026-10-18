@@ -305,17 +305,76 @@ class NoteRepo:
         )
         return result.scalar_one()
 
-    async def count_needing_description(self, *, force: bool) -> int:
+    @staticmethod
+    def _needing_description(query, *, force: bool):
         """Unarchived notes of 40+ characters; with `force` False, only those with none yet."""
-        query = (
-            select(func.count())
-            .select_from(NoteModel)
-            .where(func.length(NoteModel.content) >= 40)
-            .where(NoteModel.archived.is_(False))
+        query = query.where(func.length(NoteModel.content) >= 40).where(
+            NoteModel.archived.is_(False)
         )
-        if not force:
-            query = query.where(NoteModel.description.is_(None))
+        return query if force else query.where(NoteModel.description.is_(None))
+
+    async def count_needing_description(self, *, force: bool) -> int:
+        query = self._needing_description(select(func.count()).select_from(NoteModel), force=force)
         return (await self.session.execute(query)).scalar_one()
+
+    async def needing_description(self, *, force: bool, limit: int) -> list[tuple[str, str]]:
+        """(id, content) of the notes `count_needing_description` counts."""
+        query = self._needing_description(
+            select(NoteModel.id, NoteModel.content), force=force
+        ).limit(limit)
+        return [(i, c) for i, c in (await self.session.execute(query)).all()]
+
+    async def find(self, note_id: str) -> NoteModel | None:
+        return await self.session.get(NoteModel, note_id)
+
+    async def content_of(self, note_id: str) -> str | None:
+        return (
+            await self.session.execute(select(NoteModel.content).where(NoteModel.id == note_id))
+        ).scalar_one_or_none()
+
+    # -- FTS and source pivot (uncommitted, in the note's write transaction) --
+
+    async def fts_insert(self, note_id: str, content: str, document_id: str | None) -> None:
+        await self.session.execute(
+            text(
+                "INSERT INTO notes_fts(note_id, content, document_id) VALUES (:nid, :content, :doc)"
+            ),
+            {"nid": note_id, "content": content, "doc": document_id or ""},
+        )
+
+    async def fts_delete(self, note_id: str) -> None:
+        """note_id is UNINDEXED in the FTS5 table, so rows are deleted by their rowid."""
+        await self.session.execute(
+            text(
+                "DELETE FROM notes_fts WHERE rowid IN "
+                "(SELECT rowid FROM notes_fts WHERE note_id = :nid)"
+            ),
+            {"nid": note_id},
+        )
+
+    async def replace_sources(self, note_id: str, document_ids: list[str], added_at: str) -> None:
+        """Keep exactly these source documents; rows already present keep their added_at."""
+        if not document_ids:
+            await self.session.execute(
+                delete(NoteSourceModel).where(NoteSourceModel.note_id == note_id)
+            )
+            return
+        await self.session.execute(
+            delete(NoteSourceModel).where(
+                NoteSourceModel.note_id == note_id,
+                NoteSourceModel.document_id.not_in(document_ids),
+            )
+        )
+        await self.session.execute(
+            text(
+                "INSERT OR IGNORE INTO note_sources (note_id, document_id, added_at)"
+                " VALUES (:note_id, :document_id, :added_at)"
+            ),
+            [
+                {"note_id": note_id, "document_id": doc_id, "added_at": added_at}
+                for doc_id in document_ids
+            ],
+        )
 
     async def note_member_count(self, collection_id: str) -> int:
         result = await self.session.execute(
