@@ -19,8 +19,9 @@ async def fetch_transcript_inputs(document_id: str) -> tuple[list[str], list[dic
     async with get_session_factory()() as session:
         row = (
             await session.execute(
-                select(DocumentModel.transcript_vocabulary, DocumentModel.transcript_corrections)
-                .where(DocumentModel.id == document_id)
+                select(
+                    DocumentModel.transcript_vocabulary, DocumentModel.transcript_corrections
+                ).where(DocumentModel.id == document_id)
             )
         ).one_or_none()
         personal = await TranscriptRepo(session).personal_vocabulary()

@@ -8,14 +8,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from sqlalchemy import false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     ChunkModel,
     FlashcardModel,
-    SectionModel,
 )
+from app.repos.collection_repo import CollectionRepo
+from app.repos.document_repo import DocumentRepo
+from app.repos.flashcard_repo import FlashcardRepo
 from app.services.flashcard_parsers import (
     _CLOZE_BLANK_RE,
     GROUNDING_UNVERIFIABLE,
@@ -132,17 +133,12 @@ async def _get_section_context_for_chunks(
     if not section_ids:
         return {}
 
-    result = await session.execute(select(SectionModel).where(SectionModel.id.in_(section_ids)))
-    sections = {s.id: s for s in result.scalars().all()}
+    repo = DocumentRepo(session)
+    sections = await repo.sections_by_id(section_ids)
 
     # Resolve parent headings (one level up = chapter)
     parent_ids = [s.parent_section_id for s in sections.values() if s.parent_section_id]
-    parents: dict[str, SectionModel] = {}
-    if parent_ids:
-        parent_result = await session.execute(
-            select(SectionModel).where(SectionModel.id.in_(parent_ids))
-        )
-        parents = {s.id: s for s in parent_result.scalars().all()}
+    parents = await repo.sections_by_id(parent_ids)
 
     context_map: dict[str, tuple[str, str | None]] = {}
     for sid, sec in sections.items():
@@ -294,29 +290,13 @@ async def _fetch_document_chunks(
     section_heading: str | None,
     session: AsyncSession,
 ) -> list[ChunkModel]:
+    repo = DocumentRepo(session)
     if scope == "section" and section_heading:
-        sec_result = await session.execute(
-            select(SectionModel)
-            .where(SectionModel.document_id == document_id)
-            .where(SectionModel.heading == section_heading)
-            .limit(1)
-        )
-        section = sec_result.scalar_one_or_none()
+        section = await repo.first_section_headed(document_id, section_heading)
         if section:
-            result = await session.execute(
-                select(ChunkModel)
-                .where(ChunkModel.document_id == document_id)
-                .where(ChunkModel.section_id == section.id)
-                .order_by(ChunkModel.chunk_index)
-            )
-            return list(result.scalars().all())
+            return await repo.chunks_in_section(document_id, section.id)
 
-    result = await session.execute(
-        select(ChunkModel)
-        .where(ChunkModel.document_id == document_id)
-        .order_by(ChunkModel.chunk_index)
-    )
-    all_chunks = list(result.scalars().all())
+    all_chunks = list(await repo.chunks_for_document(document_id))
     if scope != "full":
         return all_chunks
 
@@ -521,18 +501,7 @@ async def _study_scope_member_ids(document_id: str, session: AsyncSession) -> li
     A study session draws on a whole collection, so those cards are exactly the
     ones a newly generated question can end up sitting beside.
     """
-    from app.models import CollectionMemberModel  # noqa: PLC0415
-
-    owning = select(CollectionMemberModel.collection_id).where(
-        CollectionMemberModel.member_id == document_id,
-        CollectionMemberModel.member_type == "document",
-    )
-    result = await session.execute(
-        select(CollectionMemberModel.member_id).where(
-            CollectionMemberModel.collection_id.in_(owning)
-        )
-    )
-    return [row[0] for row in result.all()]
+    return await CollectionRepo(session).co_member_ids(document_id)
 
 
 async def _fetch_existing_embeddings(
@@ -558,20 +527,14 @@ async def _fetch_existing_embeddings(
 
     from app.services.embedder import get_embedding_service  # noqa: PLC0415
 
-    if note_id is not None:
-        scope = FlashcardModel.note_id == note_id
-    elif document_id is not None:
-        member_ids = await _study_scope_member_ids(document_id, session)
-        scope = or_(
-            FlashcardModel.document_id == document_id,
-            FlashcardModel.document_id.in_(member_ids) if member_ids else false(),
-            FlashcardModel.note_id.in_(member_ids) if member_ids else false(),
-        )
-    else:
-        scope = FlashcardModel.deck == deck
-
-    result = await session.execute(select(FlashcardModel.question).where(scope))
-    existing_questions = [row[0] for row in result.all()]
+    member_ids = (
+        await _study_scope_member_ids(document_id, session)
+        if note_id is None and document_id is not None
+        else []
+    )
+    existing_questions = await FlashcardRepo(session).questions(
+        note_id=note_id, document_id=document_id, member_ids=member_ids, deck=deck
+    )
     if not existing_questions:
         return [], None
 
@@ -738,21 +701,8 @@ class FlashcardService(FlashcardSearchService):
         never under-states it, so it will not hide a button that would have
         worked, and the caller keeps its empty-result message for that case.
         """
-        from app.repos.flashcard_repo import FlashcardRepo  # noqa: PLC0415
-
         if section_id:
-            chunks = list(
-                (
-                    await session.execute(
-                        select(ChunkModel)
-                        .where(ChunkModel.document_id == document_id)
-                        .where(ChunkModel.section_id == section_id)
-                        .order_by(ChunkModel.chunk_index)
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            chunks = await DocumentRepo(session).chunks_in_section(document_id, section_id)
             rows = await FlashcardRepo(session).list_for_section(document_id, section_id)
             decks = [card for card, _sid in rows]
         else:
@@ -760,13 +710,7 @@ class FlashcardService(FlashcardSearchService):
             # is not counted as material anyone can be questioned on.
             chunks = await _fetch_chunks(document_id, "full", None, session)
             decks = list(
-                (
-                    await session.execute(
-                        select(FlashcardModel).where(FlashcardModel.document_id == document_id)
-                    )
-                )
-                .scalars()
-                .all()
+                await FlashcardRepo(session).list_for_document(document_id, newest_first=False)
             )
 
         used: set[str] = set()
@@ -821,7 +765,6 @@ class FlashcardService(FlashcardSearchService):
         book's deck, which is the difference between a scoped control and a
         destructive one.
         """
-        from app.repos.flashcard_repo import FlashcardRepo  # noqa: PLC0415
         from app.repos.study_repo import StudyRepo  # noqa: PLC0415
 
         if bool(document_id) == bool(note_id):
@@ -836,19 +779,9 @@ class FlashcardService(FlashcardSearchService):
             rows = await FlashcardRepo(session).list_for_section(document_id, section_id)
             previous = [(card.id, card.source_chunk_ids) for card, _sid in rows]
         else:
-            owner = (
-                FlashcardModel.document_id == document_id
-                if document_id
-                else FlashcardModel.note_id == note_id
+            previous = await FlashcardRepo(session).source_chunks_by_card(
+                document_id=document_id, note_id=note_id
             )
-            previous = [
-                (row[0], row[1])
-                for row in (
-                    await session.execute(
-                        select(FlashcardModel.id, FlashcardModel.source_chunk_ids).where(owner)
-                    )
-                ).all()
-            ]
         previous_ids = [row[0] for row in previous]
         requested = count if count is not None else len(previous_ids)
         requested = max(1, min(requested or _DEFAULT_REGENERATE_COUNT, 50))

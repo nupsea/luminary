@@ -94,7 +94,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 210,
+  "complexity_over_10": 209,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
@@ -127,7 +127,6 @@
     "app/services/document_search.py": 3,
     "app/services/enrichment_worker.py": 15,
     "app/services/feynman_service.py": 18,
-    "app/services/flashcard.py": 21,
     "app/services/flashcard_audit.py": 4,
     "app/services/flashcard_generators.py": 20,
     "app/services/flashcard_grounding.py": 9,

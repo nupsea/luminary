@@ -67,6 +67,19 @@ class CollectionRepo:
                 counts[(cid, member_type)] = count
         return counts
 
+    async def co_member_ids(self, document_id: str) -> list[str]:
+        """Every member of every collection this document is in, itself included."""
+        owning = select(CollectionMemberModel.collection_id).where(
+            CollectionMemberModel.member_id == document_id,
+            CollectionMemberModel.member_type == "document",
+        )
+        result = await self.session.execute(
+            select(CollectionMemberModel.member_id).where(
+                CollectionMemberModel.collection_id.in_(owning)
+            )
+        )
+        return [row[0] for row in result.all()]
+
     async def note_ids(self, collection_id: str) -> list[str]:
         """Notes directly in this collection, not in its children."""
         result = await self.session.execute(

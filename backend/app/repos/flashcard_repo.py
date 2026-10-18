@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from fastapi import Depends
-from sqlalchemy import case, delete, func, or_, select, update
+from sqlalchemy import case, delete, false, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -121,6 +121,43 @@ class FlashcardRepo:
 
     async def find(self, card_id: str) -> FlashcardModel | None:
         return await self.session.get(FlashcardModel, card_id)
+
+    async def questions(
+        self,
+        *,
+        note_id: str | None = None,
+        document_id: str | None = None,
+        member_ids: Sequence[str] = (),
+        deck: str | None = None,
+    ) -> list[str]:
+        """Questions of a note's cards; else of a document's and its `member_ids`' (documents
+        or notes); else of a deck's."""
+        if note_id is not None:
+            scope = FlashcardModel.note_id == note_id
+        elif document_id is not None:
+            scope = or_(
+                FlashcardModel.document_id == document_id,
+                FlashcardModel.document_id.in_(list(member_ids)) if member_ids else false(),
+                FlashcardModel.note_id.in_(list(member_ids)) if member_ids else false(),
+            )
+        else:
+            scope = FlashcardModel.deck == deck
+        result = await self.session.execute(select(FlashcardModel.question).where(scope))
+        return [row[0] for row in result.all()]
+
+    async def source_chunks_by_card(
+        self, *, document_id: str | None = None, note_id: str | None = None
+    ) -> list[tuple[str, list | None]]:
+        """(card id, source_chunk_ids) for a document's cards, else a note's."""
+        owner = (
+            FlashcardModel.document_id == document_id
+            if document_id
+            else FlashcardModel.note_id == note_id
+        )
+        result = await self.session.execute(
+            select(FlashcardModel.id, FlashcardModel.source_chunk_ids).where(owner)
+        )
+        return [(row[0], row[1]) for row in result.all()]
 
     async def list_for_deck(self, deck: str) -> list[FlashcardModel]:
         result = await self.session.execute(

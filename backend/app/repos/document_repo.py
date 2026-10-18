@@ -215,6 +215,32 @@ class DocumentRepo:
     async def reading_position(self, document_id: str) -> ReadingPositionModel | None:
         return await self.session.get(ReadingPositionModel, document_id)
 
+    async def chunks_in_section(self, document_id: str, section_id: str) -> list[ChunkModel]:
+        result = await self.session.execute(
+            select(ChunkModel)
+            .where(ChunkModel.document_id == document_id)
+            .where(ChunkModel.section_id == section_id)
+            .order_by(ChunkModel.chunk_index)
+        )
+        return list(result.scalars().all())
+
+    async def sections_by_id(self, section_ids: Sequence[str]) -> dict[str, SectionModel]:
+        if not section_ids:
+            return {}
+        result = await self.session.execute(
+            select(SectionModel).where(SectionModel.id.in_(list(section_ids)))
+        )
+        return {s.id: s for s in result.scalars().all()}
+
+    async def first_section_headed(self, document_id: str, heading: str) -> SectionModel | None:
+        result = await self.session.execute(
+            select(SectionModel)
+            .where(SectionModel.document_id == document_id)
+            .where(SectionModel.heading == heading)
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def chunks_for_document(
         self,
         document_id: str,
