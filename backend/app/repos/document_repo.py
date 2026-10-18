@@ -15,11 +15,11 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Collection, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import NamedTuple
 
 from fastapi import Depends
-from sqlalchemy import func, select, text, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
@@ -74,6 +74,70 @@ class DocumentRepo:
             select(DocumentModel).where(DocumentModel.id.in_(list(document_ids)))
         )
         return list(result.scalars().all())
+
+    async def titles_and_file_paths(self) -> list[tuple[str, str | None]]:
+        result = await self.session.execute(select(DocumentModel.title, DocumentModel.file_path))
+        return [(title, path) for title, path in result.all()]
+
+    async def chunks_in_random_order(
+        self, document_id: str, limit: int | None = None
+    ) -> list[ChunkModel]:
+        result = await self.session.execute(
+            select(ChunkModel)
+            .where(ChunkModel.document_id == document_id)
+            .order_by(func.random())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def chunk_snippets(
+        self, document_id: str, fts_query: str, limit: int
+    ) -> list[tuple[str, str]]:
+        """(chunk id, highlighted snippet) of the document's chunks matching `fts_query`.
+
+        snippet() works only in a plain FTS query, with no JOIN, so sections come separately.
+        """
+        rows = await self.session.execute(
+            text(
+                "SELECT chunks_fts.chunk_id, "
+                "       snippet(chunks_fts, 0, '<mark>', '</mark>', '...', 24) AS snippet "
+                "FROM chunks_fts "
+                "WHERE chunks_fts MATCH :query "
+                "  AND chunks_fts.document_id = :doc_id "
+                "LIMIT :inner_limit"
+            ),
+            {"query": fts_query, "doc_id": document_id, "inner_limit": limit},
+        )
+        return [(cid, snippet or "") for cid, snippet in rows.fetchall()]
+
+    async def chunk_section_headings(self, chunk_ids: Sequence[str]) -> list[tuple[str, str, str]]:
+        """(chunk id, section id, heading), with "" for a chunk outside any section."""
+        result = await self.session.execute(
+            select(ChunkModel.id, ChunkModel.section_id, func.coalesce(SectionModel.heading, ""))
+            .outerjoin(SectionModel, ChunkModel.section_id == SectionModel.id)
+            .where(ChunkModel.id.in_(list(chunk_ids)))
+        )
+        return [(cid, sid or "", heading or "") for cid, sid, heading in result.all()]
+
+    async def chunk_texts_in_order(self, document_id: str) -> list[tuple[str, str | None]]:
+        """(chunk id, text) in reading order."""
+        result = await self.session.execute(
+            select(ChunkModel.id, ChunkModel.text)
+            .where(ChunkModel.document_id == document_id)
+            .order_by(ChunkModel.chunk_index)
+        )
+        return [(cid, body) for cid, body in result.all()]
+
+    async def set_entry_date(self, chunk_id: str, entry_date: date) -> None:
+        await self.session.execute(
+            update(ChunkModel).where(ChunkModel.id == chunk_id).values(entry_date=entry_date)
+        )
+
+    async def delete_learning_objectives(self, document_id: str) -> None:
+        """Uncommitted."""
+        await self.session.execute(
+            delete(LearningObjectiveModel).where(LearningObjectiveModel.document_id == document_id)
+        )
 
     async def other_ids(self, document_id: str) -> list[str]:
         """Every document id but this one."""

@@ -17,8 +17,9 @@ import logging
 import time
 from dataclasses import dataclass
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.repos.tag_repo import TagRepo
 
 logger = logging.getLogger(__name__)
 
@@ -97,15 +98,8 @@ async def build_tag_graph(session: AsyncSession) -> TagGraphOut:
         return cached
 
     # 1. Top-200 canonical tags by usage_count
-    nodes_result = await session.execute(
-        text(
-            "SELECT id, display_name, parent_tag, usage_count"  # noqa: S608
-            " FROM canonical_tags"
-            " ORDER BY usage_count DESC"
-            f" LIMIT {MAX_NODES}"
-        )
-    )
-    node_rows = nodes_result.fetchall()
+    tags = TagRepo(session)
+    node_rows = await tags.most_used(MAX_NODES)
     node_set: set[str] = {row[0] for row in node_rows}
     nodes: list[TagNodeOut] = [
         TagNodeOut(id=row[0], display_name=row[1], parent_tag=row[2], usage_count=row[3])
@@ -120,18 +114,7 @@ async def build_tag_graph(session: AsyncSession) -> TagGraphOut:
 
     # 2. Co-occurrence edges via self-join on note_tag_index
     # a.tag_full < b.tag_full ensures each pair appears once (no duplicates, no self-loops)
-    edges_result = await session.execute(
-        text(
-            "SELECT a.tag_full AS tag_a, b.tag_full AS tag_b, COUNT(*) AS weight"  # noqa: S608
-            " FROM note_tag_index a"
-            " JOIN note_tag_index b ON a.note_id = b.note_id AND a.tag_full < b.tag_full"
-            " GROUP BY a.tag_full, b.tag_full"
-            f" HAVING COUNT(*) >= {MIN_EDGE_WEIGHT}"
-            " ORDER BY weight DESC"
-            f" LIMIT {MAX_EDGES}"
-        )
-    )
-    edge_rows = edges_result.fetchall()
+    edge_rows = await tags.note_co_occurrence(MIN_EDGE_WEIGHT, MAX_EDGES)
 
     # 3. Filter edges where both endpoints are in the node set
     edges: list[TagEdgeOut] = [

@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import DependencyUnavailable
 from app.models import ChunkModel, FlashcardModel
+from app.repos.deck_stats_repo import DeckStatsRepo
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
 from app.services.flashcard_parsers import (
@@ -215,8 +216,8 @@ async def audit_factuality(
             f"asked whether its own card follows from a passage agrees with itself."
         )
 
-    repo = FlashcardRepo(session)
-    cards = await repo.judgeable(FACTUALITY_UNCHECKED, document_id, limit)
+    stats = DeckStatsRepo(session)
+    cards = await stats.judgeable(FACTUALITY_UNCHECKED, document_id, limit)
 
     llm = get_llm_service()
     counts: Counter[str] = Counter()
@@ -234,7 +235,7 @@ async def audit_factuality(
 
     if counts:
         await session.commit()
-    left = await repo.count_judgeable(FACTUALITY_UNCHECKED, document_id)
+    left = await stats.count_judgeable(FACTUALITY_UNCHECKED, document_id)
     logger.info(
         "flashcard factuality audit: %d judged, %d skipped, %d left, %s",
         sum(counts.values()),

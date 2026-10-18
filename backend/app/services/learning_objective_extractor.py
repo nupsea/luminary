@@ -9,10 +9,9 @@ import logging
 import re
 import uuid
 
-from sqlalchemy import delete
-
 from app.database import get_session_factory
 from app.models import LearningObjectiveModel
+from app.repos.document_repo import DocumentRepo
 from app.services import llm as _llm_module  # indirect: get_llm_service is patched
 from app.services.llm import LLMUnavailableError
 
@@ -80,11 +79,7 @@ class LearningObjectiveExtractorService:
             return
 
         async with get_session_factory()() as session:
-            await session.execute(
-                delete(LearningObjectiveModel).where(
-                    LearningObjectiveModel.document_id == document_id
-                )
-            )
+            await DocumentRepo(session).delete_learning_objectives(document_id)
             for section_id, objectives in section_objectives:
                 for raw_text in objectives:
                     clean = raw_text.strip()

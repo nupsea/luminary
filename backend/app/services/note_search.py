@@ -3,10 +3,8 @@
 import json
 import logging
 
-from sqlalchemy import select, text
-
 from app.database import get_session_factory
-from app.models import NoteModel
+from app.repos.note_repo import NoteRepo
 from app.services.fts_query import sanitize_fts_query as _sanitize_fts_query
 from app.types import NoteSearchResult
 
@@ -86,18 +84,10 @@ class NoteSearchService:
         if not safe_query:
             return []
 
-        sql = text(
-            "SELECT nf.note_id, nf.content, nf.document_id, bm25(notes_fts) AS score, "
-            "       n.tags, n.group_name "
-            "FROM notes_fts AS nf "
-            "JOIN notes AS n ON nf.note_id = n.id "
-            "WHERE notes_fts MATCH :query "
-            "ORDER BY score LIMIT :k"
-        )
         async with get_session_factory()() as session:
-            rows = (await session.execute(sql, {"query": safe_query, "k": k})).fetchall()
-            if not rows:
-                return []
+            rows = await NoteRepo(session).fts_matches(safe_query, k)
+        if not rows:
+            return []
 
         results = []
         for row in rows:
@@ -174,20 +164,8 @@ class NoteSearchService:
         if not results:
             return []
         ids = [r.note_id for r in results]
-        # ORM `in_`, not a built IN list: the placeholders would be ours rather
-        # than the caller's, but a string-built WHERE is the shape this repo is
-        # trying to be rid of and ruff S608 says so.
-        stmt = select(
-            NoteModel.id,
-            NoteModel.content,
-            NoteModel.tags,
-            NoteModel.group_name,
-            NoteModel.document_id,
-        ).where(NoteModel.id.in_(ids))
         async with get_session_factory()() as session:
-            rows = (await session.execute(stmt)).all()
-
-        live = {row[0]: row for row in rows}
+            live = await NoteRepo(session).search_fields(ids)
         out: list[NoteSearchResult] = []
         for r in results:
             row = live.get(r.note_id)

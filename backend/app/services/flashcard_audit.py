@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import FlashcardModel
+from app.repos.deck_stats_repo import DeckStatsRepo
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
 from app.services.flashcard import _parse_llm_response
@@ -71,9 +72,8 @@ class FlashcardAuditService:
         section context. Cards with null bloom_level are counted in total_cards
         but excluded from by_bloom_level and gap computation.
         """
-        repo = FlashcardRepo(db)
-        total_cards = len(await repo.all_for(document_id))
-        rows = await repo.bloom_by_section(document_id)
+        total_cards = len(await FlashcardRepo(db).all_for(document_id))
+        rows = await DeckStatsRepo(db).bloom_by_section(document_id)
 
         # Build per-section stats
         by_section: dict[str, BloomSectionStat] = {}

@@ -8,10 +8,9 @@ import asyncio
 import logging
 from typing import TypedDict
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import NoteModel
+from app.repos.note_repo import NoteRepo
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +34,7 @@ class ReindexService:
             get_lancedb_service,
         )
 
-        result = await db.execute(select(NoteModel.id, NoteModel.content, NoteModel.document_id))
-        rows = result.all()
+        rows = await NoteRepo(db).contents_with_documents()
         total = len(rows)
         reindexed = 0
         failed = 0

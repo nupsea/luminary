@@ -27,10 +27,8 @@ from app.repos.eval_repo import EvalRepo
 from app.services import llm_output_stats
 from app.services.background import fire_and_forget, task_registry
 from app.services.dataset_generator_service import (
-    count_questions,
     create_dataset,
     delete_dataset,
-    latest_run_for_dataset,
 )
 from app.services.eval_environment import collect_environment
 from app.services.golden_quality import golden_dataset_quality
@@ -886,8 +884,8 @@ async def get_datasets(
 
     items: list[dict[str, Any]] = []
     for dataset in datasets:
-        question_count = await count_questions(db, dataset.id)
-        last_run = await latest_run_for_dataset(db, dataset.id)
+        question_count = await EvalRepo(db).count_included_questions(dataset.id)
+        last_run = await EvalRepo(db).latest_run(dataset.id)
         missing = await EvalRepo(db).dataset_missing_document_ids(dataset.id)
         items.append(_dataset_to_item(dataset, question_count, last_run, missing).model_dump())
 
@@ -900,7 +898,7 @@ async def get_datasets(
             count = _file_golden_question_count(f)
             if count is None:
                 continue  # not a retrieval golden / empty — don't surface as evaluable
-            last_run = await latest_run_for_dataset(db, f.stem)
+            last_run = await EvalRepo(db).latest_run(f.stem)
             items.append(
                 GoldenDatasetListItem(
                     name=f.stem,
@@ -975,8 +973,8 @@ async def get_golden_dataset(
         )
         for q in rows
     ]
-    question_count = await count_questions(db, dataset_id)
-    last_run = await latest_run_for_dataset(db, dataset_id)
+    question_count = await EvalRepo(db).count_included_questions(dataset_id)
+    last_run = await EvalRepo(db).latest_run(dataset_id)
     missing = await EvalRepo(db).dataset_missing_document_ids(dataset_id)
     item = _dataset_to_item(dataset, question_count, last_run, missing)
     return GoldenDatasetDetailResponse(

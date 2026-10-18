@@ -3,10 +3,10 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import RecommendationFeedbackModel
+from app.repos.recommendation_repo import RecommendationRepo
 from app.schemas.home import Recommendation, RecommendationReason, TodayAction
 
 logger = logging.getLogger(__name__)
@@ -88,14 +88,7 @@ def _clamp(v: float) -> float:
 
 
 async def _overdue_reviews(session: AsyncSession) -> list[_Candidate]:
-    row = (
-        await session.execute(
-            text(
-                "SELECT COUNT(*), MIN(due_date), MAX(due_date) FROM flashcards "
-                "WHERE due_date IS NOT NULL AND due_date <= datetime('now')"
-            )
-        )
-    ).first()
+    row = await RecommendationRepo(session).due_cards()
     count = int(row[0] or 0) if row else 0
     if count == 0:
         return []
@@ -120,34 +113,9 @@ async def _overdue_reviews(session: AsyncSession) -> list[_Candidate]:
 
 
 async def _weak_concepts(session: AsyncSession) -> list[_Candidate]:
-    rows = (
-        await session.execute(
-            text(
-                """
-                SELECT c.slug, c.label, c.mastery,
-                       COUNT(re.id) AS bad_count, MAX(re.reviewed_at) AS last_bad
-                FROM concepts c
-                JOIN flashcards f ON f.concept_slug = c.slug
-                JOIN review_events re ON re.flashcard_id = f.id
-                WHERE re.rating IN ('again', 'hard')
-                  AND re.reviewed_at >= datetime('now', :cutoff)
-                  AND c.mastery < :floor
-                  AND c.kind = 'concept'
-                  AND c.status != 'candidate'
-                GROUP BY c.slug, c.label, c.mastery
-                HAVING COUNT(re.id) >= :min_bad
-                ORDER BY COUNT(re.id) * (1.0 - c.mastery) DESC
-                LIMIT :lim
-                """
-            ),
-            {
-                "cutoff": f"-{_BAD_REVIEW_DAYS} days",
-                "floor": _MASTERY_FLOOR,
-                "min_bad": _MIN_BAD_REVIEWS,
-                "lim": _MAX_PER_KIND,
-            },
-        )
-    ).all()
+    rows = await RecommendationRepo(session).weak_concepts(
+        _BAD_REVIEW_DAYS, _MASTERY_FLOOR, _MIN_BAD_REVIEWS, _MAX_PER_KIND
+    )
     out: list[_Candidate] = []
     for slug, label, mastery, bad_count, last_bad in rows:
         last_bad_dt = _as_naive(last_bad)
@@ -178,22 +146,7 @@ async def _weak_concepts(session: AsyncSession) -> list[_Candidate]:
 
 
 async def _open_misconceptions(session: AsyncSession) -> list[_Candidate]:
-    rows = (
-        await session.execute(
-            text(
-                """
-                SELECT m.flashcard_id, m.error_type, m.correction_note, m.detected_at,
-                       f.concept_slug, f.document_id, f.question, c.label
-                FROM misconceptions m
-                JOIN flashcards f ON f.id = m.flashcard_id
-                LEFT JOIN concepts c ON c.slug = f.concept_slug
-                WHERE m.status = 'open'
-                ORDER BY m.detected_at DESC
-                LIMIT 10
-                """
-            )
-        )
-    ).all()
+    rows = await RecommendationRepo(session).open_misconceptions(10)
     out: list[_Candidate] = []
     seen: set[str] = set()
     for card_id, error_type, note, detected_at, slug, doc_id, question, concept_label in rows:
@@ -233,30 +186,9 @@ async def _open_misconceptions(session: AsyncSession) -> list[_Candidate]:
 
 
 async def _calibration_blind_spots(session: AsyncSession) -> list[_Candidate]:
-    rows = (
-        await session.execute(
-            text(
-                """
-                SELECT f.concept_slug, c.label, COUNT(*) AS n, MAX(re.reviewed_at) AS last_evt
-                FROM review_events re
-                JOIN flashcards f ON f.id = re.flashcard_id
-                JOIN concepts c ON c.slug = f.concept_slug
-                WHERE re.predicted_rating IN ('good', 'easy')
-                  AND re.rating = 'again'
-                  AND re.reviewed_at >= datetime('now', :cutoff)
-                GROUP BY f.concept_slug, c.label
-                HAVING COUNT(*) >= :min_over
-                ORDER BY COUNT(*) DESC
-                LIMIT :lim
-                """
-            ),
-            {
-                "cutoff": f"-{_CALIBRATION_DAYS} days",
-                "min_over": _MIN_OVERCONFIDENT,
-                "lim": _MAX_PER_KIND,
-            },
-        )
-    ).all()
+    rows = await RecommendationRepo(session).overconfident_concepts(
+        _CALIBRATION_DAYS, _MIN_OVERCONFIDENT, _MAX_PER_KIND
+    )
     out: list[_Candidate] = []
     for slug, label, n, last_evt in rows:
         last_evt_dt = _as_naive(last_evt)
@@ -286,28 +218,9 @@ async def _calibration_blind_spots(session: AsyncSession) -> list[_Candidate]:
 
 
 async def _stalled_reading(session: AsyncSession) -> list[_Candidate]:
-    rows = (
-        await session.execute(
-            text(
-                """
-                SELECT d.id, d.title, ca.last_meaningful_at,
-                  (SELECT COUNT(*) FROM sections WHERE document_id = d.id) AS total,
-                  (SELECT COUNT(*) FROM reading_progress WHERE document_id = d.id) AS read
-                FROM content_activity ca
-                JOIN documents d ON d.id = ca.member_id
-                WHERE ca.member_type = 'document'
-                  AND ca.last_meaningful_at <= datetime('now', :min_days)
-                  AND ca.last_meaningful_at >= datetime('now', :max_days)
-                ORDER BY ca.last_meaningful_at DESC
-                LIMIT 10
-                """
-            ),
-            {
-                "min_days": f"-{_STALLED_MIN_DAYS} days",
-                "max_days": f"-{_STALLED_MAX_DAYS} days",
-            },
-        )
-    ).all()
+    rows = await RecommendationRepo(session).stalled_documents(
+        _STALLED_MIN_DAYS, _STALLED_MAX_DAYS, 10
+    )
     out: list[_Candidate] = []
     for doc_id, title, last_at, total_raw, read_raw in rows:
         total = int(total_raw or 0)
@@ -353,7 +266,7 @@ _GENERATORS = (
 async def _load_feedback(
     session: AsyncSession,
 ) -> dict[tuple[str, str, str], RecommendationFeedbackModel]:
-    rows = (await session.execute(select(RecommendationFeedbackModel))).scalars().all()
+    rows = await RecommendationRepo(session).feedback()
     return {(r.kind, r.target_type, r.target_ref): r for r in rows}
 
 

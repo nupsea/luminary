@@ -10,10 +10,11 @@ import logging
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChunkModel, FlashcardModel, SectionModel
+from app.models import FlashcardModel
+from app.repos.deck_stats_repo import DeckStatsRepo
+from app.repos.document_repo import DocumentRepo
 from app.types import DeckHealthReport, HealthSection
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,18 @@ _STALE_DAYS = 90
 _STALE_MAX_STABILITY = 7.0
 _HOTSPOT_MIN_CARDS = 15
 _HOTSPOT_TOP_N = 5
+
+
+def _is_mastered(card: FlashcardModel) -> bool:
+    return card.fsrs_stability is not None and card.fsrs_stability > _MASTERED_STABILITY_DAYS
+
+
+def _is_stale(card: FlashcardModel, threshold: datetime) -> bool:
+    """Reviewed long ago and almost forgotten since."""
+    if card.last_review is None or card.fsrs_stability is None:
+        return False
+    last = card.last_review if card.last_review.tzinfo else card.last_review.replace(tzinfo=UTC)
+    return last < threshold and card.fsrs_stability < _STALE_MAX_STABILITY
 
 
 class DeckHealthService:
@@ -48,75 +61,30 @@ class DeckHealthService:
         now = datetime.now(UTC)
 
         # 1. Valid section IDs for this document
-        section_result = await db.execute(
-            select(SectionModel.id, SectionModel.heading).where(
-                SectionModel.document_id == document_id
-            )
-        )
-        section_rows = section_result.all()
-        valid_section_ids: set[str] = {row[0] for row in section_rows}
-        section_heading_map: dict[str, str] = {row[0]: row[1] for row in section_rows}
+        sections = await DocumentRepo(db).sections_for_document(document_id)
+        valid_section_ids: set[str] = {s.id for s in sections}
+        section_heading_map: dict[str, str] = {s.id: s.heading for s in sections}
 
-        # 2. All non-archived cards for this document
-        cards_result = await db.execute(
-            select(
-                FlashcardModel.id,
-                FlashcardModel.fsrs_stability,
-                FlashcardModel.last_review,
-                FlashcardModel.chunk_id,
-            ).where(
-                FlashcardModel.document_id == document_id,
-                FlashcardModel.fsrs_state != "archived",
-            )
+        # 2. Non-archived cards with their chunk's section; None when there is no chunk
+        rows = await DeckStatsRepo(db).with_section_ids(
+            document_id=document_id, exclude_archived=True
         )
-        cards = cards_result.all()
-
-        # 3. JOIN: card -> chunk -> section (excludes null chunk_id naturally)
-        join_result = await db.execute(
-            select(FlashcardModel.id, ChunkModel.section_id)
-            .join(ChunkModel, FlashcardModel.chunk_id == ChunkModel.id)
-            .where(FlashcardModel.document_id == document_id)
-            .where(FlashcardModel.fsrs_state != "archived")
-        )
-        join_rows = join_result.all()
-
-        # Build a map: card_id -> section_id (from join; only cards with chunk_id)
-        card_to_section: dict[str, str | None] = {}
+        stale_threshold = now - timedelta(days=_STALE_DAYS)
         section_card_counts: Counter[str] = Counter()
-        covered_section_ids: set[str] = set()
-
-        for card_id, section_id in join_rows:
-            card_to_section[card_id] = section_id
-            if section_id is not None:
-                section_card_counts[section_id] += 1
-                covered_section_ids.add(section_id)
-
-        # 4. Classify each card
         orphaned_ids: list[str] = []
         mastered_ids: list[str] = []
         stale_ids: list[str] = []
-
-        stale_threshold = now - timedelta(days=_STALE_DAYS)
-
-        for card_id, stability, last_review, _chunk_id in cards:
-            # Orphaned: has a chunk_id AND that chunk's section_id is not in valid sections
-            if card_id in card_to_section:
-                s_id = card_to_section[card_id]
-                if s_id is not None and s_id not in valid_section_ids:
-                    orphaned_ids.append(card_id)
-
-            # Mastered: stability > 180 days
-            if stability is not None and stability > _MASTERED_STABILITY_DAYS:
-                mastered_ids.append(card_id)
-
-            # Stale: last_review not null AND > 90 days ago AND stability < 7
-            # SQLite may return naive datetimes; normalise to UTC-aware for comparison.
-            if last_review is not None and stability is not None:
-                lr_aware = (
-                    last_review.replace(tzinfo=UTC) if last_review.tzinfo is None else last_review
-                )
-                if lr_aware < stale_threshold and stability < _STALE_MAX_STABILITY:
-                    stale_ids.append(card_id)
+        for card, section_id in rows:
+            if section_id is not None:
+                section_card_counts[section_id] += 1
+                # Orphaned: its chunk's section is no longer one of the document's
+                if section_id not in valid_section_ids:
+                    orphaned_ids.append(card.id)
+            if _is_mastered(card):
+                mastered_ids.append(card.id)
+            if _is_stale(card, stale_threshold):
+                stale_ids.append(card.id)
+        covered_section_ids = set(section_card_counts)
 
         # 5. Uncovered sections: sections with no cards
         uncovered_section_ids: list[str] = [
@@ -154,14 +122,9 @@ class DeckHealthService:
 
         Returns the count of archived cards.
         """
-        cards_result = await db.execute(
-            select(FlashcardModel).where(
-                FlashcardModel.document_id == document_id,
-                FlashcardModel.fsrs_stability > _MASTERED_STABILITY_DAYS,
-                FlashcardModel.fsrs_state != "archived",
-            )
+        cards = await DeckStatsRepo(db).live_with_stability_over(
+            document_id, _MASTERED_STABILITY_DAYS
         )
-        cards = list(cards_result.scalars().all())
 
         for card in cards:
             card.fsrs_state = "archived"
@@ -194,10 +157,8 @@ class DeckHealthService:
 
         for section_id in section_ids:
             # Fetch section heading
-            section_result = await db.execute(
-                select(SectionModel.heading).where(SectionModel.id == section_id)
-            )
-            heading = section_result.scalar_one_or_none()
+            section = await DocumentRepo(db).section(section_id)
+            heading = section.heading if section else None
             if heading is None:
                 logger.warning(
                     "generate_for_uncovered: section %s not found, skipping",

@@ -94,6 +94,36 @@ class TagRepo:
     async def find_suggestion(self, suggestion_id: str) -> TagMergeSuggestionModel | None:
         return await self.session.get(TagMergeSuggestionModel, suggestion_id)
 
+    async def most_used(self, limit: int) -> list[tuple[str, str, str | None, int]]:
+        """(id, display name, parent tag, usage count), most used first."""
+        result = await self.session.execute(
+            select(
+                CanonicalTagModel.id,
+                CanonicalTagModel.display_name,
+                CanonicalTagModel.parent_tag,
+                CanonicalTagModel.usage_count,
+            )
+            .order_by(CanonicalTagModel.usage_count.desc())
+            .limit(limit)
+        )
+        return [tuple(r) for r in result.all()]
+
+    async def note_co_occurrence(self, min_weight: int, limit: int) -> list[tuple[str, str, int]]:
+        """(tag a, tag b, notes carrying both), each pair once, heaviest first."""
+        result = await self.session.execute(
+            text(
+                "SELECT a.tag_full, b.tag_full, COUNT(*) AS weight"
+                " FROM note_tag_index a"
+                " JOIN note_tag_index b ON a.note_id = b.note_id AND a.tag_full < b.tag_full"
+                " GROUP BY a.tag_full, b.tag_full"
+                " HAVING COUNT(*) >= :min_weight"
+                " ORDER BY weight DESC"
+                " LIMIT :lim"
+            ),
+            {"min_weight": min_weight, "lim": limit},
+        )
+        return [(a, b, int(w)) for a, b, w in result.all()]
+
     async def all_in_storage_order(self) -> list[CanonicalTagModel]:
         """Every tag, unsorted: the naming migration's tie-break follows this order."""
         return list((await self.session.execute(select(CanonicalTagModel))).scalars().all())

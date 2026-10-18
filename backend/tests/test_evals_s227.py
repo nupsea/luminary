@@ -63,9 +63,9 @@ async def test_get_eval_runs_run_at_is_utc_aware(test_db):
 @pytest.mark.anyio
 async def test_persist_failed_run_appears_in_runs_list(test_db):
     """A failed subprocess must leave a visible eval_runs row (status=failed),
-    and latest_run_for_dataset must skip it so metrics aren't blanked."""
+    and EvalRepo.latest_run must skip it so metrics aren't blanked."""
+    from app.repos.eval_repo import EvalRepo
     from app.routers.evals import _persist_failed_run
-    from app.services.dataset_generator_service import latest_run_for_dataset
 
     _, factory, _ = test_db
     async with factory() as session:
@@ -89,7 +89,7 @@ async def test_persist_failed_run_appears_in_runs_list(test_db):
     assert failed[0]["model_used"] == "ollama/qwen2.5:14b-instruct"
 
     async with factory() as session:
-        last = await latest_run_for_dataset(session, "failds")
+        last = await EvalRepo(session).latest_run("failds")
     assert last is not None
     assert last.status != "failed"
     assert last.hit_rate_5 == 0.7

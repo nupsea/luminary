@@ -6,9 +6,8 @@ Returns section-grouped results scoped to a single document_id.
 import logging
 from collections import defaultdict
 
-from sqlalchemy import bindparam, text
-
 from app.database import get_session_factory
+from app.repos.document_repo import DocumentRepo
 from app.services.fts_query import sanitize_fts_query as _sanitize_fts_query
 
 logger = logging.getLogger(__name__)
@@ -37,61 +36,17 @@ class DocumentSearchService:
         if not safe_query:
             return []
 
-        # SQLite FTS5 restriction: snippet() can ONLY be used in a simple FTS query
-        # with no JOINs, no CTEs, no GROUP BY. We use two queries:
-        #   1. Pure FTS5 query to get chunk_id + snippet pairs
-        #   2. Regular SQL to group by section, get headings
-        # Then combine in Python.
-
-        # Query 1: get matching chunk_ids and snippets via pure FTS5 (no JOIN allowed)
-        fts_sql = text(
-            "SELECT chunks_fts.chunk_id, "
-            "       snippet(chunks_fts, 0, '<mark>', '</mark>', '...', 24) AS snippet "
-            "FROM chunks_fts "
-            "WHERE chunks_fts MATCH :query "
-            "  AND chunks_fts.document_id = :doc_id "
-            "LIMIT :inner_limit"
-        )
-        # Query 2: given chunk_ids, get section_id and heading
-        # expandable bindparam required for IN clause in raw SQL
-        section_sql = text(
-            "SELECT c.id AS chunk_id, c.section_id, COALESCE(s.heading, '') AS section_heading "
-            "FROM chunks c "
-            "LEFT JOIN sections s ON c.section_id = s.id "
-            "WHERE c.id IN :chunk_ids"
-        ).bindparams(bindparam("chunk_ids", expanding=True))
         async with get_session_factory()() as session:
-            fts_rows = (
-                await session.execute(
-                    fts_sql,
-                    {"query": safe_query, "doc_id": document_id, "inner_limit": limit * 4},
-                )
-            ).fetchall()
-
-            # Multi-word fallback: if strict AND yielded no hits, try OR so
-            # composite/parenthesized entity names still match
+            docs = DocumentRepo(session)
+            fts_rows = await docs.chunk_snippets(document_id, safe_query, limit * 4)
+            # Strict AND found nothing: try OR, so composite or parenthesised names still match.
             words = safe_query.split()
             if not fts_rows and len(words) > 1:
-                or_query = " OR ".join(words)
-                fts_rows = (
-                    await session.execute(
-                        fts_sql,
-                        {"query": or_query, "doc_id": document_id, "inner_limit": limit * 4},
-                    )
-                ).fetchall()
-
+                fts_rows = await docs.chunk_snippets(document_id, " OR ".join(words), limit * 4)
             if not fts_rows:
                 return []
-
-            chunk_ids = tuple(row[0] for row in fts_rows)
-            chunk_snippets: dict[str, str] = {row[0]: row[1] or "" for row in fts_rows}
-
-            section_rows = (
-                await session.execute(
-                    section_sql,
-                    {"chunk_ids": chunk_ids},
-                )
-            ).fetchall()
+            chunk_snippets = dict(fts_rows)
+            section_rows = await docs.chunk_section_headings(list(chunk_snippets))
 
         # Group by section_id in Python
         section_match_counts: dict[str, int] = defaultdict(int)

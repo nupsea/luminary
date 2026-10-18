@@ -20,10 +20,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import TimeOnTaskModel
+from app.repos.time_on_task_repo import TimeOnTaskRepo
 
 # What the client aims for between samples. The server does not depend on it
 # holding -- the credited amount is always the measured gap -- but the ceiling
@@ -57,19 +57,7 @@ class TimeOnTaskService:
             raise ValueError(f"unknown activity {activity!r}")
 
         now = datetime.now(UTC)
-        row = (
-            await self._session.execute(
-                select(TimeOnTaskModel)
-                .where(
-                    TimeOnTaskModel.activity == activity,
-                    TimeOnTaskModel.member_id.is_(None)
-                    if member_id is None
-                    else TimeOnTaskModel.member_id == member_id,
-                )
-                .order_by(TimeOnTaskModel.last_beat_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
+        row = await TimeOnTaskRepo(self._session).latest(activity, member_id)
 
         credited = 0
         if row is not None:
@@ -109,16 +97,8 @@ class TimeOnTaskService:
         approximation EngagementService makes at a local midnight.
         """
         cutoff = datetime.now(UTC) - timedelta(days=days)
-        rows = (
-            await self._session.execute(
-                select(TimeOnTaskModel.activity, TimeOnTaskModel.seconds).where(
-                    TimeOnTaskModel.started_at >= cutoff
-                )
-            )
-        ).all()
-
         totals = dict.fromkeys(ACTIVITIES, 0)
-        for activity, seconds in rows:
+        for activity, seconds in await TimeOnTaskRepo(self._session).seconds_since(cutoff):
             if activity in totals:
-                totals[activity] += int(seconds or 0)
+                totals[activity] += seconds
         return totals

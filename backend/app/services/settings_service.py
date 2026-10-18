@@ -10,11 +10,9 @@ from contextvars import ContextVar
 import keyring
 import keyring.backends.fail
 import keyring.errors
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import CloudKeyMissing
-from app.models import SettingsModel
 from app.repos.settings_repo import SettingsRepo
 from app.services.cloud_models import PROVIDER_DEFAULT_MODEL, check_key
 
@@ -176,8 +174,7 @@ async def load_llm_settings(db: AsyncSession) -> None:
     """
     global _mode_row_present
     for key in _LLM_SETTING_KEYS:
-        result = await db.execute(select(SettingsModel).where(SettingsModel.key == key))
-        row = result.scalar_one_or_none()
+        row = await SettingsRepo(db).find(key)
         if key == "llm_mode":
             _mode_row_present = row is not None
         if row is None:
@@ -394,11 +391,8 @@ _RERANK_DEFAULT = True
 
 
 async def get_rerank_enabled(db: AsyncSession) -> bool:
-    result = await db.execute(select(SettingsModel).where(SettingsModel.key == _RERANK_KEY))
-    row = result.scalar_one_or_none()
-    if row is None or not isinstance(row.value, bool):
-        return _RERANK_DEFAULT
-    return row.value
+    value = await SettingsRepo(db).get(_RERANK_KEY)
+    return value if isinstance(value, bool) else _RERANK_DEFAULT
 
 
 async def set_rerank_enabled(db: AsyncSession, enabled: bool) -> None:
@@ -465,9 +459,7 @@ def _routing_value(key: str) -> str:
 
 
 @contextlib.contextmanager
-def previewing_routing(
-    mode: str | None, provider: str | None, model: str | None
-) -> Iterator[None]:
+def previewing_routing(mode: str | None, provider: str | None, model: str | None) -> Iterator[None]:
     """Resolve routes as if *mode*, *provider* and *model* were saved.
 
     A provider without a model takes that provider's default, as saving would (I-53).
