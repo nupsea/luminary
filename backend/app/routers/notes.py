@@ -93,6 +93,9 @@ from app.services.notes_service import (
     generate_and_store_description as _generate_and_store_description,
 )
 from app.services.notes_service import (
+    primary_document_id as _primary_document_id,
+)
+from app.services.notes_service import (
     sync_note_sources as _sync_note_sources,
 )
 from app.services.notes_service import (
@@ -369,6 +372,11 @@ async def _apply_note_update(
         note.title_auto_generated = False
     if req.is_favorite is not None:
         note.is_favorite = req.is_favorite
+    if req.source_document_ids is not None:
+        primary = _primary_document_id(note.document_id, req.source_document_ids)
+        if primary != note.document_id:
+            # Section and chunk belong to the old document.
+            note.document_id, note.section_id, note.chunk_id = primary, None, None
     note.updated_at = datetime.now(UTC)
 
     await session.flush()  # Ensure content update is visible to other queries if needed

@@ -1204,7 +1204,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     try {
       await deleteNote(id)
       void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
-      void qc.invalidateQueries({ queryKey: ["reader-notes"] })
       void qc.invalidateQueries({ queryKey: ["notes"] })
       toast.success("Note deleted")
     } catch {
@@ -1986,7 +1985,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 onClose={closeNoteCapture}
                 onSaved={() => {
                   void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
-                  void qc.invalidateQueries({ queryKey: ["reader-notes"] })
                   void qc.invalidateQueries({ queryKey: ["notes"] })
                   void qc.invalidateQueries({ queryKey: ["notes-groups"] })
                 }}

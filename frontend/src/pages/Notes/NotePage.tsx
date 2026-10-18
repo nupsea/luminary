@@ -230,7 +230,7 @@ export default function NotePage() {
   useEffect(() => {
     return () => {
       void qc.invalidateQueries({ queryKey: ["notes"], refetchType: "none" })
-      void qc.invalidateQueries({ queryKey: ["reader-notes"], refetchType: "none" })
+      void qc.invalidateQueries({ queryKey: ["notes-for-doc"], refetchType: "none" })
       void qc.invalidateQueries({ queryKey: ["notes-groups"], refetchType: "none" })
     }
   }, [qc])
