@@ -22,6 +22,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.database import get_db, get_session_factory
 from app.models import CanonicalTagModel
 from app.repos._helpers import get_or_404
+from app.repos.note_repo import NoteRepo
 from app.repos.tag_repo import TagRepo, get_tag_repo
 from app.routers.notes import _sync_tag_index
 from app.services.background import task_registry
@@ -588,7 +589,7 @@ async def migrate_tag_naming(
         usage = len(set(note_ids)) if merged else tag_group[0].usage_count
         await repo.insert_if_absent(normalized_id, usage)
 
-        for note in await repo.load_notes(sorted(set(note_ids))):
+        for note in await NoteRepo(repo.session).by_ids(sorted(set(note_ids))):
             note.tags = _normalized_tags(note.tags or [])
             flag_modified(note, "tags")
             session.add(note)
@@ -624,7 +625,7 @@ async def get_notes_for_tag(
     note_ids = await repo.note_ids_with_tag(tag_id, include_descendants=True)
     if not note_ids:
         return []
-    notes = await repo.load_notes(note_ids)
+    notes = await NoteRepo(repo.session).by_ids(note_ids)
     return [NoteItem(id=n.id, content=n.content, tags=n.tags or []) for n in notes]
 
 

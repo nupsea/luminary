@@ -327,6 +327,25 @@ class NoteRepo:
     async def find(self, note_id: str) -> NoteModel | None:
         return await self.session.get(NoteModel, note_id)
 
+    async def by_ids(self, note_ids: Sequence[str]) -> list[NoteModel]:
+        if not note_ids:
+            return []
+        result = await self.session.execute(
+            select(NoteModel).where(NoteModel.id.in_(list(note_ids)))
+        )
+        return list(result.scalars().all())
+
+    async def collection_names_for(self, note_id: str) -> list[str]:
+        result = await self.session.execute(
+            select(CollectionModel.name)
+            .join(CollectionMemberModel, CollectionMemberModel.collection_id == CollectionModel.id)
+            .where(
+                CollectionMemberModel.member_id == note_id,
+                CollectionMemberModel.member_type == "note",
+            )
+        )
+        return list(result.scalars().all())
+
     async def content_of(self, note_id: str) -> str | None:
         return (
             await self.session.execute(select(NoteModel.content).where(NoteModel.id == note_id))

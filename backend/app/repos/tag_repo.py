@@ -19,7 +19,6 @@ from app.models import (
     CanonicalTagModel,
     DocumentTagIndexModel,
     DocumentTagProvenanceModel,
-    NoteModel,
     NoteTagIndexModel,
     TagAliasModel,
 )
@@ -137,14 +136,6 @@ class TagRepo:
             stmt = stmt.where(NoteTagIndexModel.tag_full == tag_id)
         result = await self.session.execute(stmt)
         return [row[0] for row in result.all()]
-
-    async def load_notes(self, note_ids: Sequence[str]) -> Sequence[NoteModel]:
-        if not note_ids:
-            return []
-        result = await self.session.execute(
-            select(NoteModel).where(NoteModel.id.in_(list(note_ids)))
-        )
-        return result.scalars().all()
 
     # -- writes ------------------------------------------------------------
 

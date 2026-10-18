@@ -122,6 +122,12 @@ class FlashcardRepo:
     async def find(self, card_id: str) -> FlashcardModel | None:
         return await self.session.get(FlashcardModel, card_id)
 
+    async def list_for_deck(self, deck: str) -> list[FlashcardModel]:
+        result = await self.session.execute(
+            select(FlashcardModel).where(FlashcardModel.deck == deck)
+        )
+        return list(result.scalars().all())
+
     async def get_many(self, card_ids: Sequence[str]) -> dict[str, FlashcardModel]:
         """The cards among these ids that still exist, by id."""
         if not card_ids:

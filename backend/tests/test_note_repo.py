@@ -165,3 +165,12 @@ async def test_note_link_lifecycle(repo: NoteRepo) -> None:
 
     await repo.delete_link(link)
     assert await repo.find_link("src", "tgt", "see-also") is None
+
+
+@pytest.mark.asyncio
+async def test_by_ids_filters_by_id(repo: NoteRepo) -> None:
+    repo.session.add(_make_note(id="n1"))
+    repo.session.add(_make_note(id="n2", content_hash="h2"))
+    await repo.session.commit()
+    assert [n.id for n in await repo.by_ids(["n1"])] == ["n1"]
+    assert await repo.by_ids([]) == []
