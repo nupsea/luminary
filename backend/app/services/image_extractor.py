@@ -18,14 +18,13 @@ import ebooklib
 import fitz  # PyMuPDF
 from ebooklib import epub
 from PIL import Image as PILImage
-from sqlalchemy import delete as _delete
-from sqlalchemy import func, select
-from sqlalchemy import text as _text
-from sqlalchemy import update as _update
 
 from app import config as _config_module  # indirect: get_settings is patched
 from app import database as _database_module  # indirect: get_session_factory is patched
-from app.models import ChunkModel, DocumentModel, EnrichmentJobModel, ImageModel
+from app.models import ImageModel
+from app.repos.document_repo import DocumentRepo
+from app.repos.enrichment_repo import EnrichmentRepo
+from app.repos.image_repo import ImageRepo
 from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
@@ -673,11 +672,7 @@ async def _record_job_note(job_id: str, note: str) -> None:
     """
     try:
         async with _database_module.get_session_factory()() as session:
-            await session.execute(
-                _update(EnrichmentJobModel)
-                .where(EnrichmentJobModel.id == job_id)
-                .values(error_message=note)
-            )
+            await EnrichmentRepo(session).update_job(job_id, error_message=note)
             await session.commit()
     except Exception as exc:
         logger.warning("image_extract_handler: could not record job note job=%s: %s", job_id, exc)
@@ -696,24 +691,12 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
     images_dir.mkdir(parents=True, exist_ok=True)
 
     async with _database_module.get_session_factory()() as session:
-        doc_result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
-        doc = doc_result.scalar_one_or_none()
+        docs = DocumentRepo(session)
+        doc = await docs.get(document_id)
         if doc is None:
             raise ValueError(f"Document not found: {document_id}")
-
-        existing_hashes_result = await session.execute(
-            select(ImageModel.content_hash).where(ImageModel.document_id == document_id)
-        )
-        existing_hashes: set[str] = {row[0] for row in existing_hashes_result.all()}
-
-        chunks_result = await session.execute(
-            select(ChunkModel.id, ChunkModel.page_number)
-            .where(ChunkModel.document_id == document_id)
-            .order_by(ChunkModel.page_number, ChunkModel.chunk_index)
-        )
-        chunks = chunks_result.all()
+        existing_hashes = await ImageRepo(session).content_hashes(document_id)
+        chunks = await docs.chunk_pages(document_id)
 
     fmt = doc.format.lower()
     file_path = Path(doc.file_path)
@@ -806,17 +789,11 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
     if note is None and extracted and not outcome.skipped:
         fresh_hashes = {img.content_hash for img in extracted}
         async with _database_module.get_session_factory()() as session:
-            stale = (
-                await session.execute(
-                    select(ImageModel.id, ImageModel.path).where(
-                        ImageModel.document_id == document_id,
-                        ImageModel.content_hash.notin_(fresh_hashes),
-                    )
-                )
-            ).all()
-            retired_ids = [row[0] for row in stale]
+            images = ImageRepo(session)
+            stale = await images.stale(document_id, fresh_hashes)
+            retired_ids = [image_id for image_id, _ in stale]
             if retired_ids:
-                await session.execute(_delete(ImageModel).where(ImageModel.id.in_(retired_ids)))
+                await images.delete(retired_ids)
                 await session.commit()
 
         # Secondary indexes, each in its own transaction. An orphaned FTS row is
@@ -827,11 +804,7 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
         if retired_ids:
             try:
                 async with _database_module.get_session_factory()() as session:
-                    for image_id in retired_ids:
-                        await session.execute(
-                            _text("DELETE FROM images_fts WHERE image_id = :image_id"),
-                            {"image_id": image_id},
-                        )
+                    await ImageRepo(session).delete_fts(retired_ids)
                     await session.commit()
             except Exception as exc:
                 logger.warning(
@@ -893,56 +866,17 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
     # SQL_Cookbook_2006 among them. Asking the question of the table also makes
     # this self-healing after an interrupted analyze run.
     async with _database_module.get_session_factory()() as session:
-        undescribed = (
-            await session.execute(
-                select(func.count())
-                .select_from(ImageModel)
-                .where(
-                    ImageModel.document_id == document_id,
-                    ImageModel.description.is_(None),
-                )
+        analyze = None
+        if await ImageRepo(session).count_undescribed(document_id):
+            analyze = await EnrichmentRepo(session).enqueue_unless_active(
+                document_id, "image_analyze"
             )
-        ).scalar_one()
-        queued_already = (
-            await session.execute(
-                select(func.count())
-                .select_from(EnrichmentJobModel)
-                .where(
-                    EnrichmentJobModel.document_id == document_id,
-                    EnrichmentJobModel.job_type == "image_analyze",
-                    EnrichmentJobModel.status.in_(["pending", "running"]),
-                )
-            )
-        ).scalar_one()
-
-    if undescribed and not queued_already:
-        analyze_job_id = str(uuid.uuid4())
-        async with _database_module.get_session_factory()() as session:
-            session.add(
-                EnrichmentJobModel(
-                    id=analyze_job_id,
-                    document_id=document_id,
-                    job_type="image_analyze",
-                    status="pending",
-                )
-            )
-            await session.commit()
-        logger.info(
-            "image_extract_handler: enqueued image_analyze job=%s doc=%s",
-            analyze_job_id,
-            document_id,
-        )
-
-    async with _database_module.get_session_factory()() as session:
-        await session.execute(
-            _update(DocumentModel)
-            .where(
-                DocumentModel.id == document_id,
-                DocumentModel.stage == "enriching",
-            )
-            .values(stage="complete")
-        )
+        await DocumentRepo(session).finish_enriching(document_id)
         await session.commit()
+    if analyze is not None:
+        logger.info(
+            "image_extract_handler: enqueued image_analyze job=%s doc=%s", analyze.id, document_id
+        )
 
     logger.info(
         "image_extract_handler: done doc=%s new_images=%d",

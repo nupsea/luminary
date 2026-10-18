@@ -124,7 +124,7 @@ async def test_search_bloom_level_min(test_db):
 async def test_fts_populated_on_create(test_db):
     """When a card is inserted via the service helper, FTS row exists."""
     _, factory, _ = test_db
-    from app.services.flashcard import _sync_flashcard_fts
+    from app.repos.flashcard_repo import FlashcardRepo
 
     card = _make_flashcard(
         question="What is recursion?",
@@ -132,7 +132,7 @@ async def test_fts_populated_on_create(test_db):
     )
     async with factory() as session:
         session.add(card)
-        await _sync_flashcard_fts(card, session)
+        await FlashcardRepo(session).sync_fts(card)
         await session.commit()
 
         # Verify FTS row exists
@@ -191,3 +191,30 @@ async def test_search_by_fsrs_state(test_db):
         ids = [item["id"] for item in data["items"]]
         assert card_new.id in ids
         assert card_review.id not in ids
+
+
+async def test_like_fallback_keeps_the_section_filter(test_db):
+    """FTS matches whole tokens, so "tangle" finds nothing and the search falls back to a
+    substring match. The fallback once rebuilt every filter but the section, so a
+    section's search returned cards from every section."""
+    from app.models import ChunkModel
+    from app.services.flashcard_search import FlashcardSearchService
+
+    _, factory, _ = test_db
+    async with factory() as session:
+        for section in ("sec-a", "sec-b"):
+            chunk_id = f"chunk-{section}"
+            session.add(
+                ChunkModel(
+                    id=chunk_id, document_id="doc-1", section_id=section, text="x", chunk_index=0
+                )
+            )
+            session.add(_make_flashcard(card_id=f"card-{section}", chunk_id=chunk_id))
+        await session.commit()
+
+        cards, total = await FlashcardSearchService().search(
+            session, query="tangle", section_id="sec-a"
+        )
+
+    assert total == 1
+    assert [c.id for c in cards] == ["card-sec-a"]

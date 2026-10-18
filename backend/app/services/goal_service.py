@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.exceptions import LuminaryError
 from app.models import LearningGoalModel, PomodoroSessionModel
 from app.repos.goal_repo import GoalRepo
+from app.repos.pomodoro_repo import PomodoroRepo
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,7 @@ class LearningGoalsService:
     async def link_session(self, goal_id: str, session_id: str) -> PomodoroSessionModel:
         # Verify the goal exists -- raises GoalNotFound otherwise.
         await self._get(goal_id)
-        sess = await self._repo.find_session(session_id)
+        sess = await PomodoroRepo(self._session).find(session_id)
         if sess is None:
             raise SessionNotFound(f"pomodoro session {session_id} not found")
         sess.goal_id = goal_id
@@ -211,7 +212,7 @@ class LearningGoalsService:
         return sess
 
     async def unlink_session(self, goal_id: str, session_id: str) -> PomodoroSessionModel:
-        sess = await self._repo.find_session(session_id)
+        sess = await PomodoroRepo(self._session).find(session_id)
         if sess is None:
             raise SessionNotFound(f"pomodoro session {session_id} not found")
         if sess.goal_id == goal_id:

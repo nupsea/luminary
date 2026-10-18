@@ -24,8 +24,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import FlashcardModel
-from app.repos.flashcard_repo import _CARD_CHILD_TABLES
-from app.services.flashcard_search import _sync_flashcard_fts
+from app.repos.flashcard_repo import _CARD_CHILD_TABLES, FlashcardRepo
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +62,7 @@ async def repair_flashcard_tables(session: AsyncSession) -> dict[str, int]:
             .all()
         )
         for card in cards:
-            await _sync_flashcard_fts(card, session)
+            await FlashcardRepo(session).sync_fts(card)
 
     orphan_rows = 0
     for model in _CARD_CHILD_TABLES:

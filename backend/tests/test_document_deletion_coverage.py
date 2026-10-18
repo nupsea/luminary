@@ -12,13 +12,14 @@ is: cascaded, special-cased, or part of the learner record that outlives the
 document.
 """
 
-import inspect
+from sqlalchemy import select
 
-from app.models import Base
+from app.models import Base, ChatSessionModel, DocumentModel
 from app.services.document_deletion_service import (
     _DOCUMENT_ID_CHILD_TABLES,
     _LEARNER_RECORD_TABLES,
     _SPECIAL_CASE_TABLES,
+    DocumentDeletionService,
 )
 
 
@@ -69,17 +70,39 @@ def test_the_three_lists_do_not_overlap():
     assert not special & kept, sorted(c.__name__ for c in special & kept)
 
 
-def test_chat_sessions_are_handled_even_though_they_have_no_document_id_column():
+async def test_deleting_a_document_clears_it_from_chat_session_scopes(memory_db):
     """`chat_sessions.document_ids` is a JSON array, so the column scan above misses it.
 
-    That is exactly how a chat stayed pointed at a deleted document: nothing in the
-    cascade could match a JSON array, so the id survived the delete. The handling is
-    explicit code in `delete_sqlite_cascade`; this asserts it is still there, since a
-    silent removal would restore the bug without failing anything else.
+    That is how a chat stayed pointed at a deleted document and answered nothing. A
+    session left with no documents becomes library-wide rather than scoped to nothing.
     """
-    from app.services import document_deletion_service as svc
+    gone, kept = "doc-gone", "doc-kept"
+    async with memory_db.factory() as session:
+        for doc_id in (gone, kept):
+            session.add(
+                DocumentModel(
+                    id=doc_id,
+                    title=doc_id,
+                    format="txt",
+                    content_type="notes",
+                    word_count=1,
+                    page_count=1,
+                    file_path=f"/nonexistent/{doc_id}.txt",
+                    stage="complete",
+                )
+            )
+        session.add(ChatSessionModel(id="only", scope="single", document_ids=[gone]))
+        session.add(ChatSessionModel(id="both", scope="single", document_ids=[gone, kept]))
+        session.add(ChatSessionModel(id="other", scope="single", document_ids=[kept]))
+        await session.commit()
 
-    source = inspect.getsource(svc.DocumentDeletionService.delete_sqlite_cascade)
-    assert "ChatSessionModel" in source, (
-        "deleting a document must also clear it from chat session scopes"
-    )
+    async with memory_db.factory() as session:
+        doc = await session.get(DocumentModel, gone)
+        await DocumentDeletionService().delete_sqlite_cascade(session, doc)
+        await session.commit()
+
+    async with memory_db.factory() as session:
+        chats = {c.id: c for c in (await session.execute(select(ChatSessionModel))).scalars()}
+    assert (chats["only"].scope, chats["only"].document_ids) == ("all", [])
+    assert (chats["both"].scope, chats["both"].document_ids) == ("single", [kept])
+    assert (chats["other"].scope, chats["other"].document_ids) == ("single", [kept])

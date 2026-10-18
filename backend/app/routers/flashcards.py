@@ -81,8 +81,6 @@ from app.services.deck_health import DeckHealthService, get_deck_health_service
 from app.services.engagement_service import EngagementService
 from app.services.flashcard import (
     FlashcardService,
-    _delete_flashcard_fts,
-    _sync_flashcard_fts,
     get_flashcard_service,
 )
 from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
@@ -492,11 +490,9 @@ async def create_trace_flashcard(
         flashcard_type="trace",
         bloom_level=None,
     )
-    # Card insert and FTS sync must be in the same transaction; _sync_flashcard_fts
-    # takes the live session mid-flight, so the commit must stay with the add here.
+    # The FTS row must commit in the same transaction as the card.
     session.add(card)
-    # sync FTS index for trace flashcards
-    await _sync_flashcard_fts(card, session)
+    await FlashcardRepo(session).sync_fts(card)
     await session.commit()
     await session.refresh(card)
     logger.info("Created trace flashcard", extra={"card_id": card.id})
@@ -767,7 +763,7 @@ async def update_flashcard(
     card.is_user_edited = True
 
     # keep FTS index in sync on question/answer edits
-    await _sync_flashcard_fts(card, session)
+    await FlashcardRepo(session).sync_fts(card)
     await repo.commit_refresh(card)
     logger.info("Updated flashcard", extra={"card_id": card_id})
     return _to_response(card)
@@ -805,7 +801,7 @@ async def delete_flashcard(
     document_id = card.document_id
 
     # remove from FTS index before deleting
-    await _delete_flashcard_fts(card_id, session)
+    await FlashcardRepo(session).delete_fts(card_id)
     await repo.delete_by_id(card_id)
     sessions_removed = await _purge_emptied_runs(
         session, [card_id], document_ids=[document_id] if document_id else []
@@ -826,7 +822,7 @@ async def bulk_delete_flashcards(
     existing = await repo.list_existing_ids_in(req.ids)
     document_ids = await repo.list_document_ids_for_cards(existing)
     for card_id in existing:
-        await _delete_flashcard_fts(card_id, session)
+        await FlashcardRepo(session).delete_fts(card_id)
     await repo.delete_by_ids(existing)
     sessions_removed = await _purge_emptied_runs(session, existing, document_ids=document_ids)
     logger.info(
@@ -849,7 +845,7 @@ async def delete_all_document_flashcards(
     """
     ids = await repo.list_ids_for_document(document_id)
     for card_id in ids:
-        await _delete_flashcard_fts(card_id, session)
+        await FlashcardRepo(session).delete_fts(card_id)
     if ids:
         await repo.delete_for_document(document_id)
     sessions_removed = await _purge_emptied_runs(session, ids, document_ids=[document_id])
@@ -877,7 +873,7 @@ async def delete_all_collection_flashcards(
     ids = await repo.list_ids_for_collection(collection_id)
     document_ids = await repo.list_document_ids_for_cards(ids)
     for card_id in ids:
-        await _delete_flashcard_fts(card_id, session)
+        await FlashcardRepo(session).delete_fts(card_id)
     await repo.delete_by_ids(ids)
     # Both scopes: a run on one of these documents and a run on the collection
     # itself are different rows, and this call empties the decks under both.

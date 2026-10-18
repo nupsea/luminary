@@ -7,11 +7,11 @@ import uuid
 from datetime import UTC, datetime
 from functools import lru_cache
 
-from sqlalchemy import func, select, update
-
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models import ChatSuggestionHistoryModel, ChunkModel, SummaryModel
+from app.models import ChatSuggestionHistoryModel
+from app.repos.suggestion_repo import SuggestionRepo
+from app.repos.summary_repo import SummaryRepo
 from app.services.llm import LLMUnavailableError, get_llm_service
 from app.services.llm_admission import YieldedToInteractive, run_yielding_to_interactive
 from app.services.prompt_spec import NO_FENCES, PromptSpec, render_for
@@ -340,20 +340,8 @@ class SuggestionService:
         led with level 5, so first contact with new material was a demand to
         evaluate it. Depth is earned by engagement, so it climbs.
         """
-        factory = get_session_factory()
-        async with factory() as session:
-            query = (
-                select(func.count())
-                .select_from(ChatSuggestionHistoryModel)
-                .where(
-                    ChatSuggestionHistoryModel.was_asked.is_(True),
-                )
-            )
-            if document_id is not None:
-                query = query.where(ChatSuggestionHistoryModel.document_id == document_id)
-            else:
-                query = query.where(ChatSuggestionHistoryModel.document_id.is_(None))
-            asked_count = (await session.execute(query)).scalar() or 0
+        async with get_session_factory()() as session:
+            asked_count = await SuggestionRepo(session).count_asked(document_id)
 
         # Level 6 ("Create") is deliberately unreachable: the chat answers from
         # the learner's own documents, and a create-level task has no grounded
@@ -363,29 +351,14 @@ class SuggestionService:
 
     async def get_recent_history(self, document_id: str | None, limit: int = 50) -> list[str]:
         """Return recent suggestion texts for dedup."""
-        factory = get_session_factory()
-        async with factory() as session:
-            query = (
-                select(ChatSuggestionHistoryModel.suggestion_text)
-                .where(ChatSuggestionHistoryModel.document_id == document_id)
-                .order_by(ChatSuggestionHistoryModel.shown_at.desc())
-                .limit(limit)
-            )
-            result = await session.execute(query)
-            return [row[0] for row in result.all()]
+        async with get_session_factory()() as session:
+            return await SuggestionRepo(session).recent_texts(document_id, limit)
 
     async def get_executive_summary(self, document_id: str) -> str | None:
         """Fetch executive summary for a document."""
-        factory = get_session_factory()
-        async with factory() as session:
-            result = await session.execute(
-                select(SummaryModel.content)
-                .where(SummaryModel.document_id == document_id, SummaryModel.mode == "executive")
-                .order_by(SummaryModel.created_at.desc())
-                .limit(1)
-            )
-            row = result.scalar_one_or_none()
-            return row
+        async with get_session_factory()() as session:
+            summary = await SummaryRepo(session).latest(document_id, "executive")
+            return summary.content if summary else None
 
     async def get_grounding_passages(self, document_id: str, limit: int = 6) -> list[str]:
         """The document's own text, sampled evenly across it, for question generation.
@@ -393,16 +366,9 @@ class SuggestionService:
         Never summaries: a summary is a paraphrase, and questions written from one
         presupposed framings the document never makes (#66).
         """
-        factory = get_session_factory()
-        async with factory() as session:
-            chunk_rows = (
-                await session.execute(
-                    select(ChunkModel.text)
-                    .where(ChunkModel.document_id == document_id)
-                    .order_by(ChunkModel.chunk_index)
-                )
-            ).all()
-        texts = [r[0] for r in chunk_rows if r[0]]
+        async with get_session_factory()() as session:
+            chunks = await SummaryRepo(session).chunks(document_id)
+        texts = [c.text for c in chunks if c.text]
         passages = [t for t in texts if len(t) >= _MIN_PASSAGE_CHARS] or texts
 
         if len(passages) > limit:
@@ -411,17 +377,10 @@ class SuggestionService:
         return [p[:800] for p in passages]
 
     async def get_multi_doc_summaries(self, limit: int = 5) -> str:
-        """Fetch executive summaries from multiple documents for cross-doc context."""
-        factory = get_session_factory()
-        async with factory() as session:
-            result = await session.execute(
-                select(SummaryModel.content)
-                .where(SummaryModel.mode == "executive")
-                .order_by(SummaryModel.created_at.desc())
-                .limit(limit)
-            )
-            summaries = [row[0] for row in result.all()]
-            return "\n---\n".join(summaries) if summaries else ""
+        """The latest executive summary of up to `limit` live documents, for cross-doc context."""
+        async with get_session_factory()() as session:
+            summaries = await SummaryRepo(session).latest_executive_summaries(limit)
+        return "\n---\n".join(summaries)
 
     def filter_near_duplicates(
         self,
@@ -465,15 +424,10 @@ class SuggestionService:
 
     async def mark_asked(self, suggestion_id: str) -> bool:
         """Mark a suggestion as asked. Returns True if found."""
-        factory = get_session_factory()
-        async with factory() as session:
-            result = await session.execute(
-                update(ChatSuggestionHistoryModel)
-                .where(ChatSuggestionHistoryModel.id == suggestion_id)
-                .values(was_asked=True)
-            )
+        async with get_session_factory()() as session:
+            found = await SuggestionRepo(session).mark_asked(suggestion_id)
             await session.commit()
-            return result.rowcount > 0
+        return found
 
     async def generate_suggestions(
         self,

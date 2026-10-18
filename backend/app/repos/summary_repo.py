@@ -50,6 +50,19 @@ class SummaryRepo:
         )
         return list(result.scalars().all())
 
+    async def section_summary(
+        self, document_id: str, section_id: str
+    ) -> SectionSummaryModel | None:
+        result = await self.session.execute(
+            select(SectionSummaryModel)
+            .where(
+                SectionSummaryModel.document_id == document_id,
+                SectionSummaryModel.section_id == section_id,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def summarised_section_ids(self, document_id: str) -> set[str | None]:
         result = await self.session.execute(
             select(SectionSummaryModel.section_id).where(
@@ -191,6 +204,24 @@ class SummaryRepo:
             if row.document_id not in best or prio < best[row.document_id][0]:
                 best[row.document_id] = (prio, row.content)
         return {doc_id: content for doc_id, (_, content) in best.items()}
+
+    async def latest_executive_summaries(self, limit: int) -> list[str]:
+        """The newest executive summary of each live document, newest documents first."""
+        rows = await self.session.execute(
+            select(SummaryModel.document_id, SummaryModel.content)
+            # A summary that outlived its document must not describe the library.
+            .join(DocumentModel, DocumentModel.id == SummaryModel.document_id)
+            .where(SummaryModel.mode == "executive")
+            .order_by(SummaryModel.created_at.desc())
+        )
+        latest: dict[str, str] = {}
+        for document_id, content in rows:
+            if document_id in latest:
+                continue
+            if len(latest) >= limit:
+                break
+            latest[document_id] = content
+        return list(latest.values())
 
     async def titles(self, document_ids: list[str]) -> dict[str, str]:
         rows = await self.session.execute(

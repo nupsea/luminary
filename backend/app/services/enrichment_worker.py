@@ -12,11 +12,11 @@ from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_, case, func, or_, select, update
-
 from app.database import get_session_factory
 from app.exceptions import LocalInferenceRefused
-from app.models import DocumentModel, EnrichmentJobModel
+from app.models import EnrichmentJobModel
+from app.repos.document_repo import DocumentRepo
+from app.repos.enrichment_repo import EnrichmentRepo
 from app.services.components import component_for_model
 from app.services.llm import LLMUnavailableError, missing_model_from
 from app.services.llm_admission import unattended
@@ -56,10 +56,12 @@ async def _record_skip(job_id: str, message: str, *, refund_attempt: bool) -> No
         # A refused call did no work, so it must not spend the retry budget that
         # bounds real attempts.
         values["attempts"] = EnrichmentJobModel.attempts - 1
+    await _update_job(job_id, **values)
+
+
+async def _update_job(job_id: str, **values: object) -> None:
     async with get_session_factory()() as session:
-        await session.execute(
-            update(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id).values(**values)
-        )
+        await EnrichmentRepo(session).update_job(job_id, **values)
         await session.commit()
 
 
@@ -128,32 +130,9 @@ class EnrichmentQueueWorker:
           which is minutes of GPU per document that the user never asked for.
         """
         async with get_session_factory()() as session:
-            result = await session.execute(
-                update(EnrichmentJobModel)
-                .where(
-                    or_(
-                        EnrichmentJobModel.status == "running",
-                        EnrichmentJobModel.status == "skipped",
-                        and_(
-                            EnrichmentJobModel.status == "failed",
-                            EnrichmentJobModel.attempts < _MAX_BOOT_ATTEMPTS,
-                        ),
-                    )
-                )
-                .values(status="pending", started_at=None, error_message=None)
-                .returning(EnrichmentJobModel.id)
-            )
-            reset_ids = [row[0] for row in result.all()]
-            exhausted = (
-                await session.execute(
-                    select(func.count())
-                    .select_from(EnrichmentJobModel)
-                    .where(
-                        EnrichmentJobModel.status == "failed",
-                        EnrichmentJobModel.attempts >= _MAX_BOOT_ATTEMPTS,
-                    )
-                )
-            ).scalar_one()
+            jobs = EnrichmentRepo(session)
+            reset_ids = await jobs.requeue_for_boot(_MAX_BOOT_ATTEMPTS)
+            exhausted = await jobs.count_exhausted(_MAX_BOOT_ATTEMPTS)
             if reset_ids:
                 await session.commit()
                 logger.info(
@@ -205,12 +184,7 @@ class EnrichmentQueueWorker:
     async def _dispatch_pending(self) -> None:
         """Find pending jobs; launch per-document runners for any doc not already active."""
         async with get_session_factory()() as session:
-            result = await session.execute(
-                select(EnrichmentJobModel.document_id)
-                .where(EnrichmentJobModel.status == "pending")
-                .distinct()
-            )
-            doc_ids = [row[0] for row in result.all()]
+            doc_ids = await EnrichmentRepo(session).documents_with_pending()
 
         for doc_id in doc_ids:
             if doc_id in self._active_doc_ids:
@@ -228,26 +202,7 @@ class EnrichmentQueueWorker:
         """
         while True:
             async with get_session_factory()() as session:
-                result = await session.execute(
-                    select(EnrichmentJobModel)
-                    .where(
-                        EnrichmentJobModel.document_id == document_id,
-                        EnrichmentJobModel.status == "pending",
-                    )
-                    .order_by(
-                        # Chapter cards before image analysis: a reader reaches chapter 1's end
-                        # long before every figure is analysed.
-                        case(
-                            (EnrichmentJobModel.job_type == "image_extract", 1),
-                            (EnrichmentJobModel.job_type == "chapter_cards", 2),
-                            (EnrichmentJobModel.job_type == "image_analyze", 3),
-                            else_=4,
-                        ),
-                        EnrichmentJobModel.created_at,
-                    )
-                    .limit(1)
-                )
-                job = result.scalar_one_or_none()
+                job = await EnrichmentRepo(session).next_pending(document_id)
 
             if job is None:
                 break
@@ -257,14 +212,7 @@ class EnrichmentQueueWorker:
         # All enrichment jobs for this document are done (or failed).
         # Transition stage from 'enriching' to 'complete'.
         async with get_session_factory()() as session:
-            await session.execute(
-                update(DocumentModel)
-                .where(
-                    DocumentModel.id == document_id,
-                    DocumentModel.stage == "enriching",
-                )
-                .values(stage="complete")
-            )
+            await DocumentRepo(session).finish_enriching(document_id)
             await session.commit()
         logger.info("EnrichmentQueueWorker: document enrichment complete doc=%s", document_id)
 
@@ -313,17 +261,12 @@ class EnrichmentQueueWorker:
             await _record_skip(job_id, refused, refund_attempt=False)
             return
 
-        async with get_session_factory()() as session:
-            await session.execute(
-                update(EnrichmentJobModel)
-                .where(EnrichmentJobModel.id == job_id)
-                .values(
-                    status="running",
-                    started_at=datetime.now(UTC),
-                    attempts=EnrichmentJobModel.attempts + 1,
-                )
-            )
-            await session.commit()
+        await _update_job(
+            job_id,
+            status="running",
+            started_at=datetime.now(UTC),
+            attempts=EnrichmentJobModel.attempts + 1,
+        )
 
         logger.info(
             "EnrichmentQueueWorker: starting job job_id=%s job_type=%s doc=%s",
@@ -335,28 +278,14 @@ class EnrichmentQueueWorker:
         if handler is None:
             error_msg = f"No handler registered for job_type={job_type}"
             logger.warning(error_msg)
-            async with get_session_factory()() as session:
-                await session.execute(
-                    update(EnrichmentJobModel)
-                    .where(EnrichmentJobModel.id == job_id)
-                    .values(
-                        status="failed",
-                        completed_at=datetime.now(UTC),
-                        error_message=error_msg,
-                    )
-                )
-                await session.commit()
+            await _update_job(
+                job_id, status="failed", completed_at=datetime.now(UTC), error_message=error_msg
+            )
             return
 
         try:
             await self._invoke_with_backoff(handler, document_id, job_id)
-            async with get_session_factory()() as session:
-                await session.execute(
-                    update(EnrichmentJobModel)
-                    .where(EnrichmentJobModel.id == job_id)
-                    .values(status="done", completed_at=datetime.now(UTC))
-                )
-                await session.commit()
+            await _update_job(job_id, status="done", completed_at=datetime.now(UTC))
             logger.info("EnrichmentQueueWorker: job done job_id=%s doc=%s", job_id, document_id)
         except LLMUnavailableError as exc:
             # Same exception type, two situations: a model the user never
@@ -393,13 +322,9 @@ class EnrichmentQueueWorker:
             if status == "skipped":
                 await _record_skip(job_id, message, refund_attempt=True)
                 return
-            async with get_session_factory()() as session:
-                await session.execute(
-                    update(EnrichmentJobModel)
-                    .where(EnrichmentJobModel.id == job_id)
-                    .values(status=status, completed_at=datetime.now(UTC), error_message=message)
-                )
-                await session.commit()
+            await _update_job(
+                job_id, status=status, completed_at=datetime.now(UTC), error_message=message
+            )
             return
         except LocalInferenceRefused as exc:
             await _record_skip(job_id, exc.detail, refund_attempt=True)
@@ -412,17 +337,9 @@ class EnrichmentQueueWorker:
                 exc,
                 exc_info=exc,
             )
-            async with get_session_factory()() as session:
-                await session.execute(
-                    update(EnrichmentJobModel)
-                    .where(EnrichmentJobModel.id == job_id)
-                    .values(
-                        status="failed",
-                        completed_at=datetime.now(UTC),
-                        error_message=str(exc),
-                    )
-                )
-                await session.commit()
+            await _update_job(
+                job_id, status="failed", completed_at=datetime.now(UTC), error_message=str(exc)
+            )
 
 
 async def requeue_skipped_jobs() -> int:
@@ -432,13 +349,7 @@ async def requeue_skipped_jobs() -> int:
     in the library wait for a restart, which reads as the install having failed.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(
-            update(EnrichmentJobModel)
-            .where(EnrichmentJobModel.status == "skipped")
-            .values(status="pending", started_at=None, completed_at=None, error_message=None)
-            .returning(EnrichmentJobModel.id)
-        )
-        requeued = [row[0] for row in result.all()]
+        requeued = await EnrichmentRepo(session).requeue_skipped()
         if requeued:
             await session.commit()
             logger.info("EnrichmentQueueWorker: re-queued %d skipped jobs", len(requeued))

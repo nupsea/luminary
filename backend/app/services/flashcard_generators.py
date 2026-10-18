@@ -74,7 +74,6 @@ from app.services.flashcard_prompts import (
     flashcard_user_tmpl,
     notes_concept_extract_system,
 )
-from app.services.flashcard_search import _sync_flashcard_fts
 from app.services.flashcard_units import (
     MIN_ANSWER_COVERAGE,
     best_unit,
@@ -239,7 +238,7 @@ async def generate_technical(
             source_chunk_ids=_card_chunk_ids(chunks, passage_chunk_ids, source_excerpt),
         )
         session.add(card)
-        await _sync_flashcard_fts(card, session)
+        await FlashcardRepo(session).sync_fts(card)
         flashcards.append(card)
 
     if flashcards:
@@ -357,7 +356,7 @@ async def generate_cloze(
             source_chunk_ids=_card_chunk_ids(chunks, passage_chunk_ids, source_excerpt),
         )
         session.add(card)
-        await _sync_flashcard_fts(card, session)
+        await FlashcardRepo(session).sync_fts(card)
         flashcards.append(card)
 
     if flashcards:
@@ -1208,7 +1207,7 @@ async def generate(
             source_chunk_ids=_card_chunk_ids(eligible_chunks, passage_chunk_ids, source_excerpt),
         )
         session.add(card)
-        await _sync_flashcard_fts(card, session)
+        await FlashcardRepo(session).sync_fts(card)
         flashcards.append(card)
 
     if deduped:
@@ -1346,7 +1345,7 @@ async def generate_from_notes(
             factuality=item.get("factuality", FACTUALITY_UNCHECKED),
         )
         session.add(card)
-        await _sync_flashcard_fts(card, session)
+        await FlashcardRepo(session).sync_fts(card)
         flashcards.append(card)
 
     if flashcards:
@@ -1448,7 +1447,7 @@ async def generate_from_collection(
                 factuality=item.get("factuality", FACTUALITY_UNCHECKED),
             )
             session.add(card)
-            await _sync_flashcard_fts(card, session)
+            await FlashcardRepo(session).sync_fts(card)
             created += 1
 
         await session.commit()
@@ -1573,7 +1572,7 @@ async def generate_from_graph(
 
     for card in all_cards:
         session.add(card)
-        await _sync_flashcard_fts(card, session)
+        await FlashcardRepo(session).sync_fts(card)
     if all_cards:
         await session.commit()
         for card in all_cards:

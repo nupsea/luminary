@@ -152,7 +152,7 @@ async def test_a_correction_card_that_repeats_its_card_is_dropped(question, kept
         else card.source_excerpt,
     }
     session = MagicMock()
-    with patch("app.services.teachback_service._sync_flashcard_fts", AsyncMock()):
+    with patch("app.repos.flashcard_repo.FlashcardRepo.sync_fts", AsyncMock()):
         new_id = await _insert_correction_flashcard(card, payload, session, _STORY)
 
     assert (new_id is not None) is kept

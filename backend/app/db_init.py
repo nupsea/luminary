@@ -117,7 +117,7 @@ USING fts5(
 """
 
 # Column ORDER is a contract, not a detail: SQLite names the shadow-table columns
-# positionally (c0/c1/c2), and queries like flashcard_search.py:42 select on them by
+# positionally (c0/c1/c2), and queries like `FlashcardRepo._fts_rowid` select on them by
 # name. Reordering a column here returns wrong rows instead of raising. See I-4.
 ALL_FTS5_DDL = (
     FTS5_DDL,

@@ -12,10 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A story could be classified as an essay from one reflective passage**, and get technical card prompts. The register is now a majority of three passages from the body (#286).
 - **A document classified as a conversation had sections with no text to practise from**, so it never got chapter cards (#286).
 - **A library card showed the summary written from a book's opening chapters**, not the one ingestion rewrites once every section is summarised, and retagging such a document added nothing. Both now read the newest summary.
+- **A flashcard search inside one section returned cards from every section** whenever its words matched only part of a word, because the fallback search dropped the section filter.
+- **Library-wide suggested questions could be drawn from a deleted book's summary**, or from an older summary of a book alongside its current one. They now use the current summary of each book still in the library.
 - **A cloud chat model the provider no longer offers showed only `litellm.NotFoundError: GeminiException - {` on the setup screen.** It now shows the provider's reason and points to Settings, and is no longer mistaken for a local model to install.
 
 ### Changed
-- **No API route runs SQL of its own any more**; every query is in `repos/`, ahead of the library scope 0.17.0 adds to each of them. The engagement, progress, notes, document-tagging, goal, export, collection-health, flashcard, mastery and clustering services followed. No behaviour change.
+- **No API route runs SQL of its own any more**; every query is in `repos/`, ahead of the library scope 0.17.0 adds to each of them. The engagement, progress, notes, document-tagging, goal, export, collection-health, flashcard, mastery, clustering, Feynman, document-deletion, flashcard-search, enrichment-worker, image, pomodoro, tag-normalizer and suggestion services followed. No behaviour change beyond the two fixes above.
 
 ## [0.16.1] - 2026-10-15
 
