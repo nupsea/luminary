@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import Depends
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -19,7 +19,6 @@ from app.models import (
     CanonicalTagModel,
     DocumentTagIndexModel,
     DocumentTagProvenanceModel,
-    NoteModel,
     NoteTagIndexModel,
     TagAliasModel,
 )
@@ -137,14 +136,6 @@ class TagRepo:
             stmt = stmt.where(NoteTagIndexModel.tag_full == tag_id)
         result = await self.session.execute(stmt)
         return [row[0] for row in result.all()]
-
-    async def load_notes(self, note_ids: Sequence[str]) -> Sequence[NoteModel]:
-        if not note_ids:
-            return []
-        result = await self.session.execute(
-            select(NoteModel).where(NoteModel.id.in_(list(note_ids)))
-        )
-        return result.scalars().all()
 
     # -- writes ------------------------------------------------------------
 
@@ -317,6 +308,38 @@ class TagRepo:
             await self.session.execute(
                 delete(model).where(model.document_id == document_id, model.tag_full.in_(tags))
             )
+
+    async def find_alias(self, alias: str) -> TagAliasModel | None:
+        result = await self.session.execute(
+            select(TagAliasModel).where(TagAliasModel.alias == alias)
+        )
+        return result.scalar_one_or_none()
+
+    async def index_usage(self, tag: str) -> int:
+        """Notes plus documents carrying exactly this tag, per the shadow indexes."""
+        notes = await self.session.execute(
+            select(func.count())
+            .select_from(NoteTagIndexModel)
+            .where(NoteTagIndexModel.tag_full == tag)
+        )
+        documents = await self.session.execute(
+            select(func.count())
+            .select_from(DocumentTagIndexModel)
+            .where(DocumentTagIndexModel.tag_full == tag)
+        )
+        return int(notes.scalar_one()) + int(documents.scalar_one())
+
+    async def retarget_index_rows(self, old: str, new: str) -> None:
+        """Point both shadow indexes' `old` rows at `new`, uncommitted; JSON tag columns are
+        not rewritten."""
+        segments = new.split("/")
+        values = {
+            "tag_full": new,
+            "tag_root": segments[0],
+            "tag_parent": "/".join(segments[:-1]) if "/" in new else "",
+        }
+        for model in (NoteTagIndexModel, DocumentTagIndexModel):
+            await self.session.execute(update(model).where(model.tag_full == old).values(**values))
 
     async def delete_with_aliases(self, tag_id: str) -> None:
         """Delete the canonical tag and any aliases pointing to it.

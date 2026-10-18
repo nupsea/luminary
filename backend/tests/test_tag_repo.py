@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.exceptions import NotFound
-from app.models import NoteModel, NoteTagIndexModel, TagAliasModel
+from app.models import NoteTagIndexModel, TagAliasModel
 from app.repos.tag_repo import TagRepo
 
 
@@ -84,23 +84,6 @@ async def test_note_ids_with_tag_descendants(repo: TagRepo) -> None:
 
     inclusive = await repo.note_ids_with_tag("science", include_descendants=True)
     assert set(inclusive) == {"n1", "n2"}
-
-
-@pytest.mark.asyncio
-async def test_load_notes_filters_by_id(repo: TagRepo) -> None:
-    from datetime import UTC, datetime  # noqa: PLC0415
-
-    now = datetime.now(UTC)
-    repo.session.add(
-        NoteModel(id="n1", content="hello", tags=["x"], created_at=now, updated_at=now)
-    )
-    repo.session.add(
-        NoteModel(id="n2", content="world", tags=["y"], created_at=now, updated_at=now)
-    )
-    await repo.session.commit()
-    rows = await repo.load_notes(["n1"])
-    assert [r.id for r in rows] == ["n1"]
-    assert await repo.load_notes([]) == []
 
 
 @pytest.mark.asyncio

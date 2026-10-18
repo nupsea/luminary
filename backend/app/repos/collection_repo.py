@@ -67,6 +67,29 @@ class CollectionRepo:
                 counts[(cid, member_type)] = count
         return counts
 
+    async def co_member_ids(self, document_id: str) -> list[str]:
+        """Every member of every collection this document is in, itself included."""
+        owning = select(CollectionMemberModel.collection_id).where(
+            CollectionMemberModel.member_id == document_id,
+            CollectionMemberModel.member_type == "document",
+        )
+        result = await self.session.execute(
+            select(CollectionMemberModel.member_id).where(
+                CollectionMemberModel.collection_id.in_(owning)
+            )
+        )
+        return [row[0] for row in result.all()]
+
+    async def note_ids(self, collection_id: str) -> list[str]:
+        """Notes directly in this collection, not in its children."""
+        result = await self.session.execute(
+            select(CollectionMemberModel.member_id).where(
+                CollectionMemberModel.collection_id == collection_id,
+                CollectionMemberModel.member_type == "note",
+            )
+        )
+        return [row[0] for row in result.all()]
+
     async def child_ids(self, parent_id: str) -> list[str]:
         result = await self.session.execute(
             select(CollectionModel.id).where(CollectionModel.parent_collection_id == parent_id)
@@ -163,6 +186,18 @@ class CollectionRepo:
         member_type: str,
     ) -> int:
         """Idempotent INSERT OR IGNORE. Returns number of rows attempted."""
+        added = await self.stage_members(collection_id, member_ids, member_type=member_type)
+        await self.session.commit()
+        return added
+
+    async def stage_members(
+        self,
+        collection_id: str,
+        member_ids: list[str],
+        *,
+        member_type: str,
+    ) -> int:
+        """`add_members`, uncommitted."""
         added = 0
         now_iso = datetime.now(UTC).isoformat()
         for mid in member_ids:
@@ -181,8 +216,22 @@ class CollectionRepo:
                 },
             )
             added += 1
-        await self.session.commit()
         return added
+
+    async def stage_new(self, name: str, color: str = "#6366F1") -> CollectionModel:
+        """A top-level collection, flushed but uncommitted, for a caller adding members next."""
+        now = datetime.now(UTC)
+        col = CollectionModel(
+            id=str(uuid.uuid4()),
+            name=name,
+            color=color,
+            sort_order=0,
+            created_at=now,
+            updated_at=now,
+        )
+        self.session.add(col)
+        await self.session.flush()
+        return col
 
     async def merge_into(self, loser_id: str, keeper_id: str) -> set[str]:
         """Move a collection's members to another, then delete it and its children.

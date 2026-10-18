@@ -25,10 +25,11 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChunkModel, FlashcardModel, PredictionEventModel, SectionModel
+from app.models import FlashcardModel
+from app.repos.document_repo import DocumentRepo
+from app.repos.mastery_repo import MasteryRepo
 from app.services.graph import get_graph_service
 from app.types import ConceptMastery, HeatmapCell, MasteryHeatmapResponse
 
@@ -80,14 +81,7 @@ class MasteryService:
         """
         if not document_ids or not concept_name:
             return []
-        pattern = f"%{concept_name.lower()}%"
-        result = await session.execute(
-            select(ChunkModel.id).where(
-                ChunkModel.document_id.in_(document_ids),
-                func.lower(ChunkModel.text).like(pattern),
-            )
-        )
-        return list(result.scalars().all())
+        return await MasteryRepo(session).chunk_ids_mentioning(concept_name, document_ids)
 
     async def _get_flashcards_for_chunks(
         self,
@@ -97,10 +91,7 @@ class MasteryService:
         """Return flashcards whose chunk_id is in chunk_ids."""
         if not chunk_ids:
             return []
-        result = await session.execute(
-            select(FlashcardModel).where(FlashcardModel.chunk_id.in_(chunk_ids))
-        )
-        return list(result.scalars().all())
+        return await MasteryRepo(session).cards_on_chunks(chunk_ids)
 
     async def _get_prediction_error_count(
         self,
@@ -110,13 +101,7 @@ class MasteryService:
         """Return count of PredictionEventModel rows with correct=False for these chunks."""
         if not chunk_ids:
             return 0
-        result = await session.execute(
-            select(func.count()).where(
-                PredictionEventModel.chunk_id.in_(chunk_ids),
-                PredictionEventModel.correct.is_(False),
-            )
-        )
-        return result.scalar_one() or 0
+        return await MasteryRepo(session).wrong_predictions(chunk_ids)
 
     async def _due_soon_count(
         self,
@@ -127,13 +112,7 @@ class MasteryService:
         if not chunk_ids:
             return 0
         cutoff = datetime.now(UTC) + timedelta(days=_DUE_SOON_DAYS)
-        result = await session.execute(
-            select(func.count()).where(
-                FlashcardModel.chunk_id.in_(chunk_ids),
-                FlashcardModel.due_date <= cutoff,
-            )
-        )
-        return result.scalar_one() or 0
+        return await MasteryRepo(session).cards_due_by(chunk_ids, cutoff)
 
     async def recompute_for_concepts(self, session: AsyncSession, concept_ids: list[str]) -> None:
         """Write the grounded, by-concept_id mastery to concepts.mastery (I-19).
@@ -143,21 +122,12 @@ class MasteryService:
         weighted FSRS mastery, mean stability, and last review on the Concept row.
         Mirrors the backfill formula so stored values stay consistent. Does not commit.
         """
-        from app.models import ConceptModel  # noqa: PLC0415 -- avoid import cycle at load
-
+        repo = MasteryRepo(session)
         for cid in dict.fromkeys(concept_ids):
-            row = await session.get(ConceptModel, cid)
+            row = await repo.concept(cid)
             if row is None:
                 continue
-            cards = list(
-                (
-                    await session.execute(
-                        select(FlashcardModel).where(FlashcardModel.concept_id == cid)
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            cards = await repo.cards_for_concept(cid)
             if not cards:
                 continue
             weighted = self._compute_weighted_mastery(cards)
@@ -272,13 +242,9 @@ class MasteryService:
         Sparse: most cells will be (mastery=None, card_count=0) meaning no flashcards.
         """
         # Fetch sections (ordered, capped)
-        sections_result = await session.execute(
-            select(SectionModel)
-            .where(SectionModel.document_id == document_id)
-            .order_by(SectionModel.section_order)
-            .limit(_MAX_HEATMAP_SECTIONS)
+        sections = list(
+            await DocumentRepo(session).sections_for_document(document_id, _MAX_HEATMAP_SECTIONS)
         )
-        sections = list(sections_result.scalars().all())
         chapter_names = [s.heading for s in sections]
         section_ids = [s.id for s in sections]
 
@@ -312,51 +278,19 @@ class MasteryService:
 
         # Three grouped reads feed every cell. Per-cell queries made this
         # sections x concepts x 3 round trips (861 for a 20x20 grid).
-        chunk_rows = (
-            await session.execute(
-                select(ChunkModel.id, ChunkModel.section_id, ChunkModel.text).where(
-                    ChunkModel.document_id == document_id,
-                    ChunkModel.section_id.in_(section_ids),
-                )
-            )
-        ).all()
+        repo = MasteryRepo(session)
+        chunk_rows = await repo.section_chunk_texts(document_id, section_ids)
 
         chunks_by_section: dict[str, list[tuple[str, str]]] = {}
         for chunk_id, sid, text in chunk_rows:
             chunks_by_section.setdefault(sid, []).append((chunk_id, (text or "").lower()))
 
-        # Subquery rather than a materialised id list: a long document can hold
-        # more chunks than SQLite allows bound variables in one statement.
-        doc_chunk_ids = (
-            select(ChunkModel.id)
-            .where(
-                ChunkModel.document_id == document_id,
-                ChunkModel.section_id.in_(section_ids),
-            )
-            .scalar_subquery()
-        )
-
         cards_by_chunk: dict[str, list[FlashcardModel]] = {}
-        card_rows = (
-            await session.execute(
-                select(FlashcardModel).where(FlashcardModel.chunk_id.in_(doc_chunk_ids))
-            )
-        ).scalars()
-        for card in card_rows:
+        for card in await repo.section_cards(document_id, section_ids):
             if card.chunk_id:
                 cards_by_chunk.setdefault(card.chunk_id, []).append(card)
 
-        error_rows = (
-            await session.execute(
-                select(PredictionEventModel.chunk_id, func.count())
-                .where(
-                    PredictionEventModel.chunk_id.in_(doc_chunk_ids),
-                    PredictionEventModel.correct.is_(False),
-                )
-                .group_by(PredictionEventModel.chunk_id)
-            )
-        ).all()
-        errors_by_chunk = {cid: int(n) for cid, n in error_rows}
+        errors_by_chunk = await repo.section_wrong_predictions(document_id, section_ids)
 
         lowered_concepts = [(c, c.lower()) for c in concept_names]
 

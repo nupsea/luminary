@@ -111,11 +111,14 @@ class DocumentRepo:
 
     # -- list reads --------------------------------------------------------
 
-    async def sections_for_document(self, document_id: str) -> Sequence[SectionModel]:
+    async def sections_for_document(
+        self, document_id: str, limit: int | None = None
+    ) -> Sequence[SectionModel]:
         result = await self.session.execute(
             select(SectionModel)
             .where(SectionModel.document_id == document_id)
             .order_by(SectionModel.section_order)
+            .limit(limit)
         )
         return result.scalars().all()
 
@@ -214,6 +217,49 @@ class DocumentRepo:
 
     async def reading_position(self, document_id: str) -> ReadingPositionModel | None:
         return await self.session.get(ReadingPositionModel, document_id)
+
+    async def chunks_in_section(
+        self, section_id: str, document_id: str | None = None
+    ) -> list[ChunkModel]:
+        stmt = select(ChunkModel).where(ChunkModel.section_id == section_id)
+        if document_id is not None:
+            stmt = stmt.where(ChunkModel.document_id == document_id)
+        result = await self.session.execute(stmt.order_by(ChunkModel.chunk_index))
+        return list(result.scalars().all())
+
+    async def first_chunk_id(self, document_id: str) -> str | None:
+        result = await self.session.execute(
+            select(ChunkModel.id)
+            .where(ChunkModel.document_id == document_id)
+            .order_by(ChunkModel.chunk_index)
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def has_speaker_turns(self, document_id: str) -> bool:
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(ChunkModel)
+            .where(ChunkModel.document_id == document_id, ChunkModel.speaker.isnot(None))
+        )
+        return bool(result.scalar())
+
+    async def sections_by_id(self, section_ids: Sequence[str]) -> dict[str, SectionModel]:
+        if not section_ids:
+            return {}
+        result = await self.session.execute(
+            select(SectionModel).where(SectionModel.id.in_(list(section_ids)))
+        )
+        return {s.id: s for s in result.scalars().all()}
+
+    async def first_section_headed(self, document_id: str, heading: str) -> SectionModel | None:
+        result = await self.session.execute(
+            select(SectionModel)
+            .where(SectionModel.document_id == document_id)
+            .where(SectionModel.heading == heading)
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def chunks_for_document(
         self,

@@ -12,16 +12,13 @@ import re
 import zipfile
 
 import genanki
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import (
-    CollectionMemberModel,
-    CollectionModel,
-    DocumentModel,
-    FlashcardModel,
-    NoteModel,
-)
+from app.models import CollectionModel, NoteModel
+from app.repos.collection_repo import CollectionRepo
+from app.repos.document_repo import DocumentRepo
+from app.repos.flashcard_repo import FlashcardRepo
+from app.repos.note_repo import NoteRepo
 
 logger = logging.getLogger(__name__)
 
@@ -115,51 +112,23 @@ class ExportService:
         session: AsyncSession,
     ) -> tuple[CollectionModel, list[str], list[NoteModel]]:
         """Return (collection, collection_path, notes_in_collection_and_children)."""
-        col = (
-            await session.execute(
-                select(CollectionModel).where(CollectionModel.id == collection_id)
-            )
-        ).scalar_one_or_none()
+        collections = CollectionRepo(session)
+        col = await collections.find(collection_id)
         if col is None:
             raise ValueError(f"Collection not found: {collection_id}")
 
         # Build collection path list (parent name / child name)
         if col.parent_collection_id:
-            parent = (
-                await session.execute(
-                    select(CollectionModel).where(CollectionModel.id == col.parent_collection_id)
-                )
-            ).scalar_one_or_none()
+            parent = await collections.find(col.parent_collection_id)
             collection_path = [parent.name if parent else "", col.name]
         else:
             collection_path = [col.name]
 
-        # Gather all relevant collection_ids: the collection itself + child collections
-        child_ids_result = await session.execute(
-            select(CollectionModel.id).where(CollectionModel.parent_collection_id == collection_id)
-        )
-        child_ids = [row[0] for row in child_ids_result.all()]
-        all_collection_ids = [collection_id, *child_ids]
-
-        # Load all note_ids in these collections
-        member_rows = (
-            await session.execute(
-                select(CollectionMemberModel.member_id).where(
-                    CollectionMemberModel.collection_id.in_(all_collection_ids),
-                    CollectionMemberModel.member_type == "note",
-                )
-            )
-        ).all()
-        note_ids = list({row[0] for row in member_rows})
-
-        if not note_ids:
-            return col, collection_path, []
-
-        notes = list(
-            (await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids))))
-            .scalars()
-            .all()
-        )
+        # The collection itself and its direct children
+        all_collection_ids = [collection_id, *await collections.child_ids(collection_id)]
+        members = await collections.memberships(all_collection_ids)
+        note_ids = list({mid for _cid, mid, kind in members if kind == "note"})
+        notes = await NoteRepo(session).by_ids(note_ids)
         return col, collection_path, notes
 
     async def export_collection_markdown(
@@ -175,16 +144,7 @@ class ExportService:
 
         # Batch-fetch document titles for notes that have a document_id
         doc_ids = list({n.document_id for n in notes if n.document_id})
-        doc_title_map: dict[str, str] = {}
-        if doc_ids:
-            doc_rows = (
-                await session.execute(
-                    select(DocumentModel.id, DocumentModel.title).where(
-                        DocumentModel.id.in_(doc_ids)
-                    )
-                )
-            ).all()
-            doc_title_map = {row[0]: row[1] for row in doc_rows}
+        doc_title_map = await DocumentRepo(session).titles(doc_ids)
 
         # Build id -> title map for wikilink resolution
         id_to_title: dict[str, str] = {n.id: _note_title(n) for n in notes}
@@ -222,46 +182,24 @@ class ExportService:
         Same shape as a vault entry: YAML frontmatter + Obsidian [[title]] wikilinks.
         The collections list holds every collection the note belongs to.
         """
-        note = (
-            await session.execute(select(NoteModel).where(NoteModel.id == note_id))
-        ).scalar_one_or_none()
+        notes = NoteRepo(session)
+        note = await notes.find(note_id)
         if note is None:
             raise ValueError(f"Note not found: {note_id}")
 
-        collection_names = [
-            row[0]
-            for row in (
-                await session.execute(
-                    select(CollectionModel.name)
-                    .join(
-                        CollectionMemberModel,
-                        CollectionMemberModel.collection_id == CollectionModel.id,
-                    )
-                    .where(
-                        CollectionMemberModel.member_id == note_id,
-                        CollectionMemberModel.member_type == "note",
-                    )
-                )
-            ).all()
-        ]
+        collection_names = await notes.collection_names_for(note_id)
 
         doc_title: str | None = None
         if note.document_id:
-            doc_title = (
-                await session.execute(
-                    select(DocumentModel.title).where(DocumentModel.id == note.document_id)
-                )
-            ).scalar_one_or_none()
+            doc_title = (await DocumentRepo(session).titles([note.document_id])).get(
+                note.document_id
+            )
 
         # Resolve [[id|text]] wikilinks against just the notes this one references
         linked_ids = {m.group(1) for m in _LINK_RE.finditer(note.content)}
         id_to_title: dict[str, str] = {}
         if linked_ids:
-            linked_notes = (
-                (await session.execute(select(NoteModel).where(NoteModel.id.in_(linked_ids))))
-                .scalars()
-                .all()
-            )
+            linked_notes = await notes.by_ids(list(linked_ids))
             id_to_title = {n.id: (n.title or "").strip() or _note_title(n) for n in linked_notes}
 
         frontmatter = _build_yaml_frontmatter(note, collection_names, doc_title)
@@ -282,20 +220,11 @@ class ExportService:
         card_count == 0 means no flashcards exist (caller should warn user).
         The .apkg is always a valid zip even when empty.
         """
-        col = (
-            await session.execute(
-                select(CollectionModel).where(CollectionModel.id == collection_id)
-            )
-        ).scalar_one_or_none()
+        col = await CollectionRepo(session).find(collection_id)
         if col is None:
             raise ValueError(f"Collection not found: {collection_id}")
 
-        # Fetch flashcards where deck matches the collection name
-        cards = list(
-            (await session.execute(select(FlashcardModel).where(FlashcardModel.deck == col.name)))
-            .scalars()
-            .all()
-        )
+        cards = await FlashcardRepo(session).list_for_deck(col.name)
 
         # Build a stable deck_id from the collection name hash
         deck_id = int(hashlib.sha256(col.name.encode()).hexdigest()[:8], 16)
