@@ -74,6 +74,39 @@ _MARKER_MAX_SENTENCE_WORDS = 4
 # Markdown images and link targets, read past when judging whether text is prose.
 _MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+# A fenced code block's lines are code: "# load the data" in Python and Rust's hidden
+# "# extern crate" lines read as headings otherwise (the Rust book gained two topics).
+_MD_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$", re.M)
+
+
+def _fenced_spans(text: str) -> list[tuple[int, int]]:
+    """[start, end) of each fenced code block, by CommonMark's rules.
+
+    A fence closes on the same character, at least as long, with nothing after it; one never
+    closed runs to the end of the text.
+    """
+    spans: list[tuple[int, int]] = []
+    opened: re.Match[str] | None = None
+    for m in _MD_FENCE.finditer(text):
+        fence, rest = m.group(1), m.group(2)
+        if opened is None:
+            opened = m
+        elif (
+            fence[0] == opened.group(1)[0]
+            and len(fence) >= len(opened.group(1))
+            and not rest.strip()
+        ):
+            spans.append((opened.start(), m.end()))
+            opened = None
+    if opened is not None:
+        spans.append((opened.start(), len(text)))
+    return spans
+
+
+def _outside_fences(text: str, matches: list[re.Match[str]]) -> list[re.Match[str]]:
+    spans = _fenced_spans(text)
+    return [m for m in matches if not any(a <= m.start() < b for a, b in spans)]
+
 
 def _drop_bodyless(sections: list[Section]) -> list[Section]:
     """Drop sections that carry a heading and no text.
@@ -348,6 +381,8 @@ class UniversalParser:
 
         for sig in self.candidates:
             matches = list(sig.pattern.finditer(probe_text))
+            if sig.id == "markdown_header":
+                matches = _outside_fences(probe_text, matches)
             if not matches:
                 continue
 
@@ -476,6 +511,8 @@ class UniversalParser:
         sections = []
         # Re-run finditer on the FULL clean text to get all matches
         matches = list(sig.pattern.finditer(text))
+        if sig.id == "markdown_header":
+            matches = _outside_fences(text, matches)
 
         # Re-filter matches if it's chat to avoid metadata
         if sig.id == "chat_standard":
