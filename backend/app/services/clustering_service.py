@@ -15,19 +15,13 @@ from datetime import UTC, datetime
 from functools import lru_cache
 
 import numpy as np
-from sqlalchemy import func, select, update
-from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import (
-    CanonicalTagModel,
-    ClusterSuggestionModel,
-    CollectionModel,
-    DocumentTagIndexModel,
-    NoteModel,
-    NoteTagIndexModel,
-    TagAliasModel,
-)
+from app.models import CanonicalTagModel, ClusterSuggestionModel, TagAliasModel
+from app.repos.cluster_repo import ClusterRepo
+from app.repos.collection_repo import CollectionRepo
+from app.repos.note_repo import NoteRepo
+from app.repos.tag_repo import TagRepo
 from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
@@ -37,25 +31,6 @@ from app.services.naming import normalize_collection_name, normalize_tag_slug
 logger = logging.getLogger(__name__)
 
 RATE_LIMIT_HOURS = 1
-
-
-async def _count_usage(db: AsyncSession, tag_full: str) -> int:
-    """Total notes + documents that reference a tag, via the shadow indexes."""
-    note_n = (
-        await db.execute(
-            select(func.count())
-            .select_from(NoteTagIndexModel)
-            .where(NoteTagIndexModel.tag_full == tag_full)
-        )
-    ).scalar_one()
-    doc_n = (
-        await db.execute(
-            select(func.count())
-            .select_from(DocumentTagIndexModel)
-            .where(DocumentTagIndexModel.tag_full == tag_full)
-        )
-    ).scalar_one()
-    return int(note_n) + int(doc_n)
 
 
 class ClusteringService:
@@ -72,13 +47,7 @@ class ClusteringService:
         rate_limit_cutoff = datetime.fromtimestamp(
             now.timestamp() - RATE_LIMIT_HOURS * 3600, tz=UTC
         )
-        result = await db.execute(
-            select(ClusterSuggestionModel)
-            .where(ClusterSuggestionModel.status == "pending")
-            .where(ClusterSuggestionModel.created_at > rate_limit_cutoff)
-            .limit(1)
-        )
-        if result.scalar_one_or_none() is not None:
+        if await ClusterRepo(db).has_pending_since(rate_limit_cutoff):
             logger.info(
                 "Clustering rate-limited: pending suggestion within last %dh",
                 RATE_LIMIT_HOURS,
@@ -143,12 +112,9 @@ class ClusteringService:
                 confidence_score = 1.0
 
             # Fetch note content excerpts for medoids to build LLM prompt
-            note_rows = (
-                await db.execute(
-                    select(NoteModel.id, NoteModel.content).where(NoteModel.id.in_(medoid_note_ids))
-                )
-            ).all()
-            excerpts = [row[1][:150] for row in note_rows]
+            excerpts = [
+                snippet for _id, snippet, _n in await NoteRepo(db).snippets(medoid_note_ids, 150)
+            ]
 
             # Generate collection name via LiteLLM
             suggested_name = await self._generate_cluster_name(excerpts)
@@ -168,7 +134,7 @@ class ClusteringService:
         # Added only once the naming calls are done, never inside the loop.
         #
         # `db.add` inside the loop left a row pending, and the next iteration's
-        # `select(NoteModel...)` autoflushed it -- which takes SQLite's single write
+        # note read autoflushed it -- which takes SQLite's single write
         # lock. The loop then `await`ed an LLM call per cluster while holding it.
         # Measured on a real library: 11.2s before commit, against a 5.0s
         # busy_timeout, so every concurrent writer failed with "database is locked"
@@ -214,25 +180,14 @@ class ClusteringService:
 
     async def get_pending_last_run(self, db: AsyncSession) -> datetime | None:
         """Return the created_at of the latest pending suggestion, or None."""
-        result = await db.execute(
-            select(ClusterSuggestionModel.created_at)
-            .where(ClusterSuggestionModel.status == "pending")
-            .order_by(ClusterSuggestionModel.created_at.desc())
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
+        return await ClusterRepo(db).latest_pending_at()
 
     async def get_pending_suggestions(self, db: AsyncSession) -> list[dict]:
         """Return pending ClusterSuggestionModel rows sorted by confidence_score DESC.
 
         Each row includes ALL note_ids with content excerpts (for Organization Plan dialog).
         """
-        result = await db.execute(
-            select(ClusterSuggestionModel)
-            .where(ClusterSuggestionModel.status == "pending")
-            .order_by(ClusterSuggestionModel.confidence_score.desc())
-        )
-        suggestions = list(result.scalars().all())
+        suggestions = await ClusterRepo(db).pending_by_confidence()
 
         if not suggestions:
             return []
@@ -242,14 +197,9 @@ class ClusteringService:
         for s in suggestions:
             all_note_ids.extend(s.note_ids or [])
 
-        note_map: dict[str, str] = {}
-        if all_note_ids:
-            note_rows = (
-                await db.execute(
-                    select(NoteModel.id, NoteModel.content).where(NoteModel.id.in_(all_note_ids))
-                )
-            ).all()
-            note_map = {row[0]: row[1][:200] for row in note_rows}
+        note_map = {
+            nid: snippet for nid, snippet, _n in await NoteRepo(db).snippets(all_note_ids, 200)
+        }
 
         output = []
         for s in suggestions:
@@ -274,43 +224,18 @@ class ClusteringService:
 
         Returns the new collection_id, or None if suggestion not found.
         """
-        result = await db.execute(
-            select(ClusterSuggestionModel).where(ClusterSuggestionModel.id == suggestion_id)
-        )
-        suggestion = result.scalar_one_or_none()
+        suggestion = await ClusterRepo(db).find(suggestion_id)
         if suggestion is None:
             return None
 
-        # Create NoteCollection
-        collection_id = str(uuid.uuid4())
-        collection = CollectionModel(
-            id=collection_id,
-            name=normalize_collection_name(suggestion.suggested_name),
-            color="#6366F1",
-            sort_order=0,
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
+        collections = CollectionRepo(db)
+        collection = await collections.stage_new(
+            normalize_collection_name(suggestion.suggested_name)
         )
-        db.add(collection)
-        await db.flush()
-
-        # Insert member rows using INSERT OR IGNORE (same pattern as collections router)
-
-        for note_id in suggestion.note_ids or []:
-            await db.execute(
-                sa_text(
-                    "INSERT OR IGNORE INTO collection_members"
-                    " (id, member_id, member_type, collection_id, added_at)"
-                    " VALUES (:id, :member_id, :member_type, :collection_id, :added_at)"
-                ),
-                {
-                    "id": str(uuid.uuid4()),
-                    "member_id": note_id,
-                    "member_type": "note",
-                    "collection_id": collection_id,
-                    "added_at": datetime.now(UTC).isoformat(),
-                },
-            )
+        collection_id = collection.id
+        await collections.stage_members(
+            collection_id, list(suggestion.note_ids or []), member_type="note"
+        )
 
         suggestion.status = "accepted"
         await db.commit()
@@ -339,13 +264,8 @@ class ClusteringService:
             List of created collection IDs.
         """
         suggestion_ids = [it["suggestion_id"] for it in items]
-        result = await db.execute(
-            select(ClusterSuggestionModel).where(
-                ClusterSuggestionModel.id.in_(suggestion_ids),
-                ClusterSuggestionModel.status == "pending",
-            )
-        )
-        suggestion_map = {s.id: s for s in result.scalars().all()}
+        suggestion_map = await ClusterRepo(db).pending_among(suggestion_ids)
+        collections = CollectionRepo(db)
 
         # Build override maps keyed by suggestion_id
         name_overrides = {
@@ -362,38 +282,15 @@ class ClusteringService:
             if suggestion is None:
                 continue
 
-            collection_id = str(uuid.uuid4())
             raw_name = name_overrides.get(sid) or suggestion.suggested_name
-            name = normalize_collection_name(raw_name)
-            collection = CollectionModel(
-                id=collection_id,
-                name=name,
-                color="#6366F1",
-                sort_order=0,
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
-            )
-            db.add(collection)
-            await db.flush()
+            collection = await collections.stage_new(normalize_collection_name(raw_name))
+            collection_id = collection.id
 
             # Use overridden note_ids if provided (drag-and-drop), else original
             effective_note_ids = note_ids_overrides.get(sid) or suggestion.note_ids or []
-
-            for note_id in effective_note_ids:
-                await db.execute(
-                    sa_text(
-                        "INSERT OR IGNORE INTO collection_members"
-                        " (id, member_id, member_type, collection_id, added_at)"
-                        " VALUES (:id, :member_id, :member_type, :collection_id, :added_at)"
-                    ),
-                    {
-                        "id": str(uuid.uuid4()),
-                        "member_id": note_id,
-                        "member_type": "note",
-                        "collection_id": collection_id,
-                        "added_at": datetime.now(UTC).isoformat(),
-                    },
-                )
+            await collections.stage_members(
+                collection_id, list(effective_note_ids), member_type="note"
+            )
 
             suggestion.status = "accepted"
             created_ids.append(collection_id)
@@ -406,10 +303,7 @@ class ClusteringService:
 
     async def reject_suggestion(self, suggestion_id: str, db: AsyncSession) -> bool:
         """Reject a cluster suggestion. Returns False if not found."""
-        result = await db.execute(
-            select(ClusterSuggestionModel).where(ClusterSuggestionModel.id == suggestion_id)
-        )
-        suggestion = result.scalar_one_or_none()
+        suggestion = await ClusterRepo(db).find(suggestion_id)
         if suggestion is None:
             return False
         suggestion.status = "rejected"
@@ -428,7 +322,7 @@ class ClusteringService:
         violations: list[dict] = []
 
         # --- Tags ---
-        tag_rows = (await db.execute(select(CanonicalTagModel))).scalars().all()
+        tag_rows = await TagRepo(db).all_in_storage_order()
 
         # Build normalized-slug -> list of (id, original) for duplicate detection
         tag_norm_map: dict[str, list[str]] = {}
@@ -486,7 +380,7 @@ class ClusteringService:
                         )
 
         # --- Collections ---
-        coll_rows = (await db.execute(select(CollectionModel))).scalars().all()
+        coll_rows = await CollectionRepo(db).all_in_storage_order()
 
         for coll in coll_rows:
             normalized = normalize_collection_name(coll.name)
@@ -521,15 +415,13 @@ class ClusteringService:
         tags_renamed = 0
         tags_merged = 0
         collections_renamed = 0
+        tag_repo = TagRepo(db)
 
         for fix in fixes:
             if fix["type"] == "tag":
                 old_slug = fix["id"]
                 new_slug = fix["suggested_name"]
                 action = fix.get("action", "rename")
-
-                tag_root = new_slug.split("/")[0]
-                tag_parent = "/".join(new_slug.split("/")[:-1]) if "/" in new_slug else ""
 
                 if action == "merge":
                     # Repoint both shadow indexes from old_slug -> new_slug.
@@ -538,30 +430,13 @@ class ClusteringService:
                     # those columns until the next per-row write. The proper
                     # cross-content rewrite lives in TagMergeService; this
                     # bulk-clustering path should be migrated to call it.
-                    await db.execute(
-                        update(NoteTagIndexModel)
-                        .where(NoteTagIndexModel.tag_full == old_slug)
-                        .values(tag_full=new_slug, tag_root=tag_root, tag_parent=tag_parent)
-                    )
-                    await db.execute(
-                        update(DocumentTagIndexModel)
-                        .where(DocumentTagIndexModel.tag_full == old_slug)
-                        .values(tag_full=new_slug, tag_root=tag_root, tag_parent=tag_parent)
-                    )
-                    old_tag = (
-                        await db.execute(
-                            select(CanonicalTagModel).where(CanonicalTagModel.id == old_slug)
-                        )
-                    ).scalar_one_or_none()
+                    await tag_repo.retarget_index_rows(old_slug, new_slug)
+                    old_tag = await tag_repo.find_by_id(old_slug)
                     if old_tag:
                         await db.delete(old_tag)
 
-                    target_tag = (
-                        await db.execute(
-                            select(CanonicalTagModel).where(CanonicalTagModel.id == new_slug)
-                        )
-                    ).scalar_one_or_none()
-                    new_usage = await _count_usage(db, new_slug)
+                    target_tag = await tag_repo.find_by_id(new_slug)
+                    new_usage = await tag_repo.index_usage(new_slug)
                     if target_tag:
                         target_tag.usage_count = new_usage
                     else:
@@ -575,11 +450,7 @@ class ClusteringService:
                             )
                         )
 
-                    existing_alias = (
-                        await db.execute(
-                            select(TagAliasModel).where(TagAliasModel.alias == old_slug)
-                        )
-                    ).scalar_one_or_none()
+                    existing_alias = await tag_repo.find_alias(old_slug)
                     if not existing_alias:
                         db.add(TagAliasModel(alias=old_slug, canonical_tag_id=new_slug))
 
@@ -587,11 +458,7 @@ class ClusteringService:
                 else:
                     # Rename: re-key the canonical tag PK and repoint both
                     # shadow indexes from old_slug to new_slug.
-                    old_tag = (
-                        await db.execute(
-                            select(CanonicalTagModel).where(CanonicalTagModel.id == old_slug)
-                        )
-                    ).scalar_one_or_none()
+                    old_tag = await tag_repo.find_by_id(old_slug)
 
                     if old_tag:
                         prev_usage_count = old_tag.usage_count
@@ -611,24 +478,11 @@ class ClusteringService:
                             )
                         )
 
-                    await db.execute(
-                        update(NoteTagIndexModel)
-                        .where(NoteTagIndexModel.tag_full == old_slug)
-                        .values(tag_full=new_slug, tag_root=tag_root, tag_parent=tag_parent)
-                    )
-                    await db.execute(
-                        update(DocumentTagIndexModel)
-                        .where(DocumentTagIndexModel.tag_full == old_slug)
-                        .values(tag_full=new_slug, tag_root=tag_root, tag_parent=tag_parent)
-                    )
+                    await tag_repo.retarget_index_rows(old_slug, new_slug)
 
                     # Create tag alias
 
-                    existing_alias = (
-                        await db.execute(
-                            select(TagAliasModel).where(TagAliasModel.alias == old_slug)
-                        )
-                    ).scalar_one_or_none()
+                    existing_alias = await tag_repo.find_alias(old_slug)
                     if not existing_alias:
                         db.add(TagAliasModel(alias=old_slug, canonical_tag_id=new_slug))
 
@@ -637,9 +491,7 @@ class ClusteringService:
             elif fix["type"] == "collection":
                 coll_id = fix["id"]
                 new_name = fix["suggested_name"]
-                coll = (
-                    await db.execute(select(CollectionModel).where(CollectionModel.id == coll_id))
-                ).scalar_one_or_none()
+                coll = await CollectionRepo(db).find(coll_id)
                 if coll:
                     coll.name = new_name
                     collections_renamed += 1

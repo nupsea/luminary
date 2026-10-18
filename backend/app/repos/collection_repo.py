@@ -186,6 +186,18 @@ class CollectionRepo:
         member_type: str,
     ) -> int:
         """Idempotent INSERT OR IGNORE. Returns number of rows attempted."""
+        added = await self.stage_members(collection_id, member_ids, member_type=member_type)
+        await self.session.commit()
+        return added
+
+    async def stage_members(
+        self,
+        collection_id: str,
+        member_ids: list[str],
+        *,
+        member_type: str,
+    ) -> int:
+        """`add_members`, uncommitted."""
         added = 0
         now_iso = datetime.now(UTC).isoformat()
         for mid in member_ids:
@@ -204,8 +216,22 @@ class CollectionRepo:
                 },
             )
             added += 1
-        await self.session.commit()
         return added
+
+    async def stage_new(self, name: str, color: str = "#6366F1") -> CollectionModel:
+        """A top-level collection, flushed but uncommitted, for a caller adding members next."""
+        now = datetime.now(UTC)
+        col = CollectionModel(
+            id=str(uuid.uuid4()),
+            name=name,
+            color=color,
+            sort_order=0,
+            created_at=now,
+            updated_at=now,
+        )
+        self.session.add(col)
+        await self.session.flush()
+        return col
 
     async def merge_into(self, loser_id: str, keeper_id: str) -> set[str]:
         """Move a collection's members to another, then delete it and its children.
