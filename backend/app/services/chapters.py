@@ -44,6 +44,12 @@ _FRONT_MATTER = re.compile(
     re.I,
 )
 
+
+def is_book_matter(heading: str) -> bool:
+    """Pages about the book rather than of it, at either end: a preface, an index."""
+    return bool(_FRONT_MATTER.match(heading) or _BACK_MATTER.match(heading))
+
+
 # One "Chapter 5" heading in an article is a cross-reference, not a structure.
 MIN_MARKED_CHAPTERS = 2
 # Numbered headings must also count up: SysDesign's listicles ("9 best practices",
