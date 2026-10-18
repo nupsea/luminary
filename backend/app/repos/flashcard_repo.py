@@ -17,7 +17,6 @@ from app.models import (
     FlashcardModel,
     MisconceptionModel,
     NoteTagIndexModel,
-    SectionModel,
     TeachbackResultModel,
 )
 from app.repos._helpers import get_or_404
@@ -180,28 +179,6 @@ class FlashcardRepo:
             stmt = stmt.where(FlashcardModel.document_id == document_id)
         return list((await self.session.execute(stmt)).scalars().all())
 
-    def _judgeable(self, factuality: str, document_id: str | None):  # noqa: ANN202 -- a Select
-        stmt = select(FlashcardModel).where(
-            FlashcardModel.factuality == factuality,
-            FlashcardModel.source_chunk_ids.isnot(None),
-        )
-        if document_id is not None:
-            stmt = stmt.where(FlashcardModel.document_id == document_id)
-        return stmt
-
-    async def judgeable(
-        self, factuality: str, document_id: str | None, limit: int
-    ) -> list[FlashcardModel]:
-        """Cards in this factuality state that recorded the passage they were written from."""
-        result = await self.session.execute(self._judgeable(factuality, document_id).limit(limit))
-        return list(result.scalars().all())
-
-    async def count_judgeable(self, factuality: str, document_id: str | None) -> int:
-        result = await self.session.execute(
-            select(func.count()).select_from(self._judgeable(factuality, document_id).subquery())
-        )
-        return int(result.scalar_one())
-
     async def list_for_concept(self, concept_id: str) -> list[FlashcardModel]:
         result = await self.session.execute(
             select(FlashcardModel).where(FlashcardModel.concept_id == concept_id)
@@ -234,37 +211,6 @@ class FlashcardRepo:
             .limit(limit)
         )
         return list(result.scalars().all())
-
-    async def avg_stability_by_section(self, document_id: str) -> dict[str, float]:
-        """{section id: mean FSRS stability} over the document's non-definition cards."""
-        result = await self.session.execute(
-            select(ChunkModel.section_id, func.avg(FlashcardModel.fsrs_stability))
-            .join(ChunkModel, FlashcardModel.chunk_id == ChunkModel.id)
-            .where(
-                FlashcardModel.document_id == document_id,
-                FlashcardModel.fsrs_stability.is_not(None),
-                or_(
-                    FlashcardModel.flashcard_type.is_(None),
-                    FlashcardModel.flashcard_type != "definition",
-                ),
-                ChunkModel.section_id.is_not(None),
-            )
-            .group_by(ChunkModel.section_id)
-        )
-        return {sid: float(avg) for sid, avg in result.all() if avg is not None}
-
-    async def bloom_by_section(self, document_id: str) -> list[tuple[int, str, str]]:
-        """(bloom level, section id, heading) per card anchored in a section of the document."""
-        result = await self.session.execute(
-            select(FlashcardModel.bloom_level, ChunkModel.section_id, SectionModel.heading)
-            .join(ChunkModel, FlashcardModel.chunk_id == ChunkModel.id)
-            .join(SectionModel, ChunkModel.section_id == SectionModel.id)
-            .where(
-                FlashcardModel.document_id == document_id,
-                FlashcardModel.bloom_level.is_not(None),
-            )
-        )
-        return [(int(level), sid, heading) for level, sid, heading in result.all()]
 
     async def get_many(self, card_ids: Sequence[str]) -> dict[str, FlashcardModel]:
         """The cards among these ids that still exist, by id."""

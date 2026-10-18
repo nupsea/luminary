@@ -9,10 +9,12 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChunkModel, FlashcardModel, ReviewEventModel
+from app.models import FlashcardModel
+from app.repos.deck_stats_repo import DeckStatsRepo
+from app.repos.flashcard_repo import FlashcardRepo
+from app.repos.study_repo import StudyRepo
 from app.services.misconceptions import resolve_on_review
 
 logger = logging.getLogger(__name__)
@@ -79,8 +81,7 @@ class FSRSService:
         """Apply an FSRS review and persist the updated card state."""
         from fsrs import Rating, Scheduler  # noqa: PLC0415
 
-        result = await session.execute(select(FlashcardModel).where(FlashcardModel.id == card_id))
-        db_card = result.scalar_one_or_none()
+        db_card = await FlashcardRepo(session).find(card_id)
         if db_card is None:
             raise ValueError(f"Flashcard {card_id} not found")
 
@@ -135,32 +136,15 @@ class FSRSService:
         cutoff = datetime.now(UTC) - timedelta(days=days)
 
         # Step 1: count 'again' events per flashcard within the window
-        count_stmt = (
-            select(
-                ReviewEventModel.flashcard_id,
-                func.count(ReviewEventModel.id).label("again_count"),
-            )
-            .where(ReviewEventModel.rating == "again")
-            .where(ReviewEventModel.reviewed_at >= cutoff)
-            .group_by(ReviewEventModel.flashcard_id)
-            .having(func.count(ReviewEventModel.id) >= again_threshold)
-        )
-        count_rows = await session.execute(count_stmt)
-        counts: dict[str, int] = {row.flashcard_id: row.again_count for row in count_rows}
+        counts = await StudyRepo(session).again_counts_since(cutoff, again_threshold)
 
         if not counts:
             return []
 
         # Step 2: fetch flashcard details + section_id via chunk join
-        card_stmt = (
-            select(FlashcardModel, ChunkModel.section_id)
-            .outerjoin(ChunkModel, FlashcardModel.chunk_id == ChunkModel.id)
-            .where(FlashcardModel.id.in_(list(counts)))
+        card_rows = await DeckStatsRepo(session).with_section_ids(
+            card_ids=list(counts), document_id=document_id or None
         )
-        if document_id:
-            card_stmt = card_stmt.where(FlashcardModel.document_id == document_id)
-
-        card_rows = await session.execute(card_stmt)
         results: list[dict] = []
         for card, section_id in card_rows:
             results.append(

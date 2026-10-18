@@ -21,8 +21,8 @@ import logging
 from collections import defaultdict
 
 from app.database import get_session_factory
+from app.repos.deck_stats_repo import DeckStatsRepo
 from app.repos.document_repo import DocumentRepo
-from app.repos.flashcard_repo import FlashcardRepo
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class ObjectiveTrackerService:
         can un-mark a goal.
         """
         async with get_session_factory()() as session:
-            stability = await FlashcardRepo(session).avg_stability_by_section(document_id)
+            stability = await DeckStatsRepo(session).avg_stability_by_section(document_id)
             covered_section_ids = {
                 sid for sid, avg in stability.items() if avg >= _COVERAGE_THRESHOLD
             }

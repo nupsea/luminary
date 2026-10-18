@@ -80,6 +80,16 @@ class StudyRepo:
 
     # -- StudySession lifecycle -------------------------------------------
 
+    async def again_counts_since(self, cutoff: datetime, at_least: int) -> dict[str, int]:
+        """{card id: 'again' ratings since `cutoff`} for cards with at least `at_least`."""
+        result = await self.session.execute(
+            select(ReviewEventModel.flashcard_id, func.count(ReviewEventModel.id))
+            .where(ReviewEventModel.rating == "again", ReviewEventModel.reviewed_at >= cutoff)
+            .group_by(ReviewEventModel.flashcard_id)
+            .having(func.count(ReviewEventModel.id) >= at_least)
+        )
+        return {card_id: int(n) for card_id, n in result.all()}
+
     async def get_session_or_404(self, session_id: str) -> StudySessionModel:
         return await get_or_404(self.session, StudySessionModel, session_id, name="Session")
 
