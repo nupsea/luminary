@@ -50,9 +50,7 @@ from app.services.flashcard_prompts import (
 )
 from app.services.flashcard_search import (
     FlashcardSearchService,
-    _delete_flashcard_fts,
     _sanitize_fts5_query,
-    _sync_flashcard_fts,
 )
 from app.services.llm import (
     LLMAPIConnectionError,
@@ -82,7 +80,6 @@ __all__ = [
     "FlashcardService",
     "_build_cloze_question",
     "_build_genre_system_prompt",
-    "_delete_flashcard_fts",
     "_infer_genre",
     "_parse_cloze_llm_response",
     "_parse_cloze_text",
@@ -90,7 +87,6 @@ __all__ = [
     "_parse_gap_flashcard",
     "_parse_llm_response",
     "_sanitize_fts5_query",
-    "_sync_flashcard_fts",
     "flashcard_user_tmpl",
     "get_flashcard_service",
     "notes_concept_extract_system",
@@ -822,7 +818,7 @@ class FlashcardService(FlashcardSearchService):
             return RegenerateResult(cards=[], requested=requested, replaced=0, kept_previous=True)
 
         for card_id in previous_ids:
-            await _delete_flashcard_fts(card_id, session)
+            await FlashcardRepo(session).delete_fts(card_id)
         await FlashcardRepo(session).delete_by_ids(previous_ids)
         # The runs those cards belonged to go with them. A run is only removed
         # when the replacement left its plan holding nothing that still exists,
@@ -965,7 +961,7 @@ class FlashcardService(FlashcardSearchService):
         ids: list[str] = []
         for card in cards:
             session.add(card)
-            await _sync_flashcard_fts(card, session)
+            await FlashcardRepo(session).sync_fts(card)
             ids.append(card.id)
         if cards:
             await session.commit()

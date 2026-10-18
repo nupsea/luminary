@@ -67,7 +67,6 @@ from app.repos.note_repo import NoteRepo
 # indirect: get_lancedb_service is patched in tests
 from app.services import vector_store as _vector_store_module
 from app.services.documents_service import delete_raw_file
-from app.services.flashcard_search import _delete_flashcard_fts
 from app.storage import library_root
 
 logger = logging.getLogger(__name__)
@@ -185,7 +184,7 @@ class DocumentDeletionService:
         # pointed at cards that no longer existed: flashcard search matches the index,
         # so a deleted document's cards kept turning up in results.
         for card_id in await FlashcardRepo(session).list_ids_for_document(document_id):
-            await _delete_flashcard_fts(card_id, session)
+            await FlashcardRepo(session).delete_fts(card_id)
 
         await cascade.delete_keyed_rows(document_id, _DOCUMENT_ID_CHILD_TABLES)
         await _release_notes(session, document_id, delete_notes=delete_notes)

@@ -1,7 +1,7 @@
 """Pure helpers extracted from `app/routers/flashcards.py`.
 
 The `flashcards.py` router file already imports several helpers from the
-`flashcard*` services (FlashcardService, _delete_flashcard_fts, etc.),
+`flashcard*` services (FlashcardService and others),
 so this module is named `flashcards_router_service` to avoid a name
 clash with the existing `flashcard_*` service modules.
 """

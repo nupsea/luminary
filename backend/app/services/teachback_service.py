@@ -35,7 +35,6 @@ from app.schemas.study import (
     TeachbackRubricResponse,
 )
 from app.services.background import fire_and_forget, task_registry
-from app.services.flashcard_search import _sync_flashcard_fts
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
 from app.services.llm_json import parse_llm_json_object, salvage_llm_json_object
@@ -969,7 +968,7 @@ async def _insert_correction_flashcard(
     session.add(correction)
     # Without this the card exists but cannot be found: flashcard search reads the
     # FTS index, and a card that never enters it is invisible to every query.
-    await _sync_flashcard_fts(correction, session)
+    await FlashcardRepo(session).sync_fts(correction)
     return new_id
 
 

@@ -9,7 +9,8 @@ from sqlalchemy import text
 
 from app.main import app
 from app.models import FlashcardModel
-from app.services.flashcard import _sanitize_fts5_query, _sync_flashcard_fts
+from app.repos.flashcard_repo import FlashcardRepo
+from app.services.flashcard_search import _sanitize_fts5_query
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -57,7 +58,7 @@ async def test_search_keyword_in_question(test_db):
     )
     async with factory() as session:
         session.add(card)
-        await _sync_flashcard_fts(card, session)
+        await FlashcardRepo(session).sync_fts(card)
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -82,7 +83,7 @@ async def test_search_keyword_in_answer(test_db):
     )
     async with factory() as session:
         session.add(card)
-        await _sync_flashcard_fts(card, session)
+        await FlashcardRepo(session).sync_fts(card)
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -112,8 +113,8 @@ async def test_search_multiword_and_semantics(test_db):
     async with factory() as session:
         session.add(card_both)
         session.add(card_partial)
-        await _sync_flashcard_fts(card_both, session)
-        await _sync_flashcard_fts(card_partial, session)
+        await FlashcardRepo(session).sync_fts(card_both)
+        await FlashcardRepo(session).sync_fts(card_partial)
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -154,7 +155,7 @@ async def test_newly_created_card_searchable(test_db):
     )
     async with factory() as session:
         session.add(card)
-        await _sync_flashcard_fts(card, session)
+        await FlashcardRepo(session).sync_fts(card)
         await session.commit()
 
         # Verify searchable via MATCH
@@ -184,7 +185,7 @@ async def test_updated_card_searchable(test_db):
     )
     async with factory() as session:
         session.add(card)
-        await _sync_flashcard_fts(card, session)
+        await FlashcardRepo(session).sync_fts(card)
         await session.commit()
 
     # Update the card
@@ -226,7 +227,7 @@ async def test_deleted_card_not_searchable(test_db):
     )
     async with factory() as session:
         session.add(card)
-        await _sync_flashcard_fts(card, session)
+        await FlashcardRepo(session).sync_fts(card)
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -287,8 +288,8 @@ async def test_search_with_filter_combination(test_db):
     async with factory() as session:
         session.add(card_new)
         session.add(card_review)
-        await _sync_flashcard_fts(card_new, session)
-        await _sync_flashcard_fts(card_review, session)
+        await FlashcardRepo(session).sync_fts(card_new)
+        await FlashcardRepo(session).sync_fts(card_review)
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

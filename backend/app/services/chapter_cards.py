@@ -31,7 +31,6 @@ from app.services.flashcard_chapter import Book, ChapterCard, Passage, write_cha
 from app.services.flashcard_factuality import FACTUALITY_UNCHECKED
 from app.services.flashcard_parsers import grounding_state
 from app.services.flashcard_prompts import _infer_genre
-from app.services.flashcard_search import _sync_flashcard_fts
 from app.services.llm_admission import unattended
 from app.types import CARD_HELD
 
@@ -136,7 +135,7 @@ async def _write_chapter(
     for card in cards:
         row = _card_row(document_id, chapter, card, now)
         session.add(row)
-        await _sync_flashcard_fts(row, session)
+        await FlashcardRepo(session).sync_fts(row)
     await FlashcardRepo(session).record_chapter_written(document_id, chapter.id, len(cards))
     await session.commit()
     logger.info(
