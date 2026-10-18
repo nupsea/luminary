@@ -9,10 +9,10 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChatMessageModel, ChatSessionModel
+from app.repos.chat_repo import ChatRepo
 from app.services.llm import get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -68,59 +68,16 @@ async def list_sessions(
     When q is supplied, results are filtered by FTS5 match across titles+message bodies.
     Each item carries a `preview` field with the most recent message snippet.
     """
+    repo = ChatRepo(db)
     if q and q.strip():
-        # SQLite restricts FTS MATCH to direct queries against the virtual table,
-        # so we resolve matching session_ids in a subquery, then OR with title LIKE.
-        sql = text(
-            """
-            SELECT cs.id
-            FROM chat_sessions cs
-            WHERE cs.id IN (
-                SELECT session_id FROM chat_messages_fts
-                WHERE chat_messages_fts MATCH :q
-            )
-               OR cs.title LIKE :like
-            ORDER BY cs.last_message_at DESC
-            LIMIT :lim
-            """
-        )
-        rows = (
-            await db.execute(sql, {"q": q.strip(), "like": f"%{q.strip()}%", "lim": limit})
-        ).fetchall()
-        ids = [r[0] for r in rows]
-        if not ids:
-            return []
-        sess_rows = (
-            (await db.execute(select(ChatSessionModel).where(ChatSessionModel.id.in_(ids))))
-            .scalars()
-            .all()
-        )
-        # preserve FTS ordering
-        order = {sid: i for i, sid in enumerate(ids)}
-        sessions = sorted(sess_rows, key=lambda s: order.get(s.id, 999))
+        sessions = await repo.matching(q.strip(), limit)
     else:
-        sessions = (
-            (
-                await db.execute(
-                    select(ChatSessionModel)
-                    .order_by(ChatSessionModel.last_message_at.desc())
-                    .limit(limit)
-                )
-            )
-            .scalars()
-            .all()
-        )
+        sessions = await repo.recent(limit)
+    latest = await repo.latest_messages([s.id for s in sessions])
 
     out: list[dict] = []
     for s in sessions:
-        last = (
-            await db.execute(
-                select(ChatMessageModel)
-                .where(ChatMessageModel.session_id == s.id)
-                .order_by(ChatMessageModel.created_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
+        last = latest.get(s.id)
         preview = last.content[:140] if last else ""
         out.append(
             {
@@ -140,23 +97,11 @@ async def list_sessions(
 
 
 async def get_session(db: AsyncSession, session_id: str) -> ChatSessionModel | None:
-    return (
-        await db.execute(select(ChatSessionModel).where(ChatSessionModel.id == session_id))
-    ).scalar_one_or_none()
+    return await ChatRepo(db).find(session_id)
 
 
 async def get_messages(db: AsyncSession, session_id: str) -> list[ChatMessageModel]:
-    return (
-        (
-            await db.execute(
-                select(ChatMessageModel)
-                .where(ChatMessageModel.session_id == session_id)
-                .order_by(ChatMessageModel.created_at.asc())
-            )
-        )
-        .scalars()
-        .all()
-    )
+    return await ChatRepo(db).messages(session_id)
 
 
 async def rename_session(
@@ -174,11 +119,7 @@ async def rename_session(
     sess.updated_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(sess)
-    # keep FTS title column in sync
-    await db.execute(
-        text("UPDATE chat_messages_fts SET title = :t WHERE session_id = :sid"),
-        {"t": sess.title, "sid": sess.id},
-    )
+    await ChatRepo(db).retitle_index(sess.id, sess.title)
     await db.commit()
     return sess
 
@@ -203,13 +144,7 @@ async def delete_session(db: AsyncSession, session_id: str) -> bool:
     sess = await get_session(db, session_id)
     if sess is None:
         return False
-    # Service-level cascade -- SQLite FKs may not enforce ON DELETE
-    await db.execute(delete(ChatMessageModel).where(ChatMessageModel.session_id == session_id))
-    await db.execute(
-        text("DELETE FROM chat_messages_fts WHERE session_id = :sid"),
-        {"sid": session_id},
-    )
-    await db.execute(delete(ChatSessionModel).where(ChatSessionModel.id == session_id))
+    await ChatRepo(db).delete(session_id)
     await db.commit()
     return True
 
@@ -242,14 +177,7 @@ async def append_message(
     sess.updated_at = now
     await db.commit()
     await db.refresh(msg)
-    # mirror into FTS shadow
-    await db.execute(
-        text(
-            "INSERT INTO chat_messages_fts (content, title, message_id, session_id) "
-            "VALUES (:c, :t, :mid, :sid)"
-        ),
-        {"c": content, "t": sess.title, "mid": msg.id, "sid": session_id},
-    )
+    await ChatRepo(db).index_message(msg, sess.title)
     await db.commit()
     return msg
 
