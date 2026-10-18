@@ -406,6 +406,61 @@ class NoteRepo:
         )
         return result.scalar_one()
 
+    async def ids_outside_collections(self) -> list[str]:
+        """Unarchived notes that belong to no collection."""
+        result = await self.session.execute(
+            select(NoteModel.id).where(
+                NoteModel.archived.is_(False),
+                NoteModel.id.not_in(
+                    select(CollectionMemberModel.member_id)
+                    .where(CollectionMemberModel.member_type == "note")
+                    .distinct()
+                ),
+            )
+        )
+        return [row[0] for row in result.all()]
+
+    async def ids_with_deck_cards(self, deck: str, note_ids: Sequence[str]) -> set[str]:
+        """Those of `note_ids` that have a note-sourced card in `deck`."""
+        if not note_ids:
+            return set()
+        result = await self.session.execute(
+            select(FlashcardModel.note_id.distinct()).where(
+                FlashcardModel.source == "note",
+                FlashcardModel.deck == deck,
+                FlashcardModel.note_id.in_(list(note_ids)),
+                FlashcardModel.note_id.is_not(None),
+            )
+        )
+        return {row[0] for row in result.all()}
+
+    async def stale_among(self, note_ids: Sequence[str], before: datetime) -> list[NoteModel]:
+        """Unarchived notes among `note_ids` last updated before `before`."""
+        if not note_ids:
+            return []
+        result = await self.session.execute(
+            select(NoteModel).where(
+                NoteModel.id.in_(list(note_ids)),
+                NoteModel.archived.is_(False),
+                NoteModel.updated_at < before,
+            )
+        )
+        return list(result.scalars().all())
+
+    async def top_tags_among(self, note_ids: Sequence[str], limit: int) -> list[tuple[str, int]]:
+        """(tag, notes carrying it) over `note_ids`, most common first."""
+        if not note_ids:
+            return []
+        count = func.count(NoteTagIndexModel.note_id)
+        result = await self.session.execute(
+            select(NoteTagIndexModel.tag_full, count)
+            .where(NoteTagIndexModel.note_id.in_(list(note_ids)))
+            .group_by(NoteTagIndexModel.tag_full)
+            .order_by(count.desc())
+            .limit(limit)
+        )
+        return [(t, n) for t, n in result.all()]
+
     async def covered_note_count(self, deck: str) -> int:
         """Distinct note contents a deck already has cards for."""
         result = await self.session.execute(

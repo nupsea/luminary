@@ -94,7 +94,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 211,
+  "complexity_over_10": 210,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
@@ -116,7 +116,6 @@
     "app/services/article_extractor.py": 1,
     "app/services/chat_sessions.py": 5,
     "app/services/clustering_service.py": 19,
-    "app/services/collection_health.py": 21,
     "app/services/concept_linker.py": 9,
     "app/services/concept_service.py": 10,
     "app/services/content_dates.py": 2,
