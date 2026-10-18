@@ -94,7 +94,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 214,
+  "complexity_over_10": 213,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
@@ -127,7 +127,6 @@
     "app/services/document_deletion_service.py": 16,
     "app/services/document_search.py": 3,
     "app/services/document_tagger.py": 26,
-    "app/services/engagement_service.py": 28,
     "app/services/enrichment_worker.py": 15,
     "app/services/export_service.py": 24,
     "app/services/feynman_service.py": 18,
@@ -150,7 +149,6 @@
     "app/services/objective_tracker.py": 8,
     "app/services/okf_context.py": 8,
     "app/services/pomodoro_service.py": 12,
-    "app/services/progress_service.py": 18,
     "app/services/recommender_service.py": 7,
     "app/services/reference_enricher.py": 8,
     "app/services/reference_validator.py": 4,

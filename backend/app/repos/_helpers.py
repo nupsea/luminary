@@ -6,7 +6,7 @@ but raises `NotFound`, which main.py maps to a 404 response.
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,3 +55,13 @@ def upsert_insert(session: AsyncSession, model: type):
     """
     dialect = session.get_bind().dialect.name
     return (postgresql.insert if dialect == "postgresql" else sqlite.insert)(model)
+
+
+def local_date(column, tz_offset_minutes: int):
+    """A UTC datetime column as the user's local date, so 11pm study stays on its own day.
+
+    `tz_offset_minutes` is JS `Date.getTimezoneOffset()`: positive west of UTC.
+    """
+    if tz_offset_minutes == 0:
+        return func.date(column)
+    return func.date(func.datetime(column, f"{-tz_offset_minutes:+d} minutes"))

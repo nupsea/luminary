@@ -11,13 +11,11 @@ Level formula: level = floor(sqrt(total_xp / 100))
   Level 1 = 100 XP, Level 5 = 2500 XP, Level 10 = 10000 XP
 """
 
-import json
 import logging
 import math
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -26,11 +24,9 @@ from app.models import (
     StudyStreakModel,
     XPLedgerModel,
 )
+from app.repos.engagement_repo import EngagementRepo
 
 logger = logging.getLogger(__name__)
-
-# Singleton streak row ID (local-first, single user)
-_STREAK_ID = "local"
 
 # XP multipliers by FSRS rating
 _RATING_MULTIPLIERS: dict[str, float] = {
@@ -97,38 +93,19 @@ class EngagementService:
     def __init__(self, session: AsyncSession, tz_offset_minutes: int = 0) -> None:
         self._session = session
         self._tz_offset_minutes = tz_offset_minutes
+        self._repo = EngagementRepo(session, tz_offset_minutes)
 
     def _local_today(self) -> date:
         """Return the user's current local date, derived from UTC + offset."""
         return (datetime.now(UTC) - timedelta(minutes=self._tz_offset_minutes)).date()
 
-    def _local_date_sql(self, column):
-        """SQL expression: cast a UTC datetime column to the user's local date.
-
-        SQLite's `datetime(x, '<N> minutes')` modifier handles the shift; the
-        outer `date(...)` strips the time component. With tz_offset_minutes=0
-        this is equivalent to the prior `func.date(column)` behavior.
-        """
-        if self._tz_offset_minutes == 0:
-            return func.date(column)
-        modifier = f"{-self._tz_offset_minutes:+d} minutes"
-        return func.date(func.datetime(column, modifier))
-
     # ------------------------------------------------------------------
     # Streak
     # ------------------------------------------------------------------
 
-    async def _get_or_create_streak(self) -> StudyStreakModel:
-        result = await self._session.get(StudyStreakModel, _STREAK_ID)
-        if result is None:
-            result = StudyStreakModel(id=_STREAK_ID, current_streak=0, longest_streak=0)
-            self._session.add(result)
-            await self._session.flush()
-        return result
-
     async def record_study_activity(self) -> StudyStreakModel:
         """Call on any qualifying study action. Updates streak and awards streak bonus XP."""
-        streak = await self._get_or_create_streak()
+        streak = await self._repo.streak()
         today = self._local_today()
 
         # Reset weekly freezes on Monday
@@ -174,7 +151,7 @@ class EngagementService:
         return streak
 
     async def get_streak(self) -> dict:
-        streak = await self._get_or_create_streak()
+        streak = await self._repo.streak()
         today = self._local_today()
         studied_today = streak.last_study_date == today
         return {
@@ -190,15 +167,7 @@ class EngagementService:
     # ------------------------------------------------------------------
 
     async def _add_xp(self, action: str, amount: int, detail: dict | None = None) -> XPLedgerModel:
-        entry = XPLedgerModel(
-            id=str(uuid.uuid4()),
-            action=action,
-            xp_amount=amount,
-            detail_json=json.dumps(detail) if detail else None,
-        )
-        self._session.add(entry)
-        await self._session.flush()
-        return entry
+        return await self._repo.add_xp(action, amount, detail)
 
     async def award_flashcard_xp(self, rating: str, card_id: str) -> int:
         """Award XP for a flashcard review. Returns XP amount."""
@@ -246,19 +215,8 @@ class EngagementService:
 
     async def get_xp_summary(self) -> dict:
         """Return total XP, level, XP to next level, today's XP."""
-        total_result = await self._session.execute(
-            select(func.coalesce(func.sum(XPLedgerModel.xp_amount), 0))
-        )
-        total_xp = total_result.scalar() or 0
-
-        today_str = str(self._local_today())
-        local_date = self._local_date_sql(XPLedgerModel.created_at)
-        today_result = await self._session.execute(
-            select(func.coalesce(func.sum(XPLedgerModel.xp_amount), 0)).where(
-                local_date == today_str
-            )
-        )
-        today_xp = today_result.scalar() or 0
+        total_xp = await self._repo.total_xp()
+        today_xp = await self._repo.xp_on(str(self._local_today()))
 
         level = compute_level(total_xp)
         next_level_xp = xp_for_next_level(total_xp)
@@ -273,18 +231,7 @@ class EngagementService:
     async def get_xp_history(self, days: int = 30) -> list[dict]:
         """Return daily XP totals for the last N days, bucketed in local time."""
         today_local = self._local_today()
-        start_str = str(today_local - timedelta(days=days - 1))
-        local_date = self._local_date_sql(XPLedgerModel.created_at)
-        rows = await self._session.execute(
-            select(
-                local_date.label("day"),
-                func.sum(XPLedgerModel.xp_amount).label("xp"),
-            )
-            .where(local_date >= start_str)
-            .group_by(local_date)
-            .order_by(local_date)
-        )
-        history = {str(row.day): row.xp for row in rows}
+        history = await self._repo.xp_by_day_since(str(today_local - timedelta(days=days - 1)))
 
         # Fill in zero-days
         result = []
@@ -299,11 +246,9 @@ class EngagementService:
 
     async def seed_achievements(self) -> None:
         """Ensure all achievement definitions exist in the DB. Idempotent."""
+        existing = await self._repo.achievement_keys()
         for key, title, description, icon, category, target in ACHIEVEMENT_DEFS:
-            existing = await self._session.execute(
-                select(AchievementModel).where(AchievementModel.key == key)
-            )
-            if existing.scalar_one_or_none() is None:
+            if key not in existing:
                 self._session.add(
                     AchievementModel(
                         id=str(uuid.uuid4()),
@@ -320,10 +265,7 @@ class EngagementService:
     async def _check_achievements(self) -> list[AchievementModel]:
         """Check all locked achievements and unlock any that have been earned."""
         unlocked = []
-        locked = await self._session.execute(
-            select(AchievementModel).where(AchievementModel.unlocked_at.is_(None))
-        )
-        for ach in locked.scalars().all():
+        for ach in await self._repo.locked_achievements():
             progress = await self._get_achievement_progress(ach.key)
             ach.progress_current = progress
             if progress >= ach.progress_target:
@@ -337,60 +279,25 @@ class EngagementService:
     async def _get_achievement_progress(self, key: str) -> int:
         """Compute current progress for a given achievement key."""
         if key.startswith("streak_"):
-            streak = await self._get_or_create_streak()
-            return streak.longest_streak
-
+            return (await self._repo.streak()).longest_streak
         if key.startswith("cards_"):
-            result = await self._session.execute(
-                select(func.count())
-                .select_from(XPLedgerModel)
-                .where(XPLedgerModel.action == "flashcard_review")
-            )
-            return result.scalar() or 0
-
+            return await self._repo.count_xp_actions("flashcard_review")
         if key.startswith("notes_"):
-            result = await self._session.execute(
-                select(func.count())
-                .select_from(XPLedgerModel)
-                .where(XPLedgerModel.action == "note_created")
-            )
-            return result.scalar() or 0
-
+            return await self._repo.count_xp_actions("note_created")
         if key == "focus_10":
-            result = await self._session.execute(
-                select(func.count())
-                .select_from(FocusSessionModel)
-                .where(FocusSessionModel.completed.is_(True))
-            )
-            return result.scalar() or 0
-
+            return await self._repo.count_completed_focus_sessions()
         if key == "focus_50min":
-            result = await self._session.execute(
-                select(func.count())
-                .select_from(FocusSessionModel)
-                .where(
-                    FocusSessionModel.completed.is_(True),
-                    FocusSessionModel.planned_duration_minutes >= 50,
-                )
-            )
-            return result.scalar() or 0
-
+            return await self._repo.count_completed_focus_sessions(min_planned_minutes=50)
         if key.startswith("xp_"):
-            result = await self._session.execute(
-                select(func.coalesce(func.sum(XPLedgerModel.xp_amount), 0))
-            )
-            return result.scalar() or 0
+            return await self._repo.total_xp()
 
         return 0
 
     async def get_achievements(self) -> list[dict]:
         """Return all achievements with unlock status and progress."""
         await self.seed_achievements()
-        result = await self._session.execute(
-            select(AchievementModel).order_by(AchievementModel.category, AchievementModel.key)
-        )
         achievements = []
-        for ach in result.scalars().all():
+        for ach in await self._repo.all_achievements():
             progress = await self._get_achievement_progress(ach.key)
             achievements.append(
                 {
@@ -409,12 +316,6 @@ class EngagementService:
     async def get_recent_achievements(self, days: int = 7) -> list[dict]:
         """Return achievements unlocked in the last N days."""
         cutoff = datetime.now(UTC) - timedelta(days=days)
-        result = await self._session.execute(
-            select(AchievementModel)
-            .where(AchievementModel.unlocked_at.is_not(None))
-            .where(AchievementModel.unlocked_at >= cutoff)
-            .order_by(AchievementModel.unlocked_at.desc())
-        )
         return [
             {
                 "key": ach.key,
@@ -424,7 +325,7 @@ class EngagementService:
                 "category": ach.category,
                 "unlocked_at": ach.unlocked_at.isoformat() if ach.unlocked_at else None,
             }
-            for ach in result.scalars().all()
+            for ach in await self._repo.achievements_unlocked_since(cutoff)
         ]
 
     # ------------------------------------------------------------------
@@ -489,13 +390,6 @@ class EngagementService:
         return {"session_id": session_id, "cancelled": True}
 
     async def get_today_sessions(self) -> list[dict]:
-        today_str = str(self._local_today())
-        local_date = self._local_date_sql(FocusSessionModel.started_at)
-        result = await self._session.execute(
-            select(FocusSessionModel)
-            .where(local_date == today_str)
-            .order_by(FocusSessionModel.started_at.desc())
-        )
         return [
             {
                 "id": s.id,
@@ -507,16 +401,12 @@ class EngagementService:
                 "completed": s.completed,
                 "xp_awarded": s.xp_awarded,
             }
-            for s in result.scalars().all()
+            for s in await self._repo.focus_sessions_on(str(self._local_today()))
         ]
 
     async def get_focus_stats(self, days: int = 7) -> dict:
         start_str = str(self._local_today() - timedelta(days=days - 1))
-        local_date = self._local_date_sql(FocusSessionModel.started_at)
-        result = await self._session.execute(
-            select(FocusSessionModel).where(local_date >= start_str)
-        )
-        sessions = result.scalars().all()
+        sessions = await self._repo.focus_sessions_since(start_str)
         total = len(sessions)
         completed = sum(1 for s in sessions if s.completed)
         total_minutes = sum((s.actual_duration_seconds or 0) / 60 for s in sessions if s.completed)
