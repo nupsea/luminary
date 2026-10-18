@@ -15,14 +15,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import numpy as np
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    CanonicalTagModel,
-    TagAliasModel,
     TagMergeSuggestionModel,
 )
+from app.repos.tag_repo import TagRepo
 
 logger = logging.getLogger(__name__)
 
@@ -51,20 +49,14 @@ class SmartTagNormalizerService:
         Returns the count of new TagMergeSuggestionModel rows created.
         Skips pairs already linked in TagAliasModel (in either direction).
         """
-        # Load all canonical tags
-        result = await session.execute(select(CanonicalTagModel).order_by(CanonicalTagModel.id))
-        tags = list(result.scalars().all())
+        repo = TagRepo(session)
+        tags = list(await repo.list_by_id())
 
         if len(tags) < 2:
             logger.info("Not enough canonical tags to scan (%d); skipping", len(tags))
             return 0
 
-        # Build set of existing aliases (both directions) for fast skip
-        alias_result = await session.execute(select(TagAliasModel))
-        aliases = alias_result.scalars().all()
-        linked_pairs: set[frozenset[str]] = {
-            frozenset([a.alias, a.canonical_tag_id]) for a in aliases
-        }
+        linked_pairs = await repo.alias_pairs()
 
         # Every existing suggestion, read once, in both orientations.
         #
@@ -77,10 +69,7 @@ class SmartTagNormalizerService:
         # `POST /notes` failed with "database is locked" whenever a scan was
         # running (#88). Both orientations are reachable: (a-mouse, mouse) and
         # (mouse, a-mouse) were both present in a real library.
-        suggestion_rows = await session.execute(
-            select(TagMergeSuggestionModel.tag_a_id, TagMergeSuggestionModel.tag_b_id)
-        )
-        suggested_pairs: set[frozenset[str]] = {frozenset([a, b]) for a, b in suggestion_rows.all()}
+        suggested_pairs = await repo.suggested_pairs()
 
         # Embed display_names using the synchronous EmbeddingService in a thread
         from app.services.embedder import get_embedding_service  # noqa: PLC0415
@@ -149,25 +138,11 @@ class SmartTagNormalizerService:
 
     async def get_pending_suggestions(self, session: AsyncSession) -> list[TagSuggestionDetail]:
         """Return all pending suggestions with expanded tag_a and tag_b info."""
-        result = await session.execute(
-            select(TagMergeSuggestionModel)
-            .where(TagMergeSuggestionModel.status == "pending")
-            .order_by(TagMergeSuggestionModel.similarity.desc())
-        )
-        suggestions = result.scalars().all()
+        repo = TagRepo(session)
+        suggestions = await repo.pending_suggestions()
         if not suggestions:
             return []
-
-        # Collect all tag IDs we need to look up
-        tag_ids = set()
-        for s in suggestions:
-            tag_ids.add(s.tag_a_id)
-            tag_ids.add(s.tag_b_id)
-
-        tags_result = await session.execute(
-            select(CanonicalTagModel).where(CanonicalTagModel.id.in_(tag_ids))
-        )
-        tag_by_id: dict[str, CanonicalTagModel] = {t.id: t for t in tags_result.scalars().all()}
+        tag_by_id = await repo.by_ids({t for s in suggestions for t in (s.tag_a_id, s.tag_b_id)})
 
         details: list[TagSuggestionDetail] = []
         for s in suggestions:
@@ -203,11 +178,7 @@ class SmartTagNormalizerService:
         by the router layer so it can call _sync_tag_index without violating the
         six-layer import rule (Service must not import from Router/API layer).
         """
-        suggestion = (
-            await session.execute(
-                select(TagMergeSuggestionModel).where(TagMergeSuggestionModel.id == suggestion_id)
-            )
-        ).scalar_one_or_none()
+        suggestion = await TagRepo(session).find_suggestion(suggestion_id)
         if suggestion is None:
             raise ValueError(f"Suggestion {suggestion_id!r} not found")
         if suggestion.status != "pending":
@@ -219,11 +190,7 @@ class SmartTagNormalizerService:
 
     async def reject_suggestion(self, suggestion_id: str, session: AsyncSession) -> None:
         """Set suggestion status to rejected."""
-        suggestion = (
-            await session.execute(
-                select(TagMergeSuggestionModel).where(TagMergeSuggestionModel.id == suggestion_id)
-            )
-        ).scalar_one_or_none()
+        suggestion = await TagRepo(session).find_suggestion(suggestion_id)
         if suggestion is None:
             raise ValueError(f"Suggestion {suggestion_id!r} not found")
 

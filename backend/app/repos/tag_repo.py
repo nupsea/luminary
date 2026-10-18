@@ -6,7 +6,7 @@ commit once at their end.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -21,6 +21,7 @@ from app.models import (
     DocumentTagProvenanceModel,
     NoteTagIndexModel,
     TagAliasModel,
+    TagMergeSuggestionModel,
 )
 from app.repos._helpers import get_or_404
 
@@ -59,6 +60,39 @@ class TagRepo:
             select(CanonicalTagModel).order_by(CanonicalTagModel.id)
         )
         return result.scalars().all()
+
+    async def by_ids(self, tag_ids: Collection[str]) -> dict[str, CanonicalTagModel]:
+        result = await self.session.execute(
+            select(CanonicalTagModel).where(CanonicalTagModel.id.in_(list(tag_ids)))
+        )
+        return {t.id: t for t in result.scalars().all()}
+
+    async def alias_pairs(self) -> set[frozenset[str]]:
+        """{alias, canonical id} for every alias, unordered."""
+        result = await self.session.execute(
+            select(TagAliasModel.alias, TagAliasModel.canonical_tag_id)
+        )
+        return {frozenset(pair) for pair in result.all()}
+
+    # -- merge suggestions -------------------------------------------------
+
+    async def suggested_pairs(self) -> set[frozenset[str]]:
+        """Both tags of every merge suggestion in any status, unordered."""
+        result = await self.session.execute(
+            select(TagMergeSuggestionModel.tag_a_id, TagMergeSuggestionModel.tag_b_id)
+        )
+        return {frozenset(pair) for pair in result.all()}
+
+    async def pending_suggestions(self) -> list[TagMergeSuggestionModel]:
+        result = await self.session.execute(
+            select(TagMergeSuggestionModel)
+            .where(TagMergeSuggestionModel.status == "pending")
+            .order_by(TagMergeSuggestionModel.similarity.desc())
+        )
+        return list(result.scalars().all())
+
+    async def find_suggestion(self, suggestion_id: str) -> TagMergeSuggestionModel | None:
+        return await self.session.get(TagMergeSuggestionModel, suggestion_id)
 
     async def all_in_storage_order(self) -> list[CanonicalTagModel]:
         """Every tag, unsorted: the naming migration's tie-break follows this order."""
