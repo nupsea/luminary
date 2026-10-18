@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import WebReferenceModel
@@ -42,6 +42,24 @@ class ReferenceRepo:
             .order_by(WebReferenceModel.source_quality, WebReferenceModel.term)
         )
         return result.scalars().all()
+
+    async def count_for_section(self, document_id: str, section_id: str | None) -> int:
+        result = await self.session.execute(
+            select(func.count(WebReferenceModel.id)).where(
+                WebReferenceModel.document_id == document_id,
+                WebReferenceModel.section_id == section_id,
+            )
+        )
+        return int(result.scalar_one())
+
+    async def delete_for_section(self, document_id: str, section_id: str) -> None:
+        """Uncommitted."""
+        await self.session.execute(
+            delete(WebReferenceModel).where(
+                WebReferenceModel.document_id == document_id,
+                WebReferenceModel.section_id == section_id,
+            )
+        )
 
     async def delete_all_for_document(self, document_id: str) -> None:
         existing = await self.session.execute(
