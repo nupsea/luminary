@@ -62,6 +62,15 @@ def local_date(column, tz_offset_minutes: int):
 
     `tz_offset_minutes` is JS `Date.getTimezoneOffset()`: positive west of UTC.
     """
+    return func.date(_local(column, tz_offset_minutes))
+
+
+def local_month(column, tz_offset_minutes: int):
+    """As `local_date`, as YYYY-MM."""
+    return func.strftime("%Y-%m", _local(column, tz_offset_minutes))
+
+
+def _local(column, tz_offset_minutes: int):
     if tz_offset_minutes == 0:
-        return func.date(column)
-    return func.date(func.datetime(column, f"{-tz_offset_minutes:+d} minutes"))
+        return column
+    return func.datetime(column, f"{-tz_offset_minutes:+d} minutes")

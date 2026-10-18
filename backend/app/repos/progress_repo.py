@@ -17,7 +17,7 @@ from app.models import (
     ReviewEventModel,
     TimeOnTaskModel,
 )
-from app.repos._helpers import local_date
+from app.repos._helpers import local_date, local_month
 
 
 class ProgressRepo:
@@ -104,11 +104,7 @@ class ProgressRepo:
 
     async def live_notes_per_month(self) -> list[tuple[str, int]]:
         """(local YYYY-MM, notes), oldest first, archived notes excluded."""
-        if self._tz_offset_minutes == 0:
-            month = func.strftime("%Y-%m", NoteModel.created_at)
-        else:
-            shifted = func.datetime(NoteModel.created_at, f"{-self._tz_offset_minutes:+d} minutes")
-            month = func.strftime("%Y-%m", shifted)
+        month = local_month(NoteModel.created_at, self._tz_offset_minutes)
         rows = (
             await self.session.execute(
                 select(month.label("month"), func.count().label("count"))
