@@ -37,12 +37,6 @@ class GoalRepo:
 
     # -- linked sessions ---------------------------------------------------
 
-    async def find_session(self, session_id: str) -> PomodoroSessionModel | None:
-        result = await self.session.execute(
-            select(PomodoroSessionModel).where(PomodoroSessionModel.id == session_id)
-        )
-        return result.scalar_one_or_none()
-
     async def unlink_all_sessions(self, goal_id: str) -> None:
         """Uncommitted: SQLite cannot add the FK, so this is its ON DELETE SET NULL."""
         await self.session.execute(

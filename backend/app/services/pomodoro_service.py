@@ -18,11 +18,11 @@ import logging
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import LuminaryError
 from app.models import PomodoroSessionModel
+from app.repos.pomodoro_repo import PomodoroRepo
 
 logger = logging.getLogger(__name__)
 
@@ -79,23 +79,18 @@ class PomodoroService:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._repo = PomodoroRepo(session)
 
     # ------------------------------------------------------------------ helpers
 
     async def _get(self, session_id: str) -> PomodoroSessionModel:
-        result = await self._session.execute(
-            select(PomodoroSessionModel).where(PomodoroSessionModel.id == session_id)
-        )
-        row = result.scalar_one_or_none()
+        row = await self._repo.find(session_id)
         if row is None:
             raise SessionNotFound(f"pomodoro session {session_id} not found")
         return row
 
     async def _get_active_or_paused(self) -> PomodoroSessionModel | None:
-        result = await self._session.execute(
-            select(PomodoroSessionModel).where(PomodoroSessionModel.status.in_(ACTIVE_STATUSES))
-        )
-        return result.scalar_one_or_none()
+        return await self._repo.in_status(ACTIVE_STATUSES)
 
     # ------------------------------------------------------------------ commands
 
@@ -191,45 +186,16 @@ class PomodoroService:
     async def get_active_session(self) -> PomodoroSessionModel | None:
         return await self._get_active_or_paused()
 
-    async def get_session(self, session_id: str) -> PomodoroSessionModel | None:
-        result = await self._session.execute(
-            select(PomodoroSessionModel).where(PomodoroSessionModel.id == session_id)
-        )
-        return result.scalar_one_or_none()
-
     async def get_stats(self) -> dict:
         today = _now().date()
         midnight_today = datetime.combine(today, datetime.min.time(), tzinfo=UTC)
 
-        today_count = (
-            await self._session.execute(
-                select(func.count(PomodoroSessionModel.id)).where(
-                    PomodoroSessionModel.status == "completed",
-                    PomodoroSessionModel.created_at >= midnight_today,
-                )
-            )
-        ).scalar_one()
+        today_count = await self._repo.count_completed(since=midnight_today)
+        total_completed = await self._repo.count_completed()
 
-        total_completed = (
-            await self._session.execute(
-                select(func.count(PomodoroSessionModel.id)).where(
-                    PomodoroSessionModel.status == "completed"
-                )
-            )
-        ).scalar_one()
-
-        # Pull every completed created_at; in practice the volume is small (one user, local).
-        rows = (
-            await self._session.execute(
-                select(PomodoroSessionModel.created_at).where(
-                    PomodoroSessionModel.status == "completed"
-                )
-            )
-        ).all()
+        # Every completed created_at; in practice the volume is small (one user, local).
         completed_dates: set[date] = set()
-        for (created_at,) in rows:
-            if created_at is None:
-                continue
+        for created_at in await self._repo.completed_created_at():
             ts = created_at if created_at.tzinfo is not None else created_at.replace(tzinfo=UTC)
             completed_dates.add(ts.date())
 
