@@ -14,6 +14,7 @@ uses: a count may shrink, never grow, and shrinking it is the point.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -216,3 +217,61 @@ def test_a_realigned_row_must_say_why_it_was_safe():
         )
         == []
     )
+
+
+# A follow-up's `standalone` rewrite (#322)
+
+# Words of a row's hint its rewrite may hold although the conversation never says them:
+# the name a reference resolves to ("the opposite situation" is overfitting) or a word
+# too generic to point at the passage. Anything else was borrowed from the passage.
+_STANDALONE_RESOLUTIONS = {
+    "d2l-c1": {"overfitting"},
+    "d2l-g1": {"model"},
+    "d2l-k1": {"average", "max"},
+    "d2l-k2": {"parameters"},
+    "d2l-l2": {"models"},
+    "d2l-m1": {"through"},
+    "sb-h1": {"update"},
+    "sb-i2": {"parameter"},
+    "sb-k2": {"sarsa"},
+    "sb-n2": {"were"},
+}
+
+_STOPWORDS = frozenset(
+    "the a an of to and or is are be in on for that this it its as by with at from we our "
+    "can not but if so than then there their they what how why does do which when into "
+    "used use more most one only".split()
+)
+
+
+def _content_words(text: str) -> set[str]:
+    return {t for t in re.findall(r"[a-z]{3,}", text.lower()) if t not in _STOPWORDS}
+
+
+def _borrowed_words(row: dict) -> set[str]:
+    said = _content_words(" ".join(row["history"]) + " " + row["question"])
+    hint = _content_words(row["context_hint"][0])
+    return (
+        (_content_words(row["standalone"]) & hint)
+        - said
+        - _STANDALONE_RESOLUTIONS.get(row["id"], set())
+    )
+
+
+def test_a_followup_rewrite_resolves_references_without_borrowing_the_passage():
+    """The standalone arm is the ceiling a query rewriter can reach. A rewriter sees the
+    conversation, not the passage, so a rewrite that copies the passage's wording sets a
+    ceiling no rewriter can meet and inflates the headroom it reports."""
+    rows = [json.loads(line) for line in (GOLDEN_DIR / "followups.jsonl").read_text().splitlines()]
+    borrowed = {row["id"]: sorted(words) for row in rows if (words := _borrowed_words(row))}
+
+    assert borrowed == {}
+    assert _borrowed_words(
+        {
+            "id": "synthetic",
+            "history": ["How do I tell if my model is underfitting?"],
+            "question": "And the opposite situation, is that always a problem?",
+            "standalone": "Is overfitting always a bad thing?",
+            "context_hint": ["Note that overfitting is not always a bad thing"],
+        }
+    ) == {"overfitting", "bad", "thing"}

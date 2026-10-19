@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-reader-switch verify-note-nav luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-followups eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-reader-switch verify-note-nav luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
 
 # install.sh puts uv (and Node on Linux) in ~/.local/bin, which a shell opened
 # before the install does not have on PATH.
@@ -604,6 +604,12 @@ eval-chat-routing:
 eval-false-premise:
 	@echo "False-premise eval: questions whose document contradicts their premise (#158)..."
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_false_premise_eval.py --backend-url $(BACKEND_URL) --model $(FALSE_PREMISE_MODEL) --assert-thresholds
+
+# Follow-up questions (#322): retrieval as typed, with the previous turn, and as a hand
+# rewrite. Baseline only. CHAT=1 replays each conversation through /qa (~90 calls, slow).
+eval-followups:
+	@echo "Follow-up retrieval eval (#322)..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_followup_eval.py --backend-url $(BACKEND_URL) $(if $(CHAT),--chat --model $(FALSE_PREMISE_MODEL),)
 
 eval-refusal:
 	@echo "Refusal eval: questions with no answer in the document (asserted floor is a collapse detector)..."
