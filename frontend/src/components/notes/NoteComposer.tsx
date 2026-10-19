@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom"
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, ExternalLink, Loader2, Search, X } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { type MarkdownEditorHandle } from "@/components/notes/MarkdownCodeEditor"
 import { NoteEditor } from "@/components/notes/NoteEditor"
 import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkCompletion"
 import {
@@ -110,6 +111,7 @@ export function NoteComposer({
   const [existingNotes, setExistingNotes] = useState<ExistingNoteSummary[]>([])
   const [notesLoading, setNotesLoading] = useState(false)
   const closingRef = useRef(false)
+  const editorRef = useRef<MarkdownEditorHandle | null>(null)
   const appliedCaptureRef = useRef<string | null>(null)
   const [loaded, setLoaded] = useState<{ id: string; draft: NoteDraft; note: Note } | null>(null)
   const editing = Boolean(noteId)
@@ -435,6 +437,7 @@ export function NoteComposer({
           content={editContent}
           onContentChange={setEditContent}
           linkCompletion={appendTarget ? undefined : linkCompletion}
+          editorRef={editorRef}
           autoFocus
         />
       </div>
@@ -480,7 +483,9 @@ export function NoteComposer({
           size="sm"
           label="Dictate"
           onTranscribed={(text) => {
-            setEditContent((prev) => appendCapture(prev, text))
+            if (!editorRef.current?.insertDictation(text)) {
+              setEditContent((prev) => appendCapture(prev, text))
+            }
             toast.success("Dictation added to note")
           }}
           title="Dictate into note (Whisper)"

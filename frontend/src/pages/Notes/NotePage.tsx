@@ -474,7 +474,9 @@ export default function NotePage() {
               size="sm"
               variant="icon"
               onTranscribed={(text) => {
-                setEditContent((prev) => appendCapture(prev, text))
+                if (!editorHandleRef.current?.insertDictation(text)) {
+                  setEditContent((prev) => appendCapture(prev, text))
+                }
                 toast.success("Dictation added to note")
               }}
               title="Dictate into note (Whisper)"

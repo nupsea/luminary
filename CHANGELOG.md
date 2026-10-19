@@ -6,7 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Dictation can use a larger speech model than audio import: Whisper `small` or `large-v3-turbo`, chosen when Speech to text is installed or in Settings.** The `base` model it shared with import misheard accents ("Keepable" for "Capable").
+
 ### Fixed
+- **Dictating into a note always added the text at the end.** It now lands at the caret, kept to one line so a list item or table row stays intact.
 - **Finishing a focus timer earned no XP, and the Study Habits focus stats and the two focus achievements stayed at zero.** They read a second focus-session table the timer never wrote; one library had 194 completed pomodoros and none counted. There is now one record, and timers finished from here on earn 20 XP each.
 - **Ticking a source document on a note left it "Standalone"**, so a note detached by deleting its book could not be reattached. Its document now follows its sources.
 - **A note open in the reader's panel had no way back to the document's notes or on to the next one.** It has "All notes" and previous/next now, and opening a note with two source documents no longer drops one.

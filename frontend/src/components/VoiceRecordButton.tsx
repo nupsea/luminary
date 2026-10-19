@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { Loader2, Mic, Square } from "lucide-react"
+import { DictationModelChoice } from "@/components/setup/DictationModelChoice"
 import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import {
   Dialog,
@@ -9,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
-import { useCapability } from "@/hooks/useSetup"
+import { useCapability, useComponents } from "@/hooks/useSetup"
 import { cn } from "@/lib/utils"
 
 export interface VoiceRecordButtonProps {
@@ -38,6 +39,8 @@ export function VoiceRecordButton({
   // is a component the user adds afterwards. Until then the mic offers the
   // install rather than recording: hidden, nobody learned dictation existed.
   const dictation = useCapability("dictation")
+  const { data: components } = useComponents()
+  const transcription = components?.find((c) => c.id === "transcription")
   const [offering, setOffering] = useState(false)
 
   const isSmall = size === "sm"
@@ -76,7 +79,14 @@ export function VoiceRecordButton({
                 you say leaves it.
               </DialogDescription>
             </DialogHeader>
-            <InstallComponentButton componentId="transcription" onInstalled={() => setOffering(false)} />
+            {transcription?.dictation_choices?.length ? (
+              <DictationModelChoice
+                transcription={transcription}
+                onInstalled={() => setOffering(false)}
+              />
+            ) : (
+              <InstallComponentButton componentId="transcription" onInstalled={() => setOffering(false)} />
+            )}
           </DialogContent>
         </Dialog>
       </>

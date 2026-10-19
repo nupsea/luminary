@@ -12,7 +12,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from app.exceptions import DependencyUnavailable, InvalidInput
-from app.services.audio_transcriber import get_audio_transcriber
+from app.services.audio_transcriber import dictation_model, get_audio_transcriber
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ async def transcribe_audio(
             tmp_path = Path(tmp.name)
 
         try:
-            transcriber = get_audio_transcriber()
+            transcriber = get_audio_transcriber(dictation_model())
             import av  # noqa: PLC0415 -- the media extra, absent from the bundle
 
             try:

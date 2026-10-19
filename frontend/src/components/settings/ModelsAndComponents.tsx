@@ -11,6 +11,7 @@ import { Check, Loader2, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { ChatModelChoice } from "@/components/setup/ChatModelChoice"
+import { DictationModelChoice } from "@/components/setup/DictationModelChoice"
 import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import { ModelDriftNotice, type ModelDrift, type ModelRole } from "@/components/settings/ModelDriftNotice"
 import { useComponents } from "@/hooks/useSetup"
@@ -79,6 +80,9 @@ function ComponentRow({ component }: { component: Component }) {
       {component.choices && component.choices.length > 1 && (
         <ChatModelChoice choices={component.choices} />
       )}
+      {component.dictation_choices && component.dictation_choices.length > 0 && (
+        <DictationModelChoice transcription={component} />
+      )}
 
       {component.enables.length > 0 && (
         <p className="text-xs text-muted-foreground">Enables: {component.enables.join(", ")}</p>
@@ -111,7 +115,8 @@ function ComponentRow({ component }: { component: Component }) {
             <Trash2 size={12} /> Remove
           </button>
         )
-      ) : component.choices && component.choices.length > 1 ? null : (
+      ) : (component.choices && component.choices.length > 1) ||
+        component.dictation_choices?.length ? null : (
         <InstallComponentButton componentId={component.id} />
       )}
     </div>

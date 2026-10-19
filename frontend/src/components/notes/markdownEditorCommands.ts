@@ -1,3 +1,4 @@
+import { syntaxTree } from "@codemirror/language"
 import type { EditorState, TransactionSpec } from "@codemirror/state"
 import { isImageOnlyParagraph } from "./liveMarkdownRules"
 
@@ -30,6 +31,48 @@ export function insertInlineSpec(state: EditorState, text: string): TransactionS
   return {
     changes: { from, to, insert: text },
     selection: { anchor: from + text.length },
+    scrollIntoView: true,
+  }
+}
+
+function enclosing(state: EditorState, pos: number, names: readonly string[]) {
+  let node = syntaxTree(state).resolveInner(pos, -1)
+  for (;;) {
+    if (names.includes(node.name)) return node
+    if (!node.parent) return null
+    node = node.parent
+  }
+}
+
+/**
+ * Dictated speech at the caret, shaped to the spot it lands in.
+ *
+ * Kept to one line, so it cannot end a list item or split a table row; pipes are
+ * escaped inside a table. Spaced from its neighbours, and without Whisper's closing
+ * full stop when the sentence carries on after it.
+ */
+export function insertDictationSpec(state: EditorState, text: string): TransactionSpec | null {
+  let insert = text.replace(/\s+/g, " ").trim()
+  if (!insert) return null
+  const { from, to } = state.selection.main
+  const before = state.sliceDoc(state.doc.lineAt(from).from, from)
+  const after = state.sliceDoc(to, state.doc.lineAt(to).to)
+
+  const table = enclosing(state, from, ["Table"])
+  // Any text on the |---| row unmakes the table, so it goes after the table instead.
+  if (table && /^[\s|:-]+$/.test(state.doc.lineAt(from).text)) {
+    return insertBlockSpec(state.update({ selection: { anchor: table.to } }).state, insert)
+  }
+  if (!enclosing(state, from, ["FencedCode", "CodeBlock", "InlineCode"])) {
+    if (table) insert = insert.replace(/(?<!\\)\|/g, "\\|")
+    if (/^\s*[a-z0-9]/.test(after)) insert = insert.replace(/\.$/, "")
+  }
+  if (before && !/[\s([{"'`]$/.test(before)) insert = " " + insert
+  if (after && !/^[\s.,;:!?)\]}"'`]/.test(after)) insert += " "
+
+  return {
+    changes: { from, to, insert },
+    selection: { anchor: from + insert.length },
     scrollIntoView: true,
   }
 }
