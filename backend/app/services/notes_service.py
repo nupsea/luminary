@@ -147,6 +147,17 @@ async def sync_note_sources(
     )
 
 
+def primary_document_id(current: str | None, source_document_ids: list[str]) -> str | None:
+    """The note's document_id once its sources are set: kept while it is still a source.
+
+    The note card, its reader link and its embedding read document_id, not the pivot, so a
+    source ticked on a detached note has to become it, and an unticked one has to let go.
+    """
+    if current in source_document_ids:
+        return current
+    return source_document_ids[0] if source_document_ids else None
+
+
 async def upsert_note_graph(
     note_id: str, content: str, document_id: str | None, tags: list[str]
 ) -> None:

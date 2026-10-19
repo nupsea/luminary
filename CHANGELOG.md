@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Finishing a focus timer earned no XP, and the Study Habits focus stats and the two focus achievements stayed at zero.** They read a second focus-session table the timer never wrote; one library had 194 completed pomodoros and none counted. There is now one record, and timers finished from here on earn 20 XP each.
+- **Ticking a source document on a note left it "Standalone"**, so a note detached by deleting its book could not be reattached. Its document now follows its sources.
+- **A note open in the reader's panel had no way back to the document's notes or on to the next one.** It has "All notes" and previous/next now, and opening a note with two source documents no longer drops one.
 - **A markdown book's study topics listed every heading in it** (241 for *Dive into Deep Learning*, against its 7 chapters). The technical-book chunker stored every unnumbered heading at one level; headings keep their own level now. Existing documents pick this up when reprocessed (#307).
 - **Cards for a technical book could quiz its preface and contributor list, and a novel's cards skipped any section named like "Indexing".** Front and back matter are now recognised from the sections themselves, for every kind of document (#252).
 - **A story could be classified as an essay from one reflective passage**, and get technical card prompts. The register is now a majority of three passages from the body (#286).

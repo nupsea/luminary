@@ -158,6 +158,61 @@ def test_patch_note_syncs_source_document_ids(client):
     assert doc_id_1 not in data["source_document_ids"]
 
 
+def _patch_sources(client, note_id: str, source_document_ids: list[str]) -> dict:
+    with patch("app.services.vector_store.LanceDBService.delete_note_vector"):
+        resp = client.patch(f"/notes/{note_id}", json={"source_document_ids": source_document_ids})
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_patch_sources_moves_document_id(client):
+    """Ticking a source on a detached note attaches it; unticking its document lets go.
+
+    The note card and its reader link read document_id, so a pivot-only change left a
+    re-sourced note showing as Standalone.
+    """
+    doc_a, doc_b = str(uuid.uuid4()), str(uuid.uuid4())
+
+    with patch(
+        "app.services.note_graph.NoteGraphService.upsert_note_node",
+        new_callable=AsyncMock,
+    ):
+        note = _create_note(client, "detached after its book was deleted")
+        assert note["document_id"] is None
+
+        assert _patch_sources(client, note["id"], [doc_a])["document_id"] == doc_a
+        assert _patch_sources(client, note["id"], [doc_b, doc_a])["document_id"] == doc_a
+        assert _patch_sources(client, note["id"], [doc_b])["document_id"] == doc_b
+        cleared = _patch_sources(client, note["id"], [])
+
+    assert cleared["document_id"] is None
+    assert client.get("/notes", params={"document_id": doc_b}).json() == []
+
+
+def test_patch_sources_keeps_section_while_document_stays(client):
+    doc_a, doc_b = str(uuid.uuid4()), str(uuid.uuid4())
+
+    with patch(
+        "app.services.note_graph.NoteGraphService.upsert_note_node",
+        new_callable=AsyncMock,
+    ):
+        resp = client.post(
+            "/notes",
+            json={
+                "content": "on a section",
+                "document_id": doc_a,
+                "section_id": "s1",
+                "source_document_ids": [doc_a],
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        note = resp.json()
+        assert _patch_sources(client, note["id"], [doc_a, doc_b])["section_id"] == "s1"
+        moved = _patch_sources(client, note["id"], [doc_b])
+
+    assert (moved["document_id"], moved["section_id"]) == (doc_b, None)
+
+
 def test_patch_note_without_source_document_ids_does_not_change_pivot(client):
     """PATCH /notes/{id} without source_document_ids leaves pivot rows unchanged."""
     doc_id_1 = str(uuid.uuid4())

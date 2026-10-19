@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Check, ExternalLink, Loader2, Search, X } from "lucide-react"
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, ExternalLink, Loader2, Search, X } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { NoteEditor } from "@/components/notes/NoteEditor"
@@ -78,6 +78,11 @@ export interface NoteComposerProps {
    * the capture that opened it, so a later one appends rather than being lost.
    */
   captureKey?: string | null
+  /**
+   * The document's notes, in list order, and where leaving this one goes: an id opens
+   * that note, null returns to the list. Both save first, as Done does.
+   */
+  noteNav?: { ids: string[]; onNavigate: (noteId: string | null) => void }
 }
 
 export function NoteComposer({
@@ -94,6 +99,7 @@ export function NoteComposer({
   noteId,
   variant = "sheet",
   captureKey,
+  noteNav,
 }: NoteComposerProps) {
   const [editContent, setEditContent] = useState("")
   const [editTitle, setEditTitle] = useState("")
@@ -181,7 +187,8 @@ export function NoteComposer({
       // never an empty array, so a patch can't undo tags this surface
       // didn't set (auto-tagging lands in the background after creation).
       tags: openNote?.draft.tags ?? [],
-      sourceDocIds: initialSourceDocIds ?? [],
+      // Same for sources: an opened note keeps its own, or opening it would be an edit.
+      sourceDocIds: openNote?.draft.sourceDocIds ?? initialSourceDocIds ?? [],
     },
     enabled: open && !appendTarget,
     createExtras: {
@@ -242,18 +249,18 @@ export function NoteComposer({
     return saved
   }
 
-  async function handleDismiss() {
+  async function handleDismiss(leave: () => void = onClose) {
     if (closingRef.current) return
     closingRef.current = true
     try {
       if (appendTarget) {
-        onClose()
+        leave()
         return
       }
       const result = await finalize()
       if (result === "stay") return
       if (result) onSaved(result)
-      onClose()
+      leave()
     } finally {
       closingRef.current = false
     }
@@ -412,6 +419,7 @@ export function NoteComposer({
     </SheetHeader>
   ) : (
     <div className={headerClass}>
+      {noteNav && <NoteNavBar noteId={noteId ?? null} nav={noteNav} leave={handleDismiss} />}
       {titleField}
       {appendControls}
     </div>
@@ -541,5 +549,55 @@ export function NoteComposer({
         {body}
       </SheetContent>
     </Sheet>
+  )
+}
+
+function NoteNavBar({
+  noteId,
+  nav,
+  leave,
+}: {
+  noteId: string | null
+  nav: NonNullable<NoteComposerProps["noteNav"]>
+  leave: (then: () => void) => Promise<void>
+}) {
+  const at = noteId ? nav.ids.indexOf(noteId) : -1
+  const go = (target: string | null) => void leave(() => nav.onNavigate(target))
+  const step =
+    "rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+  return (
+    <div className="mb-2 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => go(null)}
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft size={12} />
+        All notes
+      </button>
+      {at >= 0 && nav.ids.length > 1 && (
+        <div className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
+          <button
+            type="button"
+            onClick={() => go(nav.ids[at - 1])}
+            disabled={at === 0}
+            className={step}
+            aria-label="Previous note"
+          >
+            <ChevronLeft size={14} />
+          </button>
+          {at + 1} of {nav.ids.length}
+          <button
+            type="button"
+            onClick={() => go(nav.ids[at + 1])}
+            disabled={at === nav.ids.length - 1}
+            className={step}
+            aria-label="Next note"
+          >
+            <ChevronRight size={14} />
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
