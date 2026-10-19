@@ -1,0 +1,13 @@
+{
+  "name": "followups",
+  "source_files": [
+    "DATA/books/d2l_dive_into_deep_learning.md",
+    "DATA/study/sutton_barto_rl.pdf"
+  ],
+  "generated_at": "2026-10-19T00:00:00+00:00",
+  "generator_model": "hand-authored (Claude Opus 5.5) -- not model-generated",
+  "row_provenance": "hand",
+  "row_provenance_note": "Multi-turn follow-ups (#322). 15 threads per document, each a first question and two follow-ups that lean on it; a row is one follow-up, `history` holds the user turns before it. Passages were chosen by reading the ingested chunks in order, never from search results, and no row was kept or dropped by how it retrieves. `standalone` is a hand rewrite of the follow-up that resolves its references from the history: the ceiling a query rewriter can reach. It may name what a reference resolves to but may not borrow the passage's wording or state the answer; the first draft did on 18 rows (hint-word overlap 0.27 against 0.15 for the raw follow-ups), those were rewritten (0.19), and test_golden_integrity holds the rule with each permitted word named per row. `dependency` names what the follow-up needs from the history (coreference, ellipsis, instruction, topic_continuation); self_contained rows are controls whose follow-up and standalone are identical. Scored by run_followup_eval.py.",
+  "target": 60,
+  "accepted": 60
+}

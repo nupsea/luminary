@@ -23,6 +23,7 @@ whatever retrieval returned.
 | Flashcards | `make eval-flashcards` — generation rate, repairs, factuality/atomicity/clarity | `golden/flashcards.jsonl`, 35 rows over 5 content types | yes |
 | Corpus routing | `make eval-routing` — route@1, route@5, unscoped HR@5 | book, paper, legal, play, study | baseline only, no floor |
 | Chat-graph routing | `make eval-chat-routing` — generation quality (citation support/coverage) through `/qa`, not `/search` | `golden/retrieval_and_memory_tutorial.jsonl`, 45 rows, one document | report-only, see below |
+| Follow-up retrieval | `make eval-followups` — HR@5/MRR of a follow-up as typed, with the previous turn prepended, and as a hand rewrite; `CHAT=1` adds the live `/qa` path | `golden/followups.jsonl`, 60 rows over d2l and the Sutton & Barto PDF | baseline only, see below |
 | Refusal / honest decline | `make eval-refusal` — honest_rate (decline or clearly-labelled general knowledge vs. presenting a guess as sourced) | `golden/retrieval_and_memory_tutorial_unanswerable.jsonl`, 12 rows | yes, floor 0.70 (collapse detector) |
 | False premise | `make eval-false-premise` — correction_rate (the answer states what the document says instead and cites that passage) | `golden/false_premise.jsonl`, 7 hand-written rows over 6 documents | yes, floor 0.50, bracketed on qwen3.5:4b: 0.14-0.43 without the premise rule, 0.57 with it. The three novel rows fail either way (#158) |
 | Note search | `make eval-notes` — recall over the user's own notes | no committed golden, by design (see below) | baseline only, corpus-coupled |
@@ -331,3 +332,46 @@ state, HR@5 ranges 0.35 (Frankenstein) to 1.00 (notes) on the same funnel: expos
 structured text scores highest, narrative fiction lowest, and the four novels take four of the
 bottom five places. Compare a change per kind — a mean across datasets hides which kind moved, and
 the gated five are fiction-heavy relative to what users actually load.
+
+## Follow-up retrieval
+
+`make eval-followups` (`evals/run_followup_eval.py`, #322). Every other retrieval golden asks
+one self-contained question; a conversation asks "why can't we compute the second one?", and
+`search_node` retrieves on that wording unless `VAGUE_REF_RE` fires a rewrite. Each row carries
+the user turns before the follow-up and a hand rewrite (`standalone`) that resolves its
+references. Every arm is scoped to the row's document:
+
+| arm | query | reads as |
+|---|---|---|
+| `raw` | the follow-up as typed | what the shipped search sees without a rewrite |
+| `concat` | previous user turn + follow-up | the naive fix |
+| `standalone` | the hand rewrite | the ceiling a query rewriter can reach |
+| `chat` (`CHAT=1`) | live `/qa`, earlier turns replayed so the history holds the product's own answers | `gold_in_context`: the hint reached the generator's context |
+
+Measured 2026-10-19, dev library (69 documents), rerank on, identical across two runs:
+
+| arm | HR@5 | MRR |
+|---|---|---|
+| raw | 0.5833 | 0.4597 |
+| concat | 0.5667 | 0.4319 |
+| standalone | 0.7667 | 0.5789 |
+
+**Headroom is `standalone - raw`: 0.1833, 11 of 60 rows.** That is what a perfect rewriter could
+buy on this set. `concat` is not a fix: it loses on `instruction` rows (0.14 against raw 0.57)
+and `topic_continuation` rows, because the first question pulls retrieval back to the topic's
+opening passage. With rerank off every arm drops (raw 0.4500, standalone 0.6833), so the gap is
+in the query, not the ranking.
+
+**`chat` is not reproducible from one run.** On qwen3.5:4b it read 0.60 (36/60); an earlier run
+read 29 of the 59 rows it completed, with 11 rows flipping between the two. The replayed history
+holds the model's own answers, which vary, and the classifier and rewrite read them. Compare
+`chat` only as a spread over several runs; the search arms are deterministic.
+
+**The ceiling is honest only if the rewrite cannot see the passage.** A rewrite may name what a
+reference resolves to; it may not borrow the passage's wording or state the answer.
+`test_a_followup_rewrite_resolves_references_without_borrowing_the_passage` holds this, with each
+permitted word named per row. Borrowed wording in the first draft was worth 0.05 of the ceiling.
+
+30 rows per document, so one row is 0.033 of a per-document number. Of the `dependency` slices
+(`coreference` 40, `instruction` 7, `ellipsis` 6, `topic_continuation` 5, `self_contained` 2),
+only `coreference` is large enough to read.
