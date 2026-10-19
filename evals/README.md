@@ -175,6 +175,7 @@ the model matrix (`make eval-matrix`).
 
 ## Other evals
 
-Intent routing, summaries, topics, corpus routing, chat-graph routing, refusal, false premise, note
-search and ingestion fidelity each have a `make eval-*` target that runs against the dev backend.
+Intent routing, summaries, topics, corpus routing, chat-graph routing, follow-up turns, refusal,
+false premise, note search and ingestion fidelity each have a `make eval-*` target that runs
+against the dev backend.
 `docs/eval-coverage.md` lists what each measures and whether it is gated.
