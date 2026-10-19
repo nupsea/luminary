@@ -66,6 +66,17 @@ export interface Component {
   installable: boolean
   /** The chat model only: every model this computer can hold, with its trade-off. */
   choices?: ChatModelChoice[]
+  /** Speech to text only: the Whisper models dictation can use. */
+  dictation_choices?: DictationModelChoice[]
+}
+
+export interface DictationModelChoice {
+  model: string
+  size_bytes: number
+  trade_off: string
+  recommended: boolean
+  selected: boolean
+  installed: boolean
 }
 
 export interface ChatModelChoice {
