@@ -549,15 +549,22 @@ class LLMService:
                 response = await litellm.acompletion(stream=True, **fallback_kwargs)
                 if served is not None:
                     served.model = str(fallback_kwargs["model"])
-            async for chunk in response:
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    # Tells the gate the answer is still being delivered. Without
-                    # it, pressure is held by this generator's lifetime, and a
-                    # consumer that stops reading may never close it -- which
-                    # left the gate stuck and suspended every background call.
-                    keepalive()
-                    yield delta
+            try:
+                async for chunk in response:
+                    delta = chunk.choices[0].delta.content
+                    if delta:
+                        # Tells the gate the answer is still being delivered. Without
+                        # it, pressure is held by this generator's lifetime, and a
+                        # consumer that stops reading may never close it -- which
+                        # left the gate stuck and suspended every background call.
+                        keepalive()
+                        yield delta
+            finally:
+                # Releases the HTTP stream, which is what stops the server generating
+                # when a consumer ends the answer early.
+                close = getattr(response, "aclose", None)
+                if close is not None:
+                    await close()
 
 
 class TokenStream:
@@ -575,6 +582,9 @@ class TokenStream:
 
     def __aiter__(self) -> AsyncGenerator[str]:
         return self._gen
+
+    async def aclose(self) -> None:
+        await self._gen.aclose()
 
 
 def _messages_to_text(messages: list[dict]) -> str:

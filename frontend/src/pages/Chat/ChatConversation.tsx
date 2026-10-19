@@ -656,6 +656,7 @@ export function ChatConversation({
               const source_citations = (payload["source_citations"] as SourceCitation[] | undefined) ?? []
               const receipt = payload["receipt"] as AnswerReceipt | undefined
               const isDirect = Boolean(payload["direct"] === true || directEnabled)
+              const stopped = payload["stopped"] as ChatMessage["stopped"]
               const newWebCallsUsed = (payload["web_calls_used"] as number | undefined) ?? webCallsUsed
               setWebCallsUsed(newWebCallsUsed)
               setMessages((m) =>
@@ -675,6 +676,7 @@ export function ChatConversation({
                       source_citations,
                       receipt,
                       direct: isDirect,
+                      stopped,
                     }
                     : msg,
                 ),
@@ -708,6 +710,7 @@ export function ChatConversation({
                     not_found,
                     transparency: transparencyAtDone,
                     direct: isDirect,
+                    stopped,
                   },
                 })
                   .then(() => qc.invalidateQueries({ queryKey: ["chat-sessions"] }))
@@ -1084,6 +1087,12 @@ export function ChatConversation({
                         <MarkdownRenderer>{msg.text}</MarkdownRenderer>
                         {msg.isStreaming && (
                           <span className="ml-0.5 inline-block h-4 w-[3px] animate-pulse rounded-full bg-primary align-text-bottom" />
+                        )}
+                        {!msg.isStreaming && msg.stopped === "repetition" && (
+                          <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                            <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                            <span>Stopped here: the model began repeating itself. The repeated text was removed.</span>
+                          </p>
                         )}
                       </div>
                     )}

@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A chat answer could loop on one list of words for minutes and be saved that way** (63,391 characters from qwen3.5:4b for a short story). A verbatim loop now ends the answer after its first copy, says so under the answer, and closes the call so the model stops generating.
 - **Finishing a focus timer earned no XP, and the Study Habits focus stats and the two focus achievements stayed at zero.** They read a second focus-session table the timer never wrote; one library had 194 completed pomodoros and none counted. There is now one record, and timers finished from here on earn 20 XP each.
 - **Ticking a source document on a note left it "Standalone"**, so a note detached by deleting its book could not be reattached. Its document now follows its sources.
 - **A note open in the reader's panel had no way back to the document's notes or on to the next one.** It has "All notes" and previous/next now, and opening a note with two source documents no longer drops one.
