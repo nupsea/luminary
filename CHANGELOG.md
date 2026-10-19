@@ -6,11 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-10-19
+
 ### Added
 - **Dictation can use a larger speech model than audio import: Whisper `small` or `large-v3-turbo`, chosen when Speech to text is installed or in Settings.** The `base` model it shared with import misheard accents ("Keepable" for "Capable").
 
 ### Fixed
-- **A chat answer could loop on one list of words for minutes and be saved that way** (63,391 characters from qwen3.5:4b for a short story). A verbatim loop now ends the answer after its first copy, says so under the answer, and closes the call so the model stops generating.
+- **A chat answer could loop on one list of words for minutes and be saved that way** (63,391 characters from qwen3.5:4b for a short story). A verbatim loop now ends the answer after its first copy, says so under the answer, and closes the call so the model stops generating (#323).
+- **A YouTube import showed no progress while it downloaded, transcribed and corrected the audio.** The download is now the job's first stage, and each long stage reports how far it has got. Audio is stored as 16-bit FLAC instead of WAV, with the same samples: 1.03 GB became 159 MB on an 89-minute talk (#309).
 - **Dictating into a note always added the text at the end.** It now lands at the caret, kept to one line so a list item or table row stays intact.
 - **Finishing a focus timer earned no XP, and the Study Habits focus stats and the two focus achievements stayed at zero.** They read a second focus-session table the timer never wrote; one library had 194 completed pomodoros and none counted. There is now one record, and timers finished from here on earn 20 XP each.
 - **Ticking a source document on a note left it "Standalone"**, so a note detached by deleting its book could not be reattached. Its document now follows its sources.
