@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DocumentModel, SectionModel
 from app.repos.document_repo import DocumentRepo
+from app.services.chapters import is_book_matter
 from app.services.llm import get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -27,23 +28,10 @@ logger = logging.getLogger(__name__)
 # front/back-matter + metadata headings that are navigation/boilerplate, never study topics
 _EXACT_JUNK = frozenset(
     {
-        "index",
-        "contents",
-        "table of contents",
-        "copyright",
-        "copyright page",
-        "dedication",
-        "acknowledgments",
-        "acknowledgements",
-        "about the author",
-        "about the authors",
         "about the publisher",
-        "about this book",
-        "bibliography",
-        "references",
+        "appendix",
+        "appendices",
         "glossary",
-        "colophon",
-        "title page",
         "imprint",
         "credits",
         "list of figures",
@@ -156,11 +144,9 @@ def _pick_topic_sections(content: list) -> list | None:
 
 def is_junk_heading(heading: str) -> bool:
     """True for blank/boilerplate/metadata headings that must never become a study topic."""
-    raw = (heading or "").strip()
-    if not raw or not any(c.isalnum() for c in raw):
-        return True
     n = _norm(heading)
-    if not n or n in _EXACT_JUNK:
+    # Empty once normalised: blank, punctuation only, or no ASCII letter or digit at all.
+    if not n or n in _EXACT_JUNK or is_book_matter(heading or ""):
         return True
     # bare list-markers ("1", "18", single letter) -- numbering, not a topic
     if re.fullmatch(r"\d{1,3}|[a-z]", n):

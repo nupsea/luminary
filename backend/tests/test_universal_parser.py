@@ -458,3 +458,45 @@ def test_a_title_line_or_nav_bar_before_the_first_heading_is_not_kept(tmp_path):
     )
     doc = up.parse(f, "md")
     assert [s.heading for s in doc.sections] == ["Part 1", "Part 2", "Part 3"]
+
+
+def test_markdown_headings_inside_code_fences_are_code(tmp_path):
+    """Python comments and Rust's hidden "# extern crate" lines start with "# ". Read as
+    headings, they split a section mid-listing and become topics of the book."""
+    fence = "`" * 3
+    body = "Prose that explains the idea at some length so the section has a body.\n"
+    doc = "\n".join(
+        [
+            "# Getting Started",
+            body,
+            f"{fence}python",
+            "# load the data",
+            "rows = read()",
+            "## not a heading either",
+            fence,
+            body,
+            "# Ownership",
+            body,
+            "~~~rust",
+            "# extern crate trpl;",
+            f"{fence}",
+            "# still inside the tilde fence",
+            "~~~",
+            body,
+            "## Borrowing",
+            body,
+            f"{fence}",
+            "# an unclosed fence runs to the end",
+        ]
+    )
+    f = tmp_path / "book.md"
+    f.write_text(doc)
+
+    result = UniversalParser().parse(f, "md")
+
+    assert [(s.heading, s.level) for s in result.sections] == [
+        ("Getting Started", 1),
+        ("Ownership", 1),
+        ("Borrowing", 2),
+    ]
+    assert "# load the data" in result.sections[0].text

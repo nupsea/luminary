@@ -44,6 +44,12 @@ _FRONT_MATTER = re.compile(
     re.I,
 )
 
+
+def is_book_matter(heading: str) -> bool:
+    """Pages about the book rather than of it, at either end: a preface, an index."""
+    return bool(_FRONT_MATTER.match(heading) or _BACK_MATTER.match(heading))
+
+
 # One "Chapter 5" heading in an article is a cross-reference, not a structure.
 MIN_MARKED_CHAPTERS = 2
 # Numbered headings must also count up: SysDesign's listicles ("9 best practices",
@@ -75,6 +81,7 @@ class SectionExtent:
     chars: int
     page_start: int = 0
     page_end: int = 0
+    level: int = 1
 
 
 @dataclass
@@ -157,9 +164,10 @@ def _front_matter_end(ordered: Sequence[SectionExtent]) -> int:
     """Index of the first section past the opening front matter, 0 when there is none.
 
     A preface's own subsections ("The strange history of this book") carry no front-matter
-    name, so the cut runs through the last named front-matter section near the start. An
-    untitled opening is cut only with named front matter after it: alone, it is as often a
-    paper's abstract as a title page.
+    name, so the cut runs through the last named front-matter section near the start, and
+    through the subsections under it: Think Stats' preface ends in "How I wrote this book" and
+    "Using the code", with nothing named after them. An untitled opening is cut only with named
+    front matter after it: alone, it is as often a paper's abstract as a title page.
     """
     if ordered[0].heading.strip() and not _FRONT_MATTER.match(ordered[0].heading):
         return 0
@@ -169,9 +177,18 @@ def _front_matter_end(ordered: Sequence[SectionExtent]) -> int:
         if seen >= limit:
             break
         if _FRONT_MATTER.match(s.heading):
-            end = i + 1
+            end = max(end, _subtree_end(ordered, i, limit))
         seen += s.chars
     return end if end < len(ordered) else 0
+
+
+def _subtree_end(ordered: Sequence[SectionExtent], i: int, limit: float) -> int:
+    """Index past section i and the deeper sections under it, or past i alone when that would
+    run beyond the front-matter limit: a lone "# Preface" above a book of "##" chapters."""
+    j = i + 1
+    while j < len(ordered) and ordered[j].level > ordered[i].level:
+        j += 1
+    return j if sum(s.chars for s in ordered[:j]) <= limit else i + 1
 
 
 def matter_section_ids(sections: Sequence[SectionExtent]) -> set[str]:
@@ -193,7 +210,7 @@ async def document_extents(document_id: str, session: AsyncSession) -> list[Sect
     repo = DocumentRepo(session)
     extents = await repo.section_extents(document_id)
     return [
-        SectionExtent(s.id, s.heading, *extents[s.id])
+        SectionExtent(s.id, s.heading, *extents[s.id], level=s.level or 1)
         for s in await repo.sections_for_document(document_id)
         if s.id in extents
     ]
