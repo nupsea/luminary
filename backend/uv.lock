@@ -1774,7 +1774,7 @@ wheels = [
 
 [[package]]
 name = "luminary-backend"
-version = "0.16.1"
+version = "0.16.2"
 source = { virtual = "." }
 default-groups = ["dev", "full", "media"]
 dependencies = [
