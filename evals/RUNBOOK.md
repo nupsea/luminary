@@ -124,14 +124,6 @@ store. They appear in the **Quality dashboard** (`/quality`, full mode):
 
 ## 5. Thresholds (quality gates)
 
-`--assert-thresholds` exits non-zero if a gate is missed:
-
-| Metric | Gate |
-|--------|------|
-| HR@5 | ≥ 0.50 |
-| MRR | ≥ 0.35 |
-| Faithfulness | ≥ 0.65 |
-| Topic F1 | ≥ 0.70 |
-| Junk rate | ≤ 0.15 |
-
-Thresholds are general defaults, not tuned to any one document.
+`--assert-thresholds` exits non-zero if a gate is missed. The gates live in each runner
+(`THRESHOLDS` / `DATASET_THRESHOLDS` in `run_eval.py`, `THRESHOLDS` in `run_flashcard_eval.py`
+and `run_topic_eval.py`); `README.md` says which library each run measures.

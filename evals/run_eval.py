@@ -610,6 +610,14 @@ def main() -> None:
             "Answer-Relevance >= 0.50"
         ),
     )
+    parser.add_argument(
+        "--ingest-only",
+        action="store_true",
+        help=(
+            "Ingest the dataset's source documents and exit. A corpus ingested "
+            "dataset by dataset is a different library for each one."
+        ),
+    )
     parser.add_argument("--hyde", action="store_true", help="Enable HyDE-style query expansion.")
     parser.add_argument(
         "--unscoped",
@@ -795,6 +803,11 @@ def main() -> None:
     for src in unique_sources:
         doc_id = ensure_ingested(args.backend_url, src, manifest)
         source_to_doc_id[src] = doc_id
+    if args.ingest_only:
+        missing = sorted(src for src, doc_id in source_to_doc_id.items() if doc_id is None)
+        if missing:
+            print(f"ERROR: not ingested: {', '.join(missing)}", file=sys.stderr)
+        sys.exit(1 if missing else 0)
 
     if args.ablation:
         # (label, search-strategy, rerank, rerank-depth, rerank-blend).

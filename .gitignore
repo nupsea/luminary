@@ -25,6 +25,7 @@ dist/
 
 # Data directories (project-local runtime data)
 .luminary/
+.luminary-eval/
 .lance/
 
 # Local SQLite databases

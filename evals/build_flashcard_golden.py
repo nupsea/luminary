@@ -21,6 +21,10 @@ Selection rules, all mechanical so a re-run reproduces the file:
 Usage::
 
     uv run --project backend python evals/build_flashcard_golden.py --per-kind 7
+
+`--corpus book,paper,...` builds a portable golden instead: only the documents those
+retrieval goldens are built on, balanced per document, each row naming its DATA file
+rather than one library's document id, so a fresh library can run it (`make eval-cards-full`).
 """
 
 from __future__ import annotations
@@ -66,33 +70,56 @@ def _passages(con: sqlite3.Connection, doc_id: str) -> list[str]:
     return [t for t in texts[lo:hi] if MIN_CHARS <= len(t) <= MAX_CHARS]
 
 
+def _corpus_sources(datasets: list[str]) -> dict[str, str]:
+    """Lowercased title -> DATA path, for the documents the named retrieval goldens use."""
+    sources: dict[str, str] = {}
+    for name in datasets:
+        for line in (GOLDEN_DIR / f"{name}.jsonl").read_text().splitlines():
+            if line.strip():
+                src = json.loads(line)["source_file"]
+                # Ingestion titles a document by its file stem; the eval manifest relies on it too.
+                sources[Path(src).stem.lower()] = src
+    return sources
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--db", default=str(REPO_ROOT / ".luminary/luminary.db"))
-    ap.add_argument("--per-kind", type=int, default=7, help="passages per content type")
+    ap.add_argument(
+        "--per-kind",
+        type=int,
+        default=7,
+        help="passages per content type, or per document with --corpus",
+    )
     ap.add_argument("--cards-per-passage", type=int, default=3)
+    ap.add_argument("--corpus", help="comma-separated retrieval datasets; builds a portable golden")
     ap.add_argument("--out", default=str(GOLDEN_DIR / "flashcards.jsonl"))
     args = ap.parse_args()
 
     con = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
     rng = random.Random(SEED)
+    corpus = _corpus_sources(args.corpus.split(",")) if args.corpus else None
 
-    by_kind: dict[str, list[tuple[str, str, str]]] = {}
+    by_kind: dict[str, list[tuple[str, str, str, str, str]]] = {}
     for doc_id, title, kind, path in _documents(con):
+        if corpus is not None and title.lower() not in corpus:
+            continue
+        # Five documents are too few to balance by kind, so a corpus golden balances by document.
+        group = title if corpus is not None else kind
         for text in _passages(con, doc_id):
-            by_kind.setdefault(kind, []).append((title, doc_id, path, text))
+            by_kind.setdefault(group, []).append((title, doc_id, path, text, kind))
 
     rows: list[dict] = []
-    for kind in sorted(by_kind):
-        pool = by_kind[kind]
+    for group in sorted(by_kind):
+        pool = by_kind[group]
         # Spread across documents within a kind rather than taking whatever the
         # longest document happens to contribute.
-        by_doc: dict[str, list[tuple[str, str, str, str]]] = {}
+        by_doc: dict[str, list[tuple[str, str, str, str, str]]] = {}
         for item in pool:
             by_doc.setdefault(item[0], []).append(item)
         titles = sorted(by_doc)
         rng.shuffle(titles)
-        picked: list[tuple[str, str, str, str]] = []
+        picked: list[tuple[str, str, str, str, str]] = []
         # Shuffled once per document, then consumed in order. Choosing from the
         # whole pool each round could pick the same passage twice, which
         # double-weights it in a dataset built to be balanced.
@@ -105,21 +132,23 @@ def main() -> int:
                 if len(picked) >= args.per_kind:
                     break
 
-        for title, doc_id, path, text in picked:
-            rows.append(
-                {
-                    "question": f"Generate flashcards from a {kind} passage ({title})",
-                    # The document is named by id, not by path: these passages
-                    # come out of the live index, so the row must point at what
-                    # is already ingested rather than ask the runner to ingest a
-                    # copy from disk.
-                    "source_document_id": doc_id,
-                    "source_file": path,
-                    "chunk_id_or_text": text,
-                    "expected_card_count": args.cards_per_passage,
-                    "content_type": kind,
-                }
-            )
+        for title, doc_id, path, text, kind in picked:
+            row = {
+                "question": f"Generate flashcards from a {kind} passage ({title})",
+                "chunk_id_or_text": text,
+                "expected_card_count": args.cards_per_passage,
+                "content_type": kind,
+            }
+            if corpus is not None:
+                # No id: the runner resolves the file in whichever library it is pointed at.
+                row["source_file"] = corpus[title.lower()]
+            else:
+                # The document is named by id, not by path: these passages
+                # come out of the live index, so the row must point at what
+                # is already ingested rather than ask the runner to ingest a
+                # copy from disk.
+                row |= {"source_document_id": doc_id, "source_file": path}
+            rows.append(row)
 
     if not rows:
         print("no passages matched the selection rules", file=sys.stderr)
@@ -141,8 +170,10 @@ def main() -> int:
             "min_chars": MIN_CHARS,
             "max_chars": MAX_CHARS,
             "edge_trim": EDGE_TRIM,
+            "corpus": args.corpus,
         },
         "rows": len(rows),
+        "row_provenance": "sampled",
         "by_content_type": {
             kind: sum(1 for r in rows if r["content_type"] == kind)
             for kind in sorted({r["content_type"] for r in rows})
