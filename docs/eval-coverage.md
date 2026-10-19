@@ -362,6 +362,11 @@ and `topic_continuation` rows, because the first question pulls retrieval back t
 opening passage. With rerank off every arm drops (raw 0.4500, standalone 0.6833), so the gap is
 in the query, not the ranking.
 
+**`chat` is not reproducible from one run.** On qwen3.5:4b it read 0.60 (36/60); an earlier run
+read 29 of the 59 rows it completed, with 11 rows flipping between the two. The replayed history
+holds the model's own answers, which vary, and the classifier and rewrite read them. Compare
+`chat` only as a spread over several runs; the search arms are deterministic.
+
 **The ceiling is honest only if the rewrite cannot see the passage.** A rewrite may name what a
 reference resolves to; it may not borrow the passage's wording or state the answer.
 `test_a_followup_rewrite_resolves_references_without_borrowing_the_passage` holds this, with each
