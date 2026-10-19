@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -58,6 +59,24 @@ def generate_cards(backend_url: str, document_id: str, row: dict) -> list[dict]:
     return resp.json()
 
 
+def card_rows(
+    dataset: str, index: int, row: dict, document_id: str, cards: list[dict]
+) -> list[dict]:
+    """A row's cards in the card_quality format, so the judge panel and rating page read them."""
+    doc = Path(row["source_file"]).stem if row.get("source_file") else document_id
+    return [
+        {
+            "card_id": f"{dataset}:{index}:{j}",
+            "doc": doc,
+            "chapter": "",
+            "question": card.get("question", ""),
+            "answer": card.get("answer", ""),
+            "passage": row["chunk_id_or_text"],
+        }
+        for j, card in enumerate(cards)
+    ]
+
+
 def print_table(dataset: str, metrics: dict) -> None:
     print(f"\n{'=' * 58}")
     print(f"  Flashcard evaluation -- dataset={dataset}")
@@ -90,6 +109,14 @@ def main() -> None:
         ),
     )
     parser.add_argument("--assert-thresholds", action="store_true")
+    parser.add_argument(
+        "--save-cards",
+        type=Path,
+        help=(
+            "Write every generated card with its passage as JSONL (overwritten), in the format "
+            "evals/card_quality/judge_panel.py and rating_page.py read."
+        ),
+    )
     args = parser.parse_args()
 
     rows = load_golden(args.dataset, FlashcardGoldenEntry)
@@ -102,7 +129,8 @@ def main() -> None:
     skipped: list[str] = []
     failed_rows: list[str] = []
 
-    for row in rows:
+    saved = args.save_cards.open("w") if args.save_cards else None
+    for index, row in enumerate(rows):
         # Rows sampled from the live index name their document; only a row that
         # does not gets ingested from disk.
         doc_id = row.get("source_document_id") or ensure_ingested(
@@ -121,6 +149,10 @@ def main() -> None:
             failed_rows.append(f"{type(exc).__name__}: {str(exc)[:80]}")
             print(f"WARNING: row failed ({type(exc).__name__}), continuing", file=sys.stderr)
             continue
+        if saved:
+            for card in card_rows(args.dataset, index, row, doc_id, cards):
+                saved.write(json.dumps(card) + "\n")
+            saved.flush()
         requested += int(row.get("expected_card_count") or 1)
         delivered += len(cards)
         scored = {"cards": len(cards), "requested": int(row.get("expected_card_count") or 1)}
@@ -135,6 +167,9 @@ def main() -> None:
             )
         per_row.append(scored)
         per_kind.setdefault(row.get("content_type") or "?", []).append(scored)
+    if saved:
+        saved.close()
+        print(f"Cards saved to {args.save_cards}")
 
     if not per_row:
         print("ERROR: no rows produced cards", file=sys.stderr)
