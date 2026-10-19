@@ -15,12 +15,12 @@ whatever retrieval returned.
 | Stage | Measured by | Corpus | Gated |
 |---|---|---|---|
 | Ingestion | `make eval-ingest` — retention, duplication | all 12 manifest documents | yes |
-| Retrieval | `make eval` — HR@5, MRR, nDCG@10 | book, paper, legal, play, study | yes |
-| Generation | `make eval-gen` — faithfulness, answer relevance, citation support, citation coverage, answer rate | book, paper | yes |
+| Retrieval | `make eval` — HR@5, MRR, nDCG@10, on the dev library as it was ingested. `make eval-full`: the same on a fresh library | book, paper, legal, play, study | yes |
+| Generation | `make eval-gen` — faithfulness, answer relevance, citation support, citation coverage, answer rate. `make eval-gen-full`: the same on a fresh library | book, paper | yes |
 | Intent routing | `make eval-intent` — routing accuracy, per-route P/R | `golden/intents.jsonl` 50 rows (gated) + `intents_adversarial.jsonl` 29 + `intents_heldout.jsonl` 160 rows (report-only); the heuristic's confident claims on all three are gated in pytest | yes / report-only |
 | Topics | `make eval-topics` | d2l | yes |
 | Summaries | `make eval-summary` — theme coverage, grounding (HHEM), conciseness, hallucination. Regenerates each summary and fails any row the stream does not report as `generated`; `MODE=detailed` is assembled from section summaries, so it runs only with `SCORE_STORED=1` and is filed as `stored`, never under a model | `golden/summaries.jsonl` | yes |
-| Flashcards | `make eval-flashcards` — generation rate, repairs, factuality/atomicity/clarity | `golden/flashcards.jsonl`, 35 rows over 5 content types | yes |
+| Flashcards | `make eval-flashcards` — generation rate, repairs, factuality/atomicity/clarity, on the dev library (its rows name dev document ids). `make eval-cards-full`: the same on a fresh library, plus the grounding states of the cards ingestion wrote (report-only) | `golden/flashcards.jsonl`, 35 rows over 5 content types; `golden/flashcards_corpus.jsonl`, 30 rows over the 5 retrieval documents | yes |
 | Corpus routing | `make eval-routing` — route@1, route@5, unscoped HR@5 | book, paper, legal, play, study | baseline only, no floor |
 | Chat-graph routing | `make eval-chat-routing` — generation quality (citation support/coverage) through `/qa`, not `/search` | `golden/retrieval_and_memory_tutorial.jsonl`, 45 rows, one document | report-only, see below |
 | Follow-up retrieval | `make eval-followups` — HR@5/MRR of a follow-up as typed, with the previous turn prepended, and as a hand rewrite; `CHAT=1` adds the live `/qa` path | `golden/followups.jsonl`, 60 rows over d2l and the Sutton & Barto PDF | baseline only, see below |
@@ -31,6 +31,22 @@ whatever retrieval returned.
 | Model choice | `make eval-matrix MODELS=a,b` — the model-sensitive runners across candidates, structural tier only | whatever the chosen tasks use | `--assert-separation` gates the instrument, not a model |
 | Generation variance | `make eval-variance` — mean/sd over N runs, gated on the mean | any dataset | on demand |
 | HTTP contract | `make smoke` — ~160 scripts | live backend | yes, separately |
+
+## Which library a number describes
+
+`make eval`, `make eval-gen` and `make eval-flashcards` query whatever the running backend holds. On
+the dev library that is the corpus as an older build ingested it, so a change to parsing,
+classification, chunking or sections never reaches them, and their numbers stay put through it.
+`make eval-full`, `make eval-gen-full` and `make eval-cards-full` start their own backend on an
+empty library, pin the chat model before ingesting (ingestion writes chapter cards with it), ingest
+the whole corpus with this checkout before scoring anything, and delete the library afterwards
+(`KEEP=1` keeps it). Runs that measure a model also wait for background enrichment to drain. Their
+history goes to `.luminary-eval/`, apart from the dev library's: the two are different corpora.
+`EVAL_BACKEND=<checkout>/backend` runs the same harness against another build, which is how a
+release is compared with master.
+
+The harness uploads with no `content_type`, as the upload dialog does: a supplied type is final, so
+a forced one measures a corpus no user would have.
 
 ## What is not covered
 

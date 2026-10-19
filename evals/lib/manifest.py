@@ -26,6 +26,8 @@ GOLDEN_DIR = Path(__file__).resolve().parent.parent / "golden"
 _STATE_DIR = os.environ.get("LUMINARY_EVAL_STATE_DIR")
 MANIFEST_PATH = (Path(_STATE_DIR) if _STATE_DIR else GOLDEN_DIR) / "manifest.json"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+# DATA/ is not in git, so a worktree reads the corpus from the main checkout.
+SOURCE_ROOT = Path(os.environ.get("LUMINARY_EVAL_SOURCE_ROOT") or REPO_ROOT)
 
 
 def resolve_backend_base(backend_url: str) -> str:
@@ -117,17 +119,18 @@ def lookup_document_by_filename(backend_url: str, source_file: str) -> str | Non
 
 def ingest_document(backend_url: str, source_file: str) -> str | None:
     """Ingest a source file via POST /ingest and wait for completion."""
-    file_path = REPO_ROOT / source_file
+    file_path = SOURCE_ROOT / source_file
     if not file_path.exists():
         print(f"  ERROR: source file not found: {file_path}", file=sys.stderr)
         return None
 
     try:
         with file_path.open("rb") as fh:
+            # No content_type: a supplied one skips classification, so every document
+            # would be chunked as a book rather than as what a user's upload becomes.
             resp = httpx.post(
                 f"{backend_url}/documents/ingest",
-                data={"content_type": "book"},
-                files={"file": (file_path.name, fh, "text/plain")},
+                files={"file": (file_path.name, fh, "application/octet-stream")},
                 timeout=30.0,
             )
         resp.raise_for_status()
@@ -161,7 +164,8 @@ def ingest_document(backend_url: str, source_file: str) -> str | None:
         if stage != last_stage:
             last_stage, last_change = stage, time.time()
         if stage == "complete":
-            print(f"  Ingestion complete: {source_file} -> {doc_id}")
+            kind = httpx.get(f"{backend_url}/documents/{doc_id}", timeout=10.0).json()
+            print(f"  Ingestion complete: {source_file} -> {doc_id} ({kind.get('content_type')})")
             return doc_id
         if stage == "error":
             print(f"  ERROR: ingestion failed for {source_file}", file=sys.stderr)

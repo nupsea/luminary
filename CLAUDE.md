@@ -37,7 +37,8 @@ Prose versions in this repo have drifted before.
 | `make lint` | ruff + tsc + eslint + manifest checks |
 | `make test` | `pytest` (backend) |
 | `make smoke` | `scripts/smoke/all.sh` — ~160 numbered HTTP contract scripts; needs a running backend |
-| `make eval` | retrieval quality vs. committed thresholds; needs a running backend |
+| `make eval` | retrieval quality vs. committed thresholds, on the running backend's library as it was ingested |
+| `make eval-full` / `eval-gen-full` / `eval-cards-full` | retrieval / answers / cards on a fresh library this checkout ingests itself; the ones that see an ingestion change. `evals/README.md` picks the run |
 | `make db-revision m="…"` | generate an Alembic revision (never raw `alembic revision` — see I-23) |
 | `make db-migrate` | apply migrations to the dev database |
 | `make regen-api-types` | regenerate `frontend/src/types/api.ts` from the OpenAPI schema |

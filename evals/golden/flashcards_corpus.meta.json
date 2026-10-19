@@ -1,0 +1,20 @@
+{
+  "name": "flashcards_corpus",
+  "generated_at": "2026-10-19T03:52:23.643530+00:00",
+  "generator_model": null,
+  "selection": {
+    "seed": 20260815,
+    "per_kind": 6,
+    "cards_per_passage": 3,
+    "min_chars": 400,
+    "max_chars": 1500,
+    "edge_trim": 0.1,
+    "corpus": "book,paper,legal,play,study"
+  },
+  "rows": 30,
+  "row_provenance": "sampled",
+  "by_content_type": {
+    "book": 18,
+    "tech_book": 12
+  }
+}

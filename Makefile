@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-followups eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-reader-switch verify-note-nav luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-full eval-gen-full eval-cards-full eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-followups eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards golden-flashcards-corpus eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-reader-switch verify-note-nav luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
 
 # install.sh puts uv (and Node on Linux) in ~/.local/bin, which a shell opened
 # before the install does not have on PATH.
@@ -20,6 +20,8 @@ BACKEND_URL ?= http://localhost:7820
 # The vision model is resolved by the backend (Settings), never by the eval, and
 # is recorded per run; `make eval-models` prints both before anything runs.
 EVAL_TEXT_MODEL ?= ollama/qwen2.5:14b-instruct
+# The model the *-full targets pin on their fresh library: the shipped default (config.py).
+EVAL_CHAT_MODEL ?= ollama/qwen3.5:4b
 
 # eval-false-premise measures the answering model; its floor was set on the shipped default.
 FALSE_PREMISE_MODEL ?= ollama/qwen3.5:4b
@@ -575,6 +577,21 @@ eval-gen:
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset book --backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) --check-citations --assert-thresholds
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset paper --backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) --check-citations --assert-thresholds
 
+# `eval`, `eval-gen` and `eval-flashcards` score the dev library as it was ingested,
+# so an ingestion change never reaches them. These start their own backend on an
+# empty library, ingest the corpus with this checkout's code, then measure. No
+# backend needed. EVAL_BACKEND=<checkout>/backend measures another build with this harness.
+EVAL_FULL = EVAL_TEXT_MODEL=$(EVAL_TEXT_MODEL) EVAL_CHAT_MODEL=$(EVAL_CHAT_MODEL) bash scripts/eval_full.sh
+
+eval-full:
+	$(EVAL_FULL) retrieval
+
+eval-gen-full:
+	$(EVAL_FULL) generation
+
+eval-cards-full:
+	$(EVAL_FULL) cards
+
 # Chat-graph routing holdout (I-55): 45 hand-authored rows over one document,
 # covering pure keyword/comparison/semantic-intent phrasing and every pairwise
 # combination, relational, summary/global and mixed-grounding questions. Unlike
@@ -671,6 +688,13 @@ eval-flashcards:
 golden-flashcards:
 	$(UV) run --project $(CURDIR)/backend python evals/build_flashcard_golden.py \
 		--per-kind $(or $(PER_KIND),7)
+
+# The portable golden eval-cards-full runs: passages from the retrieval corpus, rows
+# naming DATA files. DB= is a library that corpus was ingested into (KEEP=1 make eval-full).
+golden-flashcards-corpus:
+	$(UV) run --project $(CURDIR)/backend python evals/build_flashcard_golden.py \
+		--db $(DB) --corpus book,paper,legal,play,study --per-kind $(or $(PER_DOC),6) \
+		--out evals/golden/flashcards_corpus.jsonl
 
 # Cross-document routing: does retrieval pick the right DOCUMENT, unscoped, the
 # way real "All documents" chat runs. `make eval` pins each row to its source,
