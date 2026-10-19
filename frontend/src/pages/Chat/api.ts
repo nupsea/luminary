@@ -65,5 +65,6 @@ export function persistedToChatMessage(p: PersistedMessage): ChatMessage {
     source_citations: (extra["source_citations"] as SourceCitation[] | undefined) ?? undefined,
     transparency: (extra["transparency"] as TransparencyInfo | undefined) ?? undefined,
     direct: (extra["direct"] as boolean | undefined) ?? undefined,
+    stopped: (extra["stopped"] as ChatMessage["stopped"]) ?? undefined,
   }
 }

@@ -31,6 +31,7 @@ from app.services.qa import (
     _resolve_marker_citations,
     _split_response,
 )
+from app.services.repetition import repetition_cut
 from app.telemetry import trace_chain
 from app.types import ScoredChunk
 
@@ -44,6 +45,7 @@ NO_MODEL = "none"
 # the stream then emits exactly {"card": ...} and {"done": true}, no tokens.
 CARD_PREFIX = "__card__"
 _STOP_MARKERS = ('{"citations"', '{"answer"', NOT_FOUND_SENTINEL)
+_REPETITION_CHECK_CHARS = 200
 _SOCRATIC_PREFIX = (
     "Before answering, start with one probing question (1-2 sentences) "
     "that activates the user's prior knowledge about this topic. "
@@ -171,6 +173,7 @@ class _Generation:
 
     collected: list[str]
     ttft_seconds: float | None = None
+    stopped: str | None = None
 
 
 def _first_marker(text: str) -> int | None:
@@ -193,6 +196,7 @@ async def _stream_prose(token_gen, gen: _Generation, t_llm: float) -> AsyncGener
     """
     text = ""
     emitted = 0
+    next_check = _REPETITION_CHECK_CHARS
     async for token in token_gen:
         _record_token(gen, token, t_llm)
         text += token
@@ -203,6 +207,17 @@ async def _stream_prose(token_gen, gen: _Generation, t_llm: float) -> AsyncGener
             async for rest in token_gen:  # drained so the full text can be parsed
                 gen.collected.append(rest)
             return
+        if len(text) >= next_check:
+            next_check = len(text) + _REPETITION_CHECK_CHARS
+            loop_at = repetition_cut(text)
+            if loop_at is not None:
+                # Closing the stream is what stops the model generating; done replaces
+                # the streamed copies with the text before the loop.
+                await token_gen.aclose()
+                logger.warning("stream_answer: model looped; stopped at %d chars", len(text))
+                gen.collected = [text[:loop_at].rstrip()]
+                gen.stopped = "repetition"
+                return
         safe = len(text) - _marker_prefix_holdback(text, _STOP_MARKERS)
         if safe > emitted:
             yield _sse({"token": text[emitted:safe]})
@@ -581,11 +596,19 @@ class QAService:
                 result, answer.served_model, answer.gen.ttft_seconds, req.t_start, req.direct
             ),
         }
-        if req.direct:
-            final["direct"] = True
+        final.update(_answer_flags(req, answer))
         if req.include_context:
             final.update(_eval_context(result, answer.grounded, req.direct))
         return _sse(final)
+
+
+def _answer_flags(req: "_Request", answer: "_Answer") -> dict:
+    flags: dict = {}
+    if req.direct:
+        flags["direct"] = True
+    if answer.gen.stopped:
+        flags["stopped"] = answer.gen.stopped
+    return flags
 
 
 @dataclass
