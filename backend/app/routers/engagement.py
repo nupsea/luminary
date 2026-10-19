@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,11 +18,6 @@ from app.services.time_on_task_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/engagement", tags=["engagement"])
-
-
-class FocusStartRequest(BaseModel):
-    duration_minutes: int = 25
-    session_type: str = "study"
 
 
 class HeartbeatRequest(BaseModel):
@@ -42,13 +37,6 @@ class HeartbeatResponse(BaseModel):
 
     seconds_credited: int
     heartbeat_seconds: int
-
-
-class FocusSessionResponse(BaseModel):
-    id: str
-    started_at: str
-    planned_duration_minutes: int
-    session_type: str
 
 
 # Streak endpoints
@@ -111,9 +99,6 @@ async def get_recent_achievements(
     return await svc.get_recent_achievements(days)
 
 
-# Focus session endpoints
-
-
 @router.post("/heartbeat")
 async def heartbeat(
     req: HeartbeatRequest,
@@ -134,54 +119,6 @@ async def heartbeat(
         seconds_credited=credited,
         heartbeat_seconds=HEARTBEAT_SECONDS,
     )
-
-
-@router.post("/focus/start")
-async def start_focus(
-    req: FocusStartRequest,
-    session: AsyncSession = Depends(get_db),
-) -> FocusSessionResponse:
-    svc = EngagementService(session)
-    fs = await svc.start_focus_session(req.duration_minutes, req.session_type)
-    return FocusSessionResponse(
-        id=fs.id,
-        started_at=fs.started_at.isoformat(),
-        planned_duration_minutes=fs.planned_duration_minutes,
-        session_type=fs.session_type,
-    )
-
-
-@router.post("/focus/{session_id}/complete")
-async def complete_focus(
-    session_id: str,
-    session: AsyncSession = Depends(get_db),
-) -> dict:
-    svc = EngagementService(session)
-    try:
-        return await svc.complete_focus_session(session_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.post("/focus/{session_id}/cancel")
-async def cancel_focus(
-    session_id: str,
-    session: AsyncSession = Depends(get_db),
-) -> dict:
-    svc = EngagementService(session)
-    try:
-        return await svc.cancel_focus_session(session_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.get("/focus/today")
-async def get_today_sessions(
-    tz_offset_minutes: int = Query(default=0, description=_TZ_OFFSET_DESC),
-    session: AsyncSession = Depends(get_db),
-) -> list[dict]:
-    svc = EngagementService(session, tz_offset_minutes=tz_offset_minutes)
-    return await svc.get_today_sessions()
 
 
 @router.get("/focus/stats")

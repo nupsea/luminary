@@ -23,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.exceptions import LuminaryError
 from app.models import PomodoroSessionModel
 from app.repos.pomodoro_repo import PomodoroRepo
+from app.services.engagement_service import EngagementService
+from app.types import as_utc
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +69,6 @@ class InvalidTransition(PomodoroError):
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-def _as_utc(dt: datetime) -> datetime:
-    """SQLite returns tz-naive datetimes; treat them as UTC for arithmetic."""
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 class PomodoroService:
@@ -147,7 +144,7 @@ class PomodoroService:
         if row.status != "paused":
             raise InvalidTransition(session_id, row.status, "resume")
         if row.paused_at is not None:
-            elapsed = (_now() - _as_utc(row.paused_at)).total_seconds()
+            elapsed = (_now() - as_utc(row.paused_at)).total_seconds()
             if elapsed > 0:
                 row.pause_accumulated_seconds += int(elapsed)
         row.paused_at = None
@@ -162,12 +159,13 @@ class PomodoroService:
             raise InvalidTransition(session_id, row.status, "complete")
         # Roll any pending pause into the accumulator before completing.
         if row.status == "paused" and row.paused_at is not None:
-            elapsed = (_now() - _as_utc(row.paused_at)).total_seconds()
+            elapsed = (_now() - as_utc(row.paused_at)).total_seconds()
             if elapsed > 0:
                 row.pause_accumulated_seconds += int(elapsed)
             row.paused_at = None
         row.status = "completed"
         row.completed_at = _now()
+        await EngagementService(self._session).award_focus_session_xp(row.id)
         await self._session.commit()
         await self._session.refresh(row)
         return row

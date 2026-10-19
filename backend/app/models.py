@@ -191,9 +191,7 @@ class FlashcardModel(Base):
     # A card written for a document deleted mid-generation fails the key, never orphans (#242).
     document_id: Mapped[str | None] = mapped_column(
         String,
-        ForeignKey(
-            "documents.id", name="fk_flashcards_document_id_documents", ondelete="CASCADE"
-        ),
+        ForeignKey("documents.id", name="fk_flashcards_document_id_documents", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
@@ -1483,28 +1481,8 @@ class AchievementModel(Base):
     )
 
 
-class FocusSessionModel(Base):
-    """A timed focus session (Pomodoro-style)."""
-
-    __tablename__ = "focus_sessions"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(UTC)
-    )
-    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    planned_duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=25)
-    actual_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    session_type: Mapped[str] = mapped_column(String(20), nullable=False, default="study")
-    completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    xp_awarded: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(UTC)
-    )
-
-
 class PomodoroSessionModel(Base):
-    """a Pomodoro focus interval owned by the global header timer.
+    """A Pomodoro focus interval owned by the global header timer; the one focus-session record.
 
     Status state machine: active -> paused -> active -> completed | abandoned.
     goal_id is a free-form string until adds the learning_goals FK.
