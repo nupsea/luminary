@@ -23,6 +23,8 @@ from app.services.qa import (
     QA_CREATIVE_SYSTEM_PROMPT,
     QA_CREATIVE_TEMPERATURE,
     QA_DIRECT_SYSTEM_PROMPT,
+    QA_FACTUAL_SYSTEM_PROMPT,
+    QA_SYSTEM_PROMPT,
     _drop_ungrounded_citations,
     _enrich_citation_titles,
     _fill_citation_locations,
@@ -147,10 +149,20 @@ def _card_events(raw_answer: str) -> list[str]:
     return [_sse({"card": card_payload}), _sse({"done": True})]
 
 
+def _documents_only(system_prompt: str, suggested: bool) -> str:
+    """A suggested question is answered from the documents only (#66).
+
+    The product invited it; a general-knowledge answer would render under its source chips.
+    """
+    if suggested and system_prompt == QA_FACTUAL_SYSTEM_PROMPT:
+        return QA_SYSTEM_PROMPT
+    return system_prompt
+
+
 def _system_prompt_for(
-    result: dict, direct: bool, creative: bool, socratic: bool
+    result: dict, direct: bool, creative: bool, socratic: bool, suggested: bool = False
 ) -> tuple[str, float | None]:
-    system_prompt = result.get("_system_prompt") or ""
+    system_prompt = _documents_only(result.get("_system_prompt") or "", suggested)
     temperature: float | None = None
     if direct:
         system_prompt = QA_DIRECT_SYSTEM_PROMPT
@@ -435,13 +447,22 @@ class QAService:
         creative: bool = False,
         direct: bool = False,
         include_context: bool = False,
+        suggested: bool = False,
     ) -> AsyncGenerator[str]:
         """Async generator of SSE events: token*, then done (or error).
 
         Every exception becomes an SSE error event so the stream is never silently dropped.
         """
         req = _Request(
-            question, document_ids, scope, model, socratic, creative, direct, include_context
+            question,
+            document_ids,
+            scope,
+            model,
+            socratic,
+            creative,
+            direct,
+            include_context,
+            suggested=suggested,
         )
         try:
             req.store_model = _store_model_for(model)
@@ -509,7 +530,7 @@ class QAService:
             yield _sse({"type": "sources", "source_citations": early_sources})
 
         system_prompt, temperature = _system_prompt_for(
-            result, req.direct, req.creative, req.socratic
+            result, req.direct, req.creative, req.socratic, req.suggested
         )
         try:
             t_llm = time.perf_counter()
@@ -621,6 +642,7 @@ class _Request:
     creative: bool
     direct: bool
     include_context: bool
+    suggested: bool = False
     store_model: str = ""
     t_start: float = field(default_factory=time.perf_counter)
 

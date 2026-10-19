@@ -435,7 +435,10 @@ export function ChatConversation({
     ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`
   }
 
-  async function sendMessage(question: string, opts?: { reuseUserTurn?: boolean }) {
+  async function sendMessage(
+    question: string,
+    opts?: { reuseUserTurn?: boolean; suggested?: boolean },
+  ) {
     if (!question.trim() || isStreaming) return
     setInput("")
     if (textareaRef.current) textareaRef.current.style.height = "auto"
@@ -528,6 +531,7 @@ export function ChatConversation({
           web_enabled: webEnabled,
           creative: creativeEnabled,
           direct: directEnabled,
+          suggested: opts?.suggested || undefined,
         }),
       })
       if (!res.ok || !res.body) throw new Error("QA request failed")
@@ -1207,7 +1211,7 @@ export function ChatConversation({
         effectiveDocId && (
           <SuggestionPills
             documentId={effectiveDocId}
-            onSuggest={(text) => void sendMessage(text)}
+            onSuggest={(text) => void sendMessage(text, { suggested: true })}
           />
         )}
 

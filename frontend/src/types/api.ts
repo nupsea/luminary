@@ -10362,6 +10362,11 @@ export interface components {
              * @default false
              */
             include_context: boolean;
+            /**
+             * Suggested
+             * @default false
+             */
+            suggested: boolean;
         };
         /** ReadingPositionResponse */
         ReadingPositionResponse: {

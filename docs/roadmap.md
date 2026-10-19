@@ -545,7 +545,10 @@ no word stem with it at recall@1 0.64 and @5 0.79, measured on short notes only 
 (PR #288, 0.16.0).** Over two 200-question runs per arm on 50 documents, questions answered "not in
 the text" fell from 13.2% and 13.0% to 11.0% and 8.8%. That flag is a phrase match; a hand-read of one
 run found about 16 truly unanswerable questions before and 13 after, so the effect is real in
-direction and small. #66 stays open. The same bar covers
+direction and small. A suggested question is answered from the documents only, never from general
+knowledge: on 11 factual questions, three runs each, general-knowledge answers under source chips went
+from 7, 7 and 6 to none, and real answers without a citation stayed at 0, 0 and 1. #66 stays open:
+an answer saying the text does not cover the question still shows source chips. The same bar covers
 Ask on a false premise (#158), web chunk hygiene (#159) and flashcard quality:
 0.53 of delivered cards are good, and no checker applied after generation lifts that above 0.62 (#191).
 A prompt that asks for a reason only where the text states one, plus a check that rejects unnamed
