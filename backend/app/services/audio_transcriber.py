@@ -8,6 +8,7 @@ import logging
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
+from typing import NamedTuple
 
 from app.config import get_settings
 from app.exceptions import ModelNotDownloaded
@@ -21,25 +22,86 @@ def _cache_dir() -> Path:
     return machine_root() / "models" / "whisper"
 
 
-def weights_cached() -> bool:
-    """Whether the configured Whisper weights are on disk. Never touches the network."""
+_MB = 1024**2
+
+
+class DictationModel(NamedTuple):
+    repo_id: str
+    size_bytes: int
+    trade_off: str
+
+
+# A dictated answer lasts seconds, so it can afford a larger model than an hour of
+# imported audio. The user picks it; imports stay on `WHISPER_MODEL_SIZE`.
+DICTATION_MODELS: dict[str, DictationModel] = {
+    "base": DictationModel(
+        "Systran/faster-whisper-base",
+        145 * _MB,
+        "The model audio import uses. Quick, but often mishears accents.",
+    ),
+    "small": DictationModel(
+        "Systran/faster-whisper-small",
+        485 * _MB,
+        "Much better with accents, and still quick on a short answer.",
+    ),
+    "large-v3-turbo": DictationModel(
+        "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+        1620 * _MB,
+        "Close to Whisper's best with accents. A few seconds slower per answer, "
+        "and about 1.5 GB of memory while dictating.",
+    ),
+}
+
+
+def repo_dir(model_size: str) -> Path:
+    """The model's own entry in the Hugging Face cache, beside the other sizes."""
+    return _cache_dir() / f"models--{DICTATION_MODELS[model_size].repo_id.replace('/', '--')}"
+
+
+def _choice_file() -> Path:
+    return _cache_dir() / "dictation_model"
+
+
+def dictation_model() -> str:
+    """The Whisper model dictation uses: the user's choice, else the import model."""
+    try:
+        chosen = _choice_file().read_text().strip()
+    except OSError:
+        chosen = ""
+    return chosen if chosen in DICTATION_MODELS else get_settings().WHISPER_MODEL_SIZE
+
+
+def choose_dictation_model(model_size: str | None) -> None:
+    """Record the choice beside the weights: a machine's models serve every library."""
+    path = _choice_file()
+    if model_size is None:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(model_size)
+
+
+def weights_cached(model_size: str | None = None) -> bool:
+    """Whether these Whisper weights (default: the import model's) are on disk. Offline."""
     from faster_whisper.utils import download_model  # noqa: PLC0415
 
     try:
         download_model(
-            get_settings().WHISPER_MODEL_SIZE, local_files_only=True, cache_dir=str(_cache_dir())
+            model_size or get_settings().WHISPER_MODEL_SIZE,
+            local_files_only=True,
+            cache_dir=str(_cache_dir()),
         )
     except Exception:
         return False
     return True
 
 
-def fetch_weights() -> None:
-    """Download the configured Whisper weights: part of installing the component."""
+def fetch_weights(model_size: str | None = None) -> None:
+    """Download Whisper weights (default: the import model's) as part of an install."""
     from faster_whisper.utils import download_model  # noqa: PLC0415
 
     _cache_dir().mkdir(parents=True, exist_ok=True)
-    download_model(get_settings().WHISPER_MODEL_SIZE, cache_dir=str(_cache_dir()))
+    download_model(model_size or get_settings().WHISPER_MODEL_SIZE, cache_dir=str(_cache_dir()))
 
 
 class AudioTranscriber:
@@ -61,7 +123,7 @@ class AudioTranscriber:
                 local_files_only=True,
             )
         except Exception as exc:
-            if weights_cached():
+            if weights_cached(model_size):
                 raise
             raise ModelNotDownloaded(
                 f"The Whisper '{model_size}' model is not downloaded. "
@@ -138,8 +200,11 @@ class AudioTranscriber:
         return text, info.duration
 
 
-@lru_cache(maxsize=1)
-def get_audio_transcriber() -> AudioTranscriber:
-    from app.config import get_settings  # noqa: PLC0415
+def get_audio_transcriber(model_size: str | None = None) -> AudioTranscriber:
+    return _loaded(model_size or get_settings().WHISPER_MODEL_SIZE)
 
-    return AudioTranscriber(model_size=get_settings().WHISPER_MODEL_SIZE)
+
+# Two: the import model and the dictation model stay loaded side by side.
+@lru_cache(maxsize=2)
+def _loaded(model_size: str) -> AudioTranscriber:
+    return AudioTranscriber(model_size=model_size)

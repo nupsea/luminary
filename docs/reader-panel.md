@@ -133,6 +133,14 @@ below it. `ExplanationPanel`, `PracticePanel` and `FeynmanPanel` are faces, not 
 through `dictate`: beam search, VAD, and the UI language pinned, because detection on a few seconds
 of speech misreads English as another language. It is never primed with the question: Whisper then
 returns the question as the learner's answer on noisy audio.
+Dictation runs on its own Whisper model (`dictation_model()`), chosen by the user from
+`DICTATION_MODELS` when Speech to text is installed and in Settings; imports stay on
+`WHISPER_MODEL_SIZE`. A clip lasts seconds, so it can afford the larger model the import model's
+accent errors call for. The choice is a file beside the weights, switched only once they are on
+disk, and readable before the database is up.
+In a note, dictation lands at the caret (`insertDictationSpec`): one line, so a list item or table
+row survives; pipes escaped in a table; after the table when the caret is on its `|---|` row.
+Until the user has clicked or typed in the editor it appends, as the initial caret is not a choice.
 It needs the `transcription` component, which the installer may not carry, so the mic reads a
 `dictation` capability and is absent until it is installed. The macOS entitlements it needs are in
 `desktop-bundle.md`.

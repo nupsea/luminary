@@ -229,10 +229,10 @@ def hub_reachable(timeout: float = 5.0) -> bool:
 
 
 def downloaded_bytes(spec: ModelSpec) -> int:
-    return _dir_size(cache_dir(spec))
+    return dir_size(cache_dir(spec))
 
 
-def _dir_size(path: Path) -> int:
+def dir_size(path: Path) -> int:
     if not path.exists():
         return 0
     total = 0
@@ -299,7 +299,7 @@ def prefetch(to_fetch: list[ModelSpec], status=None) -> dict[str, str]:
     def _report() -> None:
         while not stop.wait(1.0):
             for spec in to_fetch:
-                status.set_progress(spec.key, _dir_size(cache_dir(spec)), spec.size_bytes)
+                status.set_progress(spec.key, dir_size(cache_dir(spec)), spec.size_bytes)
 
     reporter = threading.Thread(target=_report, name="prefetch-progress", daemon=True)
     reporter.start()

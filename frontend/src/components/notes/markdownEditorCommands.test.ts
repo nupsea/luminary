@@ -12,6 +12,7 @@ import {
   indentMarkdownSpec,
   insertBlockBreakSpec,
   insertBlockSpec,
+  insertDictationSpec,
   insertInlineSpec,
   moveBlockOrLineSpec,
   replaceSelectionSpec,
@@ -116,6 +117,58 @@ describe("insertInlineSpec", () => {
     const state = mdState("ab", 1)
     const next = apply(state, insertInlineSpec(state, "X"))
     expect(next.doc.toString()).toBe("aXb")
+  })
+})
+
+describe("insertDictationSpec", () => {
+  function dictate(doc: string, cursor: number, text: string): string {
+    const state = mdState(doc, cursor)
+    const spec = insertDictationSpec(state, text)
+    return spec ? apply(state, spec).doc.toString() : doc
+  }
+
+  it("lands at the caret, not the end of the note", () => {
+    const doc = "First paragraph.\n\nSecond paragraph."
+    expect(dictate(doc, "First paragraph.".length, "Added here.")).toBe(
+      "First paragraph. Added here.\n\nSecond paragraph.",
+    )
+  })
+
+  it("stays inside a list item instead of breaking the list", () => {
+    const doc = "- one\n- \n- three"
+    expect(dictate(doc, "- one\n- ".length, "Two\nlines spoken.")).toBe(
+      "- one\n- Two lines spoken.\n- three",
+    )
+  })
+
+  it("keeps a table row on one line and escapes pipes", () => {
+    const doc = "| a | b |\n|---|---|\n| x |  |"
+    const cell = doc.length - 2
+    expect(dictate(doc, cell, "either | or")).toBe("| a | b |\n|---|---|\n| x | either \\| or |")
+  })
+
+  it("puts text on the separator row after the table", () => {
+    const doc = "| a |\n|---|\n| x |\n\nAfter."
+    expect(dictate(doc, "| a |\n|-".length, "Spoken.")).toBe(
+      "| a |\n|---|\n| x |\n\nSpoken.\n\nAfter.",
+    )
+  })
+
+  it("drops the full stop when the sentence carries on, and spaces both sides", () => {
+    expect(dictate("The system handles data.", 11, "Quickly.")).toBe(
+      "The system Quickly handles data.",
+    )
+  })
+
+  it("keeps punctuation and pipes verbatim inside code", () => {
+    const doc = "```\ncode\n```"
+    expect(dictate(doc, "```\ncode".length, "a | b.")).toBe("```\ncode a | b.\n```")
+  })
+
+  it("replaces a selection", () => {
+    expect(insertDictationSpec(mdState("x", 0), "  ")).toBeNull()
+    const state = EditorState.create({ doc: "keep old keep", selection: { anchor: 5, head: 8 } })
+    expect(apply(state, insertDictationSpec(state, "New.")!).doc.toString()).toBe("keep New keep")
   })
 })
 

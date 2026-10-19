@@ -23,6 +23,7 @@ import {
   indentMarkdownSpec,
   insertBlockBreakSpec,
   insertBlockSpec,
+  insertDictationSpec,
   insertInlineSpec,
   moveBlockOrLineSpec,
   replaceSelectionSpec,
@@ -48,6 +49,8 @@ import { isWithheldImage, readShellClipboardImage } from "@/lib/noteAssets"
 export interface MarkdownEditorHandle {
   insertBlock: (markdown: string) => void
   insertInline: (text: string) => void
+  /** Dictated text at the caret; false when the user never placed one. */
+  insertDictation: (text: string) => boolean
   replaceSelection: (fn: (selected: string) => string) => void
   getSelection: () => string
   focus: () => void
@@ -530,6 +533,8 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
   ) {
     const hostRef = useRef<HTMLDivElement>(null)
     const viewRef = useRef<EditorView | null>(null)
+    // The initial caret sits at 0 without the user choosing it; dictation must not land there.
+    const caretPlaced = useRef(false)
     const noteEditorZoom = usePanelZoomStore((s) => s.getZoom("note-editor"))
     const fontSizeRoom = useRef(new Compartment()).current
     // The preview pane is a toggle, so live rendering has to be switchable on a
@@ -613,6 +618,13 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
             EditorView.domEventHandlers({
               scroll: () => {
                 latest.current.onScroll?.()
+              },
+              // Live widgets move the caret with untagged transactions, so the press is the signal.
+              mousedown: () => {
+                caretPlaced.current = true
+              },
+              keydown: () => {
+                caretPlaced.current = true
               },
               paste: (event, v) => {
                 const handler = latest.current.onPasteImage
@@ -732,6 +744,14 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
           v.dispatch(insertInlineSpec(v.state, text))
           v.focus()
         },
+        insertDictation: (text) => {
+          const v = viewRef.current
+          if (!v || !caretPlaced.current) return false
+          const spec = insertDictationSpec(v.state, text)
+          if (spec) v.dispatch(spec)
+          v.focus()
+          return true
+        },
         replaceSelection: (fn) => {
           const v = viewRef.current
           if (!v) return
@@ -754,6 +774,7 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
             selection: { anchor: docLine.from },
             effects: EditorView.scrollIntoView(docLine.from, { y: "start", yMargin: 8 }),
           })
+          caretPlaced.current = true
           v.focus()
         },
         lineCount: () => viewRef.current?.state.doc.lines ?? 0,

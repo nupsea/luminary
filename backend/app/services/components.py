@@ -52,7 +52,8 @@ from app.storage import machine_root
 
 logger = logging.getLogger(__name__)
 
-Kind = str  # "ollama_model" | "python_extra" | "tool" | "engine_runner" | "hf_model"
+# "ollama_model" | "python_extra" | "tool" | "engine_runner" | "hf_model" | "whisper_model"
+Kind = str
 
 
 @dataclass(frozen=True)
@@ -270,6 +271,7 @@ def _encoder_components() -> tuple[Component, ...]:
 # `qwen2.5vl:7b` missing and its install button pulled the generalist, after
 # which `requeue_skipped_jobs()` skipped the job again, forever.
 _MODEL_ID_PREFIX = "model:"
+_DICTATION_ID_PREFIX = "dictation:"
 
 
 def get_component(component_id: str) -> Component | None:
@@ -278,7 +280,51 @@ def get_component(component_id: str) -> Component | None:
             return comp
     if component_id.startswith(_MODEL_ID_PREFIX):
         return _component_for_registry_model(component_id[len(_MODEL_ID_PREFIX) :])
+    if component_id.startswith(_DICTATION_ID_PREFIX):
+        return _dictation_component(component_id[len(_DICTATION_ID_PREFIX) :])
     return None
+
+
+def _dictation_component(model_size: str) -> Component | None:
+    from app.services.audio_transcriber import DICTATION_MODELS  # noqa: PLC0415
+
+    known = DICTATION_MODELS.get(model_size)
+    if known is None:
+        return None
+    return Component(
+        id=f"{_DICTATION_ID_PREFIX}{model_size}",
+        label=f"Dictation model {model_size}",
+        description=known.trade_off,
+        kind="whisper_model",
+        ref=model_size,
+        size_bytes=known.size_bytes,
+        licence="MIT",
+        enables=("Voice dictation",),
+    )
+
+
+def _dictation_choices(transcription: Component) -> list[dict]:
+    """Each Whisper model dictation can use. Reads the disk: call off the loop (I-2)."""
+    from app.services.audio_transcriber import (  # noqa: PLC0415
+        DICTATION_MODELS,
+        dictation_model,
+        weights_cached,
+    )
+
+    selected = dictation_model()
+    # The weights check imports faster_whisper, absent until Speech to text is installed.
+    present = python_extras.packages_present(transcription)
+    return [
+        {
+            "model": size,
+            "size_bytes": known.size_bytes,
+            "trade_off": known.trade_off,
+            "recommended": size == "large-v3-turbo",
+            "selected": size == selected,
+            "installed": present and weights_cached(size),
+        }
+        for size, known in DICTATION_MODELS.items()
+    ]
 
 
 def _bare_model_name(model: str) -> str:
@@ -481,6 +527,8 @@ async def component_status() -> list[dict]:
         extra = {}
         if comp.id == "chat_model" and host.local_models:
             extra["choices"] = chat_model_choices(installed_models, host.ram_gb)
+        if comp.id == "transcription":
+            extra["dictation_choices"] = await asyncio.to_thread(_dictation_choices, comp)
 
         out.append(
             {
@@ -827,6 +875,56 @@ async def install_encoder_model(comp: Component) -> AsyncIterator[dict]:
     yield {"state": "ready", "detail": spec.repo_id}
 
 
+async def install_dictation_model(comp: Component) -> AsyncIterator[dict]:
+    """Install Speech to text if needed, download this model's weights, then dictate with it.
+
+    One step, so the choice can be made before Speech to text is installed.
+    """
+    from app.services import audio_transcriber  # noqa: PLC0415
+
+    transcription = get_component("transcription")
+    if transcription is not None and not await asyncio.to_thread(
+        python_extras.extra_installed, transcription
+    ):
+        async for event in python_extras.install_python_extra(transcription):
+            if event["state"] == "failed":
+                yield event
+                return
+            if event["state"] != "ready":
+                yield event
+
+    size = comp.ref
+    if not await asyncio.to_thread(audio_transcriber.weights_cached, size):
+        repo = audio_transcriber.repo_dir(size)
+        task = asyncio.ensure_future(asyncio.to_thread(audio_transcriber.fetch_weights, size))
+        while not task.done():
+            await asyncio.wait({task}, timeout=1.0)
+            yield {
+                "state": "downloading",
+                "detail": f"Whisper {size}",
+                "completed_bytes": min(model_prefetch.dir_size(repo), comp.size_bytes),
+                "total_bytes": comp.size_bytes,
+            }
+        if error := task.exception():
+            text = str(error)
+            yield {"state": "failed", "detail": network_errors.explain(text) or text[:300]}
+            return
+
+    # Switched only once the weights are on disk, so a failed download keeps the old model.
+    audio_transcriber.choose_dictation_model(size)
+    yield {"state": "ready", "detail": f"Dictation now uses Whisper {size}"}
+
+
+async def _remove_dictation_model(size: str) -> None:
+    from app.services import audio_transcriber  # noqa: PLC0415
+
+    if size == get_settings().WHISPER_MODEL_SIZE:
+        raise ValueError(f"Whisper {size} also transcribes imported audio, so it stays.")
+    if audio_transcriber.dictation_model() == size:
+        audio_transcriber.choose_dictation_model(None)
+    await asyncio.to_thread(shutil.rmtree, audio_transcriber.repo_dir(size), True)
+
+
 async def install_engine_runner(comp: Component) -> AsyncIterator[dict]:
     """Fetch an accelerator runner out of the release archive, beside the shipped ones."""
     source = engine_source()
@@ -895,6 +993,11 @@ async def install_component(component_id: str) -> AsyncIterator[dict]:
             yield event
         return
 
+    if comp.kind == "whisper_model":
+        async for event in install_dictation_model(comp):
+            yield event
+        return
+
     # Tools have no automated source yet: a build has to be chosen deliberately
     # because the licence travels with it. Report rather than guess.
     yield {"state": "failed", "detail": tool_install_advice(comp.ref)}
@@ -914,6 +1017,9 @@ async def remove_component(component_id: str) -> None:
             # the tokenizer base it shares.
             repo_dir = model_prefetch.cache_dir(spec) / f"models--{spec.repo_id.replace('/', '--')}"
             await asyncio.to_thread(shutil.rmtree, repo_dir, True)
+        return
+    if comp.kind == "whisper_model":
+        await _remove_dictation_model(comp.ref)
         return
     if comp.kind == "engine_runner":
         # Holds only what was unpacked into it.
