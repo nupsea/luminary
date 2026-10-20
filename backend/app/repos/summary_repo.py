@@ -187,6 +187,8 @@ class SummaryRepo:
         rows = await self.session.execute(
             select(DocumentModel.title, SummaryModel.content)
             .join(DocumentModel, DocumentModel.id == SummaryModel.document_id)
+            # The timestamp alone matched any mode written at the same instant.
+            .where(SummaryModel.mode == "executive")
             .join(
                 latest_subq,
                 (SummaryModel.document_id == latest_subq.c.document_id)

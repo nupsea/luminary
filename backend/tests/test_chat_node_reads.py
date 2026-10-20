@@ -167,3 +167,16 @@ async def test_a_document_s_auto_collection_notes(session):
     assert await collections.auto_collection_id("d1") == "col1"
     assert await collections.auto_collection_id("d2") is None
     assert await collections.note_ids("col1") == ["n1"]
+
+
+async def test_a_summary_of_another_mode_written_at_the_same_instant_is_not_executive(memory_db):
+    factory = async_sessionmaker(memory_db.engine, expire_on_commit=False)
+    async with factory() as s:
+        s.add(DocumentModel(id="d", title="D", format="txt", content_type="book", file_path="/d"))
+        s.add_all(
+            SummaryModel(id=mode, document_id="d", mode=mode, content=mode, created_at=T0)
+            for mode in ("executive", "detailed")
+        )
+        await s.commit()
+
+        assert await SummaryRepo(s).latest_executive_with_titles() == [("D", "executive")]
