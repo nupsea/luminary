@@ -91,7 +91,6 @@
     "app/services/parser.py"
   ],
   "sql_outside_repos": {
-    "app/scripts/reindex_entities.py": 2,
     "app/services/retriever.py": 4,
     "app/services/retriever_strategies.py": 2
   },

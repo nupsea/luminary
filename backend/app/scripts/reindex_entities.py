@@ -34,10 +34,8 @@ import logging
 import sys
 import uuid
 
-from sqlalchemy import text
-
 from app.database import get_session_factory
-from app.repos.document_repo import DocumentRepo
+from app.repos.document_repo import DocumentRepo, index_chunks_fts
 from app.workflows.ingestion import build_entity_tail
 
 logger = logging.getLogger(__name__)
@@ -190,29 +188,8 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
             batch = lancedb_rows[start : start + batch_size]
             await asyncio.to_thread(lancedb_svc.upsert_chunks, batch)
 
-        # Rebuild FTS5 rows (rowid-based delete + reinsert with concatenated text).
-        # rowid-based delete is always reliable for FTS5 with UNINDEXED cols.
-        await session.execute(
-            text(
-                "DELETE FROM chunks_fts WHERE rowid IN ("
-                "  SELECT rowid FROM chunks WHERE document_id = :doc_id"
-                ")"
-            ),
-            {"doc_id": doc_id},
-        )
-        await session.execute(
-            text(
-                "INSERT INTO chunks_fts(rowid, text, chunk_id, document_id) "
-                "SELECT rowid, "
-                "       text || CASE "
-                "         WHEN entities_text IS NOT NULL AND entities_text != '' "
-                "         THEN ' ' || entities_text "
-                "         ELSE '' END, "
-                "       id, document_id FROM chunks "
-                "WHERE document_id = :doc_id"
-            ),
-            {"doc_id": doc_id},
-        )
+        # The rows ingestion writes, header included: this script's own copy left it out.
+        await index_chunks_fts(session, doc_id)
         await session.commit()
 
     metrics["p95_entities_per_chunk"] = _percentile(per_chunk_counts, 95)
