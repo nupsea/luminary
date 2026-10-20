@@ -13,10 +13,8 @@ import json
 import logging
 import time
 
-from sqlalchemy import func, select
-
 from app.database import get_session_factory
-from app.models import DocumentModel
+from app.repos.document_repo import DocumentRepo
 from app.runtime.chat_nodes._shared import _chunk_to_dict, _read_rerank_enabled, _round_robin
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.llm import get_llm_service
@@ -98,13 +96,7 @@ async def _resolve_side_to_docs(side_name: str, scope_doc_ids: list[str] | None)
     # Document title search — catches cases where the side name appears in a title
     try:
         async with get_session_factory()() as session:
-            rows = await session.execute(
-                select(DocumentModel.id).where(
-                    func.lower(DocumentModel.title).contains(side_name.lower())
-                )
-            )
-            for row in rows:
-                doc_ids.add(row.id)
+            doc_ids.update(await DocumentRepo(session).ids_titled_like(side_name))
     except Exception:
         logger.warning(
             "_resolve_side_to_docs: title search failed for %r", side_name, exc_info=True

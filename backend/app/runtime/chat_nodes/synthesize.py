@@ -13,12 +13,10 @@ node returns {} so stream_answer() emits the existing answer.
 
 import logging
 
-from sqlalchemy import select
-
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models import DocumentModel, ImageModel
-from app.repos.document_repo import ChunkLocation, fetch_chunk_locations
+from app.repos.document_repo import ChunkLocation, DocumentRepo, fetch_chunk_locations
+from app.repos.image_repo import ImageRepo
 from app.runtime.chat_nodes._shared import _get_system_prompt
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.context_packer import pack_context_indexed, resolve_context_budget
@@ -77,14 +75,7 @@ async def _fetch_image_context(image_ids: list[str], doc_titles: dict[str, str])
     if not image_ids:
         return ""
     async with get_session_factory()() as session:
-        rows = await session.execute(
-            select(ImageModel).where(
-                ImageModel.id.in_(image_ids),
-                ImageModel.description.is_not(None),
-                ImageModel.image_type != "decorative",
-            )
-        )
-        images = list(rows.scalars().all())
+        images = await ImageRepo(session).described_by_ids(image_ids)
 
     if not images:
         return ""
@@ -108,10 +99,7 @@ async def _fetch_doc_titles_for_chunks(chunks_dicts: list[dict]) -> dict[str, st
     if not doc_ids:
         return {}
     async with get_session_factory()() as session:
-        rows = await session.execute(
-            select(DocumentModel.id, DocumentModel.title).where(DocumentModel.id.in_(doc_ids))
-        )
-        return {row.id: row.title for row in rows}
+        return await DocumentRepo(session).titles(doc_ids)
 
 
 async def _fetch_section_ids_and_pages_for_chunks(
@@ -151,13 +139,7 @@ async def _fetch_contradiction_context(doc_ids: list[str]) -> str:
         doc_years: dict[str, int | None] = {}
         try:
             async with get_session_factory()() as session:
-                rows = await session.execute(
-                    select(DocumentModel.id, DocumentModel.publication_year).where(
-                        DocumentModel.id.in_(list(all_doc_ids))
-                    )
-                )
-                for row in rows:
-                    doc_years[row.id] = row.publication_year
+                doc_years = await DocumentRepo(session).publication_years(list(all_doc_ids))
         except Exception:
             logger.debug("_fetch_contradiction_context: year lookup failed", exc_info=True)
 

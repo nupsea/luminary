@@ -4,7 +4,6 @@
     "app/routers/documents.py::ingest_document",
     "app/routers/documents.py::ingest_url",
     "app/runtime/chat_nodes/comparative.py::comparative_node",
-    "app/runtime/chat_nodes/notes.py::notes_gap_node",
     "app/runtime/chat_nodes/search.py::search_node",
     "app/runtime/chat_nodes/synthesize.py::synthesize_node",
     "app/scripts/reindex_entities.py::reindex_document",
@@ -85,7 +84,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 209,
+  "complexity_over_10": 208,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
@@ -94,12 +93,6 @@
   ],
   "sql_outside_repos": {
     "app/main.py": 1,
-    "app/runtime/chat_graph.py": 2,
-    "app/runtime/chat_nodes/comparative.py": 2,
-    "app/runtime/chat_nodes/notes.py": 4,
-    "app/runtime/chat_nodes/search.py": 10,
-    "app/runtime/chat_nodes/summary.py": 7,
-    "app/runtime/chat_nodes/synthesize.py": 6,
     "app/scripts/backfill_word_counts.py": 2,
     "app/scripts/reindex_entities.py": 9,
     "app/scripts/remeasure_domain.py": 5,
@@ -124,7 +117,7 @@
     "app/routers/documents.py": 47,
     "app/routers/images.py": 6,
     "app/routers/search.py": 5,
-    "app/runtime/chat_nodes/search.py": 2,
+    "app/runtime/chat_nodes/search.py": 1,
     "app/schemas/documents.py": 4,
     "app/scripts/reindex_entities.py": 7,
     "app/scripts/remeasure_domain.py": 6,

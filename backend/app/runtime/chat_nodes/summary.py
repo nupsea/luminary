@@ -13,14 +13,8 @@ background for next time.
 import asyncio
 import logging
 
-from sqlalchemy import func, select
-
 from app.database import get_session_factory
-from app.models import (
-    DocumentModel,
-    LibrarySummaryModel,
-    SummaryModel,
-)
+from app.repos.summary_repo import SummaryRepo
 from app.runtime.chat_nodes._shared import _background_tasks
 from app.services.library_summary import get_library_summary_service
 from app.types import ChatState
@@ -31,16 +25,8 @@ logger = logging.getLogger(__name__)
 async def _fetch_single_doc_executive_summary(doc_id: str) -> str | None:
     """Return executive summary content for a single document, or None if absent."""
     async with get_session_factory()() as session:
-        row = await session.execute(
-            select(SummaryModel.content)
-            .where(
-                SummaryModel.document_id == doc_id,
-                SummaryModel.mode == "executive",
-            )
-            .order_by(SummaryModel.created_at.desc())
-            .limit(1)
-        )
-        return row.scalar_one_or_none()
+        summary = await SummaryRepo(session).latest(doc_id, "executive")
+        return summary.content if summary else None
 
 
 async def _fetch_all_doc_executive_summaries() -> list[tuple[str, str]]:
@@ -50,39 +36,14 @@ async def _fetch_all_doc_executive_summaries() -> list[tuple[str, str]]:
     Returns an empty list if none exist.
     """
     async with get_session_factory()() as session:
-        # Latest created_at per document_id
-        latest_subq = (
-            select(
-                SummaryModel.document_id,
-                func.max(SummaryModel.created_at).label("max_ts"),
-            )
-            .where(SummaryModel.mode == "executive")
-            .group_by(SummaryModel.document_id)
-            .subquery()
-        )
-        rows = await session.execute(
-            select(DocumentModel.title, SummaryModel.content)
-            .join(DocumentModel, DocumentModel.id == SummaryModel.document_id)
-            .join(
-                latest_subq,
-                (SummaryModel.document_id == latest_subq.c.document_id)
-                & (SummaryModel.created_at == latest_subq.c.max_ts),
-            )
-            .order_by(DocumentModel.title)
-        )
-        return [(row.title, row.content) for row in rows]
+        return await SummaryRepo(session).latest_executive_with_titles()
 
 
 async def _fetch_library_executive_summary() -> str | None:
     """Return the most recent library-level executive summary, or None if absent."""
     async with get_session_factory()() as session:
-        row = await session.execute(
-            select(LibrarySummaryModel.content)
-            .where(LibrarySummaryModel.mode == "executive")
-            .order_by(LibrarySummaryModel.created_at.desc())
-            .limit(1)
-        )
-        return row.scalar_one_or_none()
+        summary = await SummaryRepo(session).latest_library("executive")
+        return summary.content if summary else None
 
 
 async def _generate_library_summary_task() -> None:

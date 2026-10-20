@@ -51,7 +51,7 @@ def _mock_get_session_factory(rows: list):
 
     `rows` can be a flat list (single execute call returns that list via fetchall)
     or a list of lists (sequential execute calls return different results via
-    side_effect -- first() for collection lookup, fetchall() for member lookup).
+    side_effect -- first() for collection lookup, scalars() for member lookup).
     """
     if rows and isinstance(rows[0], list):
         # Multiple sequential execute results (S197: collection + members)
@@ -60,6 +60,7 @@ def _mock_get_session_factory(rows: list):
             mock_result = MagicMock()
             mock_result.first.return_value = row_set[0] if row_set else None
             mock_result.fetchall.return_value = row_set
+            mock_result.scalars.return_value.all.return_value = [r[0] for r in row_set]
             results.append(mock_result)
 
         mock_session = AsyncMock()
@@ -69,6 +70,7 @@ def _mock_get_session_factory(rows: list):
         mock_result = MagicMock()
         mock_result.first.return_value = rows[0] if rows else None
         mock_result.fetchall.return_value = rows
+        mock_result.scalars.return_value.all.return_value = [r[0] for r in rows]
 
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=mock_result)

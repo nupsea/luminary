@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, delete, exists, func, insert, literal, select
+from sqlalchemy import DateTime, and_, delete, exists, func, insert, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -171,6 +172,49 @@ class SummaryRepo:
             .limit(1)
         )
         return result.scalar_one_or_none()
+
+    async def latest_executive_with_titles(self) -> list[tuple[str, str]]:
+        """(document title, content) of each document's newest executive summary, by title."""
+        latest_subq = (
+            select(
+                SummaryModel.document_id,
+                func.max(SummaryModel.created_at).label("max_ts"),
+            )
+            .where(SummaryModel.mode == "executive")
+            .group_by(SummaryModel.document_id)
+            .subquery()
+        )
+        rows = await self.session.execute(
+            select(DocumentModel.title, SummaryModel.content)
+            .join(DocumentModel, DocumentModel.id == SummaryModel.document_id)
+            .join(
+                latest_subq,
+                (SummaryModel.document_id == latest_subq.c.document_id)
+                & (SummaryModel.created_at == latest_subq.c.max_ts),
+            )
+            .order_by(DocumentModel.title)
+        )
+        return [(row.title, row.content) for row in rows]
+
+    async def section_summaries_by_heading(
+        self, doc_heading_pairs: Sequence[tuple[str, str]]
+    ) -> dict[tuple[str, str], str]:
+        """{(document_id, heading): content} for the given pairs."""
+        conditions = [
+            and_(
+                SectionSummaryModel.document_id == doc_id,
+                SectionSummaryModel.heading == heading,
+            )
+            for doc_id, heading in doc_heading_pairs
+        ]
+        rows = await self.session.execute(
+            select(
+                SectionSummaryModel.document_id,
+                SectionSummaryModel.heading,
+                SectionSummaryModel.content,
+            ).where(or_(*conditions))
+        )
+        return {(row.document_id, row.heading): row.content for row in rows}
 
     async def insert_library_if_sources_exist(
         self, mode: str, content: str, source_ids: list[str]
