@@ -467,3 +467,142 @@ def test_nav_line_shapes():
         assert _is_nav_line(nav), nav
     for title in ("Next Steps", "Up the Line", "Homeward Bound", "Previews of Coming Attractions"):
         assert not _is_nav_line(title), title
+
+
+# Reading order and heading shapes (#332, #333)
+
+_PROSE = (
+    "This paragraph is ordinary narrative prose, long enough to read as a real paragraph of the "
+    "book rather than a title line, and it ends the way sentences end, with a full stop."
+)
+
+
+def _parse_text(tmp_path, text: str):
+    f = tmp_path / "book.txt"
+    f.write_text(text)
+    result = bp.parse(f, "txt")
+    assert result is not None
+    return result.sections
+
+
+def _in_reading_order(sections, text: str) -> bool:
+    flat = " ".join(text.split())
+    starts = [flat.find(" ".join(s.text.split())[:60]) for s in sections]
+    return -1 not in starts and starts == sorted(starts)
+
+
+def test_a_contents_list_does_not_claim_the_text_after_it(tmp_path):
+    """Frankenstein's last contents entry ("Chapter 24") took the opening Letters, and the
+    duplicate merge appended them after the real Chapter 24 (#332)."""
+    text = (
+        "A Novel\n\n CONTENTS\n\n Chapter 1\n Chapter 2\n Chapter 3\n Chapter 4\n\n\n"
+        f"An unheaded opening. {_PROSE}\n\n"
+        + "".join(f"Chapter {n}\n\nChapter {n} begins. {_PROSE}\n\n" for n in range(1, 5))
+    )
+    sections = _parse_text(tmp_path, text)
+
+    assert [s.heading for s in sections] == ["", "Chapter 1", "Chapter 2", "Chapter 3", "Chapter 4"]
+    assert sections[0].text.startswith("A Novel")
+    assert "unheaded opening" in sections[0].text
+    assert "unheaded opening" not in sections[-1].text
+
+
+def test_text_before_the_first_heading_is_kept_only_when_it_is_prose(tmp_path):
+    chapters = "".join(f"CHAPTER {n}.\n\nChapter {n} begins. {_PROSE}\n\n" for n in ("I", "II"))
+
+    title_only = _parse_text(tmp_path, "A Novel\n\nby Someone\n\n" + chapters)
+    with_prologue = _parse_text(tmp_path, f"A Novel\n\n{_PROSE}\n\n" + chapters)
+
+    assert [s.heading for s in title_only] == ["CHAPTER I", "CHAPTER II"]
+    assert [s.heading for s in with_prologue] == ["", "CHAPTER I", "CHAPTER II"]
+
+
+def test_a_numbering_that_restarts_keeps_every_chapter_in_place(tmp_path):
+    """Gulliver's Parts each restart at CHAPTER I; merging twins by name collapsed four Parts
+    into 12 chapters out of order (#332)."""
+    text = "".join(
+        ("" if c != "I" else f"PART {p}.\n\n")
+        + f"CHAPTER {c}.\n\nPart {p} chapter {c}. {_PROSE}\n\n"
+        for p in ("I", "II")
+        for c in ("I", "II", "III")
+    )
+    sections = _parse_text(tmp_path, text)
+
+    assert [s.heading for s in sections] == ["CHAPTER I", "CHAPTER II", "CHAPTER III"] * 2
+    assert _in_reading_order(sections, text)
+
+
+def test_a_divider_beside_chapters_is_a_scene_break(tmp_path):
+    """The Great Gatsby's dividers sit inside its chapters; as headings, all 25 merged into one
+    157k-character section (#332)."""
+    rule = "-" * 72
+    text = "".join(
+        f"\n    {n}\n\n{n} opens. {_PROSE}\n\n{rule}\n\nAfter the break. {_PROSE}\n\n"
+        for n in ("I", "II", "III")
+    )
+    sections = _parse_text(tmp_path, text)
+
+    assert [s.heading for s in sections] == ["I", "II", "III"]
+    assert all("After the break" in s.text for s in sections)
+
+
+def test_an_epilogue_beside_chapters_is_its_own_section(tmp_path):
+    text = (
+        "".join(f"CHAPTER {n}.\n\nChapter {n}. {_PROSE}\n\n" for n in ("I", "II"))
+        + f"EPILOGUE\n\nAfterwards. {_PROSE}\n"
+    )
+    sections = _parse_text(tmp_path, text)
+
+    assert [(s.heading, s.level) for s in sections][-1] == ("EPILOGUE", 1)
+    assert "Afterwards" not in sections[1].text
+
+
+def test_numbered_papers_are_sections_and_prose_lines_are_not(tmp_path):
+    """The Federalist Papers parsed to 8 sections headed by prose (#333): "I FLATTER myself"
+    read as a roman numeral, a wrapped "Louis\\nXIV." as a heading, numbered paragraphs as
+    titles."""
+    text = "".join(
+        f"FEDERALIST No. {n}\n\nA Subject\n\n"
+        "I FLATTER myself it has been clearly shown in my last number that the\n"
+        "argument holds, and it continues on this wrapped line of prose here.\n\n"
+        "I. The qualifications proposed for senators, as distinguished from\n"
+        "those of representatives, consist in a more advanced age and so on.\n\n"
+        "the most persevering and implacable of the opponents of Louis\nXIV.\n\n"
+        f"{_PROSE}\n\n"
+        for n in range(1, 5)
+    )
+    sections = _parse_text(tmp_path, text)
+
+    assert [s.heading for s in sections] == [f"FEDERALIST No. {n} — A Subject" for n in range(1, 5)]
+
+
+def test_a_sentence_is_never_a_heading(tmp_path):
+    """Meditations: "part one to another." and "the first book of his _Meditations_, and
+    shows" open on lower case; numbered paragraphs run on to the next line."""
+    text = "".join(
+        f"THE {o} BOOK\n\nI. Of my grandfather Verus I have learned to be gentle and meek, and to\n"
+        "refrain from all anger and passion, which is the way of a good man.\n\n"
+        "the first book of his _Meditations_, and shows how he could retire within\n"
+        f"himself.\n\n{_PROSE}\n\npart one to another.\n\n{_PROSE}\n\n"
+        for o in ("FIRST", "SECOND")
+    )
+    sections = _parse_text(tmp_path, text)
+
+    assert [s.heading for s in sections] == ["THE FIRST BOOK", "THE SECOND BOOK"]
+
+
+def test_frankenstein_opens_on_its_letters():
+    """#332 on the real file: the Letters were stored after Chapter 24, under its name."""
+    path = _book("frankenstein.txt")
+    sections = bp.parse(path, "txt").sections
+
+    assert [s.heading.split(" — ")[0] for s in sections[:5]] == [
+        "Letter 1",
+        "Letter 2",
+        "Letter 3",
+        "Letter 4",
+        "Chapter 1",
+    ]
+    assert "St. Petersburgh" in sections[0].text
+    assert "St. Petersburgh" not in sections[-1].text
+    assert _in_reading_order(sections, path.read_text(encoding="utf-8"))

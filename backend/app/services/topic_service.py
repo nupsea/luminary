@@ -91,7 +91,7 @@ _MAX_TOPIC_WORDS = 14
 
 
 # explicit chapter markers -- a clean book labels its chapters even when the level field is flat
-_CHAPTER_RE = re.compile(r"^(chapter|ch|part|lesson|module|unit)\s+(\d+|[ivxlcdm]+)\b", re.I)
+_CHAPTER_RE = re.compile(r"^(chapter|ch|part|lesson|module|unit|letter)\s+(\d+|[ivxlcdm]+)\b", re.I)
 
 
 def _chapter_sections(content: list) -> list | None:

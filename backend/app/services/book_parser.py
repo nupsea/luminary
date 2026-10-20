@@ -14,6 +14,9 @@ Discovers patterns across a corpus of diverse books:
   P7  CHAPTER N (no dot) + confirmed by HERE ENDETH
   P8  The [Nth] Book of / The Gospel According
   P9  ADVENTURE N. TITLE
+  P10 FEDERALIST No. N (a numbered series)
+  PL  Letter N (epistolary novels)
+  plus Prologue / Epilogue / Afterword beside any of those, and divider lines only without them
 
 Metadata stripping:
   - Gutenberg preamble/footer
@@ -24,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import re
+from itertools import pairwise
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -87,12 +91,29 @@ _PATTERNS: list[tuple[str, re.Pattern[str], int]] = [
         ),
         1,
     ),
-    # P3: I. CAPS TITLE on one line (Sherlock Holmes Stories)
+    # P3: I. CAPS TITLE on one line (Sherlock Holmes Stories). Without the dot the title must be
+    # capitals: "I FLATTER myself it has been..." opens a Federalist paper (#333).
     (
         "P3",
         re.compile(
-            rf"^[ \t]*({_ROMAN})\.?[ \t]+([A-Z][A-Za-z0-9 ’',\-:&]{{2,79}})[ \t]*$",
+            rf"^[ \t]*({_ROMAN})(?:\.[ \t]+([A-Z][A-Za-z0-9 ’',\-:&]{{2,79}})"
+            rf"|[ \t]+([A-Z][A-Z0-9 ’',\-:&]{{2,79}}))[ \t]*$",
             re.MULTILINE,
+        ),
+        1,
+    ),
+    # P10: a numbered paper in a series, "FEDERALIST No. 10" (#333)
+    (
+        "P10",
+        re.compile(r"^[ \t]*(?:THE[ \t]+)?[A-Z][A-Za-z]+[ \t]+No\.[ \t]*\d+[ \t]*$", re.MULTILINE),
+        1,
+    ),
+    # PL: an epistolary novel's "Letter 1" (Frankenstein, #332)
+    (
+        "PL",
+        re.compile(
+            rf"^[ \t]*LETTER[ \t]+({_ROMAN}|\d+|{_WORDS_N})[\.:]?[ \t]*$",
+            re.MULTILINE | re.IGNORECASE,
         ),
         1,
     ),
@@ -105,11 +126,11 @@ _PATTERNS: list[tuple[str, re.Pattern[str], int]] = [
         ),
         1,
     ),
-    # P6a: PART N. / BOOK N. (superstructure)
+    # P6a: PART N. / BOOK N. (superstructure); the title stays on the heading's own line
     (
         "P6a",
         re.compile(
-            rf"^(?:PART|BOOK|SECTION|VOLUME)\s+({_ROMAN}|\d+|{_WORDS_N})[\.]?(?:\s+[^\n]+)?$",
+            rf"^(?:PART|BOOK|SECTION|VOLUME)[ \t]+({_ROMAN}|\d+|{_WORDS_N})[\.]?(?:[ \t]+[^\n]+)?$",
             re.MULTILINE | re.IGNORECASE,
         ),
         1,
@@ -164,16 +185,27 @@ _PATTERNS: list[tuple[str, re.Pattern[str], int]] = [
         ),
         1,
     ),
-    # Horizontal-rule divider (8+ dashes, equals, or asterisks on own line)
-    (
-        "HR",
-        re.compile(
-            r"^[-=*_]{8,}\s*$",
-            re.MULTILINE,
-        ),
-        1,
-    ),
 ]
+
+# A divider is a break, not a label, so it splits only text that has no labelled heading: a
+# transcript's sessions, never The Great Gatsby's scene breaks inside its chapters.
+_RE_DIVIDER = re.compile(r"^[-=*_]{8,}\s*$", re.MULTILINE)
+
+# A named division sits beside the chapters and takes their level. It counts only alongside
+# them: one "Epilogue" line alone is as likely prose as structure.
+_RE_NAMED_DIVISION = re.compile(
+    r"^[ \t]*(?:PROLOGUE|EPILOGUE|AFTERWORD)\.?[ \t]*$", re.MULTILINE | re.IGNORECASE
+)
+
+# Prose is a paragraph of this many words that ends a sentence. It decides whether text before
+# the first heading is kept and whether a heading is a contents entry. Frankenstein's title
+# lines run to 6 words and the Bible's contents is 70 lines with no full stop; Frankenstein's
+# first Letter opens on a 50-word paragraph.
+_PROSE_WORDS = 25
+_RE_SENTENCE_END = re.compile(r"[a-z][.!?]")
+
+# A contents list is at least this many entries in a row with nothing under them.
+_MIN_CONTENTS_RUN = 3
 
 # TOC detection: line that looks like a TOC entry
 _RE_TOC_LINE = re.compile(
@@ -292,58 +324,101 @@ def _base_heading(heading: str) -> str:
     return h.lower()
 
 
+def _match(m: re.Match[str], pid: str, level: int | None) -> dict:
+    return {
+        "start": m.start(),
+        "end": m.end(),
+        "pid": pid,
+        "level": level,
+        "raw_heading": m.group(0).strip(),
+    }
+
+
+_INLINE_TITLE_PATTERNS = frozenset({"P3", "P6a", "P6b", "P9"})
+_BARE_NUMERAL_PATTERNS = frozenset({"P2", "P4"})
+
+
+def _is_heading_line(text: str, m: re.Match[str], pid: str) -> bool:
+    """Whether a pattern match is a heading rather than a line of prose.
+
+    A heading opens on a capital: "part one to another." and "the first book of his
+    _Meditations_, and shows" are sentences. A heading with a mixed-case title on its own line
+    is its own paragraph, followed by a blank line: "I. A SCANDAL IN BOHEMIA" is, while a
+    numbered paragraph runs on ("I. Of my grandfather Verus I have learned to be gentle and
+    meek, and to", Meditations; "I. The qualifications proposed for senators", #333). It must
+    also read as a title, since unwrapped text puts a whole paragraph on one line.
+    """
+    line = m.group(0).strip()
+    if not line[:1].isupper():
+        return False
+    if pid in _BARE_NUMERAL_PATTERNS:
+        # A hard wrap can leave a sentence's last word alone: "opponents of Louis\nXIV." (#333).
+        before = text[max(0, m.start() - 80) : m.start()]
+        at_start = m.start() == len(before) and not before.strip()
+        return at_start or re.search(r"\n[ \t\f]*\n\Z", before) is not None
+    if pid not in _INLINE_TITLE_PATTERNS or line.upper() == line:
+        return True
+    alone = re.match(r"[ \t]*(?:\n[ \t]*\n|\n?\Z)", text[m.end() :]) is not None
+    return alone and _is_subtitle(line)
+
+
+def _has_prose(text: str) -> bool:
+    return any(
+        len(p.split()) >= _PROSE_WORDS and _RE_SENTENCE_END.search(p)
+        for p in re.split(r"\n\s*\n", text)
+    )
+
+
+def _without_contents_runs(text: str, matches: list[dict]) -> list[dict]:
+    """Drop a contents list's entries, the last one included (#332).
+
+    An entry matches a chapter pattern, recurs later as the chapter itself, and has no prose
+    under it. The last entry's "body" is whatever follows the list, so Frankenstein's opening
+    Letters became a twin of Chapter 24. It is the entry right after the run, recurring later
+    and not already in the list: a real "CHAPTER I" after a list that names it is the chapter.
+    """
+    keys = [
+        re.sub(r"^the\s+", "", _base_heading(_clean_heading(m["raw_heading"]))) for m in matches
+    ]
+    bodies = [text[a["end"] : b["start"]] for a, b in pairwise(matches)] + [
+        text[matches[-1]["end"] :]
+    ]
+    entry = [keys[i] in keys[i + 1 :] and not _has_prose(bodies[i]) for i in range(len(matches))]
+    entry.append(False)
+    kept: list[dict] = []
+    i = 0
+    while i < len(matches):
+        j = i
+        while entry[j]:
+            j += 1
+        if j - i >= _MIN_CONTENTS_RUN:
+            last = j < len(matches) and keys[j] in keys[j + 1 :] and keys[j] not in keys[i:j]
+            i = j + 1 if last else j
+            continue
+        kept += matches[i : j + 1]
+        i = j + 1
+    return kept
+
+
 def _merge_duplicate_sections(sections: list[Section]) -> list[Section]:
-    """Merge sections that share the same base heading.
+    """Merge consecutive sections that share a base heading: a PDF's running head
+    ("Chapter 1: Title" on every page) opens one per page.
 
-    PDF running headers/footers (e.g. "Chapter 1: Title" on every page)
-    cause the segmenter to create dozens of micro-sections per chapter.
-    Cross-references ("In Chapter 7, we discussed...") at line starts
-    create additional orphan sections.
-
-    Two-pass approach:
-    1. Merge consecutive sections with the same base heading.
-    2. For each base heading that still appears multiple times, keep the
-       longest section and absorb shorter duplicates' text into it.
+    Only neighbours merge. A twin further on is a different section: Gulliver's four Parts each
+    restart at "CHAPTER I", and Sherlock's stories each restart their parts at "I". Merging
+    those by name moved whole chapters out of reading order (#332).
     """
     if not sections:
         return sections
-
-    # Pass 1: merge consecutive duplicates
-    consec: list[Section] = [sections[0]]
+    merged: list[Section] = [sections[0]]
     for s in sections[1:]:
-        prev = consec[-1]
+        prev = merged[-1]
         if _base_heading(s.heading) == _base_heading(prev.heading):
             prev.text = prev.text + "\n\n" + s.text
             prev.page_end = max(prev.page_end, s.page_end)
         else:
-            consec.append(s)
-
-    # Pass 2: for each base heading appearing multiple times, keep
-    # the longest section and absorb the shorter ones' text.
-    from collections import defaultdict  # noqa: PLC0415
-
-    groups: dict[str, list[int]] = defaultdict(list)
-    for i, s in enumerate(consec):
-        groups[_base_heading(s.heading)].append(i)
-
-    drop: set[int] = set()
-    for idxs in groups.values():
-        if len(idxs) <= 1:
-            continue
-        # Pick the longest section as the primary
-        primary_idx = max(idxs, key=lambda i: len(consec[i].text))
-        primary = consec[primary_idx]
-        for i in idxs:
-            if i == primary_idx:
-                continue
-            primary.text = primary.text + "\n\n" + consec[i].text
-            primary.page_end = max(
-                primary.page_end,
-                consec[i].page_end,
-            )
-            drop.add(i)
-
-    return [s for i, s in enumerate(consec) if i not in drop]
+            merged.append(s)
+    return merged
 
 
 class BookParser:
@@ -584,42 +659,46 @@ class BookParser:
 
     def _segment_chapters(self, text: str) -> list[Section] | None:
         """Segment text into hierarchical sections using multiple active patterns."""
-        active_patterns: list[tuple[str, re.Pattern[str], int]] = []
+        all_matches = []
         for pid, pat, level in _PATTERNS:
             if pid == "P7" and not _RE_ENDETH.search(text):
                 continue
-            if len(pat.findall(text)) >= _MIN_CHAPTERS:
-                active_patterns.append((pid, pat, level))
-
-        if not active_patterns:
-            return None
-
-        all_matches = []
-        for pid, pat, level in active_patterns:
-            for m in pat.finditer(text):
-                all_matches.append(
-                    {
-                        "start": m.start(),
-                        "end": m.end(),
-                        "pid": pid,
-                        "level": level,
-                        "raw_heading": m.group(0).strip(),
-                    }
-                )
+            found = [m for m in pat.finditer(text) if _is_heading_line(text, m, pid)]
+            if len(found) >= _MIN_CHAPTERS:
+                all_matches += [_match(m, pid, level) for m in found]
+        if all_matches:
+            all_matches += [_match(m, "ND", None) for m in _RE_NAMED_DIVISION.finditer(text)]
+        else:
+            all_matches = [_match(m, "HR", 1) for m in _RE_DIVIDER.finditer(text)]
+            if len(all_matches) < _MIN_CHAPTERS:
+                return None
         all_matches.sort(key=lambda x: x["start"])
-        if not all_matches:
-            return None
 
         filtered = [all_matches[0]]
         for m in all_matches[1:]:
             last = filtered[-1]
             if m["start"] < last["end"]:
-                if m["level"] < last["level"]:
+                if (m["level"] or 99) < (last["level"] or 99):
                     filtered[-1] = m
                 continue
             filtered.append(m)
+        filtered = _without_contents_runs(text, filtered)
+        if not filtered:
+            return None
+        for i, m in enumerate(filtered):
+            if m["level"] is None:
+                near = [f["level"] for f in [*filtered[i::-1], *filtered[i:]] if f["level"]]
+                m["level"] = near[0] if near else 1
 
         sections: list[Section] = []
+        front = text[: filtered[0]["start"]].strip()
+        if _has_prose(front):
+            # I-30: the source gave this text no heading, so it carries none.
+            sections.append(
+                Section(
+                    heading="", level=filtered[0]["level"], text=front, page_start=0, page_end=0
+                )
+            )
         for i, m in enumerate(filtered):
             body_start = m["end"]
             body_end = filtered[i + 1]["start"] if i + 1 < len(filtered) else len(text)
