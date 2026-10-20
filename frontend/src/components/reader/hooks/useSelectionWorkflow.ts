@@ -6,6 +6,7 @@ import { apiPost } from "@/lib/apiClient"
 import { docThreadKey, type ChatPreload } from "@/store/chatThreads"
 
 import type { SourceRef } from "../SelectionActionBar"
+import { askDraftFor } from "../selectionBarLogic"
 import type { AnnotationItem } from "../types"
 
 interface UseSelectionWorkflowOpts {
@@ -26,14 +27,12 @@ export function useSelectionWorkflow({
 }: UseSelectionWorkflowOpts) {
   const qc = useQueryClient()
 
-  // Asking about a passage no longer leaves the passage. The question is
-  // addressed to this document's own conversation, which is docked beside the
-  // text rather than on another tab.
+  // The draft lands in this document's docked conversation for the reader to
+  // edit and send; it is never sent on their behalf.
   const handleAskInChat = useCallback((text: string) => {
     setChatPreload({
-      text: `Explain this excerpt:\n\n> ${text}`,
+      ...askDraftFor(text),
       documentId,
-      autoSubmit: true,
       threadKey: docThreadKey(documentId),
     })
     openAsk()

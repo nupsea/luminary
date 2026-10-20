@@ -12,6 +12,18 @@ export function explainModeFor(text: string): "define" | "plain" {
   return core.split(/\s+/).filter(Boolean).length <= TERM_MAX_WORDS ? "define" : "plain"
 }
 
+export const SUGGESTED_QUESTION = "What does this passage mean?"
+
+/**
+ * The passage quoted, then a question the reader edits before sending: Ask is
+ * for their question about the passage, not a fixed request to explain it.
+ */
+export function askDraftFor(text: string): { text: string; selectFrom: number } {
+  const quote = text.trim().split(/\r?\n/).map((line) => `> ${line}`).join("\n")
+  const prefix = `${quote}\n\n`
+  return { text: prefix + SUGGESTED_QUESTION, selectFrom: prefix.length }
+}
+
 export const BAR_HEIGHT = 44
 export const BAR_HALF_WIDTH = 160
 const GAP = 8
