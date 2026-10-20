@@ -20,10 +20,8 @@ import uuid as _uuid
 import wave
 from pathlib import Path
 
-from sqlalchemy import update as _update
-
 from app.database import get_session_factory
-from app.models import DocumentModel
+from app.repos.document_repo import DocumentRepo
 from app.repos.transcript_repo import fetch_transcript_inputs
 from app.services import (
     audio_transcriber as _audio_transcriber_module,  # indirect: get_audio_transcriber is patched
@@ -236,14 +234,11 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
 
         # Persist duration to DocumentModel
         async with get_session_factory()() as session:
-            await session.execute(
-                _update(DocumentModel)
-                .where(DocumentModel.id == doc_id)
-                .values(
-                    audio_duration_seconds=duration,
-                    word_count=len(raw_text.split()),
-                    transcript_source=transcript_source,
-                )
+            await DocumentRepo(session).update_fields(
+                doc_id,
+                audio_duration_seconds=duration,
+                word_count=len(raw_text.split()),
+                transcript_source=transcript_source,
             )
             await session.commit()
 

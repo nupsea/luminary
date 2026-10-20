@@ -35,10 +35,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import select
-
 from app.database import get_session_factory
-from app.models import DocumentModel
+from app.repos.document_repo import DocumentRepo
 from app.services.universal_parser import read_document_text
 
 logger = logging.getLogger(__name__)
@@ -64,18 +62,7 @@ def _word_count(path: Path) -> int:
 async def recount_all(*, apply: bool) -> list[Recount]:
     factory = get_session_factory()
     async with factory() as session:
-        rows = (
-            (
-                await session.execute(
-                    select(DocumentModel).where(
-                        DocumentModel.stage == "complete",
-                        (DocumentModel.word_count == 0) | (DocumentModel.word_count.is_(None)),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
+        rows = await DocumentRepo(session).complete_without_word_count()
 
         results: list[Recount] = []
         for doc in rows:

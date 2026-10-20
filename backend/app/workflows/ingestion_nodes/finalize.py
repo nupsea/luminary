@@ -23,10 +23,9 @@ import uuid
 from collections.abc import Coroutine
 from typing import Any
 
-from sqlalchemy import update as _update
-
 from app.database import get_session_factory
-from app.models import DocumentModel, EnrichmentJobModel
+from app.models import EnrichmentJobModel
+from app.repos.document_repo import DocumentRepo
 from app.services.activity_service import ActivityService
 from app.services.document_tagger import enrich_document_tags
 from app.services.enrichment_worker import get_enrichment_worker
@@ -247,11 +246,7 @@ async def error_finalize_node(state: IngestionState) -> IngestionState:
     doc_id = state["document_id"]
     error_detail = state.get("error")
     async with get_session_factory()() as session:
-        await session.execute(
-            _update(DocumentModel)
-            .where(DocumentModel.id == doc_id)
-            .values(stage="error", error_message=error_detail)
-        )
+        await DocumentRepo(session).update_fields(doc_id, stage="error", error_message=error_detail)
         await session.commit()
     logger.error(
         "Ingestion failed at node",
@@ -288,11 +283,7 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
                         status="pending",
                     )
                 )
-                await session.execute(
-                    _update(DocumentModel)
-                    .where(DocumentModel.id == doc_id)
-                    .values(stage="enriching")
-                )
+                await DocumentRepo(session).update_fields(doc_id, stage="enriching")
                 await session.commit()
             needs_dispatch = True
             logger.info(
@@ -362,13 +353,8 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
     pd = state.get("parsed_document")
     if pd:
         async with get_session_factory()() as session:
-            await session.execute(
-                _update(DocumentModel)
-                .where(DocumentModel.id == doc_id)
-                .values(
-                    word_count=pd.get("word_count") or 0,
-                    page_count=pd.get("pages") or 0,
-                )
+            await DocumentRepo(session).update_fields(
+                doc_id, word_count=pd.get("word_count") or 0, page_count=pd.get("pages") or 0
             )
             await session.commit()
 

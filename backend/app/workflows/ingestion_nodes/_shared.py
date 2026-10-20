@@ -19,6 +19,7 @@ import logging
 from typing import Any, TypedDict
 
 from app.database import get_session_factory
+from app.repos.document_repo import DocumentRepo
 from app.services.background import task_registry
 from app.services.llm_admission import awaited
 from app.services.parser import DocumentParser
@@ -189,14 +190,8 @@ def _classify(
 
 
 async def _update_stage(document_id: str, stage: str) -> None:
-    from sqlalchemy import update  # noqa: PLC0415
-
-    from app.models import DocumentModel  # noqa: PLC0415
-
     async with get_session_factory()() as session:
-        await session.execute(
-            update(DocumentModel).where(DocumentModel.id == document_id).values(stage=stage)
-        )
+        await DocumentRepo(session).update_fields(document_id, stage=stage)
         await session.commit()
 
 
@@ -319,31 +314,15 @@ async def _persist_extraction_report(document_id: str, report: dict | None) -> N
     because the stored report has to describe the import that is in the
     database, not the one it replaced.
     """
-    from sqlalchemy import update  # noqa: PLC0415
-
-    from app.models import DocumentModel  # noqa: PLC0415
-
     async with get_session_factory()() as session:
-        await session.execute(
-            update(DocumentModel)
-            .where(DocumentModel.id == document_id)
-            .values(extraction_report=report)
-        )
+        await DocumentRepo(session).update_fields(document_id, extraction_report=report)
         await session.commit()
 
 
 async def _persist_structure_type(document_id: str, structure_type: str) -> None:
     """Write the layout the parser discovered ('book'|'paper'|'script'|'chat')."""
-    from sqlalchemy import update  # noqa: PLC0415
-
-    from app.models import DocumentModel  # noqa: PLC0415
-
     async with get_session_factory()() as session:
-        await session.execute(
-            update(DocumentModel)
-            .where(DocumentModel.id == document_id)
-            .values(structure_type=structure_type)
-        )
+        await DocumentRepo(session).update_fields(document_id, structure_type=structure_type)
         await session.commit()
 
 
@@ -361,9 +340,6 @@ async def _persist_classification(
     `register` and `form` are only written when supplied, so a pass that
     measures one cannot wipe the other.
     """
-    from sqlalchemy import update  # noqa: PLC0415
-
-    from app.models import DocumentModel  # noqa: PLC0415
     from app.types import DocumentProfile  # noqa: PLC0415
 
     profile = DocumentProfile.from_legacy(content_type, is_technical)
@@ -378,7 +354,5 @@ async def _persist_classification(
     if register is not None:
         values["register"] = register
     async with get_session_factory()() as session:
-        await session.execute(
-            update(DocumentModel).where(DocumentModel.id == document_id).values(**values)
-        )
+        await DocumentRepo(session).update_fields(document_id, **values)
         await session.commit()

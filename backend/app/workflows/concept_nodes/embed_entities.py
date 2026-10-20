@@ -14,10 +14,9 @@ from __future__ import annotations
 import asyncio
 
 import numpy as np
-from sqlalchemy import select
 
 from app.database import get_session_factory
-from app.models import ChunkModel
+from app.repos.document_repo import DocumentRepo
 from app.services.embedder import get_embedding_service
 from app.services.vector_store import get_lancedb_service
 from app.workflows.concept_nodes._shared import ConceptPipelineState, record
@@ -68,13 +67,7 @@ async def embed_entities(state: ConceptPipelineState) -> ConceptPipelineState:
     if doc_ids:
         try:
             async with get_session_factory()() as session:
-                rows = (
-                    await session.execute(
-                        select(
-                            ChunkModel.id, ChunkModel.document_id, ChunkModel.entities_text
-                        ).where(ChunkModel.document_id.in_(doc_ids))
-                    )
-                ).all()
+                rows = await DocumentRepo(session).chunk_entity_texts(doc_ids)
             # match against the short canonical entity tail; fall back to text only if a
             # chunk has no entities_text (older rows).
             chunk_rows = [(cid, did, (etext or "").lower()) for cid, did, etext in rows]

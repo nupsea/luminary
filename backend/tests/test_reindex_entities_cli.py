@@ -70,7 +70,15 @@ async def test_reindex_writes_entity_tail_fts_and_vectors(factory):
                 tags=[],
             )
         )
-        s.add(ChunkModel(id="c1", document_id="d1", text="Holmes met Watson.", chunk_index=0))
+        s.add(
+            ChunkModel(
+                id="c1",
+                document_id="d1",
+                text="Holmes met Watson.",
+                chunk_index=0,
+                context_header="A Study in Scarlet > Mr. Sherlock Holmes",
+            )
+        )
         s.add(ChunkModel(id="c2", document_id="d1", text="It rained.", chunk_index=1))
         await s.commit()
 
@@ -98,6 +106,8 @@ async def test_reindex_writes_entity_tail_fts_and_vectors(factory):
     assert tails["c2"] is None
     assert "Holmes" in tails["c1"] and "Watson" in tails["c1"]
     assert tails["c1"] in fts, "the FTS row carries the entity tail"
+    # Ingestion indexes the header too; a reindex that dropped it lost section terms.
+    assert fts.startswith("A Study in Scarlet > Mr. Sherlock Holmes "), fts
     rows = [r for call in lancedb.upsert_chunks.call_args_list for r in call.args[0]]
     assert {r["chunk_id"] for r in rows} == {"c1", "c2"}
 

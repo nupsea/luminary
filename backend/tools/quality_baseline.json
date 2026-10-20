@@ -31,7 +31,6 @@
     "app/workflows/concept_nodes/persist.py::persist_concepts",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_conversation",
-    "app/workflows/ingestion_nodes/chunk.py::_chunk_paper",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book",
     "app/workflows/ingestion_nodes/chunk.py::chunk_node",
     "app/workflows/ingestion_nodes/finalize.py::enrichment_enqueue_node",
@@ -92,19 +91,8 @@
     "app/services/parser.py"
   ],
   "sql_outside_repos": {
-    "app/main.py": 1,
-    "app/scripts/backfill_word_counts.py": 2,
-    "app/scripts/reindex_entities.py": 9,
-    "app/scripts/remeasure_domain.py": 5,
     "app/services/retriever.py": 4,
-    "app/services/retriever_strategies.py": 2,
-    "app/workflows/concept_nodes/embed_entities.py": 2,
-    "app/workflows/concept_nodes/persist.py": 5,
-    "app/workflows/ingestion_nodes/_shared.py": 4,
-    "app/workflows/ingestion_nodes/chunk.py": 9,
-    "app/workflows/ingestion_nodes/entity_extract.py": 1,
-    "app/workflows/ingestion_nodes/finalize.py": 3,
-    "app/workflows/ingestion_nodes/transcribe.py": 1
+    "app/services/retriever_strategies.py": 2
   },
   "unstable_tests": {},
   "content_type_refs": {
@@ -119,7 +107,7 @@
     "app/routers/search.py": 5,
     "app/runtime/chat_nodes/search.py": 1,
     "app/schemas/documents.py": 4,
-    "app/scripts/reindex_entities.py": 7,
+    "app/scripts/reindex_entities.py": 6,
     "app/scripts/remeasure_domain.py": 6,
     "app/services/article_extractor.py": 2,
     "app/services/content_classifier.py": 1,
