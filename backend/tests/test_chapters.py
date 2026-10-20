@@ -201,3 +201,18 @@ def test_a_preface_over_a_book_of_deeper_chapters_takes_only_itself():
     chapters = detect_chapters(front + body, "book")
     assert chapters[0].id == "c0"
     assert "c29" in {s for c in chapters for s in c.section_ids}
+
+
+def test_letters_and_numbered_papers_are_chapter_marks():
+    """Frankenstein opens on four Letters before Chapter 1 (#332); the Federalist Papers are
+    headed "FEDERALIST No. N" (#333). Unmarked, the Letters fell outside every chapter."""
+    novel = detect_chapters(
+        _sections(("Letter 1", BIG), ("Letter 2", BIG), ("Chapter 1", BIG), ("Chapter 2", BIG)),
+        "Frankenstein",
+    )
+    papers = detect_chapters(
+        _sections(*((f"FEDERALIST No. {n} — A Subject", BIG) for n in range(1, 4))), "Federalist"
+    )
+
+    assert [c.title for c in novel] == ["Letter 1", "Letter 2", "Chapter 1", "Chapter 2"]
+    assert [c.title for c in papers] == [f"FEDERALIST No. {n} — A Subject" for n in range(1, 4)]

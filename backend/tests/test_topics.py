@@ -248,3 +248,15 @@ async def test_a_markdown_book_s_topics_are_its_top_level_headings(test_db):
         body = (await client.get("/study/topics/d2l")).json()
     assert body["source"] == "sections"
     assert [t["title"] for t in body["topics"]] == golden["expected_topics"]
+
+
+def test_an_epistolary_novel_s_letters_are_topics():
+    """#332: Frankenstein's chapter headings won the topic list and left its four Letters out."""
+    from types import SimpleNamespace
+
+    from app.services.topic_service import _pick_topic_sections
+
+    headings = [f"Letter {n}" for n in range(1, 5)] + [f"Chapter {n}" for n in range(1, 6)]
+    tops = _pick_topic_sections([SimpleNamespace(heading=h, level=1) for h in headings])
+
+    assert [t.heading for t in tops] == headings

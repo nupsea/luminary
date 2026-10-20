@@ -17,8 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 _ROMAN = "IVXLC"
 _NUMERAL = rf"\d{{1,3}}|[{_ROMAN}]{{1,7}}"
-# "Chapter 3. Storage", "CHAPTER IX", "Appendix B. Analysis of Algorithms".
-_CHAPTER_MARK = re.compile(rf"^\W*(?:chapter|appendix)\s+(?:{_NUMERAL}|[A-Z])\b", re.I)
+# "Chapter 3. Storage", "CHAPTER IX", "Appendix B. Analysis of Algorithms", Frankenstein's
+# "Letter 1" (#332), "FEDERALIST No. 10" (#333).
+_CHAPTER_MARK = re.compile(
+    rf"^\W*(?:(?:chapter|appendix)\s+(?:{_NUMERAL}|[A-Z])\b|letter\s+(?:{_NUMERAL})\b"
+    r"|[A-Z][A-Za-z]+\s+No\.\s*\d+\b)",
+    re.I,
+)
 # "Part II. Distributed Data", "Book 3".
 _PART_MARK = re.compile(rf"^\W*(?:part|book)\s+(?:{_NUMERAL})\b", re.I)
 # "IX The Morlocks", "I. THE DISTRESS OF ARJUNA", "4 — Time Travelling"; not "1.1 Processors".
