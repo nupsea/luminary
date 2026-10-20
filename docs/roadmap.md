@@ -96,15 +96,15 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | — | 0.10.0 | Smart Hybrid, and the privacy receipt — **shipped** | | Time to first token measured on both arms from a cold install and reported as a pair; a test proves that only the question and its packed passages leave the machine |
 | — | 0.11.0 | The docked reader — **shipped** | | A passage captured in the reader resolves back to its locus for page, video and web; no modal opens from the reader |
 | — | 0.12.0 | The Brief — **parked** | | None; no rung waits on it |
-| I. Every host | 0.13.x | Every host is a first-class host — **0.13.9 released; exit gate open.** **Checkpoint A** | #24, #99, #110, #154, #155, #156 | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator; `make smoke` green on Windows and against the bundled macOS app |
+| I. Every host | 0.13.x | Every host is a first-class host — **0.13.9 released; exit gate open, carried to Checkpoint C: what is left needs hardware we do not have (§7).** **Checkpoint A** | #110, #154; #24, #99, #155 and #156 moved to 0.18.0 | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator; `make smoke` green on Windows and against the bundled macOS app |
 | II. Stability | 0.14.x | Gates you can believe — **0.14.5 released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
-| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #66, #97, #100, #158, #159, #161, #185, #186, #187, #188, #189, #191, #204, #205 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
-| III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement; chapter practice — **0.16.2 released; pairing merged (#260); chunking reads the measured form (#223, wire and column open); chapter card quality moved to 0.17.0** | #195, #221, #222, #226, #227, #229; #162 and #223 moved to 0.17.0 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
-| | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail; chapter card quality — **a card restating its evidence is refused (#290); quotes from markdown and PDF books ground, and PDF words split across pages rejoin (#305), both in 0.16.1; 15 of 17 and 17 of 18 kept and correct on two fresh-chapter runs; no checker model for wrong-person or added claims yet. In 0.16.2: front matter is skipped by the sections for every form (#252), a book's register is a majority of three body windows (#286), and a markdown book's topics are its top-level headings (#307); none yet measured on a live library** | #160, #162, #211, #223, #231, #252, #286, #300, #307 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
-| | 0.18.0 | Your own server. **Checkpoint C** | | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key |
+| | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #158, #159, #161, #185, #186, #187, #188, #189, #191, #204, #205; #100 moved to 0.17.0, #66 to 0.18.0 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
+| III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement; chapter practice — **0.16.2 released; pairing merged (#260); chunking reads the measured form (#223, wire and column open); chapter card quality passed its gate (#305); the Practice panel's cards have not (#330)** | #160, #195, #221, #222, #226, #227, #229; #223 moved to 0.17.0, #162 to 0.18.0 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
+| | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail — **not started; six batches in §6.** Done ahead of it: every router and all but the two retrieval services keep their SQL in `repos/`, and every `DATA_DIR` join goes through `app/storage.py`. Fixed in 0.16.2 and not yet measured on a live library: front matter skipped for every form (#252), register from three body windows (#286), a markdown book's topics from its top-level headings (#307) | #100, #211, #223, #231, #252, #286, #307 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
+| | 0.18.0 | Your own server, plus what Checkpoints A and B left open: the hardware session, the Practice panel's cards and Ask on what the documents do not say (§7). **Checkpoint C** | #24, #66, #99, #155, #156, #162, #322, #330 | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key; zero open `bug` issues milestoned to Phase I, II or III |
 | IV. Separation | 0.19.0 | Components separated for mobile | | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
 | V. Mobile | 0.20.0 | Topic notes and the draft inbox; mobile reading and note capture. **Checkpoint D** | #173 | A merge that leaves a source note out of every section is refused, a summary claim no source note supports is flagged, and undoing a merge restores every original; a phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated |
-| VI. Extras | 0.21.0 | Anki import; the capture extension, watch folder and Obsidian export; card review on mobile | #137, #124, #121, #25, #103, #26 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an offline review on the phone merges without overwriting FSRS state |
+| VI. Extras | 0.21.0 | Anki import; the capture extension, watch folder and Obsidian export; card review on mobile | #137, #124, #121, #25, #103, #26, #300, #314 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an offline review on the phone merges without overwriting FSRS state |
 | VII. Languages | 0.22.0 | Multi-language — **conditional** | | Non-English degradation measured on the current stack first; a swap ships only through 0.17.0's rail; a no-go decision is an allowed outcome and moves the swap to 1.1 |
 | | 1.0.0-rc → 1.0.0 | The release. **Checkpoint E** | | Zero open `bug` issues; every rung's exit gate green together, on one build; the code-quality targets met |
 
@@ -347,14 +347,10 @@ and `verify-citation` green. Not yet run:
 - A first run of the installer on a real Windows machine past what CI does (install, ingest,
   search in `desktop-installers.yml`), and `make smoke` there.
 - `make smoke` against the bundled macOS app, and the DMG on a cleared data directory.
-- #110: a route chunk can fail to load in the packaged app, cause unknown. The bundled backend logs
-  no request status or latency, so the next occurrence could not be diagnosed either. That logging
-  comes first.
 
-Defects that were written here have moved to the tracker: `eval-summary` scoring a stored summary
-(#154), the Windows proxy for model pulls (#155) and split GPU/CPU offload (#156) belong to this
-phase. The false-premise answer (#158) and Wikipedia `[edit]` links (#159) belong to 0.15.0; the flashcard
-floors (#160) and YouTube verification (#162) moved to 0.16.0. Three instrument defects listed here were fixed
+Defects that were written here have moved to the tracker. #154, #158, #159 and #160 are closed; the
+Windows proxy for model pulls (#155), split GPU/CPU offload (#156) and YouTube verification (#162)
+are on 0.18.0. Three instrument defects listed here were fixed
 on `master` before the move: `eval-ingest` re-resolves a document by filename (#143), atomicity is
 structural (`is_atomic`), and a judge verdict outside its enum is excluded rather than crashing
 the run.
@@ -488,7 +484,9 @@ retrieval and the learner record never move with it. Desktop-only code stays in 
 **Exit gate.** First run completes with no terminal on a Windows and a Linux machine that has never
 seen Luminary; each host's verdict names the accelerator it actually has, proven by a platform-pinned
 test and a Windows CI job; `make smoke` green on Windows and against the bundled macOS app; #24,
-#99, #110, #154, #155 and #156 closed. Then Checkpoint A.
+#99, #110, #154, #155 and #156 closed. #110 and #154 are closed; the other four need a consumer Windows
+GPU laptop, Linux hardware and a PAC-proxy network, so they moved to 0.18.0 and this gate runs in
+Checkpoint C's hardware session (§7).
 
 ### 3. Gates you can believe — 0.14.x
 
@@ -562,13 +560,19 @@ analysis the sentence does not state, so it needs its own design and a graded ru
 are speakers the source mislabels (the Gita's chapter headings name the wrong speaker) and misread
 text.
 
-**The flashcard floors (#160) moved to 0.16.0, behind the instrument (#226).** Naming the work in
-the unit prompt did not move clarity beyond run-to-run noise. Over four runs on one library copy
-(judge `qwen2.5:14b-instruct`, 35 rows, 2026-10-02), clarity was 3.09 and 3.35 without the change
-and 3.27 and 3.26 with it. No run reached the 3.5 floor. Clarity is the only judged axis with no
-anchors (`evals/lib/flashcard_metrics.py`), and the judge leaves cards unjudged on factuality (#226).
-The floors stay where they are until the judge can resolve a change. The branch
-`fix/flashcard-clarity-160` is kept and not merged.
+**Card quality is gated by people, not by the flashcard eval's judge (#160, closed 2026-10-20).**
+Against the owner's ratings of 82 cards, no qwen3.5:4b judge tracks quality (Spearman 0.04 to
+0.13), so `make eval-flashcards`' judged clarity cannot show a generator change in either
+direction (`eval-coverage.md`). The gate is the step 4 gate: at least 6 in 10 kept and correct
+and at most 1 in 10 discarded, on two fresh runs, with framing rated by the owner and correctness
+checked against the source. The chapter path passed it (15/17 and 17/18, #305). The Practice
+panel's unit path has not (#330). The branch `fix/flashcard-clarity-160` is kept and not merged.
+
+**A novel false premise is a limit of the local model (#158, closed 2026-10-20).** The premise rule
+(#218) corrects a premise that near-misses the document's wording: 0.57 on 7 rows against 0.43 and
+0.14 before it, and `make eval-false-premise` holds it at 0.50. The three rows whose premise is
+novel fail with qwen3.5:4b and gemma4 alike, although the correcting passage is retrieved. A
+candidate default model is run on those rows before it ships; one that corrects them reopens #158.
 
 **Query-time graph expansion is removed from `/search`; do not restore it.** It bought nothing:
 `run_eval.py --ablation`, 2026-09-21, dev library, GLiNER held resident and the arms confirmed to
@@ -768,17 +772,28 @@ measured.
 
 **Only the seams that are expensive to add once users have data.** There is no tenancy UI and no
 billing; hosted multi-tenant is after 1.0 (Deferred). On desktop every seam carries a single value.
-Today `models.py` has no owner, tenant or library column, data sits under one global `DATA_DIR`
-(`config.py`), and 54 files call `get_settings()`.
 
-| Seam | What it means |
-|---|---|
-| A library scope on every query | `library_id` on user-owned tables, the LanceDB tables and the graph tables (in SQLite from 0.15.0). The migration is additive with a backfill: DDL and backfill in separate revisions (I-23) |
-| A request context | `principal` and `library` flow from the auth middleware through services to repos. No repo reads global state to find its data |
-| One path resolver | Direct `DATA_DIR` joins go through a resolver that takes the library, so each tenant gets its own root, or later an object store |
-| Per-library settings | `get_settings()` splits into process configuration and per-library or per-user preferences (`llm_mode`, keys, model picks). API keys move to storage scoped to the principal |
-| Shared-resource audit | Model residency, `MODEL_LOAD_LOCK`, the write-lock watchdog and the background queues, checked for anything that assumes one user. Fairness waits for the hosted work; correctness does not |
-| A layer-linter rule | `layer_linter.py` fails when a repo function lacks a library scope. Without it the seam decays |
+| Seam | What it means | Now |
+|---|---|---|
+| A library scope on every query | `library_id` on user-owned tables, the LanceDB tables and the graph tables (in SQLite from 0.15.0). The migration is additive with a backfill: DDL and backfill in separate revisions (I-23) | The nine graph tables carry a nullable `library_id` that nothing reads; no other table and no LanceDB table has one |
+| A request context | `principal` and `library` flow from the auth middleware through services to repos. No repo reads global state to find its data | `RequestAuthMiddleware` resolves a `Principal` (`types.py`); nothing below the router reads it |
+| One path resolver | Direct `DATA_DIR` joins go through a resolver that takes the library, so each tenant gets its own root, or later an object store | Built: `app/storage.py`, held by `tests/test_storage_roots.py`; `library_root` does not take a library yet |
+| Per-library settings | `get_settings()` splits into process configuration and per-library or per-user preferences (`llm_mode`, keys, model picks). API keys move to storage scoped to the principal | Not started; 56 files in `app/` call `get_settings()` |
+| Shared-resource audit | Model residency, `MODEL_LOAD_LOCK`, the write-lock watchdog and the background queues, checked for anything that assumes one user. Fairness waits for the hosted work; correctness does not | Not started |
+| A layer-linter rule | `layer_linter.py` fails when a repo function lacks a library scope. Without it the seam decays | Not started |
+
+**Order of work.** Each batch is a few PRs and ends in a manual test pass on the app (Code quality
+to 1.0). Chapter card quality and the Ask fixes are not on this rung: they run beside it and land by
+Checkpoint C (§7), so open-ended research cannot hold the architecture back.
+
+| Batch | Work | Why it is here |
+|---|---|---|
+| 0. Close-outs | Measure #252, #286 and #307 on a fresh library (`make eval-full`, `make eval-topics` for F1 ≥ 0.70 on d2l, thinkpython2's first chapter cards, Usher's register) and close or reopen each with the numbers. Fix the CI `database is locked` flake (#211). Put #100's measurements (§4) on the issue and close it or narrow it to what is unmeasured. Run the chapter practice offer, panel and Study list in the desktop shell (#231) | The fixes are merged and need a number to close; #211 fails PRs at random for the whole rung |
+| 1. SQL into repos | The last 79 statements outside `repos/` (`quality_baseline.json`): the two retrieval services (6, under the `retrieval-change` gate, `make eval` equal before and after), the chat runtime (31), the ingestion and concept workflows (25), scripts (16) and `main.py` (1). No behaviour change | The scope is then added in repos alone, which is what the layer-linter rule checks |
+| 2. Schema | #223's wire and column: measure `form` for documents that predate 0.16.0 (`app.scripts.remeasure_domain`), stop the API and frontend taking `content_type`, drop the column. Then `library_id` on the user-owned and LanceDB tables. Upgrade test from a 0.16.2 library | Migrations are one-way (`releasing.md`); one batch needs one upgrade test, not two |
+| 3. Request context | `principal` and `library` from `RequestAuthMiddleware` to every repo; `library_root` takes the library; the layer-linter rule; a test that a second library sees none of the first's documents, notes, cards, vectors or graph rows | The first two parts of the exit gate |
+| 4. Settings and shared resources | `get_settings()` split; API keys scoped to the principal; the shared-resource audit, with a test for each defect it finds | Preferences are keyed on the library from batch 3 |
+| 5. Snapshot and the re-embed rail | The snapshot format and restore, then a resumable re-embed, proven against the current 384-dim embedder: a re-embed killed midway and restarted matches a clean run | The last two parts of the exit gate; a snapshot is of one library, so it follows batch 3 |
 
 **The snapshot/restore format and the re-embed rail ship in the same rung.** Moving to a multilingual
 embedder regenerates every vector in every library, and 0.x is the last point at which the
@@ -800,6 +815,32 @@ tunnel the user owns, and the docs say so.
 `container_without_accelerator` for a CPU-only container, so every local call is refused. Cloud mode
 with the user's key is the answer (engine modes, 0.13.x), and this rung's gate proves it builds an
 enriched library.
+
+**Checkpoint C also closes what Checkpoints A and B left open.** It cannot be tagged while a `bug`
+milestoned to Phase I, II or III is open, so this work is on the 0.18.0 milestone and starts now,
+beside 0.17.0, rather than after it:
+
+| Track | Issues | What it needs |
+|---|---|---|
+| Hardware session | #24, #99, #155, #156, #162 | The runs below |
+| The Practice panel's cards | #330 | The step 4 gate on the unit path (§4) |
+| Ask on what the documents do not say | #66, #322 | #322 is a `retrieval-change` and follows 0.17.0's batch 1 |
+
+**The hardware session waits on no borrowed laptop (decided 2026-10-20).** Each item closes on the
+cheapest run that exercises its mechanism for real. What only consumer hardware would show is
+named in Checkpoint C's release notes as not exercised (Checkpoint releases).
+
+| Issue | The run that closes it |
+|---|---|
+| #156 | A Linux `g4dn.xlarge` whose Ollama runs with `OLLAMA_GPU_OVERHEAD` reserving all but about 2 GB of the T4, so the scheduler splits `qwen3.5:4b` between card and processor. The host verdict and banner are read in the UI, served by the backend in public mode. Not exercised: a consumer laptop's latency under a split |
+| #155 | The 0.13.4 Windows setup (m6i behind mitmproxy) with a PAC script as the only proxy setting. A stalled model download must name the setting to change, which is the issue's alternative done-when, shipped in #235. Resolving the PAC script automatically (`WinHttpGetProxyForUrl`) and WPAD are after 1.0 |
+| #24 | `desktop-installers.yml` installs the Windows setup into a root as long as a 20-character username's. Linux is covered by the same job's `.deb` and AppImage installs and by the T4 first run (§2) |
+| #99 | The same job renders, through the installed Linux build (WebKitGTK), a local page whose text only script writes |
+| #162 | The bundled macOS app on this Mac. YouTube refuses cloud and CI addresses as bots, so Windows and Linux come from rc testers or are named as not exercised. #162 is not a `bug`, so it does not hold the tag |
+
+Both AWS runs fit inside the remaining cap (§2): about an hour each, profile `personal`, terminated
+in the same session, launched when the user says go. #314 (built-in AMD and Intel graphics) moved to
+0.21.0, because no cloud or CI machine has them to time.
 
 Then Checkpoint C.
 
@@ -962,7 +1003,7 @@ lines with their own copies of manifest, search and history plumbing.
 |---|---|
 | 0.14 | **Done.** The ratchets above run in `make ci`, coverage floors included (#177, #182). `qa.stream_answer` moved to `runtime/qa_stream.py` and `KNOWN_VIOLATIONS` is empty (#181). One shared DB fixture replaces 96 copies (#180). The 19 smoke scripts that never called the server are pytest tests or deleted (#179) |
 | 0.15 | **Done.** `summarizer.py` split into `summary_prompts.py` and `summary_assembly.py` (both pure), `repos/summary_repo.py` and `library_summary.py`; `sql_outside_repos` for it went from 22 to 0. `content_type` readers go through `DocumentProfile.of`, starting with flashcard generation, and the ratchet counts the rest (234 references in 33 files) so none is added. Eval runners read `/search` order through `evals/lib/search.py`, beside the shared manifest and history |
-| 0.16–0.17 | Repos extracted from `routers/study.py` (103 queries) and `routers/documents.py` (42), then from the services with the most direct SQL, before `library_id` lands, so the scope is added in one place. `get_collection_study_dashboard` and `list_documents` are split on the way. The 53 `DATA_DIR` joins go through the path resolver. **`routers/study.py` done:** 109 statements to 0 and off the maintainability list; the due queue, collection dashboard and teach-back pipeline are services (`study_queue.py`, `collection_dashboard.py`, `teachback_service.py`) over repos (#244 and the teach-back PR). **Every router done:** `routers/documents.py` 43 to 0, with the library list query in `repos/document_list_repo.py`, and the other 14 routers 150 to 0 in total, over new `home_repo`, `enrichment_repo`, `concept_repo`, `eval_repo` and `suggestion_repo`. **Path resolver done:** every `DATA_DIR` join goes through `app/storage.py` (`library_root` or `machine_root`, both `DATA_DIR` today), held by `tests/test_storage_roots.py`. **Services, five batches:** every service but `retriever` and `retriever_strategies`, which wait for the retrieval-change gate; statements outside repos 629 to 79, the rest in the chat runtime, the ingestion and concept workflows, and scripts. Open: the retrieval services, then the runtime, workflows and scripts |
+| 0.16–0.17 | Repos extracted from `routers/study.py` (103 queries) and `routers/documents.py` (42), then from the services with the most direct SQL, before `library_id` lands, so the scope is added in one place. `get_collection_study_dashboard` and `list_documents` are split on the way. The 53 `DATA_DIR` joins go through the path resolver. **`routers/study.py` done:** 109 statements to 0 and off the maintainability list; the due queue, collection dashboard and teach-back pipeline are services (`study_queue.py`, `collection_dashboard.py`, `teachback_service.py`) over repos (#244 and the teach-back PR). **Every router done:** `routers/documents.py` 43 to 0, with the library list query in `repos/document_list_repo.py`, and the other 14 routers 150 to 0 in total, over new `home_repo`, `enrichment_repo`, `concept_repo`, `eval_repo` and `suggestion_repo`. **Path resolver done:** every `DATA_DIR` join goes through `app/storage.py` (`library_root` or `machine_root`, both `DATA_DIR` today), held by `tests/test_storage_roots.py`. **Services, five batches:** every service but `retriever` and `retriever_strategies`, which wait for the retrieval-change gate; statements outside repos 629 to 79, the rest in the chat runtime, the ingestion and concept workflows, and scripts. Open: the retrieval services, then the runtime, workflows and scripts (0.17.0's batch 1) |
 | 0.18 | `main.lifespan` (300 lines) becomes named startup phases |
 | 0.19 | `fetch` onto `apiClient`, then `DocumentReader` (1,946 lines), `PDFViewer`, `Notes` and `ChatConversation` split into `packages/domain` hooks and `packages/ui` views |
 | 1.0-rc | Every target above met, or its exemption stated here with the reason |

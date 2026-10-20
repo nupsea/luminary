@@ -45,7 +45,7 @@ DATASET = "false_premise"
 # Bracketed by two arms on one library copy, qwen3.5:4b, 2026-10-01: master before the
 # premise rule scored 0.43 and 0.14, the rule 0.57 on four runs. 7 rows, so one row is
 # 0.14 and the floor sits on the one-row step between them. The three novel rows fail on
-# both arms: the model does not read the correction out of narrative (#158 stays open).
+# both arms: the model does not read the correction out of narrative (#158, a model limit).
 DEFAULT_THRESHOLD = 0.50
 
 
