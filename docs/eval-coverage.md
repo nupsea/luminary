@@ -61,6 +61,13 @@ a forced one measures a corpus no user would have.
   as placeholders until `make eval-flashcards` has run enough times to derive floors the way the
   generation floors were derived.
 
+- **`clarity_avg` is evidence of nothing about a generator change** (#160). Against the owner's
+  ratings of 82 cards, no qwen3.5:4b judge tracks quality: Spearman 0.08 with the passage visible,
+  0.13 and 0.04 judging the question alone. A second labeller (Claude, writing labels before reading any judge score) agreed with the
+  owner at 0.46.
+  Card quality is decided by the step 4 gate in `roadmap.md` §4. A judge counts again once it
+  reaches 0.46 against the owner on a held-out set of rated cards.
+
 - **`make eval-flashcards` cannot resolve a change smaller than its own noise.** Measured
   2026-09-02, four runs, same library, two per arm across an unrelated prompt change:
   `factuality` **0.7396 / 0.6026** on identical code in one arm and 0.7083 / 0.7300 in the other.
