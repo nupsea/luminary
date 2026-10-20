@@ -647,6 +647,40 @@ class DocumentRepo:
         )
         return [tuple(row) for row in result.all()]
 
+    async def all_ids(self) -> list[str]:
+        result = await self.session.execute(select(DocumentModel.id))
+        return [row[0] for row in result.all()]
+
+    async def all_documents(self) -> Sequence[DocumentModel]:
+        return (await self.session.execute(select(DocumentModel))).scalars().all()
+
+    async def complete_without_word_count(self) -> Sequence[DocumentModel]:
+        result = await self.session.execute(
+            select(DocumentModel).where(
+                DocumentModel.stage == "complete",
+                (DocumentModel.word_count == 0) | (DocumentModel.word_count.is_(None)),
+            )
+        )
+        return result.scalars().all()
+
+    async def fail_unfinished(self, message: str) -> int:
+        """Mark every document not complete or failed as failed; the number marked."""
+        result = await self.session.execute(
+            update(DocumentModel)
+            .where(DocumentModel.stage.notin_(("complete", "error")))
+            .values(stage="error", error_message=message)
+        )
+        return result.rowcount
+
+    async def chunk_ner_inputs(self, document_id: str) -> list[tuple[str, str, bool | None]]:
+        """(id, text, has_code) for a document's chunks, in reading order."""
+        result = await self.session.execute(
+            select(ChunkModel.id, ChunkModel.text, ChunkModel.has_code)
+            .where(ChunkModel.document_id == document_id)
+            .order_by(ChunkModel.chunk_index)
+        )
+        return [tuple(row) for row in result.all()]
+
     async def set_chunk_entities_text(self, chunk_id: str, entities_text: str | None) -> None:
         await self.session.execute(
             update(ChunkModel).where(ChunkModel.id == chunk_id).values(entities_text=entities_text)

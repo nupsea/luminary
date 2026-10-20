@@ -34,11 +34,10 @@ import logging
 import sys
 import uuid
 
-from sqlalchemy import select, text
-from sqlalchemy import update as sa_update
+from sqlalchemy import text
 
 from app.database import get_session_factory
-from app.models import ChunkModel, DocumentModel
+from app.repos.document_repo import DocumentRepo
 from app.workflows.ingestion import build_entity_tail
 
 logger = logging.getLogger(__name__)
@@ -61,8 +60,7 @@ def _percentile(values: list[int], pct: float) -> int:
 
 async def _list_document_ids() -> list[str]:
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel.id))
-        return [row[0] for row in result.all()]
+        return await DocumentRepo(session).all_ids()
 
 
 async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str, int]:
@@ -85,36 +83,23 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
     }
 
     async with get_session_factory()() as session:
-        doc_row = (
-            await session.execute(
-                select(
-                    DocumentModel.title,
-                    DocumentModel.content_type,
-                    DocumentModel.is_technical,
-                ).where(DocumentModel.id == doc_id)
-            )
-        ).first()
+        docs = DocumentRepo(session)
+        doc_row = await docs.get(doc_id)
         if doc_row is None:
             logger.warning("reindex_entities: doc_id not found", extra={"doc_id": doc_id})
             return metrics
         content_type = doc_row.content_type or "notes"
         is_technical = doc_row.is_technical
 
-        chunk_rows = (
-            await session.execute(
-                select(ChunkModel.id, ChunkModel.text, ChunkModel.has_code)
-                .where(ChunkModel.document_id == doc_id)
-                .order_by(ChunkModel.chunk_index)
-            )
-        ).all()
+        chunk_rows = await docs.chunk_ner_inputs(doc_id)
         if not chunk_rows:
             logger.info("reindex_entities: no chunks", extra={"doc_id": doc_id})
             return metrics
 
         chunk_dicts = [
             # has_code picks GLiNER's code threshold, as it does at ingest.
-            {"id": row.id, "document_id": doc_id, "text": row.text, "has_code": bool(row.has_code)}
-            for row in chunk_rows
+            {"id": cid, "document_id": doc_id, "text": ctext, "has_code": bool(has_code)}
+            for cid, ctext, has_code in chunk_rows
         ]
 
         # Rebuilding starts from an empty pool so fresh (frequency-based) canonicals
@@ -170,9 +155,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
             canonicals = chunk_to_entities.get(cid)
             tail = build_entity_tail(canonicals) if canonicals else ""
             chunk["entities_text"] = tail or None
-            await session.execute(
-                sa_update(ChunkModel).where(ChunkModel.id == cid).values(entities_text=tail or None)
-            )
+            await docs.set_chunk_entities_text(cid, tail or None)
             if canonicals:
                 metrics["chunks_updated"] += 1
                 metrics["entities_injected_total"] += len(canonicals)

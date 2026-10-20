@@ -30,10 +30,9 @@ import logging
 import sys
 from pathlib import Path
 
-from sqlalchemy import select, update
-
 from app.database import get_session_factory
 from app.models import DocumentModel
+from app.repos.document_repo import DocumentRepo
 from app.services.content_classifier import classify_form
 from app.types import TECHNICAL_CONTENT_TYPES, DocumentProfile
 from app.workflows.ingestion_nodes._shared import (
@@ -57,15 +56,7 @@ async def _read(doc: DocumentModel, session) -> tuple[str, list[dict], int, str]
     way ingestion parses it, because `classify_form` reads the section headings.
     """
     if doc.content_type in _MEDIA:
-        from app.models import ChunkModel  # noqa: PLC0415
-
-        rows = await session.execute(
-            select(ChunkModel.text)
-            .where(ChunkModel.document_id == doc.id)
-            .order_by(ChunkModel.chunk_index)
-            .limit(200)
-        )
-        text = " ".join(r[0] for r in rows.all())
+        text = " ".join(await DocumentRepo(session).opening_chunk_texts(doc.id, 200))
         return text, [], len(text.split()), Path(doc.file_path).suffix.lstrip(".")
     try:
         from app.services.parser import DocumentParser  # noqa: PLC0415
@@ -88,7 +79,7 @@ async def main(apply: bool) -> int:
     undecided: list[str] = []
 
     async with factory() as session:
-        docs = (await session.execute(select(DocumentModel))).scalars().all()
+        docs = await DocumentRepo(session).all_documents()
 
         for doc in docs:
             before = DocumentProfile.from_legacy(doc.content_type, doc.is_technical).domain
@@ -135,9 +126,7 @@ async def main(apply: bool) -> int:
                     values["register"] = register
                 if form is not None:
                     values["form"] = form
-                await session.execute(
-                    update(DocumentModel).where(DocumentModel.id == doc.id).values(**values)
-                )
+                await DocumentRepo(session).update_fields(doc.id, **values)
         if apply:
             await session.commit()
 

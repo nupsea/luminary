@@ -83,3 +83,29 @@ async def test_a_concept_rebuild_unmaps_and_remaps_cards_by_slug(session):
     await session.refresh(remapped)
     assert (remapped.concept_id, remapped.mapping_status) == ("k2", "mapped")
     assert [c.id for c in await cards.slugged_but_unmapped()] == ["f2"]
+
+
+async def test_script_reads_and_the_startup_reconcile(session):
+    docs = DocumentRepo(session)
+    session.add(
+        DocumentModel(
+            id="d2",
+            title="Done",
+            format="txt",
+            content_type="book",
+            file_path="/z",
+            stage="complete",
+            word_count=0,
+        )
+    )
+    await session.commit()
+
+    assert sorted(await docs.all_ids()) == ["d1", "d2"]
+    assert [d.id for d in await docs.complete_without_word_count()] == ["d2"]
+    assert [row[0] for row in await docs.chunk_ner_inputs("d1")] == ["c0", "c1"]
+
+    assert await docs.fail_unfinished("interrupted") == 1
+    await session.commit()
+    stages = {d.id: (d.stage, d.error_message) for d in await docs.all_documents()}
+    assert stages["d2"] == ("complete", None)
+    assert stages["d1"][0] == "error"

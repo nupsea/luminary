@@ -269,28 +269,16 @@ async def lifespan(app: FastAPI):
     # a 52,331-chunk embed at 70%. An interrupted ingest is now marked failed at
     # startup, which is a state the user can act on (I-10).
     try:
-        from sqlalchemy import update  # noqa: PLC0415
+        from app.repos.document_repo import DocumentRepo  # noqa: PLC0415
 
-        from app.models import DocumentModel  # noqa: PLC0415
-
-        _terminal_stages = ("complete", "error")
         async with get_session_factory()() as _session:
-            result = await _session.execute(
-                update(DocumentModel)
-                .where(DocumentModel.stage.notin_(_terminal_stages))
-                .values(
-                    stage="error",
-                    error_message=(
-                        "Ingestion was interrupted before it finished. "
-                        "Delete this document and upload it again."
-                    ),
-                )
+            failed = await DocumentRepo(_session).fail_unfinished(
+                "Ingestion was interrupted before it finished. "
+                "Delete this document and upload it again."
             )
             await _session.commit()
-        if result.rowcount:
-            logger.warning(
-                "marked %d interrupted ingestion(s) as failed at startup", result.rowcount
-            )
+        if failed:
+            logger.warning("marked %d interrupted ingestion(s) as failed at startup", failed)
     except Exception:
         logger.warning("could not reconcile interrupted ingestions", exc_info=True)
 
