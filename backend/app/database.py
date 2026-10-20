@@ -1,4 +1,5 @@
 import logging
+import sqlite3
 import time
 
 from sqlalchemy import event
@@ -104,6 +105,32 @@ def _report_write_hold(conn, outcome: str) -> None:
         )
 
 
+def _report_busy(context) -> None:
+    """Name why a statement was refused with "database is locked" (#211).
+
+    A writer that waited out `busy_timeout` and one refused at once, because its
+    connection already held a stale read snapshot, raise the same message. SQLite's
+    extended code and the live write holders tell them apart.
+    """
+    name = getattr(context.original_exception, "sqlite_errorname", "")
+    if not name.startswith("SQLITE_BUSY"):
+        return
+    victim = id(context.connection) if context.connection is not None else None
+    now = time.monotonic()
+    holders = [
+        f"{now - started:.2f}s {first_write}"
+        for conn_id, (started, first_write) in _write_holds.items()
+        if conn_id != victim
+    ]
+    logger.warning(
+        "%s (SQLite %s) on: %s. Write holders on other connections: %s",
+        name,
+        sqlite3.sqlite_version,
+        " ".join((context.statement or "").split())[:90],
+        "; ".join(holders) or "none",
+    )
+
+
 def make_engine(db_url: str | None = None):
     url = db_url or get_db_url()
     kwargs: dict = {}
@@ -125,6 +152,7 @@ def make_engine(db_url: str | None = None):
     event.listen(engine.sync_engine, "after_cursor_execute", _note_write)
     event.listen(engine.sync_engine, "commit", lambda c: _report_write_hold(c, "commit"))
     event.listen(engine.sync_engine, "rollback", lambda c: _report_write_hold(c, "rollback"))
+    event.listen(engine.sync_engine, "handle_error", _report_busy)
     return engine
 
 
