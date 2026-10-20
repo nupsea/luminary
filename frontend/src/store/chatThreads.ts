@@ -78,6 +78,8 @@ export interface ChatPreload {
   text: string
   documentId: string | null
   autoSubmit?: boolean
+  /** Without autoSubmit: select from here to the end, so typing replaces a suggested question. */
+  selectFrom?: number
   /** Which conversation should pick it up. Absent means the Ask page. */
   threadKey?: string
 }

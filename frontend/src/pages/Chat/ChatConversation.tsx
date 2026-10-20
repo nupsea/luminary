@@ -218,7 +218,11 @@ export function ChatConversation({
         setTimeout(() => void sendMessage(chatPreload.text), 100)
       } else {
         setTimeout(() => {
-          textareaRef.current?.focus()
+          const el = textareaRef.current
+          el?.focus()
+          if (el && chatPreload.selectFrom !== undefined) {
+            el.setSelectionRange(chatPreload.selectFrom, el.value.length)
+          }
           autoResize()
         }, 50)
       }

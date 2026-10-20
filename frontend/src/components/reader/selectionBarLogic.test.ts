@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { BAR_HALF_WIDTH, BAR_HEIGHT, explainModeFor, placeBar, selectionBox } from "./selectionBarLogic"
+import { askDraftFor, BAR_HALF_WIDTH, BAR_HEIGHT, explainModeFor, placeBar, selectionBox, SUGGESTED_QUESTION } from "./selectionBarLogic"
 
 describe("explainModeFor", () => {
   it("defines a word or a short term", () => {
@@ -13,6 +13,14 @@ describe("explainModeFor", () => {
     expect(explainModeFor("The lakehouse stores tables. It is open.")).toBe("plain")
     expect(explainModeFor("Spark reads it; Trino queries it")).toBe("plain")
     expect(explainModeFor("a format that combines the lake and the warehouse")).toBe("plain")
+  })
+})
+
+describe("askDraftFor", () => {
+  it("quotes every line of the passage and selects only the suggested question", () => {
+    const draft = askDraftFor("  first line\nsecond line \n")
+    expect(draft.text).toBe(`> first line\n> second line\n\n${SUGGESTED_QUESTION}`)
+    expect(draft.text.slice(draft.selectFrom)).toBe(SUGGESTED_QUESTION)
   })
 })
 
