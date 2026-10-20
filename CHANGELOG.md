@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A question picked from the suggestions could be answered from the model's general knowledge under the document's source chips.** Suggested questions are now answered from the documents only. On 11 factual questions, three runs each, general-knowledge answers went from 7, 7 and 6 to none (#66).
+
 ## [0.16.2] - 2026-10-19
 
 ### Added

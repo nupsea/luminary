@@ -45,6 +45,8 @@ class QARequest(BaseModel):
     creative: bool = False  # grounded generative synthesis (creative prompt + higher temp)
     direct: bool = False  # per-question Direct toggle: ask model without library retrieval
     include_context: bool = False  # eval-only: echo the grounding chunk texts in the done event
+    # A question the product suggested is answered from the documents only (#66).
+    suggested: bool = False
 
 
 class ClassifyOnlyResponse(BaseModel):
@@ -82,6 +84,7 @@ async def ask_question(req: QARequest) -> StreamingResponse:
             creative=req.creative,
             direct=req.direct,
             include_context=req.include_context,
+            suggested=req.suggested,
         ),
         media_type="text/event-stream",
     )
