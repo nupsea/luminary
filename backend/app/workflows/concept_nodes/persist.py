@@ -15,10 +15,10 @@ import hashlib
 import logging
 import uuid
 
-from sqlalchemy import delete, select, update
-
 from app.database import get_session_factory
-from app.models import ConceptModel, FlashcardModel
+from app.models import ConceptModel
+from app.repos.concept_repo import ConceptRepo
+from app.repos.flashcard_repo import FlashcardRepo
 from app.repos.graph_concept_repo import GraphConceptRepo
 from app.services.vector_store import get_lancedb_service
 from app.workflows.concept_nodes._shared import (
@@ -55,12 +55,8 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
         graph = GraphConceptRepo(session)
         # --- detach cards from the about-to-be-deleted concepts. They KEEP concept_slug, the
         # durable binding we re-map below, so the learner's record survives the rebuild. ---
-        await session.execute(
-            update(FlashcardModel)
-            .where(FlashcardModel.concept_id.is_not(None))
-            .values(concept_id=None, mapping_status="unmapped")
-        )
-        await session.execute(delete(ConceptModel))
+        await FlashcardRepo(session).detach_from_concepts()
+        await ConceptRepo(session).delete_all()
         await session.commit()
         await asyncio.to_thread(lance.clear_concept_vectors)
 
@@ -127,28 +123,12 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
         rebound = 0
         id_to_slug = {cid: slug for slug, cid in slug_to_id.items()}
         for slug, new_id in slug_to_id.items():
-            res = await session.execute(
-                update(FlashcardModel)
-                .where(FlashcardModel.concept_slug == slug)
-                .values(concept_id=new_id, mapping_status="mapped")
-            )
-            rebound += res.rowcount or 0
+            rebound += await FlashcardRepo(session).map_slug_to_concept(slug, new_id)
 
         # fallback: a card whose slug vanished (concept drifted/merged) is re-grounded through its
         # source chunk -- ride the stable chunk layer, and correct its slug for the next rebuild.
         rebound_via_chunk = 0
-        orphans = (
-            (
-                await session.execute(
-                    select(FlashcardModel).where(
-                        FlashcardModel.concept_slug.is_not(None),
-                        FlashcardModel.concept_id.is_(None),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
+        orphans = await FlashcardRepo(session).slugged_but_unmapped()
         for card in orphans:
             cid = chunk_to_concept.get(card.chunk_id) if card.chunk_id else None
             if cid:

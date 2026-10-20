@@ -21,12 +21,9 @@ import logging
 import uuid
 from itertools import combinations
 
-from sqlalchemy import update as _update
-
 from app.config import get_settings as _get_settings
 from app.database import get_session_factory
 from app.exceptions import ModelNotDownloaded
-from app.models import ChunkModel
 from app.repos.document_repo import DocumentRepo
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services import ner as _ner_module  # indirect: get_entity_extractor is patched
@@ -269,10 +266,8 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                         canonicals = chunk_to_entities.get(cid)
                         tail = build_entity_tail(canonicals) if canonicals else ""
                         chunk["entities_text"] = tail or None
-                        await update_session.execute(
-                            _update(ChunkModel)
-                            .where(ChunkModel.id == cid)
-                            .values(entities_text=tail or None)
+                        await DocumentRepo(update_session).set_chunk_entities_text(
+                            cid, tail or None
                         )
                     await update_session.commit()
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ConceptModel, FlashcardModel, OverrideModel
@@ -13,6 +13,9 @@ from app.models import ConceptModel, FlashcardModel, OverrideModel
 class ConceptRepo:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def delete_all(self) -> None:
+        await self.session.execute(delete(ConceptModel))
 
     async def id_labels(self, *, tracked_only: bool = False) -> list[tuple[str, str]]:
         """(id, label) of every concept, or only those past the candidate stage."""

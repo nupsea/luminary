@@ -624,6 +624,34 @@ class DocumentRepo:
         )
         await self.session.commit()
 
+    async def update_fields(self, document_id: str, **values: object) -> None:
+        """Write these columns of one document. Does not commit."""
+        await self.session.execute(
+            update(DocumentModel).where(DocumentModel.id == document_id).values(**values)
+        )
+
+    async def title(self, document_id: str) -> str | None:
+        result = await self.session.execute(
+            select(DocumentModel.title).where(DocumentModel.id == document_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def chunk_entity_texts(
+        self, document_ids: Sequence[str]
+    ) -> list[tuple[str, str, str | None]]:
+        """(chunk id, document id, entities_text) for every chunk of these documents."""
+        result = await self.session.execute(
+            select(ChunkModel.id, ChunkModel.document_id, ChunkModel.entities_text).where(
+                ChunkModel.document_id.in_(document_ids)
+            )
+        )
+        return [tuple(row) for row in result.all()]
+
+    async def set_chunk_entities_text(self, chunk_id: str, entities_text: str | None) -> None:
+        await self.session.execute(
+            update(ChunkModel).where(ChunkModel.id == chunk_id).values(entities_text=entities_text)
+        )
+
     async def read_section_count(self, document_id: str) -> int:
         result = await self.session.execute(
             select(func.count()).where(ReadingProgressModel.document_id == document_id)

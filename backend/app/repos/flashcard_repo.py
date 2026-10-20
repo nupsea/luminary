@@ -179,6 +179,32 @@ class FlashcardRepo:
             stmt = stmt.where(FlashcardModel.document_id == document_id)
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def detach_from_concepts(self) -> None:
+        """Unmap every card from its concept; each keeps `concept_slug` to be re-mapped by."""
+        await self.session.execute(
+            update(FlashcardModel)
+            .where(FlashcardModel.concept_id.is_not(None))
+            .values(concept_id=None, mapping_status="unmapped")
+        )
+
+    async def map_slug_to_concept(self, slug: str, concept_id: str) -> int:
+        """Map the cards carrying `slug` to `concept_id`; the number mapped."""
+        result = await self.session.execute(
+            update(FlashcardModel)
+            .where(FlashcardModel.concept_slug == slug)
+            .values(concept_id=concept_id, mapping_status="mapped")
+        )
+        return result.rowcount or 0
+
+    async def slugged_but_unmapped(self) -> list[FlashcardModel]:
+        result = await self.session.execute(
+            select(FlashcardModel).where(
+                FlashcardModel.concept_slug.is_not(None),
+                FlashcardModel.concept_id.is_(None),
+            )
+        )
+        return list(result.scalars().all())
+
     async def list_for_concept(self, concept_id: str) -> list[FlashcardModel]:
         result = await self.session.execute(
             select(FlashcardModel).where(FlashcardModel.concept_id == concept_id)

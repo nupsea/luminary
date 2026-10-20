@@ -20,11 +20,9 @@ import asyncio
 import logging
 import uuid
 
-from sqlalchemy import select
-from sqlalchemy import update as _update
-
 from app.database import get_session_factory
-from app.models import ChunkModel, CodeSnippetModel, DocumentModel, SectionModel
+from app.models import ChunkModel, CodeSnippetModel, SectionModel
+from app.repos.document_repo import DocumentRepo
 from app.services.code_parser import get_code_parser
 from app.services.conversation_chunker import ConversationChunker
 from app.services.learning_objective_extractor import LearningObjectiveExtractorService
@@ -159,11 +157,7 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
     )
 
     async with get_session_factory()() as session:
-        # Fetch book title for context injection
-        doc_result = await session.execute(
-            select(DocumentModel.title).where(DocumentModel.id == doc_id)
-        )
-        book_title = doc_result.scalar_one_or_none() or "Unknown Book"
+        book_title = await DocumentRepo(session).title(doc_id) or "Unknown Book"
 
         raw_sections = pd["sections"] if pd else []
         if not raw_sections:
@@ -279,11 +273,7 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
                 chunk_idx += 1
 
         session.add_all(chunk_models)
-        await session.execute(
-            _update(DocumentModel)
-            .where(DocumentModel.id == doc_id)
-            .values(chapter_count=len(section_models))
-        )
+        await DocumentRepo(session).update_fields(doc_id, chapter_count=len(section_models))
         await session.commit()
 
     logger.info(
@@ -355,10 +345,7 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
     cfg = profile.chunk_config
 
     async with get_session_factory()() as session:
-        doc_result = await session.execute(
-            select(DocumentModel.title).where(DocumentModel.id == doc_id)
-        )
-        doc_title = doc_result.scalar_one_or_none() or "Unknown"
+        doc_title = await DocumentRepo(session).title(doc_id) or "Unknown"
 
         raw_sections = pd["sections"] if pd else []
         if not raw_sections:
@@ -501,11 +488,7 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
         session.add_all(chunk_models)
         await session.flush()
         session.add_all(snippet_models)
-        await session.execute(
-            _update(DocumentModel)
-            .where(DocumentModel.id == doc_id)
-            .values(chapter_count=len(section_models))
-        )
+        await DocumentRepo(session).update_fields(doc_id, chapter_count=len(section_models))
         await session.commit()
 
     # Fire-and-forget objective extraction for qualifying sections
@@ -669,10 +652,8 @@ async def _chunk_conversation(
             }
         session.add_all(chunk_models)
 
-        await session.execute(
-            _update(DocumentModel)
-            .where(DocumentModel.id == doc_id)
-            .values(conversation_metadata=conversation_metadata)
+        await DocumentRepo(session).update_fields(
+            doc_id, conversation_metadata=conversation_metadata
         )
         await session.commit()
 
@@ -853,10 +834,7 @@ async def _chunk_paper(state: IngestionState, pd: dict | None, doc_id: str) -> I
         cfg = chunk_config_for_form("paper")
         chunks: list[dict] = []
         async with get_session_factory()() as session:
-            doc_result = await session.execute(
-                select(DocumentModel.title).where(DocumentModel.id == doc_id)
-            )
-            paper_title = doc_result.scalar_one_or_none() or "Unknown Paper"
+            paper_title = await DocumentRepo(session).title(doc_id) or "Unknown Paper"
 
             section_models: list[SectionModel] = []
             for s_idx, s in enumerate(raw_sections):
