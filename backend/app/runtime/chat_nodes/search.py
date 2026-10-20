@@ -9,11 +9,10 @@ caps at 2 chunks per document so no single doc dominates context.
 import logging
 import time
 
-from sqlalchemy import and_, or_, select
-
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models import ChunkModel, DocumentModel, SectionSummaryModel
+from app.repos.document_repo import DocumentRepo
+from app.repos.summary_repo import SummaryRepo
 from app.runtime.chat_nodes._shared import _read_rerank_enabled
 from app.services.context_packer import _cap_per_document
 from app.services.query_understanding import parse_query_filters
@@ -40,8 +39,7 @@ async def _searchable_document_ids() -> tuple[set[str], int]:
       in that chat was filtered down to a document that did not exist.
     """
     async with get_session_factory()() as session:
-        rows = await session.execute(select(DocumentModel.id, DocumentModel.stage))
-        pairs = [(str(r[0]), r[1]) for r in rows]
+        pairs = await DocumentRepo(session).id_stages()
     return {doc_id for doc_id, stage in pairs if stage == READY_STAGE}, len(pairs)
 
 
@@ -55,23 +53,7 @@ async def _fetch_section_summaries(
     if not doc_heading_pairs:
         return {}
     async with get_session_factory()() as session:
-        # Build OR conditions for all (doc_id, heading) pairs
-
-        conditions = [
-            and_(
-                SectionSummaryModel.document_id == doc_id,
-                SectionSummaryModel.heading == heading,
-            )
-            for doc_id, heading in doc_heading_pairs
-        ]
-        rows = await session.execute(
-            select(
-                SectionSummaryModel.document_id,
-                SectionSummaryModel.heading,
-                SectionSummaryModel.content,
-            ).where(or_(*conditions))
-        )
-        return {(row.document_id, row.heading): row.content for row in rows}
+        return await SummaryRepo(session).section_summaries_by_heading(doc_heading_pairs)
 
 
 async def _fetch_neighbor_chunks(
@@ -79,12 +61,7 @@ async def _fetch_neighbor_chunks(
 ) -> list[tuple[int, str]]:
     """Fetch immediate neighbors (index-1, index+1) for a chunk to expand context."""
     async with get_session_factory()() as session:
-        stmt = select(ChunkModel.chunk_index, ChunkModel.text).where(
-            ChunkModel.document_id == document_id,
-            ChunkModel.chunk_index.in_([chunk_index - 1, chunk_index + 1]),
-        )
-        rows = await session.execute(stmt)
-        return [(row.chunk_index, row.text) for row in rows]
+        return await DocumentRepo(session).neighbor_chunks(document_id, chunk_index)
 
 
 async def _fetch_neighbor_chunks_batch(
@@ -96,32 +73,17 @@ async def _fetch_neighbor_chunks_batch(
     if not chunk_keys:
         return {}
 
-    conditions = [
-        and_(
-            ChunkModel.document_id == doc_id,
-            ChunkModel.chunk_index.in_([idx - 1, idx + 1]),
-        )
-        for doc_id, idx in chunk_keys
-    ]
-
     async with get_session_factory()() as session:
-        stmt = select(ChunkModel.document_id, ChunkModel.chunk_index, ChunkModel.text).where(
-            or_(*conditions)
-        )
-        rows = await session.execute(stmt)
+        fetched = await DocumentRepo(session).neighbor_chunk_texts(chunk_keys)
 
-        # Index fetched chunks by (document_id, chunk_index)
-        fetched = {(row.document_id, row.chunk_index): row.text for row in rows}
-
-        # Build results mapping (document_id, chunk_index) -> list of neighbor tuples
-        results = {}
-        for doc_id, idx in chunk_keys:
-            neighbors = []
-            for n_idx in (idx - 1, idx + 1):
-                if (doc_id, n_idx) in fetched:
-                    neighbors.append((n_idx, fetched[(doc_id, n_idx)]))
-            results[(doc_id, idx)] = neighbors
-        return results
+    results = {}
+    for doc_id, idx in chunk_keys:
+        neighbors = []
+        for n_idx in (idx - 1, idx + 1):
+            if (doc_id, n_idx) in fetched:
+                neighbors.append((n_idx, fetched[(doc_id, n_idx)]))
+        results[(doc_id, idx)] = neighbors
+    return results
 
 
 async def search_node(state: ChatState) -> dict:
@@ -148,12 +110,7 @@ async def search_node(state: ChatState) -> dict:
         date_from, date_to = filters.date_from, filters.date_to
         if filters.content_types:
             async with get_session_factory()() as session:
-                rows = await session.execute(
-                    select(DocumentModel.id).where(
-                        DocumentModel.content_type.in_(filters.content_types)
-                    )
-                )
-                typed_ids = [str(r[0]) for r in rows]
+                typed_ids = await DocumentRepo(session).ids_of_types(filters.content_types)
             if typed_ids:
                 effective_doc_ids = typed_ids
                 narrowed = True

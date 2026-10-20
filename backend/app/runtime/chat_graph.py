@@ -29,10 +29,9 @@ import re
 import time
 
 from langgraph.graph import END, StateGraph
-from sqlalchemy import select
 
 from app.database import get_session_factory
-from app.models import DocumentModel
+from app.repos.document_repo import DocumentRepo
 from app.runtime.chat_nodes.comparative import (
     _decompose_comparison,  # noqa: F401  re-exported for back-compat
     _resolve_side_to_docs,  # noqa: F401  re-exported for back-compat
@@ -102,8 +101,7 @@ async def _resolve_targeted_document(question: str) -> str | None:
     """
     try:
         async with get_session_factory()() as session:
-            rows = await session.execute(select(DocumentModel.id, DocumentModel.title))
-            docs = [(row.id, row.title) for row in rows]
+            docs = await DocumentRepo(session).ids_and_titles()
     except Exception:
         logger.warning("Failed to fetch documents for query routing", exc_info=True)
         return None

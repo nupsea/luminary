@@ -13,10 +13,8 @@ Bypasses synthesize/confidence nodes.
 import json
 import logging
 
-from sqlalchemy import select
-
 from app.database import get_session_factory
-from app.models import CollectionMemberModel, CollectionModel
+from app.repos.collection_repo import CollectionRepo
 from app.repos.note_repo import NoteRepo
 from app.services import (
     gap_detector as _gap_detector_module,  # indirect: get_gap_detector is patched
@@ -122,28 +120,9 @@ async def notes_gap_node(state: ChatState) -> dict:
     auto_collection_id: str | None = None
     try:
         async with get_session_factory()() as session:
-            # Step 1: find auto-collection for this document
-            coll_row = (
-                await session.execute(
-                    select(CollectionModel.id).where(
-                        CollectionModel.auto_document_id == document_id
-                    )
-                )
-            ).first()
-            if coll_row:
-                auto_collection_id = coll_row[0]
-                # Step 2: fetch note IDs from collection members
-                member_rows = (
-                    await session.execute(
-                        select(CollectionMemberModel.member_id).where(
-                            CollectionMemberModel.collection_id == auto_collection_id,
-                            CollectionMemberModel.member_type == "note",
-                        )
-                    )
-                ).fetchall()
-                note_ids = [r[0] for r in member_rows]
-            else:
-                note_ids = []
+            collections = CollectionRepo(session)
+            auto_collection_id = await collections.auto_collection_id(document_id)
+            note_ids = await collections.note_ids(auto_collection_id) if auto_collection_id else []
     except Exception:
         logger.warning("notes_gap_node: note fetch failed", exc_info=True)
         card = {

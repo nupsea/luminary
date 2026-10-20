@@ -30,6 +30,15 @@ class CollectionRepo:
         )
         return result.scalar_one_or_none()
 
+    async def auto_collection_id(self, document_id: str) -> str | None:
+        """The first auto-collection of a document; `auto_document_id` is not unique."""
+        row = (
+            await self.session.execute(
+                select(CollectionModel.id).where(CollectionModel.auto_document_id == document_id)
+            )
+        ).first()
+        return row[0] if row else None
+
     async def find(self, collection_id: str) -> CollectionModel | None:
         return await self.session.get(CollectionModel, collection_id)
 

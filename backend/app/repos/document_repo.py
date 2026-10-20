@@ -19,7 +19,7 @@ from datetime import UTC, date, datetime
 from typing import NamedTuple
 
 from fastapi import Depends
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
@@ -179,6 +179,59 @@ class DocumentRepo:
             select(DocumentModel.id).where(DocumentModel.content_type.in_(content_types))
         )
         return list(result.scalars())
+
+    async def id_stages(self) -> list[tuple[str, str | None]]:
+        result = await self.session.execute(select(DocumentModel.id, DocumentModel.stage))
+        return [(str(r[0]), r[1]) for r in result]
+
+    async def ids_and_titles(self) -> list[tuple[str, str]]:
+        result = await self.session.execute(select(DocumentModel.id, DocumentModel.title))
+        return [(row.id, row.title) for row in result]
+
+    async def ids_titled_like(self, fragment: str) -> list[str]:
+        """Documents whose title contains `fragment`, ignoring case."""
+        result = await self.session.execute(
+            select(DocumentModel.id).where(
+                func.lower(DocumentModel.title).contains(fragment.lower())
+            )
+        )
+        return [row.id for row in result]
+
+    async def publication_years(self, document_ids: Sequence[str]) -> dict[str, int | None]:
+        result = await self.session.execute(
+            select(DocumentModel.id, DocumentModel.publication_year).where(
+                DocumentModel.id.in_(list(document_ids))
+            )
+        )
+        return {row.id: row.publication_year for row in result}
+
+    async def neighbor_chunks(self, document_id: str, chunk_index: int) -> list[tuple[int, str]]:
+        """The chunks either side of `chunk_index`."""
+        result = await self.session.execute(
+            select(ChunkModel.chunk_index, ChunkModel.text).where(
+                ChunkModel.document_id == document_id,
+                ChunkModel.chunk_index.in_([chunk_index - 1, chunk_index + 1]),
+            )
+        )
+        return [(row.chunk_index, row.text) for row in result]
+
+    async def neighbor_chunk_texts(
+        self, chunk_keys: Sequence[tuple[str, int]]
+    ) -> dict[tuple[str, int], str]:
+        """{(document_id, chunk_index): text} for the chunks either side of each key."""
+        conditions = [
+            and_(
+                ChunkModel.document_id == doc_id,
+                ChunkModel.chunk_index.in_([idx - 1, idx + 1]),
+            )
+            for doc_id, idx in chunk_keys
+        ]
+        result = await self.session.execute(
+            select(ChunkModel.document_id, ChunkModel.chunk_index, ChunkModel.text).where(
+                or_(*conditions)
+            )
+        )
+        return {(row.document_id, row.chunk_index): row.text for row in result}
 
     async def titles_and_types(self, document_ids: Sequence[str]) -> dict[str, tuple[str, str]]:
         """{id: (title, type)}, with the defaults search has always shown."""
