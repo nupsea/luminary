@@ -129,7 +129,7 @@ from app.services.type_detection import detect_content_type
 from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
 from app.storage import library_root
-from app.types import DocumentProfile
+from app.types import DocumentKind, DocumentProfile, document_kind
 from app.workflows import ingestion as _ingestion_module  # indirect: _run_pregenerate is patched
 from app.workflows.ingestion import (
     ContentType,
@@ -229,9 +229,16 @@ def _facets(doc: DocumentModel) -> DocumentFacets:
     )
 
 
+def _kind(doc: DocumentModel) -> DocumentKind:
+    return document_kind(doc.format, doc.form, doc.domain)
+
+
 @router.get("", response_model=DocumentListResponse)
 async def list_documents(
     content_type: str | None = Query(default=None, description="Comma-separated content types"),
+    kind: str | None = Query(
+        default=None, description="Comma-separated kinds, derived from the format and facets"
+    ),
     format: str | None = Query(
         default=None,
         description=(
@@ -253,6 +260,7 @@ async def list_documents(
     filters = DocumentListFilters(
         formats=_csv(format),
         content_types=_csv(content_type),
+        kinds=_csv(kind),
         tag=tag,
         collection_id=collection_id,
         favorite=favorite,
@@ -289,6 +297,7 @@ def _list_item(row: DocumentListRow, collections: list[tuple]) -> DocumentListIt
         title=doc.title,
         format=doc.format,
         content_type=doc.content_type,
+        kind=_kind(doc),
         facets=_facets(doc),
         word_count=doc.word_count,
         page_count=doc.page_count,
@@ -944,16 +953,18 @@ async def ingest_url(
 
 @router.get("/facets", response_model=DocumentFacetsResponse)
 async def document_facets() -> DocumentFacetsResponse:
-    """Counts per content type and per format, for deciding which filters to show.
+    """Counts per content type, kind and format, for deciding which filters to show.
 
     Declared above `/{document_id}` so the router does not read `facets` as an id.
     """
     async with get_session_factory()() as session:
         repo = DocumentRepo(session)
         by_type, by_format = await repo.facet_counts()
+        by_kind = await repo.kind_counts()
         favorite_count = await repo.favorite_count()
     return DocumentFacetsResponse(
         content_types=by_type,
+        kinds=by_kind,
         formats=by_format,
         total=sum(by_type.values()),
         favorite_count=favorite_count,
@@ -1001,6 +1012,7 @@ async def get_document(document_id: str):
         title=doc.title,
         format=doc.format,
         content_type=doc.content_type,
+        kind=_kind(doc),
         facets=_facets(doc),
         is_favorite=bool(doc.is_favorite),
         structure_type=doc.structure_type,
@@ -1046,17 +1058,13 @@ def _transcript_corrections(stored: list | None) -> list[TranscriptCorrection]:
     ]
 
 
-@router.post(
-    "/{document_id}/transcript/corrections", response_model=TranscriptFixResponse
-)
+@router.post("/{document_id}/transcript/corrections", response_model=TranscriptFixResponse)
 async def correct_transcript_term(
     document_id: str, body: TranscriptFixRequest
 ) -> TranscriptFixResponse:
     """Replace a misheard term throughout a transcript, its search index and vectors."""
     async with get_session_factory()() as session:
-        result = await fix_term(
-            session, document_id, body.heard, body.term, remember=body.remember
-        )
+        result = await fix_term(session, document_id, body.heard, body.term, remember=body.remember)
     return TranscriptFixResponse(**asdict(result))
 
 
@@ -1084,6 +1092,7 @@ async def get_document_overview(document_id: str) -> DocumentOverviewResponse:
         title=doc.title,
         format=doc.format,
         content_type=doc.content_type,
+        kind=_kind(doc),
         tags=_safe_tags(doc.tags),
         reading_progress_pct=reading_progress_pct,
         collections=[

@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, StringConstraints
 
 from app.schemas.membership import CollectionRef
-from app.types import ContentType
+from app.types import ContentType, DocumentKind
 
 
 class DocumentFacets(BaseModel):
@@ -36,6 +36,8 @@ class DocumentListItem(BaseModel):
     title: str
     format: str
     content_type: str
+    # Derived from the format and facets; what the card shows and filters on (#223).
+    kind: DocumentKind
     facets: DocumentFacets | None = None
     word_count: int
     page_count: int
@@ -72,6 +74,7 @@ class DocumentFacetsResponse(BaseModel):
     """
 
     content_types: dict[str, int]
+    kinds: dict[str, int] = {}
     formats: dict[str, int]
     total: int
     favorite_count: int = 0
@@ -140,6 +143,7 @@ class DocumentDetail(BaseModel):
     title: str
     format: str
     content_type: str
+    kind: DocumentKind
     facets: DocumentFacets | None = None
     is_favorite: bool = False
     # Layout discovered while parsing: book|paper|script|chat.
@@ -337,6 +341,7 @@ class DocumentOverviewResponse(BaseModel):
     title: str
     format: str
     content_type: str
+    kind: DocumentKind
     tags: list[str]
     reading_progress_pct: float
     collections: list[CollectionRef]
