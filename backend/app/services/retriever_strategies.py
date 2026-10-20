@@ -10,9 +10,9 @@ import logging
 from collections import defaultdict
 from typing import Any
 
-from sqlalchemy import bindparam, text
-
 from app.database import get_session_factory
+from app.repos.document_repo import DocumentRepo
+from app.repos.retrieval_repo import RetrievalRepo
 from app.services import llm as _llm_module  # indirect: get_llm_service is patched
 from app.services import model_prefetch
 from app.services.fts_query import (  # noqa: F401  re-exported for retriever.py
@@ -173,15 +173,8 @@ async def _expand_context(
     doc_ids = list({c.document_id for c in chunks})
 
     async with get_session_factory()() as session:
-        docs = (
-            await session.execute(
-                text(
-                    "SELECT id, content_type, is_technical, form, domain, register "
-                    "FROM documents WHERE id IN :doc_ids"
-                ).bindparams(bindparam("doc_ids", expanding=True)),
-                {"doc_ids": doc_ids},
-            )
-        ).fetchall()
+        repo = RetrievalRepo(session)
+        docs = await DocumentRepo(session).by_ids(doc_ids)
 
         # Neighbouring chunks only continue the same thought in some forms.
         eligible_docs = {row.id for row in docs if DocumentProfile.of(row).expands_context}
@@ -192,21 +185,10 @@ async def _expand_context(
             if chunk.document_id not in eligible_docs:
                 continue
 
-            surrounding_result = await session.execute(
-                text(
-                    "SELECT id, chunk_index, text, page_number, speaker FROM chunks "
-                    "WHERE document_id = :doc_id "
-                    "AND chunk_index >= :start_idx AND chunk_index <= :end_idx "
-                    "ORDER BY chunk_index ASC"
-                ),
-                {
-                    "doc_id": chunk.document_id,
-                    "start_idx": chunk.chunk_index - window,
-                    "end_idx": chunk.chunk_index + window,
-                },
+            surrounding = await repo.chunk_window(
+                chunk.document_id, chunk.chunk_index - window, chunk.chunk_index + window
             )
-
-            for row in surrounding_result.fetchall():
+            for row in surrounding:
                 neighbor_id = row[0]
                 if neighbor_id == chunk.chunk_id:
                     continue

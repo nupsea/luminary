@@ -3,11 +3,10 @@ import logging
 from datetime import date
 from typing import Literal
 
-from sqlalchemy import bindparam, text
-
 from app import config as _config_module  # indirect: get_settings is patched
 from app.database import get_session_factory
 from app.exceptions import ModelNotDownloaded
+from app.repos.retrieval_repo import RetrievalRepo
 from app.services import embedder as _embedder_module  # indirect: get_embedding_service is patched
 from app.services import query_spellcorrect as _spellcorrect_module
 from app.services import (
@@ -260,36 +259,11 @@ class HybridRetriever:
         k: int,
     ) -> list[ScoredChunk]:
         """Run one FTS5 MATCH and hydrate ScoredChunks (BM25 order preserved)."""
-        params: dict[str, object] = {"query": fts_query, "k": k}
-        if document_ids:
-            sql = text(
-                "SELECT chunk_id, document_id, text, bm25(chunks_fts) AS score "
-                "FROM chunks_fts "
-                "WHERE chunks_fts MATCH :query AND document_id IN :doc_ids "
-                "ORDER BY score LIMIT :k"
-            ).bindparams(bindparam("doc_ids", expanding=True))
-            params["doc_ids"] = list(document_ids)
-        else:
-            sql = text(
-                "SELECT chunk_id, document_id, text, bm25(chunks_fts) AS score "
-                "FROM chunks_fts "
-                "WHERE chunks_fts MATCH :query "
-                "ORDER BY score LIMIT :k"
-            )
-        result = await session.execute(sql, params)
-        fts_rows = result.fetchall()
+        repo = RetrievalRepo(session)
+        fts_rows = await repo.fts_chunks(fts_query, document_ids, k)
         if not fts_rows:
             return []
-        fts_ids = [row.chunk_id for row in fts_rows]
-        meta_result = await session.execute(
-            text("SELECT id, speaker, chunk_index FROM chunks WHERE id IN :ids").bindparams(
-                bindparam("ids", expanding=True)
-            ),
-            {"ids": fts_ids},
-        )
-        meta_map: dict[str, tuple[str | None, int]] = {
-            row[0]: (row[1] or None, row[2] or 0) for row in meta_result.fetchall()
-        }
+        meta_map = await repo.speakers_and_indexes([row.chunk_id for row in fts_rows])
         return [
             ScoredChunk(
                 chunk_id=row.chunk_id,
@@ -408,14 +382,7 @@ class HybridRetriever:
             return results
         ids = [c.chunk_id for c in results]
         async with get_session_factory()() as session:
-            rows = (
-                await session.execute(
-                    text("SELECT id, entry_date FROM chunks WHERE id IN :ids").bindparams(
-                        bindparam("ids", expanding=True)
-                    ),
-                    {"ids": ids},
-                )
-            ).fetchall()
+            rows = await RetrievalRepo(session).entry_dates(ids)
         dmap: dict[str, date] = {}
         for cid, ed in rows:
             if ed is None:
@@ -640,21 +607,9 @@ class HybridRetriever:
         if not safe_query:
             return []
 
-        params: dict[str, object] = {"query": safe_query, "k": k}
-        if document_ids:
-            sql = text(
-                "SELECT image_id FROM images_fts "
-                "WHERE images_fts MATCH :query AND document_id IN :doc_ids "
-                "LIMIT :k"
-            ).bindparams(bindparam("doc_ids", expanding=True))
-            params["doc_ids"] = list(document_ids)
-        else:
-            sql = text("SELECT image_id FROM images_fts WHERE images_fts MATCH :query LIMIT :k")
-
         try:
             async with get_session_factory()() as session:
-                result = await session.execute(sql, params)
-                return [row[0] for row in result.fetchall() if row[0]]
+                return await RetrievalRepo(session).image_fts_ids(safe_query, document_ids, k)
         except Exception as exc:
             logger.warning("_image_keyword_search failed: %s", exc)
             return []

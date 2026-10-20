@@ -90,10 +90,7 @@
     "app/services/flashcard_generators.py",
     "app/services/parser.py"
   ],
-  "sql_outside_repos": {
-    "app/services/retriever.py": 4,
-    "app/services/retriever_strategies.py": 2
-  },
+  "sql_outside_repos": {},
   "unstable_tests": {},
   "content_type_refs": {
     "app/models.py": 4,
@@ -117,7 +114,6 @@
     "app/services/ner.py": 6,
     "app/services/note_graph.py": 1,
     "app/services/query_understanding.py": 1,
-    "app/services/retriever_strategies.py": 1,
     "app/services/summary_prompts.py": 1,
     "app/services/vector_store.py": 1,
     "app/telemetry.py": 3,
