@@ -107,6 +107,7 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | VI. Extras | 0.21.0 | Anki import; the capture extension, watch folder and Obsidian export; card review on mobile | #137, #124, #121, #25, #103, #26, #300, #314 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an offline review on the phone merges without overwriting FSRS state |
 | VII. Languages | 0.22.0 | Multi-language — **conditional** | | Non-English degradation measured on the current stack first; a swap ships only through 0.17.0's rail; a no-go decision is an allowed outcome and moves the swap to 1.1 |
 | | 1.0.0-rc → 1.0.0 | The release. **Checkpoint E** | | Zero open `bug` issues; every rung's exit gate green together, on one build; the code-quality targets met |
+| After 1.0 | 1.1.0 | Multi-page web import (HTML books, Confluence); Luminary as a read-only MCP server (§13) | #348, #349 | Each test source imports as one document whose sections match its ground-truth TOC, and 10 questions per source are answered with correct citations, read by hand; an MCP client receives passages only from collections the user scoped, and nothing with the setting off or without the token |
 
 **1.0.0 itself carries no new features.** Work not on a rung above is 1.1, not 1.0.
 
@@ -952,10 +953,27 @@ needs a different provider.
 The candidate is Checkpoint E: the checkpoint gate, plus zero open `bug` issues, plus every rung's exit
 gate green together on one build. 1.0.0 is that build with no new features.
 
+### 13. Web content and an MCP server — 1.1.0
+
+**Multi-page web content is imported, not searched live** (#348). An HTML book or a Confluence page
+tree becomes one document with chapters, so citations, the reader locus and chapter cards work
+unchanged; `oreilly_service.py` already does this for one site. MCP is only a fetch transport here:
+the local default model is weak at tool calling. #348 is a spike, and dropping the feature is an
+allowed outcome.
+
+**xerj is not the integration.** It indexes local folders only (no crawler, no Confluence connector),
+and its `file:line` hits come from a second index and embedder that citations and cards cannot use.
+
+**The MCP server is read-only, off by default and scoped to collections the user picks** (#349).
+An outside model writes the answer, so none of our grounding checks run; every result leaves the
+machine to that model's provider; imported pages are untrusted text handed to an agent with shell
+tools; and the backend leaves CSRF open, so it is a stdio adapter with a token rather than a new
+HTTP listener. No write tools: notes or cards from an outside model would pollute the learner record.
+
 ### Bugs to 1.0
 
-- **One GitHub milestone per rung** (`0.13.x` to `0.22.0`, then `1.0.0`). Every open issue carries
-  one; the table above is the mapping.
+- **One GitHub milestone per rung** (`0.13.x` to `0.22.0`, then `1.0.0`; `1.1.0` after the
+  release). Every open issue carries one; the table above is the mapping.
 - **A new bug is triaged when filed** to the current rung or the next one.
 - **A checkpoint is not tagged while a `bug` issue is milestoned to its phase or an earlier one.**
 - **A defect found while writing this file becomes an issue**, and the prose keeps only its link
