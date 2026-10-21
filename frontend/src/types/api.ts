@@ -1197,7 +1197,7 @@ export interface paths {
         };
         /**
          * Document Facets
-         * @description Counts per content type and per format, for deciding which filters to show.
+         * @description Counts per content type, kind and format, for deciding which filters to show.
          *
          *     Declared above `/{document_id}` so the router does not read `facets` as an id.
          */
@@ -7868,6 +7868,11 @@ export interface components {
             format: string;
             /** Content Type */
             content_type: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "book" | "technical" | "paper" | "conversation" | "notes" | "code" | "audio" | "video";
             facets?: components["schemas"]["DocumentFacets"] | null;
             /**
              * Is Favorite
@@ -7973,6 +7978,13 @@ export interface components {
             content_types: {
                 [key: string]: number;
             };
+            /**
+             * Kinds
+             * @default {}
+             */
+            kinds: {
+                [key: string]: number;
+            };
             /** Formats */
             formats: {
                 [key: string]: number;
@@ -8006,6 +8018,11 @@ export interface components {
             format: string;
             /** Content Type */
             content_type: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "book" | "technical" | "paper" | "conversation" | "notes" | "code" | "audio" | "video";
             facets?: components["schemas"]["DocumentFacets"] | null;
             /** Word Count */
             word_count: number;
@@ -8088,6 +8105,11 @@ export interface components {
             format: string;
             /** Content Type */
             content_type: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "book" | "technical" | "paper" | "conversation" | "notes" | "code" | "audio" | "video";
             /** Tags */
             tags: string[];
             /** Reading Progress Pct */
@@ -13975,6 +13997,8 @@ export interface operations {
             query?: {
                 /** @description Comma-separated content types */
                 content_type?: string | null;
+                /** @description Comma-separated kinds, derived from the format and facets */
+                kind?: string | null;
                 /** @description Comma-separated file formats. Distinct from content_type: an EPUB is format `epub` and content_type `book`, which is why filtering for e-books by type never matched one. */
                 format?: string | null;
                 /** @description Filter by tag value */

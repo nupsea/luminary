@@ -15,6 +15,7 @@
 #   3. `facets` is not swallowed by /documents/{document_id}
 #   4. every counted type is positive -- an absent key, never a zero
 #   5. the counts agree with what filtering by that type actually returns
+#   6. every kind count (#223) agrees with filtering by that kind
 
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
@@ -63,5 +64,22 @@ if [ -n "$TYPE" ]; then
   [ "$CLAIMED" = "$ACTUAL" ] || fail "facets claims ${CLAIMED} ${TYPE} documents, filtering returns ${ACTUAL}"
   echo "  ${TYPE}: facet count ${CLAIMED} matches the filtered list"
 fi
+
+KINDS=$(echo "$FACETS" | python3 -c "
+import sys, json
+body = json.load(sys.stdin)
+kinds = body.get('kinds')
+assert isinstance(kinds, dict), '/documents/facets has no kinds mapping'
+assert sum(kinds.values()) == body['total'], 'kind counts disagree with total'
+print(' '.join('%s=%d' % kv for kv in sorted(kinds.items())))
+") || fail "/documents/facets kinds check failed"
+
+for PAIR in $KINDS; do
+  KIND=${PAIR%%=*}
+  CLAIMED=${PAIR#*=}
+  ACTUAL=$(curl -s "${BASE}/documents?page_size=1&kind=${KIND}" | python3 -c "import sys, json; print(json.load(sys.stdin)['total'])")
+  [ "$CLAIMED" = "$ACTUAL" ] || fail "facets claims ${CLAIMED} ${KIND} documents, filtering by kind returns ${ACTUAL}"
+done
+echo "  kinds: ${KINDS:-none}, each matching its filtered list"
 
 echo "S241 OK"

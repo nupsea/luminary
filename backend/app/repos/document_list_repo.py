@@ -7,7 +7,7 @@ page agree.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from sqlalchemy import ColumnElement, case, func, or_, select
@@ -27,6 +27,7 @@ from app.models import (
     StudySessionModel,
     SummaryModel,
 )
+from app.repos.document_repo import kind_expr
 
 DocumentSort = Literal[
     "newest", "oldest", "alphabetical", "most-studied", "last_accessed", "weakest-first"
@@ -37,6 +38,7 @@ DocumentSort = Literal[
 class DocumentListFilters:
     formats: list[str]
     content_types: list[str]
+    kinds: list[str] = field(default_factory=list)
     tag: str | None = None
     collection_id: str | None = None
     favorite: bool | None = None
@@ -158,6 +160,8 @@ def _where(filters: DocumentListFilters) -> list[ColumnElement[bool]]:
         clauses.append(DocumentModel.format.in_(filters.formats))
     if filters.content_types:
         clauses.append(DocumentModel.content_type.in_(filters.content_types))
+    if filters.kinds:
+        clauses.append(kind_expr().in_(filters.kinds))
     if filters.tag:
         # Prefix match, as the note tag filter: ?tag=science also matches 'science/biology'.
         clauses.append(

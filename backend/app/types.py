@@ -553,6 +553,33 @@ class DeckHealthReport(TypedDict):
 # Audio files ingestion transcribes. FLAC is how YouTube audio is stored (`download_audio`).
 AUDIO_EXTENSIONS = ("mp3", "m4a", "wav", "flac")
 
+# What the library calls a document, derived from its stored format and facets (#223).
+DocumentKind = Literal[
+    "book", "technical", "paper", "conversation", "notes", "code", "audio", "video"
+]
+
+# First match wins. `document_repo.kind_expr` compiles the same table to SQL for filters.
+_KindRule = tuple[Literal["format", "form", "domain"], tuple[str, ...], DocumentKind]
+KIND_RULES: tuple[_KindRule, ...] = (
+    ("format", AUDIO_EXTENSIONS, "audio"),
+    ("format", ("mp4",), "video"),
+    ("form", ("dialogue",), "conversation"),
+    ("form", ("paper",), "paper"),
+    ("form", ("source_code",), "code"),
+    ("form", ("entries",), "notes"),
+    ("domain", ("technical",), "technical"),
+)
+DEFAULT_KIND: DocumentKind = "book"
+
+
+def document_kind(format: str | None, form: str | None, domain: str | None) -> DocumentKind:
+    """The document's kind from the stored columns alone, as the list filter computes it."""
+    values = {"format": format, "form": form, "domain": domain}
+    for column, matches, kind in KIND_RULES:
+        if values[column] in matches:
+            return kind
+    return DEFAULT_KIND
+
 
 # Technical-content gate
 
