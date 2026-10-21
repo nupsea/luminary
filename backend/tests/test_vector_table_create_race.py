@@ -68,6 +68,39 @@ def test_two_first_writers_of_a_table_both_get_it(tmp_path, get_table) -> None:
     assert db.creates == 1
 
 
+class _ListedMidCreate:
+    """A connection that lists the table before it can be opened, as Windows does mid-create."""
+
+    def __init__(self, db) -> None:
+        self._db = db
+        self.failed_opens = 0
+        self.creates = 0
+
+    def open_table(self, name, **kwargs):
+        if self.failed_opens == 0:
+            self.failed_opens += 1
+            raise ValueError(f"Table '{name}' was not found")
+        return self._db.open_table(name, **kwargs)
+
+    def create_table(self, *args, **kwargs):
+        self.creates += 1
+        return self._db.create_table(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._db, name)
+
+
+def test_a_table_listed_before_it_opens_is_opened_once_the_creator_is_done(tmp_path) -> None:
+    real = lancedb.connect(str(tmp_path))
+    real.create_table(NOTE_TABLE_NAME, schema=NOTE_SCHEMA)
+    svc = LanceDBService()
+    svc._db = db = _ListedMidCreate(real)
+
+    assert svc._get_or_create_note_table().schema == NOTE_SCHEMA
+    assert db.failed_opens == 1
+    assert db.creates == 0
+
+
 def test_note_table_keeps_its_schema(tmp_path) -> None:
     svc = LanceDBService()
     svc._db = lancedb.connect(str(tmp_path))

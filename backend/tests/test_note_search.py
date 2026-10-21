@@ -243,7 +243,12 @@ def _await_embedding(note_id: str, timeout: float = 60.0) -> None:
         if NOTE_TABLE_NAME not in svc._db.list_tables().tables:
             time.sleep(0.5)
             continue
-        table = svc._db.open_table(NOTE_TABLE_NAME)
+        try:
+            table = svc._db.open_table(NOTE_TABLE_NAME)
+        except ValueError:
+            # Listed while the task is still creating it (Windows: "not found").
+            time.sleep(0.5)
+            continue
         if table.count_rows() and any(
             r["note_id"] == note_id for r in table.search().limit(10_000).to_list()
         ):
