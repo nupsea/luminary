@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import type { ExplainMode } from "@/components/reader/SelectionActionBar"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import { KIND_ICONS, KIND_LABELS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
-import { ApiError, apiDelete, apiGet, apiPost, apiPut, request } from "@/lib/apiClient"
+import { ApiError, apiDelete, apiGet } from "@/lib/apiClient"
 import { deleteNote } from "@/lib/notesApi"
 import { API_BASE } from "@/lib/config"
 import { logger } from "@/lib/logger"
@@ -47,15 +47,15 @@ const FeynmanPanel =
     : null
 
 import { EPUBViewer, type EPUBViewerHandle } from "./EPUBViewer"
-import { epubPlaceOf, samePlace, type EpubPlace } from "./epubPlace"
+import { epubPlaceOf } from "./epubPlace"
 import { ExplanationPanel } from "./ExplanationPanel"
 import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
 import { COLOR_CLASSES } from "./highlightColors"
-import { settledSaver } from "./hooks/positionSave"
 import { readerLandingTab } from "./hooks/readerLandingTab"
 import { useReaderHistory, type ReaderPlace } from "./hooks/useReaderHistory"
 import { useReaderKeyboardShortcuts } from "./hooks/useReaderKeyboardShortcuts"
 import { useReaderTabs } from "./hooks/useReaderTabs"
+import { useReadingPlace } from "./hooks/useReadingPlace"
 import { useReadingProgress } from "./hooks/useReadingProgress"
 import { useSectionListCollapse } from "./hooks/useSectionListCollapse"
 import { useSelectionWorkflow } from "./hooks/useSelectionWorkflow"
@@ -66,7 +66,7 @@ import { NoteComposer } from "@/components/notes/NoteComposer"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
 import { ReadView } from "./ReadView"
 import { resolveChunkFromDom, resolveFromDom, resolvePdfFallback, resolvePdfPageFromDom } from "./resolveSourceRefUtils"
-import { ResumeBanner, type ReadingPosition } from "./ResumeBanner"
+import { ResumeBanner } from "./ResumeBanner"
 import { SectionListItem, type SectionHeatmapItem } from "./SectionListItem"
 import { SelectionActionBar } from "./SelectionActionBar"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
@@ -317,38 +317,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // read as broken there: the section list at least shows a snippet.
   const [searchTerm, setSearchTerm] = useState<string>("")
 
-  // reading position — resume banner
-  const [resumePosition, setResumePosition] = useState<ReadingPosition | null>(null)
-  // The page the PDF opens on: the bookmark if there is one, else the last page read.
-  const [savedPdfPage, setSavedPdfPage] = useState<number | null>(null)
-  // ref tracking the last section_id we POSTed so we only POST when it changes
-  const lastPostedSectionRef = useRef<string | null>(null)
-  // Last PDF page included in a throttled position POST
-  const lastPostedPdfPageRef = useRef<number | null>(null)
-  // The page the reader scrolled to themselves; a citation or search jump is not reading.
-  const [pdfReadPage, setPdfReadPage] = useState<number | null>(null)
-  const pdfReadPageRef = useRef<number | null>(null)
-  const handleReadingPageChange = useCallback((page: number) => {
-    pdfReadPageRef.current = page
-    setPdfReadPage(page)
-  }, [])
-  const [pdfBookmarkPage, setPdfBookmarkPage] = useState<number | null>(null)
-  // The EPUB counterparts. The Book View mounts once the saved place is known, so it
-  // opens there instead of on chapter 1.
-  const [epubPositionLoaded, setEpubPositionLoaded] = useState(false)
-  const [savedEpubPlace, setSavedEpubPlace] = useState<EpubPlace | null>(null)
-  const [epubBookmark, setEpubBookmark] = useState<EpubPlace | null>(null)
-  const [epubReadPlace, setEpubReadPlace] = useState<EpubPlace | null>(null)
-  const epubReadPlaceRef = useRef<EpubPlace | null>(null)
-  const epubChapterTitleRef = useRef<string | null>(null)
-  const lastPostedEpubPlaceRef = useRef<EpubPlace | null>(null)
-  const handleEpubPlaceChange = useCallback((place: EpubPlace, chapterTitle: string) => {
-    epubReadPlaceRef.current = place
-    epubChapterTitleRef.current = chapterTitle
-    setEpubReadPlace(place)
-  }, [])
-  const docRef = useRef(doc)
-  useEffect(() => { docRef.current = doc }, [doc])
+  const readingPlace = useReadingPlace(documentId, doc?.sections)
+  const { readSection, resume: resumePosition, endResume } = readingPlace
 
   const { canGoBack, backLabel: hookBackLabel, goBack: goBackToSource } = useBackNavigation()
   // DocumentReader falls back to onBack (library list) when no from state is set
@@ -929,164 +899,35 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   useReadingProgress(documentId, doc?.sections.length ?? 0, readerContainerRef)
   const chapterEnd = useChapterEndOffer(documentId)
   const { reach: reachPlace } = chapterEnd
-  const positionSaverRef = useRef<ReturnType<typeof settledSaver<string>> | null>(null)
-  useEffect(() => {
-    const saver = settledSaver<string>((sectionId) => {
-      const current = docRef.current
-      const section = current?.sections.find((s) => s.id === sectionId)
-      const pdfPage = current?.format === "pdf" ? pdfReadPageRef.current : null
-      const epubPlace = epubReadPlaceRef.current
-      void apiPost(`/documents/${documentId}/position`, {
-        last_section_id: sectionId,
-        last_section_heading: section?.heading ?? null,
-        last_pdf_page: pdfPage,
-        last_epub_chapter_index: epubPlace?.chapter ?? null,
-        last_epub_block_index: epubPlace?.block ?? null,
-      }).catch(() => {})
-      lastPostedSectionRef.current = sectionId
-      if (pdfPage != null) lastPostedPdfPageRef.current = pdfPage
-      if (epubPlace != null) lastPostedEpubPlaceRef.current = epubPlace
-    })
-    positionSaverRef.current = saver
-    return () => saver.stop()
-  }, [documentId])
   const onReadSection = useCallback(
     (sectionId: string) => {
       if (leftTab !== "read") return
       reachPlace({ sectionId })
-      positionSaverRef.current?.reach(sectionId)
+      readSection(sectionId)
     },
-    [leftTab, reachPlace],
+    [leftTab, reachPlace, readSection],
   )
   useEffect(() => {
     if (leftTab === "pdfview") reachPlace({ page: pdfCurrentPage })
   }, [leftTab, pdfCurrentPage, reachPlace])
 
-  // fetch saved reading position on mount; show ResumeBanner unless already dismissed this session
-  useEffect(() => {
-    if (!doc) return
-    const dismissed = Boolean(sessionStorage.getItem(`resume-dismissed-${documentId}`))
-    void apiGet<ReadingPosition>(`/documents/${documentId}/position`)
-      .then((pos) => {
-        if (!pos) return
-        setPdfBookmarkPage(pos.pdf_bookmark_page)
-        // Known before any reading, so a section save does not blank the saved page.
-        if (pos.last_pdf_page != null) {
-          pdfReadPageRef.current ??= pos.last_pdf_page
-          lastPostedPdfPageRef.current ??= pos.last_pdf_page
-        }
-        const openOn = pos.pdf_bookmark_page ?? (dismissed ? null : pos.last_pdf_page)
-        if (openOn != null) setSavedPdfPage(openOn)
-        const epubBookmarkPlace = epubPlaceOf(pos.epub_bookmark_chapter_index, pos.epub_bookmark_block_index)
-        const epubLastPlace = epubPlaceOf(pos.last_epub_chapter_index, pos.last_epub_block_index)
-        setEpubBookmark(epubBookmarkPlace)
-        if (epubLastPlace) {
-          epubReadPlaceRef.current ??= epubLastPlace
-          lastPostedEpubPlaceRef.current ??= epubLastPlace
-        }
-        setSavedEpubPlace(epubBookmarkPlace ?? (dismissed ? null : epubLastPlace))
-        if (dismissed) return
-        if (pos.last_section_id || pos.last_pdf_page != null || epubLastPlace) setResumePosition(pos)
-      })
-      .catch((err) => {
-        if (err instanceof ApiError && err.status === 404) return
-        // banner failure is silent
-      })
-      .finally(() => setEpubPositionLoaded(true))
-  }, [documentId, doc])
-
-  // Save the page or EPUB place read once it settles, and at once when the reader
-  // closes or the tab hides: a pending save cancelled on close lost the last pages read.
-  const placeSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const saveReadPlace = useCallback((keepalive: boolean) => {
-    if (placeSaveTimerRef.current) clearTimeout(placeSaveTimerRef.current)
-    placeSaveTimerRef.current = null
-    const page = pdfReadPageRef.current
-    const epubPlace = epubReadPlaceRef.current
-    const pageMoved = page != null && page !== lastPostedPdfPageRef.current
-    const epubMoved = epubPlace != null && !samePlace(epubPlace, lastPostedEpubPlaceRef.current)
-    if (!pageMoved && !epubMoved) return
-    lastPostedPdfPageRef.current = page
-    lastPostedEpubPlaceRef.current = epubPlace
-    const sectionId = lastPostedSectionRef.current
-    const section = sectionId ? docRef.current?.sections.find((s) => s.id === sectionId) : undefined
-    void request(`/documents/${documentId}/position`, {
-      method: "POST",
-      keepalive,
-      body: {
-        last_section_id: sectionId,
-        last_section_heading: (epubMoved ? epubChapterTitleRef.current : null) ?? section?.heading ?? null,
-        last_pdf_page: page,
-        last_epub_chapter_index: epubPlace?.chapter ?? null,
-        last_epub_block_index: epubPlace?.block ?? null,
-      },
-    }).catch(() => {})
-  }, [documentId])
-  useEffect(() => {
-    if (pdfReadPage == null && epubReadPlace == null) return
-    if (placeSaveTimerRef.current) clearTimeout(placeSaveTimerRef.current)
-    placeSaveTimerRef.current = setTimeout(() => saveReadPlace(false), 2_000)
-  }, [pdfReadPage, epubReadPlace, saveReadPlace])
-  useEffect(() => {
-    const onVisibility = () => { if (document.visibilityState === "hidden") saveReadPlace(true) }
-    document.addEventListener("visibilitychange", onVisibility)
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility)
-      saveReadPlace(true)
-    }
-  }, [saveReadPlace])
-
-  const handleBookmarkChange = useCallback((page: number | null) => {
-    const previous = pdfBookmarkPage
-    setPdfBookmarkPage(page)
-    const saved = page == null
-      ? apiDelete(`/documents/${documentId}/bookmark`)
-      : apiPut(`/documents/${documentId}/bookmark`, { pdf_page: page })
-    saved.catch(() => setPdfBookmarkPage(previous))
-  }, [documentId, pdfBookmarkPage])
-
-  const handleEpubBookmarkChange = useCallback((place: EpubPlace | null) => {
-    const previous = epubBookmark
-    setEpubBookmark(place)
-    const saved = place == null
-      ? apiDelete(`/documents/${documentId}/bookmark`)
-      : apiPut(`/documents/${documentId}/bookmark`, {
-        epub_chapter_index: place.chapter,
-        epub_block_index: place.block,
-      })
-    saved.catch(() => setEpubBookmark(previous))
-  }, [documentId, epubBookmark])
-
   const handleResume = () => {
-    if (resumePosition?.last_pdf_page != null && doc?.format === "pdf") {
+    if (!resumePosition) return
+    endResume()
+    const { last_pdf_page: page, last_section_id: sectionId } = resumePosition
+    const epubPlace = epubPlaceOf(resumePosition.last_epub_chapter_index, resumePosition.last_epub_block_index)
+    if (page != null && doc?.format === "pdf") {
       setPdfViewVisited(true)
       setLeftTab("pdfview")
-      window.setTimeout(() => pdfViewerRef.current?.goToPage(resumePosition.last_pdf_page as number), 50)
-      setResumePosition(null)
-      sessionStorage.setItem(`resume-dismissed-${documentId}`, "1")
-      return
-    }
-    const epubPlace = resumePosition
-      ? epubPlaceOf(resumePosition.last_epub_chapter_index, resumePosition.last_epub_block_index)
-      : null
-    if (epubPlace && doc?.format === "epub") {
+      window.setTimeout(() => pdfViewerRef.current?.goToPage(page), 50)
+    } else if (epubPlace && doc?.format === "epub") {
       setBookViewVisited(true)
       setLeftTab("bookview")
       window.setTimeout(() => epubViewerRef.current?.goTo(epubPlace), 50)
-      setResumePosition(null)
-      sessionStorage.setItem(`resume-dismissed-${documentId}`, "1")
-      return
+    } else if (sectionId) {
+      document.querySelector(`[data-section-id="${CSS.escape(sectionId)}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" })
     }
-    if (!resumePosition?.last_section_id) return
-    const el = document.querySelector(`[data-section-id="${CSS.escape(resumePosition.last_section_id)}"]`)
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
-    setResumePosition(null)
-    sessionStorage.setItem(`resume-dismissed-${documentId}`, "1")
-  }
-
-  const handleDismissResume = () => {
-    setResumePosition(null)
-    sessionStorage.setItem(`resume-dismissed-${documentId}`, "1")
   }
 
   const resolveSourceRef = useCallback(
@@ -1612,7 +1453,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 <ResumeBanner
                   position={resumePosition}
                   onResume={handleResume}
-                  onDismiss={handleDismissResume}
+                  onDismiss={endResume}
                 />
               )}
             </>
@@ -1766,28 +1607,28 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           {/* PDF View — lazy-mounted, hidden when not active to preserve page state */}
           {doc.format === "pdf" && pdfViewVisited && (() => {
             let targetPdfPage = initialPage
-            if (!targetPdfPage && savedPdfPage != null) targetPdfPage = savedPdfPage
+            if (!targetPdfPage && readingPlace.pdf.openOn != null) targetPdfPage = readingPlace.pdf.openOn
             if (!targetPdfPage && initialSectionId) {
               const sec = doc.sections.find((s) => s.id === initialSectionId)
               if (sec && sec.page_start > 0) targetPdfPage = sec.page_start
             }
             return (
               <div data-zoom-panel="reader" className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-                <PDFViewer ref={pdfViewerRef} citationWords={citationWords} citationPage={citationPdfPage} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} initialSearch={initialSearch} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} onReadingPageChange={handleReadingPageChange} bookmarkPage={pdfBookmarkPage} onBookmarkChange={handleBookmarkChange} />
+                <PDFViewer ref={pdfViewerRef} citationWords={citationWords} citationPage={citationPdfPage} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} initialSearch={initialSearch} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} onReadingPageChange={readingPlace.pdf.read} bookmarkPage={readingPlace.pdf.bookmark} onBookmarkChange={readingPlace.pdf.setBookmark} />
               </div>
             )
           })()}
 
           {/* Book View — lazy-mounted for EPUB documents */}
-          {bookViewVisited && epubPositionLoaded && (
+          {bookViewVisited && readingPlace.loaded && (
             <div data-zoom-panel="reader" className={cn("flex-1 overflow-hidden", leftTab !== "bookview" && "hidden")}>
               <EPUBViewer
                 ref={epubViewerRef}
                 documentId={documentId}
-                initialPlace={savedEpubPlace}
-                bookmark={epubBookmark}
-                onBookmarkChange={handleEpubBookmarkChange}
-                onReadingPlaceChange={handleEpubPlaceChange}
+                initialPlace={readingPlace.epub.openOn}
+                bookmark={readingPlace.epub.bookmark}
+                onBookmarkChange={readingPlace.epub.setBookmark}
+                onReadingPlaceChange={readingPlace.epub.read}
               />
             </div>
           )}
