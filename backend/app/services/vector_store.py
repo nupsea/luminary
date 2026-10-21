@@ -143,7 +143,12 @@ class LanceDBService:
         """
         self._connect()
         if name in self._db.list_tables().tables:
-            return self._db.open_table(name)
+            try:
+                return self._db.open_table(name)
+            except ValueError:
+                # Listed mid-create: the directory exists before its manifest, and
+                # Windows reports "not found". The creator holds the lock until it is done.
+                pass
         with self._create_lock:
             if name in self._db.list_tables().tables:
                 return self._db.open_table(name)
