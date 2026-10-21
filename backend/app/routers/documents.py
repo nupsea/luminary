@@ -24,6 +24,7 @@ from app.models import (
 )
 from app.repos._helpers import get_or_404
 from app.repos.collection_repo import CollectionRepo
+from app.repos.document_kind_repo import DocumentKindRepo
 from app.repos.document_list_repo import (
     DocumentListFilters,
     DocumentListRepo,
@@ -960,7 +961,7 @@ async def document_facets() -> DocumentFacetsResponse:
     async with get_session_factory()() as session:
         repo = DocumentRepo(session)
         by_type, by_format = await repo.facet_counts()
-        by_kind = await repo.kind_counts()
+        by_kind = await DocumentKindRepo(session).kind_counts()
         favorite_count = await repo.favorite_count()
     return DocumentFacetsResponse(
         content_types=by_type,

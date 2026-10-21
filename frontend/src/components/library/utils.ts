@@ -1,35 +1,17 @@
 import { 
   Book, 
-  BookOpen, 
-  Bookmark, 
   Code, 
   Cpu, 
   FileText, 
   MessageSquare, 
   Mic, 
-  Newspaper, 
   StickyNote, 
   Video, 
   Youtube 
 } from "lucide-react"
-import type { ContentType, DocumentKind, LearningStatus } from "./types"
+import type { DocumentKind, LearningStatus } from "./types"
 
 export { Youtube }
-
-export const CONTENT_TYPE_ICONS: Record<ContentType, React.ElementType> = {
-  book: Book,
-  paper: FileText,
-  conversation: MessageSquare,
-  notes: StickyNote,
-  code: Code,
-  audio: Mic,
-  epub: BookOpen,
-  kindle_clippings: Bookmark,
-  tech_book: Cpu,
-  tech_article: Newspaper,
-  technical: Cpu,
-  video: Video,
-}
 
 export const KIND_ICONS: Record<DocumentKind, React.ElementType> = {
   book: Book,

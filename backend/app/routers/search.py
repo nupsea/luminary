@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.repos.document_repo import DocumentRepo
+from app.repos.document_kind_repo import DocumentKindRepo
 from app.services.retriever import HybridRetriever, get_retriever
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ class SearchResult(BaseModel):
     chunk_id: str
     document_id: str
     document_title: str
-    content_type: str
+    kind: str
     section_heading: str
     page: int
     text_excerpt: str  # 200-char preview for UI display
@@ -44,7 +44,7 @@ class SearchResult(BaseModel):
 class DocumentGroup(BaseModel):
     document_id: str
     document_title: str
-    content_type: str
+    kind: str
     matches: list[SearchResult]
 
 
@@ -55,7 +55,7 @@ class SearchResponse(BaseModel):
 @router.get("")
 async def search(
     q: str = Query(..., min_length=1),
-    content_types: str = Query(default=""),
+    kinds: str = Query(default="", description="Comma-separated document kinds"),
     document_id: str = Query(default=""),
     # Cap matches the rerank-depth DoS guardrail: a plain fetch at 200 is one
     # LanceDB + one FTS5 query, the same work rerank_depth=200 already allows.
@@ -94,14 +94,13 @@ async def search(
     form -- the remaining failure mode after HyDE. Local-first per I-16.
     Fails soft on any reranker error.
     """
-    # Resolve document_ids for content_type filter
     document_ids: list[str] | None = None
     if document_id:
         document_ids = [document_id]
-    elif content_types:
-        type_list = [t.strip() for t in content_types.split(",") if t.strip()]
-        if type_list:
-            document_ids = await DocumentRepo(session).ids_of_types(type_list)
+    elif kinds:
+        kind_list = [k.strip() for k in kinds.split(",") if k.strip()]
+        if kind_list:
+            document_ids = await DocumentKindRepo(session).ids_of_kinds(kind_list)
             if not document_ids:
                 return SearchResponse(results=[])
 
@@ -127,7 +126,7 @@ async def search(
         return SearchResponse(results=[])
 
     doc_ids = list({c.document_id for c in scored_chunks})
-    doc_map = await DocumentRepo(session).titles_and_types(doc_ids)
+    doc_map = await DocumentKindRepo(session).titles_and_kinds(doc_ids)
 
     # Build grouped results
     groups: dict[str, list[SearchResult]] = {}
@@ -136,13 +135,13 @@ async def search(
         doc_id = chunk.document_id
         if doc_id not in doc_map:
             continue
-        title, ctype = doc_map[doc_id]
+        title, kind = doc_map[doc_id]
         rank += 1
         result_item = SearchResult(
             chunk_id=chunk.chunk_id,
             document_id=doc_id,
             document_title=title,
-            content_type=ctype,
+            kind=kind,
             section_heading=chunk.section_heading or "",
             page=chunk.page or 0,
             text_excerpt=chunk.text[:200],
@@ -157,7 +156,7 @@ async def search(
             DocumentGroup(
                 document_id=doc_id,
                 document_title=doc_map[doc_id][0],
-                content_type=doc_map[doc_id][1],
+                kind=doc_map[doc_id][1],
                 matches=matches,
             )
             for doc_id, matches in groups.items()

@@ -8003,8 +8003,8 @@ export interface components {
             document_id: string;
             /** Document Title */
             document_title: string;
-            /** Content Type */
-            content_type: string;
+            /** Kind */
+            kind: string;
             /** Matches */
             matches: components["schemas"]["SearchResult"][];
         };
@@ -10797,8 +10797,8 @@ export interface components {
             document_id: string;
             /** Document Title */
             document_title: string;
-            /** Content Type */
-            content_type: string;
+            /** Kind */
+            kind: string;
             /** Section Heading */
             section_heading: string;
             /** Page */
@@ -19918,7 +19918,8 @@ export interface operations {
         parameters: {
             query: {
                 q: string;
-                content_types?: string;
+                /** @description Comma-separated document kinds */
+                kinds?: string;
                 document_id?: string;
                 limit?: number;
                 hyde?: boolean;

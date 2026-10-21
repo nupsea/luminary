@@ -27,7 +27,7 @@ from app.models import (
     StudySessionModel,
     SummaryModel,
 )
-from app.repos.document_repo import kind_expr
+from app.repos.document_kind_repo import kind_expr
 
 DocumentSort = Literal[
     "newest", "oldest", "alphabetical", "most-studied", "last_accessed", "weakest-first"

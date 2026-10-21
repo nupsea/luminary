@@ -32,7 +32,7 @@ export interface UnifiedSearchResult {
   documentId: string | null
   /** Free-form sub-line (section heading, page, deck source, etc.). */
   context: string
-  /** Original content_type for the doc kind, or 'note' / 'flashcard' for the others. */
+  /** The document's kind for a document hit, or 'note' / 'flashcard' for the others. */
   contentType: string
 }
 
@@ -52,7 +52,7 @@ export function adaptDocumentResults(resp: SearchResponse): UnifiedSearchResult[
         score: m.relevance_score,
         documentId: m.document_id,
         context: ctxParts.join(" · "),
-        contentType: group.content_type,
+        contentType: group.kind,
       })
     }
   }

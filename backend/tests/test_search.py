@@ -115,16 +115,16 @@ def test_search_empty_when_no_chunks():
     assert resp.json() == {"results": []}
 
 
-def test_search_content_type_filter_applied():
-    """Content-type filter resolves to document_ids and passes them to retriever."""
+def test_search_kind_filter_applied():
+    """A kind filter resolves to document_ids and passes them to retriever."""
     chunks = [_make_chunk("c1", "doc-a", 0.9)]
     retriever = MagicMock()
     retriever.retrieve = AsyncMock(return_value=chunks)
 
-    # Two execute calls: content_type filter, then doc metadata
+    # Two execute calls: kind filter, then doc metadata
     session = _mock_session(
         [
-            [("doc-a",)],  # content_type filter result
+            [("doc-a",)],  # kind filter result
             [("doc-a", "Paper A", "paper")],  # doc metadata result
         ]
     )
@@ -133,7 +133,7 @@ def test_search_content_type_filter_applied():
     app.dependency_overrides[get_retriever] = _retriever_override(retriever)
 
     with TestClient(app) as client:
-        resp = client.get("/search?q=test&content_types=paper")
+        resp = client.get("/search?q=test&kinds=paper")
 
     assert resp.status_code == 200
     call_args = retriever.retrieve.call_args
@@ -141,8 +141,8 @@ def test_search_content_type_filter_applied():
     assert "doc-a" in passed_doc_ids
 
 
-def test_search_content_type_filter_no_matches_returns_empty():
-    """Returns empty when content_type filter yields no matching documents."""
+def test_search_kind_filter_no_matches_returns_empty():
+    """Returns empty when the kind filter yields no matching documents."""
     retriever = MagicMock()
     retriever.retrieve = AsyncMock(return_value=[])
     session = _mock_session([[]])  # empty filter result
@@ -151,7 +151,7 @@ def test_search_content_type_filter_no_matches_returns_empty():
     app.dependency_overrides[get_retriever] = _retriever_override(retriever)
 
     with TestClient(app) as client:
-        resp = client.get("/search?q=test&content_types=paper")
+        resp = client.get("/search?q=test&kinds=paper")
 
     assert resp.status_code == 200
     assert resp.json() == {"results": []}
@@ -323,7 +323,7 @@ def test_search_result_fields():
     assert match["chunk_id"] == "c1"
     assert match["document_id"] == "doc-a"
     assert match["document_title"] == "Paper A"
-    assert match["content_type"] == "paper"
+    assert match["kind"] == "paper"
     assert match["section_heading"] == "Introduction"
     assert match["page"] == 1
     assert "text_excerpt" in match
