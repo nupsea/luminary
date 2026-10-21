@@ -12,7 +12,7 @@ import {
   Video, 
   Youtube 
 } from "lucide-react"
-import type { ContentType, LearningStatus } from "./types"
+import type { ContentType, DocumentKind, LearningStatus } from "./types"
 
 export { Youtube }
 
@@ -29,6 +29,28 @@ export const CONTENT_TYPE_ICONS: Record<ContentType, React.ElementType> = {
   tech_article: Newspaper,
   technical: Cpu,
   video: Video,
+}
+
+export const KIND_ICONS: Record<DocumentKind, React.ElementType> = {
+  book: Book,
+  technical: Cpu,
+  paper: FileText,
+  conversation: MessageSquare,
+  notes: StickyNote,
+  code: Code,
+  audio: Mic,
+  video: Video,
+}
+
+export const KIND_LABELS: Record<DocumentKind, string> = {
+  book: "Book",
+  technical: "Technical",
+  paper: "Paper",
+  conversation: "Conversation",
+  notes: "Notes",
+  code: "Code",
+  audio: "Audio",
+  video: "Video",
 }
 
 export function isYouTubeDoc(doc: { source_url?: string | null }): boolean {

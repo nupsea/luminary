@@ -13,6 +13,18 @@ export type ContentType =
   // Transient: uploads may carry this until ingestion resolves it to a
   // tech_* variant; rows can render mid-ingest, so display maps cover it.
   | "technical"
+
+/** What the library calls a document, derived server-side from its format and facets. */
+export type DocumentKind =
+  | "book"
+  | "technical"
+  | "paper"
+  | "conversation"
+  | "notes"
+  | "code"
+  | "audio"
+  | "video"
+
 /** What the document is, on the three axes the pipeline records.
  *
  *  `domain` and `register` are null when nothing has classified them, which is
@@ -42,6 +54,7 @@ export interface DocumentListItem {
   title: string
   format: string
   content_type: ContentType
+  kind: DocumentKind
   facets?: DocumentFacets | null
   word_count: number
   page_count: number

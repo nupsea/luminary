@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { STATUS_LABELS, STATUS_VARIANTS, formatDate } from "@/components/library/utils"
+import { KIND_LABELS, STATUS_LABELS, STATUS_VARIANTS, formatDate } from "@/components/library/utils"
 import type { DocumentListItem } from "@/components/library/types"
 
 type TableSortCol = "title" | "created_at"
@@ -175,9 +175,7 @@ export function LibraryTable({ items, isLoading, isError, onRowClick, onRetry, o
                   {humanizeTitle(doc.title)}
                 </TableCell>
                 <TableCell>
-                  <Badge variant="gray" className="capitalize">
-                    {doc.content_type}
-                  </Badge>
+                  <Badge variant="gray">{KIND_LABELS[doc.kind]}</Badge>
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground capitalize">
                   {doc.format}

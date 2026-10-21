@@ -80,23 +80,19 @@ const SPECS: Record<ReadingProfile, ProfileSpec> = {
   },
 }
 
-const BY_CONTENT_TYPE: Record<string, ReadingProfile> = {
+const BY_KIND: Record<string, ReadingProfile> = {
   book: "prose",
-  epub: "prose",
   paper: "paper",
-  tech_book: "technical",
-  tech_article: "article",
   code: "technical",
-  notes: "article",
+  notes: "reference",
   conversation: "dialogue",
   audio: "dialogue",
   video: "dialogue",
-  kindle_clippings: "reference",
 }
 
 /**
- * Only layouts `content_type` cannot express. Values present on both axes must
- * not override, or the finer content_type would lose to the coarser layout.
+ * Only layouts the kind cannot express. Values present on both axes must
+ * not override, or the finer kind would lose to the coarser layout.
  */
 const BY_STRUCTURE_TYPE: Record<string, ReadingProfile> = {
   chat: "dialogue",
@@ -104,12 +100,15 @@ const BY_STRUCTURE_TYPE: Record<string, ReadingProfile> = {
 }
 
 export function readingProfile(doc: {
-  content_type?: string | null
+  kind?: string | null
+  form?: string | null
   structure_type?: string | null
 }): ReadingProfile {
   const structural = BY_STRUCTURE_TYPE[doc.structure_type ?? ""]
   if (structural) return structural
-  return BY_CONTENT_TYPE[doc.content_type ?? ""] ?? "article"
+  // A technical article reads at article width; manuals and textbooks get the wider measure.
+  if (doc.kind === "technical") return doc.form === "article" ? "article" : "technical"
+  return BY_KIND[doc.kind ?? ""] ?? "article"
 }
 
 export function profileSpec(profile: ReadingProfile): ProfileSpec {

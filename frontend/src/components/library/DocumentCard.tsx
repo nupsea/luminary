@@ -19,7 +19,6 @@ import {
   Mic, 
   MoreVertical,
   Network,
-  Newspaper,
   Plus,
   Star,
   StickyNote,
@@ -41,9 +40,9 @@ import {
 } from "@/lib/notesApi"
 import { retagDocument } from "@/pages/Learning/api"
 import { flattenCollectionTree, type CollectionTreeItem } from "@/lib/collectionUtils"
-import type { ContentType, DocumentListItem } from "./types"
+import type { DocumentKind, DocumentListItem } from "./types"
 import {
-  CONTENT_TYPE_ICONS,
+  KIND_ICONS,
   Youtube,
   STATUS_LABELS,
   STATUS_VARIANTS,
@@ -82,42 +81,32 @@ function ProgressRing({ pct, size = 24 }: { pct: number; size?: number }) {
   )
 }
 
-const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string; icon: typeof Book }> = {
+const KIND_BADGE: Record<DocumentKind, { label: string; className: string; icon: typeof Book }> = {
   book: { label: "Book", className: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900 dark:hover:bg-blue-900/50", icon: Book },
-  conversation: { label: "Chat Log", className: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100 dark:bg-green-950/40 dark:text-green-300 dark:border-green-900 dark:hover:bg-green-900/50", icon: MessageSquare },
-  notes: { label: "Note", className: "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-slate-800/60 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-800", icon: StickyNote },
+  technical: { label: "Technical", className: "bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-900 dark:hover:bg-cyan-900/50", icon: Cpu },
   paper: { label: "Paper", className: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-900 dark:hover:bg-purple-900/50", icon: FileText },
+  conversation: { label: "Conversation", className: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100 dark:bg-green-950/40 dark:text-green-300 dark:border-green-900 dark:hover:bg-green-900/50", icon: MessageSquare },
+  notes: { label: "Notes", className: "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-slate-800/60 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-800", icon: StickyNote },
   code: { label: "Code", className: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-900 dark:hover:bg-orange-900/50", icon: Code },
   audio: { label: "Audio", className: "bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100 dark:bg-yellow-950/40 dark:text-yellow-300 dark:border-yellow-900 dark:hover:bg-yellow-900/50", icon: Mic },
-  epub: { label: "E-Book", className: "bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-900 dark:hover:bg-indigo-900/50", icon: BookOpen },
-  kindle_clippings: { label: "Kindle", className: "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900 dark:hover:bg-amber-900/50", icon: Bookmark },
-  tech_book: { label: "Tech Book", className: "bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-900 dark:hover:bg-cyan-900/50", icon: Cpu },
-  tech_article: { label: "Article", className: "bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100 dark:bg-teal-950/40 dark:text-teal-300 dark:border-teal-900 dark:hover:bg-teal-900/50", icon: Newspaper },
-  technical: { label: "Technical", className: "bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-900 dark:hover:bg-cyan-900/50", icon: Cpu },
   video: { label: "Video", className: "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900 dark:hover:bg-rose-900/50", icon: Film },
 }
 
 const YOUTUBE_BADGE = { label: "YouTube", className: "bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/50" }
 const KINDLE_SOURCE_BADGE = { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/50" }
 
-// Accent band colors per content type (top-border gradient effect)
-const ACCENT_COLORS: Record<string, string> = {
+// Accent band colors per kind (top-border gradient effect)
+const ACCENT_COLORS: Record<DocumentKind | "youtube", string> = {
   book: "from-indigo-500 to-blue-500",
+  technical: "from-blue-500 to-cyan-500",
   paper: "from-purple-500 to-violet-500",
   code: "from-orange-500 to-amber-500",
-  epub: "from-indigo-400 to-purple-500",
   conversation: "from-emerald-500 to-green-500",
   notes: "from-slate-400 to-gray-500",
   audio: "from-yellow-500 to-orange-400",
-  kindle_clippings: "from-amber-500 to-yellow-500",
-  tech_book: "from-blue-500 to-cyan-500",
-  tech_article: "from-teal-500 to-emerald-500",
-  technical: "from-blue-500 to-cyan-500",
   video: "from-rose-500 to-pink-500",
   youtube: "from-red-500 to-rose-500",
 }
-
-const CHANGEABLE_TYPES: ContentType[] = ["book", "conversation", "notes", "paper", "tech_book", "tech_article"]
 
 const ACTION_ICONS: Record<DocAction, typeof BookOpen> = {
   read: BookOpen,
@@ -131,7 +120,6 @@ interface DocumentCardProps {
   doc: DocumentListItem
   onClick: (id: string) => void
   onDelete?: (id: string) => void
-  onContentTypeChange?: (id: string, contentType: ContentType) => void
   onAction?: (docId: string, action: DocAction) => void
   selected?: boolean
   onSelect?: (id: string, selected: boolean) => void
@@ -143,7 +131,6 @@ export function DocumentCard({
   doc,
   onClick,
   onDelete,
-  onContentTypeChange,
   onAction,
   selected = false,
   onSelect,
@@ -152,10 +139,10 @@ export function DocumentCard({
 }: DocumentCardProps) {
   const isYouTube = isYouTubeDoc(doc)
   const isKindleSource = doc.tags.includes("kindle")
-  const Icon = isYouTube ? Youtube : CONTENT_TYPE_ICONS[doc.content_type]
+  const Icon = isYouTube ? Youtube : KIND_ICONS[doc.kind]
   const isProcessing = isDocumentProcessing(doc)
   const isErrored = isDocumentErrored(doc)
-  const badge = isYouTube ? { ...YOUTUBE_BADGE, icon: Youtube } : (isKindleSource ? { ...KINDLE_SOURCE_BADGE, icon: Bookmark } : CONTENT_TYPE_BADGE[doc.content_type])
+  const badge = isYouTube ? { ...YOUTUBE_BADGE, icon: Youtube } : (isKindleSource ? { ...KINDLE_SOURCE_BADGE, icon: Bookmark } : KIND_BADGE[doc.kind])
   const navigate = useNavigate()
   // "View in graph" only makes sense when the Map surface ships in this build;
   // it's trimmed from public bundles, so drop the action there.
@@ -163,8 +150,6 @@ export function DocumentCard({
     ({ action }) => action !== "viz" || isSurfaceVisible("map"),
   )
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [typePopoverOpen, setTypePopoverOpen] = useState(false)
-  const popoverRef = useRef<HTMLDivElement>(null)
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const actionMenuRef = useRef<HTMLDivElement>(null)
   const [collectionPickerOpen, setCollectionPickerOpen] = useState(false)
@@ -204,11 +189,8 @@ export function DocumentCard({
 
   // Close popover on outside click
   useEffect(() => {
-    if (!typePopoverOpen && !actionMenuOpen) return
+    if (!actionMenuOpen) return
     function handleClick(e: MouseEvent) {
-      if (typePopoverOpen && popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        setTypePopoverOpen(false)
-      }
       // The menu is portalled to body, so it is not inside actionMenuRef.
       if (
         actionMenuOpen &&
@@ -222,7 +204,7 @@ export function DocumentCard({
     }
     document.addEventListener("mousedown", handleClick)
     return () => document.removeEventListener("mousedown", handleClick)
-  }, [typePopoverOpen, actionMenuOpen])
+  }, [actionMenuOpen])
 
   const flatCollections = collections ? flattenCollectionTree(collections) : []
   const showCollectionFilter = flatCollections.length > 7
@@ -332,18 +314,7 @@ export function DocumentCard({
     }
   }
 
-  async function handleTypeChange(newType: ContentType) {
-    setTypePopoverOpen(false)
-    if (newType === doc.content_type) return
-    try {
-      await apiPatch(`/documents/${doc.id}`, { content_type: newType })
-      onContentTypeChange?.(doc.id, newType)
-    } catch {
-      // Non-fatal — UI will revert on next query invalidation
-    }
-  }
-
-  const accentKey = isYouTube ? "youtube" : doc.content_type
+  const accentKey = isYouTube ? "youtube" : doc.kind
   const accentGradient = ACCENT_COLORS[accentKey] ?? "from-slate-400 to-gray-500"
 
   return (
@@ -595,50 +566,16 @@ export function DocumentCard({
         </div>
       </div>
 
-      {/* Content type badge */}
-      <div className="mt-1.5 relative inline-block" ref={popoverRef}>
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            setTypePopoverOpen((v) => !v)
-          }}
-          title="Change document type (re-ingest to apply new chunking)"
+      <div className="mt-1.5">
+        <span
           className={cn(
-            "flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors border shadow-sm",
+            "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border shadow-sm",
             badge.className,
           )}
         >
           {badge.icon && <badge.icon size={10} />}
           {badge.label}
-        </button>
-
-        {typePopoverOpen && (
-          <div
-            className="absolute left-0 top-full z-20 mt-1 w-52 rounded-lg border border-border bg-background p-2 shadow-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="mb-1.5 px-1 text-xs text-muted-foreground">
-              Re-ingest document to apply new chunking strategy.
-            </p>
-            {CHANGEABLE_TYPES.map((t) => {
-              const opt = CONTENT_TYPE_BADGE[t]
-              return (
-                <button
-                  key={t}
-                  onClick={() => void handleTypeChange(t)}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-                    doc.content_type === t && "font-medium",
-                  )}
-                >
-                  {doc.content_type === t && <Check size={12} className="shrink-0 text-primary" />}
-                  {doc.content_type !== t && <span className="w-3" />}
-                  {opt.label}
-                </button>
-              )
-            })}
-          </div>
-        )}
+        </span>
       </div>
 
       <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">

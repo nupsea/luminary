@@ -13,28 +13,16 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
-  chipIsActive,
   toggleChip as toggleChipTypes,
   visibleChips,
   type LibraryFacets,
   type TypeChip as TypeChipBase,
 } from "./filterChips"
-import type { ContentType } from "./types"
+import type { DocumentKind } from "./types"
 
 export type { LibraryFacets }
 
-/** A chip and the content types it stands for.
- *
- *  One vocabulary, and it is the one the Add Content dialog offers: a filter
- *  naming something you cannot add is a dead end. Five of the ten chips this
- *  replaces could not match a document in any library -- `code` is not in the
- *  backend's ContentType union at all, `epub` is a *format* (an EPUB is stored
- *  with content_type `book`), `kindle_clippings` needs a filename check, and
- *  `notes` names the separate Notes entity, not a document.
- *
- *  `types` is a list because Technical is one choice at upload and two stored
- *  values after classification.
- */
+/** A chip for one document kind, the vocabulary the card badge shows (#223). */
 interface TypeChip extends TypeChipBase {
   icon: LucideIcon
 }
@@ -43,28 +31,24 @@ const TYPE_GROUPS: { label: string; items: TypeChip[] }[] = [
   {
     label: "Library",
     items: [
-      { id: "book", label: "Books", icon: Book, types: ["book"] },
-      { id: "technical", label: "Technical", icon: Cpu, types: ["tech_book", "tech_article"] },
-      { id: "paper", label: "Papers", icon: FileText, types: ["paper"] },
+      { id: "book", label: "Books", icon: Book },
+      { id: "technical", label: "Technical", icon: Cpu },
+      { id: "paper", label: "Papers", icon: FileText },
+      { id: "code", label: "Code", icon: FileCode },
     ],
   },
   {
     label: "Capture",
     items: [
-      {
-        id: "conversation",
-        label: "Conversations",
-        icon: MessageSquare,
-        types: ["conversation"],
-      },
-      { id: "notes", label: "Notes", icon: StickyNote, types: ["notes"] },
+      { id: "conversation", label: "Conversations", icon: MessageSquare },
+      { id: "notes", label: "Notes", icon: StickyNote },
     ],
   },
   {
     label: "Media",
     items: [
-      { id: "audio", label: "Audio", icon: Mic, types: ["audio"] },
-      { id: "video", label: "Video", icon: Video, types: ["video"] },
+      { id: "audio", label: "Audio", icon: Mic },
+      { id: "video", label: "Video", icon: Video },
     ],
   },
 ]
@@ -81,8 +65,8 @@ const FORMAT_LABELS: Record<string, { label: string; icon: LucideIcon }> = {
 }
 
 interface FilterBarProps {
-  selected: Set<ContentType>
-  onChange: (selected: Set<ContentType>) => void
+  selected: Set<DocumentKind>
+  onChange: (selected: Set<DocumentKind>) => void
   selectedFormats: Set<string>
   onFormatsChange: (selected: Set<string>) => void
   favoriteOnly?: boolean
@@ -213,7 +197,7 @@ export function FilterBar({
                   label={chip.label}
                   icon={chip.icon}
                   count={count}
-                  active={chipIsActive(chip, selected)}
+                  active={selected.has(chip.id)}
                   onClick={() => toggleChip(chip)}
                 />
               ))}

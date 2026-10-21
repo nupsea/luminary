@@ -32,7 +32,7 @@ export async function fetchSearch(
 }
 
 export const fetchDocuments = (params: {
-  content_type?: string
+  kind?: string
   format?: string
   tag?: string
   collection_id?: string
@@ -45,7 +45,7 @@ export const fetchDocuments = (params: {
     sort: params.sort,
     page: params.page,
     page_size: params.page_size,
-    content_type: params.content_type,
+    kind: params.kind,
     format: params.format,
     tag: params.tag,
     collection_id: params.collection_id,

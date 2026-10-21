@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react"
 import { API_BASE } from "@/lib/config"
-import { isYouTubeDoc, getYouTubeThumbnail, CONTENT_TYPE_ICONS } from "./utils"
+import { isYouTubeDoc, getYouTubeThumbnail, KIND_ICONS, KIND_LABELS } from "./utils"
 import type { DocumentListItem } from "./types"
 import { cn } from "@/lib/utils"
 import { Sparkles } from "lucide-react"
@@ -25,13 +25,13 @@ function hashString(str: string): number {
  * and high-contrast typographic excerpts from summary_one_sentence.
  */
 function ProceduralCoverTile({ doc }: { doc: DocumentListItem }) {
-  const Icon = CONTENT_TYPE_ICONS[doc.content_type] || Sparkles
+  const Icon = KIND_ICONS[doc.kind] || Sparkles
   const hash = useMemo(() => hashString(doc.id + doc.title), [doc.id, doc.title])
 
-  // Curated color themes mapped by content type, styled for both light and dark modes
+  // Curated color themes mapped by kind, styled for both light and dark modes
   const theme = useMemo(() => {
-    switch (doc.content_type) {
-      case "tech_book":
+    switch (doc.kind) {
+      case "technical":
       case "code":
         return {
           gradient:
@@ -49,7 +49,6 @@ function ProceduralCoverTile({ doc }: { doc: DocumentListItem }) {
           iconColor: "text-rose-600/20 dark:text-rose-400/10",
         }
       case "book":
-      case "epub":
         return {
           gradient:
             "from-amber-50 via-orange-50/40 to-stone-100/70 dark:from-amber-950/95 dark:via-neutral-900/95 dark:to-stone-900/95",
@@ -58,7 +57,6 @@ function ProceduralCoverTile({ doc }: { doc: DocumentListItem }) {
           iconColor: "text-amber-700/20 dark:text-amber-400/10",
         }
       case "paper":
-      case "tech_article":
         return {
           gradient:
             "from-emerald-50 via-teal-50/40 to-slate-100/70 dark:from-emerald-950/95 dark:via-slate-900/95 dark:to-teal-950/95",
@@ -75,7 +73,7 @@ function ProceduralCoverTile({ doc }: { doc: DocumentListItem }) {
           iconColor: "text-violet-700/20 dark:text-violet-400/10",
         }
     }
-  }, [doc.content_type])
+  }, [doc.kind])
 
   // SVG grid pattern variation based on hash
   const patternSeed = hash % 3
@@ -128,7 +126,7 @@ function ProceduralCoverTile({ doc }: { doc: DocumentListItem }) {
         <div className="flex items-center gap-1.5 min-w-0">
           <Icon size={12} className={cn("shrink-0", theme.accent)} />
           <span className={cn("truncate text-[10px] font-bold uppercase tracking-wider", theme.accent)}>
-            {doc.facets?.domain || doc.content_type.replace("_", " ")}
+            {doc.facets?.domain || KIND_LABELS[doc.kind]}
           </span>
           {doc.facets?.form && (
             <>
