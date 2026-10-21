@@ -51,6 +51,7 @@ import { epubPlaceOf, samePlace, type EpubPlace } from "./epubPlace"
 import { ExplanationPanel } from "./ExplanationPanel"
 import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
 import { COLOR_CLASSES } from "./highlightColors"
+import { settledSaver } from "./hooks/positionSave"
 import { readerLandingTab } from "./hooks/readerLandingTab"
 import { useReaderHistory, type ReaderPlace } from "./hooks/useReaderHistory"
 import { useReaderKeyboardShortcuts } from "./hooks/useReaderKeyboardShortcuts"
@@ -346,8 +347,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     epubChapterTitleRef.current = chapterTitle
     setEpubReadPlace(place)
   }, [])
-  // throttle timer: one POST per 10 seconds max
-  const positionThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const docRef = useRef(doc)
+  useEffect(() => { docRef.current = doc }, [doc])
 
   const { canGoBack, backLabel: hookBackLabel, goBack: goBackToSource } = useBackNavigation()
   // DocumentReader falls back to onBack (library list) when no from state is set
@@ -928,9 +929,32 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   useReadingProgress(documentId, doc?.sections.length ?? 0, readerContainerRef)
   const chapterEnd = useChapterEndOffer(documentId)
   const { reach: reachPlace } = chapterEnd
+  const positionSaverRef = useRef<ReturnType<typeof settledSaver<string>> | null>(null)
+  useEffect(() => {
+    const saver = settledSaver<string>((sectionId) => {
+      const current = docRef.current
+      const section = current?.sections.find((s) => s.id === sectionId)
+      const pdfPage = current?.format === "pdf" ? pdfReadPageRef.current : null
+      const epubPlace = epubReadPlaceRef.current
+      void apiPost(`/documents/${documentId}/position`, {
+        last_section_id: sectionId,
+        last_section_heading: section?.heading ?? null,
+        last_pdf_page: pdfPage,
+        last_epub_chapter_index: epubPlace?.chapter ?? null,
+        last_epub_block_index: epubPlace?.block ?? null,
+      }).catch(() => {})
+      lastPostedSectionRef.current = sectionId
+      if (pdfPage != null) lastPostedPdfPageRef.current = pdfPage
+      if (epubPlace != null) lastPostedEpubPlaceRef.current = epubPlace
+    })
+    positionSaverRef.current = saver
+    return () => saver.stop()
+  }, [documentId])
   const onReadSection = useCallback(
     (sectionId: string) => {
-      if (leftTab === "read") reachPlace({ sectionId })
+      if (leftTab !== "read") return
+      reachPlace({ sectionId })
+      positionSaverRef.current?.reach(sectionId)
     },
     [leftTab, reachPlace],
   )
@@ -971,66 +995,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       .finally(() => setEpubPositionLoaded(true))
   }, [documentId, doc])
 
-  // IntersectionObserver — track the topmost visible section and throttle-POST position
-  useEffect(() => {
-    if (!doc || doc.sections.length === 0) return
-    const sectionElements = Array.from(
-      document.querySelectorAll<HTMLElement>("[data-section-id]"),
-    )
-    if (sectionElements.length === 0) return
-
-    function postPosition(sectionId: string) {
-      if (sectionId === lastPostedSectionRef.current) return
-      if (positionThrottleRef.current) clearTimeout(positionThrottleRef.current)
-      positionThrottleRef.current = setTimeout(() => {
-        const section = doc!.sections.find((s) => s.id === sectionId)
-        const pdfPage = doc!.format === "pdf" ? pdfReadPageRef.current : null
-        const epubPlace = epubReadPlaceRef.current
-        void apiPost(`/documents/${documentId}/position`, {
-          last_section_id: sectionId,
-          last_section_heading: section?.heading ?? null,
-          last_pdf_page: pdfPage,
-          last_epub_chapter_index: epubPlace?.chapter ?? null,
-          last_epub_block_index: epubPlace?.block ?? null,
-        }).catch(() => {})
-        lastPostedSectionRef.current = sectionId
-        if (pdfPage != null) lastPostedPdfPageRef.current = pdfPage
-        if (epubPlace != null) lastPostedEpubPlaceRef.current = epubPlace
-      }, 10_000)
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        let topmost: HTMLElement | null = null
-        let topmostTop = Infinity
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            const top = entry.boundingClientRect.top
-            if (top < topmostTop) {
-              topmostTop = top
-              topmost = entry.target as HTMLElement
-            }
-          }
-        }
-        if (topmost?.dataset.sectionId) {
-          postPosition(topmost.dataset.sectionId)
-        }
-      },
-      { threshold: 0.2 },
-    )
-
-    for (const el of sectionElements) observer.observe(el)
-    return () => {
-      observer.disconnect()
-      if (positionThrottleRef.current) clearTimeout(positionThrottleRef.current)
-    }
-  }, [documentId, doc?.sections.length])
-
   // Save the page or EPUB place read once it settles, and at once when the reader
   // closes or the tab hides: a pending save cancelled on close lost the last pages read.
   const placeSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const docRef = useRef(doc)
-  useEffect(() => { docRef.current = doc }, [doc])
   const saveReadPlace = useCallback((keepalive: boolean) => {
     if (placeSaveTimerRef.current) clearTimeout(placeSaveTimerRef.current)
     placeSaveTimerRef.current = null
