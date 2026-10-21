@@ -30,6 +30,7 @@ from app.services.summary_assembly import (
     MAP_BATCH_TOKENS,
     assemble_summary,
     chunk_into_batches,
+    foreign_latex,
     section_summary_input,
     split_for_detail,
 )
@@ -109,6 +110,18 @@ def llm_error_message(exc: Exception) -> str:
     from app.services.llm_errors import describe  # noqa: PLC0415
 
     return describe(exc)[1]
+
+
+def _found_foreign_latex(summary: str, source: str, document_id: str, mode: str) -> list[str]:
+    markup = foreign_latex(summary, source)
+    if markup:
+        logger.warning(
+            "summary mode=%s wrote LaTeX its input never used: %s",
+            mode,
+            markup,
+            extra={"document_id": document_id},
+        )
+    return markup
 
 
 class SummarizationService:
@@ -269,6 +282,33 @@ class SummarizationService:
             parts.append(text.strip())
         return "\n\n".join(p for p in parts if p)
 
+    async def _generate_without_foreign_latex(
+        self,
+        llm,
+        document_id: str,
+        mode: str,
+        source: str,
+        model: str | None,
+        profile: DocumentProfile | None,
+    ) -> str | None:
+        """A background summary, asked for once more if it invents LaTeX; None if it does again.
+
+        Nothing is stored rather than a summary the reader shows as raw markup;
+        the next request assembles one from the section summaries instead.
+        """
+        for _attempt in range(2):
+            text = await llm.generate(
+                source,
+                system=build_system_prompt(mode, profile),
+                model=model,
+                background=True,
+                num_ctx=_summary_num_ctx(model),
+                max_tokens=_PREGENERATE_MAX_TOKENS,
+            )
+            if not _found_foreign_latex(text, source, document_id, mode):
+                return text
+        return None
+
     async def _build_section_summary_input(self, document_id: str) -> str | None:
         """Section summaries as the fast-path input, or None if too few units exist."""
         async with get_session_factory()() as session:
@@ -403,6 +443,18 @@ class SummarizationService:
                 yield f"data: {json.dumps({'token': token})}\n\n"
 
             summary_text = "".join(collected)
+            markup = _found_foreign_latex(summary_text, input_text, document_id, mode)
+            if markup:
+                malformed_evt = {
+                    "error": "malformed_summary",
+                    "message": (
+                        f"The model wrote LaTeX markup ({', '.join(markup)}) that is not in "
+                        "the document, so this summary was not saved. Refresh to try again."
+                    ),
+                    "done": True,
+                }
+                yield f"data: {json.dumps(malformed_evt)}\n\n"
+                return
             summary_id = await self._store_summary(document_id, mode, summary_text)
             done_evt = {
                 "done": True,
@@ -537,14 +589,11 @@ class SummarizationService:
                             _truncate_to_budget(input_text), model, profile
                         )
                     else:
-                        text = await llm.generate(
-                            _truncate_to_budget(input_text),
-                            system=build_system_prompt(mode, profile),
-                            model=model,
-                            background=True,
-                            num_ctx=_summary_num_ctx(model),
-                            max_tokens=_PREGENERATE_MAX_TOKENS,
+                        text = await self._generate_without_foreign_latex(
+                            llm, document_id, mode, _truncate_to_budget(input_text), model, profile
                         )
+                        if text is None:
+                            continue
                     assert isinstance(text, str)  # noqa: S101
                     if await self._store_summary(document_id, mode, text) is None:
                         return

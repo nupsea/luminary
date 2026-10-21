@@ -82,6 +82,7 @@ export function SummaryPanel({ documentId, form }: SummaryPanelProps) {
       }
     }
 
+    const previous = summaries[mode]
     setStreaming((s) => ({ ...s, [mode]: true }))
     setSummaries((s) => ({ ...s, [mode]: "" }))
     try {
@@ -116,6 +117,11 @@ export function SummaryPanel({ documentId, form }: SummaryPanelProps) {
                     typeof payload["message"] === "string" ? payload["message"] : null,
                   ),
                 )
+              }
+              // The server kept the stored summary, so the panel shows it again.
+              if (payload["error"] === "malformed_summary") {
+                setSummaries((s) => ({ ...s, [mode]: previous ?? "" }))
+                setSummaryError(typeof payload["message"] === "string" ? payload["message"] : null)
               }
               if (payload["done"] === true) {
                 setStreaming((s) => ({ ...s, [mode]: false }))

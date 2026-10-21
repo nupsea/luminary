@@ -578,3 +578,96 @@ async def test_get_cached_does_not_rewrite_stored_summaries(test_db):
             .all()
         )
     assert [r.content for r in rows] == [stored]
+
+
+class _SequencedLLMService(_MockLLMService):
+    """Returns each response in turn, the last one for every call after."""
+
+    def __init__(self, responses: list[str]) -> None:
+        super().__init__()
+        self._responses = responses
+
+    async def generate(self, prompt: str, system: str = "", stream: bool = False, **kwargs):
+        self.call_count += 1
+        return self._responses[min(self.call_count, len(self._responses)) - 1]
+
+
+async def _stored_summaries(factory, doc_id: str, mode: str) -> list[str]:
+    async with factory() as session:
+        rows = await session.execute(
+            select(SummaryModel.content).where(
+                SummaryModel.document_id == doc_id, SummaryModel.mode == mode
+            )
+        )
+        return list(rows.scalars())
+
+
+_INVENTED = "Covers language models ({\\texttt{BERT}}) and {\\textbf{compute}}."
+
+
+def test_foreign_latex_names_commands_the_input_never_used():
+    from app.services.summary_assembly import foreign_latex
+
+    assert foreign_latex(_INVENTED, "BERT is a language model.") == ["\\textbf", "\\texttt"]
+    # A math book's own notation may come back in its summary.
+    assert foreign_latex("The rate is $\\frac{a}{b}$.", "rate = \\frac{a}{b}") == []
+    # A backslash escape in a code span is not markup.
+    assert foreign_latex("Split on `\\n` and `\\t`.", "lines") == []
+    # `\text` in the source does not license `\texttt`.
+    assert foreign_latex("{\\texttt{x}}", "\\text{x}") == ["\\texttt"]
+
+
+@pytest.mark.asyncio
+async def test_a_background_summary_that_invents_latex_is_asked_once_more(test_db):
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["BERT is a language model."], [5])
+
+    llm = _SequencedLLMService([_INVENTED, "Covers language models such as **BERT**."])
+    with patch("app.services.summarizer.get_llm_service", return_value=llm):
+        await SummarizationService().pregenerate(doc_id, modes=("executive",))
+
+    assert llm.call_count == 2
+    assert await _stored_summaries(factory, doc_id, "executive") == [
+        "Covers language models such as **BERT**."
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_background_summary_that_invents_latex_twice_is_not_stored(test_db):
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["BERT is a language model."], [5])
+
+    llm = _SequencedLLMService([_INVENTED])
+    with patch("app.services.summarizer.get_llm_service", return_value=llm):
+        await SummarizationService().pregenerate(doc_id, modes=("executive",))
+
+    assert llm.call_count == 2
+    assert await _stored_summaries(factory, doc_id, "executive") == []
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_that_invents_latex_keeps_the_stored_summary(test_db):
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["BERT is a language model."], [5])
+
+    svc = SummarizationService()
+    with patch(
+        "app.services.summarizer.get_llm_service",
+        return_value=_MockLLMService(tokens=["A model ", "named BERT."]),
+    ):
+        _ = [e async for e in svc.stream_summary(doc_id, "executive", None)]
+    with patch(
+        "app.services.summarizer.get_llm_service",
+        return_value=_MockLLMService(tokens=["Covers ", "({\\texttt{BERT}})."]),
+    ):
+        events = [
+            e async for e in svc.stream_summary(doc_id, "executive", None, force_refresh=True)
+        ]
+
+    done = _done(events)
+    assert done["error"] == "malformed_summary"
+    assert "\\texttt" in done["message"]
+    assert await _stored_summaries(factory, doc_id, "executive") == ["A model named BERT."]
