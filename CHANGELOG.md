@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **A plain-text book could store chapters out of order or under the wrong name.** Sections that share a number are no longer merged unless they are neighbours. Frankenstein's opening Letters had been stored after Chapter 24, and Gulliver's four Parts had collapsed into 12 chapters; across 41 local books, misplaced paragraphs went from 1,040 to 0. Text before the first heading is kept now, and a sentence is no longer read as a heading, so the Federalist Papers parse to their 85 papers instead of 8 sections (#332, #333). Existing documents pick this up when reprocessed.
 - **A question picked from the suggestions could be answered from the model's general knowledge under the document's source chips.** Suggested questions are now answered from the documents only. On 11 factual questions, three runs each, general-knowledge answers went from 7, 7 and 6 to none (#66).
+- **A library-wide chat answer could read a document's summary of another mode as its executive summary** when the two were written at the same instant. Only executive summaries are served now.
+- **Re-indexing a document's entities dropped its book and chapter names from keyword search.** The re-index writes the same rows ingestion does.
+
+### Changed
+- **No SQL runs outside `repos/` any more**: the retriever, the chat runtime, the ingestion and concept workflows, the maintenance scripts and startup followed the routers and services (79 statements to 0). Retrieval scores are unchanged on one library.
 
 ## [0.16.2] - 2026-10-19
 
