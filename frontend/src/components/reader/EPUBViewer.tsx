@@ -194,7 +194,8 @@ export const EPUBViewer = forwardRef<EPUBViewerHandle, EPUBViewerProps>(function
   })
   const reportPlace = useCallback(() => {
     const container = contentContainerRef.current
-    if (!container) return
+    // A hidden Book View has no layout: every top reads 0, which names the last block.
+    if (!container || container.getClientRects().length === 0) return
     const blocks = blocksIn(container)
     const line = container.getBoundingClientRect().top + READING_LINE_PX
     const block = blockAtLine(blocks.length, (i) => blocks[i].getBoundingClientRect().top, line)
