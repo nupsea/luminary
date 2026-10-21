@@ -103,3 +103,8 @@ def unreachable(sentence: str) -> str:
     machine is online and the person is told the one setting that fixes it (#155).
     """
     return PAC_ONLY if proxy_env.pac_only() else sentence
+
+
+def offline(reachable: bool) -> bool:
+    """Whether a failed internet check means no connection, rather than a setup script."""
+    return not reachable and not proxy_env.pac_only()
