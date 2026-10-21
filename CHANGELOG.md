@@ -6,7 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **An EPUB reopens at the paragraph where reading stopped, and can hold one bookmark,** as a PDF does. Chapters run to 20,000 words, so the place saved is the block on screen, not the chapter.
+
 ### Fixed
+- **The EPUB reader dropped footnote markers, subscripts, equations, definition lists and table captions.** One chapter of an O'Reilly book lost 85 markers and 19 equations; they render now, equations as MathML. Chapter titles keep their spaces ("Chapter 1. Introduction"), inline code shows no backticks, and links into other chapters open them.
+- **A summary could show raw LaTeX such as `{\texttt{BERT}}`.** A summary using LaTeX that its source never used is no longer saved: a background one is asked for again, and a refresh keeps the summary already there.
 - **A plain-text book could store chapters out of order or under the wrong name.** Sections that share a number are no longer merged unless they are neighbours. Frankenstein's opening Letters had been stored after Chapter 24, and Gulliver's four Parts had collapsed into 12 chapters; across 41 local books, misplaced paragraphs went from 1,040 to 0. Text before the first heading is kept now, and a sentence is no longer read as a heading, so the Federalist Papers parse to their 85 papers instead of 8 sections (#332, #333). Existing documents pick this up when reprocessed.
 - **A question picked from the suggestions could be answered from the model's general knowledge under the document's source chips.** Suggested questions are now answered from the documents only. On 11 factual questions, three runs each, general-knowledge answers went from 7, 7 and 6 to none (#66).
 - **A library-wide chat answer could read a document's summary of another mode as its executive summary** when the two were written at the same instant. Only executive summaries are served now.
