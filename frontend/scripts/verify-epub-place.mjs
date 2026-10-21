@@ -74,64 +74,86 @@ const topBlock = () =>
 const scrollBy = (dy) =>
   page.evaluate((y) => document.querySelector(".epub-reader-content").parentElement.scrollBy(0, y), dy)
 
-await page.goto(`${APP}/library?doc=${docId}`, { waitUntil: "domcontentloaded" })
-await page.waitForSelector(".epub-reader-content", { timeout: 30000 })
-await page.locator("button", { hasText: longest.title }).first().click()
-await settle()
-await page.evaluate(() => {
-  const c = document.querySelector(".epub-reader-content").parentElement
-  c.scrollTo({ top: c.scrollHeight * 0.4, behavior: "instant" })
-})
-await settle()
-const readHere = await topBlock()
-let pos = await (await api("/position")).json()
-check("scrolling saves the chapter and the block inside it",
-  pos.last_epub_chapter_index === longest.chapter_index && pos.last_epub_block_index > 0,
-  `chapter ${pos.last_epub_chapter_index} block ${pos.last_epub_block_index}`)
-
-await page.reload({ waitUntil: "domcontentloaded" })
-await page.waitForSelector(".epub-reader-content", { timeout: 30000 })
-await settle()
-check("reopening resumes at the block where reading stopped", (await topBlock()) === readHere,
-  `${JSON.stringify(readHere)} vs ${JSON.stringify(await topBlock())}`)
-
-await page.getByRole("button", { name: "Bookmark this place" }).click()
-await page.waitForTimeout(800)
-pos = await (await api("/position")).json()
-check("the bookmark is the place on screen",
-  pos.epub_bookmark_chapter_index === longest.chapter_index && pos.epub_bookmark_block_index === pos.last_epub_block_index,
-  `chapter ${pos.epub_bookmark_chapter_index} block ${pos.epub_bookmark_block_index}`)
-
-const rewritesBefore = await page.evaluate(() => window.__contentRewrites)
-for (let i = 0; i < 10; i++) { await scrollBy(600); await page.waitForTimeout(150) }
-await scrollBy(-6000)
-await page.waitForTimeout(500)
-check("scrolling never rewrites the chapter's HTML",
-  (await page.evaluate(() => window.__contentRewrites)) === rewritesBefore)
-check("the bookmarked block stays marked", (await page.locator(".epub-reader-content [data-bookmark]").count()) === 1)
-
-const link = page.locator(".epub-reader-content a[data-chapter][href^='#']:not([href='#'])").first()
-if (await link.count()) {
-  const target = await link.evaluate((a) => ({ chapter: Number(a.dataset.chapter), id: a.getAttribute("href").slice(1) }))
-  await link.evaluate((a) => a.scrollIntoView({ block: "center" }))
-  await link.click()
+async function run() {
+  await page.goto(`${APP}/library?doc=${docId}`, { waitUntil: "domcontentloaded" })
+  await page.waitForSelector(".epub-reader-content", { timeout: 30000 })
+  await page.locator("button", { hasText: longest.title }).first().click()
   await settle()
-  const offset = await page.evaluate((id) => {
-    const el = document.getElementById(id)
-    const c = document.querySelector(".epub-reader-content")?.parentElement
-    return el && c ? Math.round(el.getBoundingClientRect().top - c.getBoundingClientRect().top) : null
-  }, target.id)
-  check("a link into another chapter opens that chapter at its target",
-    offset !== null && Math.abs(offset) < 40, `chapter ${target.chapter} #${target.id} at ${offset}px`)
-} else {
-  console.log("  skip no link into another chapter in this chapter")
+  await page.evaluate(() => {
+    const c = document.querySelector(".epub-reader-content").parentElement
+    c.scrollTo({ top: c.scrollHeight * 0.4, behavior: "instant" })
+  })
+  await settle()
+  const readHere = await topBlock()
+  let pos = await (await api("/position")).json()
+  check("scrolling saves the chapter and the block inside it",
+    pos.last_epub_chapter_index === longest.chapter_index && pos.last_epub_block_index > 0,
+    `chapter ${pos.last_epub_chapter_index} block ${pos.last_epub_block_index}`)
+
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await page.waitForSelector(".epub-reader-content", { timeout: 30000 })
+  await settle()
+  check("reopening resumes at the block where reading stopped", (await topBlock()) === readHere,
+    `${JSON.stringify(readHere)} vs ${JSON.stringify(await topBlock())}`)
+
+  // A hidden Book View has no layout, and once saved its last block as the place.
+  const beforeHiding = pos.last_epub_block_index
+  await page.getByRole("button", { name: "Read", exact: true }).first().click()
+  await settle()
+  pos = await (await api("/position")).json()
+  check("hiding the Book View leaves the saved place alone", pos.last_epub_block_index === beforeHiding,
+    `block ${beforeHiding} -> ${pos.last_epub_block_index}`)
+  await page.getByRole("button", { name: "Book View", exact: true }).first().click()
+  await settle()
+
+  await page.getByRole("button", { name: "Bookmark this place" }).click()
+  await page.waitForTimeout(800)
+  pos = await (await api("/position")).json()
+  check("the bookmark is the place on screen",
+    pos.epub_bookmark_chapter_index === longest.chapter_index && pos.epub_bookmark_block_index === pos.last_epub_block_index,
+    `chapter ${pos.epub_bookmark_chapter_index} block ${pos.epub_bookmark_block_index}`)
+
+  const rewritesBefore = await page.evaluate(() => window.__contentRewrites)
+  for (let i = 0; i < 10; i++) { await scrollBy(600); await page.waitForTimeout(150) }
+  await scrollBy(-6000)
+  await page.waitForTimeout(500)
+  check("scrolling never rewrites the chapter's HTML",
+    (await page.evaluate(() => window.__contentRewrites)) === rewritesBefore)
+  check("the bookmarked block stays marked", (await page.locator(".epub-reader-content [data-bookmark]").count()) === 1)
+
+  const link = page.locator(".epub-reader-content a[data-chapter][href^='#']:not([href='#'])").first()
+  if (await link.count()) {
+    const target = await link.evaluate((a) => ({ chapter: Number(a.dataset.chapter), id: a.getAttribute("href").slice(1) }))
+    await link.evaluate((a) => a.scrollIntoView({ block: "center" }))
+    await link.click()
+    await settle()
+    const offset = await page.evaluate((id) => {
+      const el = document.getElementById(id)
+      const c = document.querySelector(".epub-reader-content")?.parentElement
+      return el && c ? Math.round(el.getBoundingClientRect().top - c.getBoundingClientRect().top) : null
+    }, target.id)
+    check("a link into another chapter opens that chapter at its target",
+      offset !== null && Math.abs(offset) < 40, `chapter ${target.chapter} #${target.id} at ${offset}px`)
+  } else {
+    console.log("  skip no link into another chapter in this chapter")
 }
 
-await page.getByRole("button", { name: /Go to your bookmark/ }).click()
-await settle()
-check("go-to-bookmark returns to the bookmarked block", (await topBlock()) === readHere)
+  // Away from the bookmark for certain: scrolling down and back up by the same
+  // distance in a long chapter lands on it again.
+  await page.evaluate(() => document.querySelector(".epub-reader-content").parentElement.scrollTo({ top: 0, behavior: "instant" }))
+  await page.waitForTimeout(1000)
+  await page.getByRole("button", { name: /Go to your bookmark/ }).click()
+  await settle()
+  check("go-to-bookmark returns to the bookmarked block", (await topBlock()) === readHere)
+}
 
-await browser.close()
+try {
+  await run()
+} catch (e) {
+  check("the run finished", false, e.message.split("\n")[0])
+} finally {
+  await browser.close()
+}
 
 await api("/bookmark", { method: "DELETE" })
 if (saved) {
