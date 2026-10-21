@@ -10,7 +10,7 @@ import { logger } from "@/lib/logger"
 import { Progress } from "@/components/ui/progress"
 
 import {
-  type ContentTypeValue,
+  type UploadKind,
   submitFile,
   detectFileType,
   submitKindleFile,
@@ -27,7 +27,7 @@ import {
   type Rejection,
   acceptedExtensions,
   describeRejection,
-  detectContentType,
+  kindFromFilename,
   toPickerValue,
 
   isKindleClippings,
@@ -53,7 +53,7 @@ const STAGE_LABELS: Record<string, string> = {
 
 const SLOW_STAGES = new Set(["embedding", "entity_extract"])
 
-const CONTENT_TYPE_OPTIONS = [
+const KIND_OPTIONS = [
   // "Book" reads as any long document, which put technical books here: the old
   // description said "non-fiction", the one word Technical also claims. Name
   // the writing rather than the length, and say what it is not.
@@ -67,7 +67,7 @@ const CONTENT_TYPE_OPTIONS = [
 ]
 
 // Content types whose ingestion depends on an optional component.
-const CONTENT_TYPE_CAPABILITY: Partial<Record<string, CapabilityKey>> = {
+const KIND_CAPABILITY: Partial<Record<string, CapabilityKey>> = {
   audio: "audio_ingest",
   video: "video_ingest",
 }
@@ -85,7 +85,7 @@ interface UploadDialogProps {
 }
 
 
-type ContentTypeOption = { value: ContentTypeValue; label: string; description: string }
+type KindOption = { value: UploadKind; label: string; description: string }
 
 /** Three dots breathing in sequence, to say work is happening without a spinner.
  *
@@ -119,9 +119,9 @@ function ContentTypePicker({
   options,
   detecting = false,
 }: {
-  value: ContentTypeValue | null
-  onChange: (v: ContentTypeValue) => void
-  options: ContentTypeOption[]
+  value: UploadKind | null
+  onChange: (v: UploadKind) => void
+  options: KindOption[]
   detecting?: boolean
 }) {
   const [open, setOpen] = useState(false)
@@ -187,7 +187,7 @@ function ContentTypePicker({
             >
               <input
                 type="radio"
-                name="content_type"
+                name="kind"
                 value={opt.value}
                 checked={value === opt.value}
                 onChange={() => {
@@ -219,8 +219,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const canUrl =
     capabilityOf(caps, "web_ingest").available || capabilityOf(caps, "youtube_ingest").available
   const acceptedTypes = acceptedExtensions({ canAudio, canVideo })
-  const contentTypeOptions = CONTENT_TYPE_OPTIONS.filter((o) => {
-    const cap = CONTENT_TYPE_CAPABILITY[o.value]
+  const kindOptions = KIND_OPTIONS.filter((o) => {
+    const cap = KIND_CAPABILITY[o.value]
     return !cap || capabilityOf(caps, cap).available
   })
   // Web URL leads: an article or a video is the most common thing to add and
@@ -230,7 +230,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [rejection, setRejection] = useState<Rejection | null>(null)
-  const [uploadType, setUploadType] = useState<ContentTypeValue | null>(null)
+  const [uploadType, setUploadType] = useState<UploadKind | null>(null)
   // True once the user has explicitly picked a type; auto-detection from the
   // filename must never override an explicit choice.
   const typeTouchedRef = useRef(false)
@@ -240,7 +240,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const [detecting, setDetecting] = useState(false)
   const [pasteLabel, setPasteLabel] = useState("")
   const [pasteText, setPasteText] = useState("")
-  const [pasteType, setPasteType] = useState<ContentTypeValue>("notes")
+  const [pasteType, setPasteType] = useState<UploadKind>("notes")
+  const pasteTypeTouchedRef = useRef(false)
   const [url, setUrl] = useState("")
   const [urlError, setUrlError] = useState("")
   const [savedPage, setSavedPage] = useState<{ name: string; html: string } | null>(null)
@@ -330,7 +331,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setSelectedFile(pendingUpload)
     setRejection(null)
     if (!typeTouchedRef.current) {
-      setUploadType(detectContentType(pendingUpload.name))
+      setUploadType(kindFromFilename(pendingUpload.name))
       void runDetection(pendingUpload)
     }
     clearPendingUpload()
@@ -351,6 +352,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setPasteLabel("")
     setPasteText("")
     setPasteType("notes")
+    pasteTypeTouchedRef.current = false
     setUrl("")
     setUrlError("")
     setSavedPage(null)
@@ -386,14 +388,14 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setRejection(null)
     setSelectedFile(file)
     if (!typeTouchedRef.current) {
-      setUploadType(detectContentType(file.name))
+      setUploadType(kindFromFilename(file.name))
       void runDetection(file)
     }
   }
 
   /** Ask the backend what this file is, so the user can correct it before adding. */
   async function runDetection(file: File) {
-    const fromName = detectContentType(file.name)
+    const fromName = kindFromFilename(file.name)
     // The extension already settles media and EPUB; reading those costs time
     // and cannot change the answer.
     if (fromName) return
@@ -454,16 +456,17 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     return `About ${remaining}s remaining`
   }
 
-  async function doSubmit(file: File, title: string, contentType: ContentTypeValue | null) {
+  // `kind` is the person's own choice or null; a detection is shown, never sent.
+  async function doSubmit(file: File, title: string, kind: UploadKind | null) {
     uploadStartRef.current = Date.now()
     const sizeMB = file.size / (1024 * 1024)
     setFileSizeMB(sizeMB)
     setMode("uploading")
     setDocTitle(title)
-    logger.info("[Upload] start", { filename: file.name, size_mb: sizeMB.toFixed(2), content_type: contentType })
+    logger.info("[Upload] start", { filename: file.name, size_mb: sizeMB.toFixed(2), kind })
 
     try {
-      const { documentId: docId, duplicate } = await submitFile(file, contentType)
+      const { documentId: docId, duplicate } = await submitFile(file, kind)
       logger.info("[Upload] uploaded", { filename: file.name, doc_id: docId, duplicate })
       if (duplicate) {
         // Ingestion dedupes on file hash and this copy is already complete, so
@@ -495,9 +498,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
       await doSubmitKindle(selectedFile)
       return
     }
-    const contentType = uploadType ?? detectContentType(selectedFile.name)
     const title = selectedFile.name.replace(/\.[^/.]+$/, "")
-    await doSubmit(selectedFile, title, contentType)
+    await doSubmit(selectedFile, title, typeTouchedRef.current ? uploadType : null)
   }
 
   async function doSubmitKindle(file: File) {
@@ -532,7 +534,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     if (!pasteLabel.trim() || !pasteText.trim()) return
     const filename = pasteLabel.trim().replace(/[^a-z0-9_-]/gi, "_").toLowerCase() + ".txt"
     const file = new File([pasteText], filename, { type: "text/plain" })
-    await doSubmit(file, pasteLabel.trim(), pasteType)
+    await doSubmit(file, pasteLabel.trim(), pasteTypeTouchedRef.current ? pasteType : null)
   }
 
   async function handleSavedPageChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -852,7 +854,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                   <ContentTypePicker
                     value={uploadType}
                     detecting={detecting}
-                    options={contentTypeOptions}
+                    options={kindOptions}
                     onChange={(v) => {
                       typeTouchedRef.current = true
                       setUploadType(v)
@@ -957,8 +959,11 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
               <div className="space-y-4">
                 <ContentTypePicker
                   value={pasteType}
-                  options={contentTypeOptions}
-                  onChange={setPasteType}
+                  options={kindOptions}
+                  onChange={(v) => {
+                    pasteTypeTouchedRef.current = true
+                    setPasteType(v)
+                  }}
                 />
 
                 <div>

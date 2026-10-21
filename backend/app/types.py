@@ -603,6 +603,23 @@ def facets_for_kind(kind: EditableKind, form: str | None) -> dict[str, str]:
     return {"form": form, "domain": "general" if kind == "book" else "technical"}
 
 
+# The legacy type column an upload's kind writes until that column is dropped (#223, step d).
+# `technical` is the transient value classify_node resolves to a tech_* variant.
+CONTENT_TYPE_OF_KIND: dict[str, str] = {
+    "book": "book",
+    "technical": "technical",
+    "paper": "paper",
+    "conversation": "conversation",
+    "notes": "notes",
+}
+
+
+def kind_of_content_type(legacy: str | None, format: str | None) -> DocumentKind:
+    """The kind a legacy content type names, for a classifier that still answers in them."""
+    profile = DocumentProfile.from_legacy(legacy)
+    return document_kind(format, profile.form, profile.domain)
+
+
 # Technical-content gate
 
 

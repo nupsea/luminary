@@ -8,7 +8,13 @@ from sqlalchemy import ColumnElement, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DocumentModel
-from app.types import DEFAULT_KIND, KIND_RULES
+from app.types import (
+    DEFAULT_KIND,
+    FACETS_FROM_READER,
+    KIND_RULES,
+    EditableKind,
+    facets_for_kind,
+)
 
 
 def kind_expr() -> ColumnElement[str]:
@@ -17,6 +23,16 @@ def kind_expr() -> ColumnElement[str]:
         *[(getattr(DocumentModel, col).in_(values), kind) for col, values, kind in KIND_RULES],
         else_=DEFAULT_KIND,
     )
+
+
+def apply_kind(doc: DocumentModel, kind: EditableKind) -> None:
+    """Write the facets that derive *kind*, marked as the reader's so ingestion keeps them."""
+    facets = facets_for_kind(kind, doc.form)
+    doc.form = facets["form"]
+    if "domain" in facets:
+        doc.domain = facets["domain"]
+        doc.is_technical = facets["domain"] == "technical"
+    doc.facets_source = FACETS_FROM_READER
 
 
 class DocumentKindRepo:
@@ -40,3 +56,12 @@ class DocumentKindRepo:
             )
         )
         return {i: (t or "Untitled", kind) for i, t, kind in result.all()}
+
+    async def choose(self, document_id: str, kind: EditableKind) -> tuple[str, str | None] | None:
+        """Make *kind* the document's, over the shape just measured; (form, domain) it wrote."""
+        doc = await self.session.get(DocumentModel, document_id)
+        if doc is None:
+            return None
+        apply_kind(doc, kind)
+        await self.session.commit()
+        return doc.form, doc.domain

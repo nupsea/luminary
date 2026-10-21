@@ -132,6 +132,8 @@ class IngestionState(TypedDict):
     format: str
     parsed_document: dict[str, Any] | None
     content_type: str | None
+    # The kind chosen at upload; classify_node lays its facets over the measured shape.
+    kind: str | None
     chunks: list[dict[str, Any]] | None
     status: str
     error: str | None

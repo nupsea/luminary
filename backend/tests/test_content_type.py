@@ -58,7 +58,7 @@ async def test_ingest_without_content_type_classifies(test_db, monkeypatch):
     # Recorded at call time, not inside the coroutine body: the job never runs
     # here, so a mock that appends when awaited would record nothing and the
     # assertion below would pass on an empty list.
-    def _mock_run_ingestion(document_id, file_path, format, content_type=None):
+    def _mock_run_ingestion(document_id, file_path, format, content_type=None, **_):
         called.append(content_type)
         return _noop()
 
@@ -84,7 +84,7 @@ async def test_ingest_with_valid_type_skips_classify_llm(test_db, monkeypatch):
     engine, factory, _ = test_db
     called: list[str | None] = []
 
-    async def _mock_run_ingestion(document_id, file_path, format, content_type=None):
+    async def _mock_run_ingestion(document_id, file_path, format, content_type=None, **_):
         called.append(content_type)
 
     # Patch so background task runs our mock immediately rather than real ingestion

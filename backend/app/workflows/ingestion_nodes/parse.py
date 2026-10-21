@@ -15,6 +15,7 @@ import logging
 from pathlib import Path
 
 from app.database import get_session_factory
+from app.repos.document_kind_repo import DocumentKindRepo
 from app.repos.document_repo import DocumentRepo
 from app.services.content_classifier import classify_content, classify_form
 from app.services.llm_admission import awaited
@@ -149,7 +150,10 @@ async def classify_node(state: IngestionState) -> IngestionState:
     if result.get("status") == "error":
         return result
     async with get_session_factory()() as session:
-        chosen = await reader_facets(DocumentRepo(session), state["document_id"])
+        if state.get("kind"):
+            chosen = await DocumentKindRepo(session).choose(state["document_id"], state["kind"])
+        else:
+            chosen = await reader_facets(DocumentRepo(session), state["document_id"])
     if chosen is None:
         return result
     # Chunking follows the kind the reader chose, which persistence kept on the row.
