@@ -31,6 +31,7 @@ from app.schemas.home import (
 from app.services.collection_health import get_collection_health_service
 from app.services.export_service import get_export_service
 from app.services.naming import normalize_collection_name
+from app.types import document_kind
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ def _to_response(col: CollectionModel) -> CollectionResponse:
     )
 
 
-# Color palette for auto-collections based on content_type
+# Color palette for auto-collections, by the document's kind
 _AUTO_COLLECTION_COLORS: dict[str, str] = {
     "book": "#8B5CF6",  # violet
     "paper": "#3B82F6",  # blue
@@ -124,26 +125,29 @@ _AUTO_COLLECTION_COLORS: dict[str, str] = {
     "code": "#6366F1",  # indigo
 }
 
-# Human-readable doc type suffixes for collection names
-_DOC_TYPE_LABELS: dict[str, str] = {
+# Human-readable kind suffixes for collection names
+_KIND_LABELS: dict[str, str] = {
     "book": "Book",
+    "technical": "Technical",
     "paper": "Paper",
-    "conversation": "Video",
+    "conversation": "Conversation",
     "notes": "Notes",
     "code": "Code",
+    "audio": "Audio",
+    "video": "Video",
 }
 
 
-def _make_collection_name(title: str, content_type: str) -> str:
-    """Generate a concise collection name from a document title + type.
+def _make_collection_name(title: str, kind: str) -> str:
+    """Generate a concise collection name from a document title + kind.
 
     Examples:
       - "DDIA.pdf" + "book"          -> "DDIA_Book"
       - "Designing Data-Intensive Applications" + "book" -> "DDIA_Book"
       - "Andrej Karpathy on Code Agents, AutoResearch, and the Loopy Era of AI"
-            + "conversation" -> "Code_Agents_Karpathy_Video"
+            + "audio" -> "Code_Agents_Karpathy_Audio"
     """
-    suffix = _DOC_TYPE_LABELS.get(content_type, content_type.capitalize())
+    suffix = _KIND_LABELS.get(kind, kind.capitalize())
 
     # Strip file extensions
     name = re.sub(r"\.(pdf|epub|docx?|txt|md)$", "", title, flags=re.IGNORECASE).strip()
@@ -338,8 +342,9 @@ async def create_auto_collection(
         return _to_response(existing)
 
     doc = await get_or_404(repo.session, DocumentModel, document_id, name="Document")
-    color = _AUTO_COLLECTION_COLORS.get(doc.content_type, "#6366F1")
-    col_name = _make_collection_name(doc.title, doc.content_type)
+    kind = document_kind(doc.format, doc.form, doc.domain)
+    color = _AUTO_COLLECTION_COLORS.get(kind, "#6366F1")
+    col_name = _make_collection_name(doc.title, kind)
     col = await repo.create(name=col_name, color=color, auto_document_id=document_id)
     logger.info("Created auto-collection id=%s for document=%s", col.id, document_id)
     return _to_response(col)

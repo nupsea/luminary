@@ -1,7 +1,6 @@
 """GET /chat/suggestions, POST /chat/suggestions/{id}/asked, GET /chat/explorations."""
 
 import logging
-import re
 
 from fastapi import APIRouter, Path, Query, Response
 from pydantic import BaseModel
@@ -12,6 +11,7 @@ from app.repos.document_repo import DocumentRepo
 from app.repos.suggestion_repo import SuggestionRepo
 from app.services.graph import get_graph_service
 from app.services.llm import LLMUnavailableError
+from app.types import MEDIA_FORMATS, DocumentProfile, document_kind
 
 logger = logging.getLogger(__name__)
 
@@ -30,24 +30,8 @@ class SuggestionResponse(BaseModel):
 # Template-based suggestion generation (fallback, no LLM)
 
 
-# A content_type='book' can be narrative fiction (Odyssey) OR a technical textbook
-# (Dive into Deep Learning, SQL Cookbook). Narrative templates ("what motivates X
-# throughout the story?") are nonsense for a textbook — route those to technical
-# suggestions instead.
-_TECH_BOOK_TITLE = re.compile(
-    r"\b(deep learning|machine learning|neural|artificial intelligence|data science"
-    r"|algorithm|programming|software|engineering|database|systems|kubernetes|docker"
-    r"|linux|network|security|statistics|mathematics|computer|data)\b",
-    re.IGNORECASE,
-)
-
-
-def _book_is_technical(title: str, entities: dict[str, list[str]]) -> bool:
-    """True when a book looks technical rather than narrative — by title keyword
-    (underscores normalised) or by an entity mix dominated by concepts/technology
-    rather than people/places."""
-    if _TECH_BOOK_TITLE.search((title or "").replace("_", " ")):
-        return True
+def _entities_look_technical(entities: dict[str, list[str]]) -> bool:
+    """An entity mix dominated by concepts and technology rather than people and places."""
     tech = len(entities.get("CONCEPT", [])) + len(entities.get("TECHNOLOGY", []))
     narrative = len(entities.get("PERSON", [])) + len(entities.get("PLACE", []))
     return tech >= 3 and tech > narrative
@@ -202,21 +186,34 @@ def _topped_up(generated: list[dict], templates: list[str]) -> SuggestionRespons
     return SuggestionResponse(suggestions=items)
 
 
+_FAMILY_TEMPLATES = {
+    "book": _book_suggestions,
+    "technical": _technical_suggestions,
+    "video": _video_suggestions,
+    "generic": _generic_suggestions,
+}
+
+
+def _template_family(doc: DocumentModel, entities: dict[str, list[str]]) -> str:
+    """Which templates fit: from the measured profile, never the title (#223).
+
+    Narrative templates ("what motivates X throughout the story?") are nonsense
+    for a textbook. The entity mix decides only where no domain was measured.
+    """
+    if doc.format in MEDIA_FORMATS:
+        return "video"
+    profile = DocumentProfile.of(doc)
+    if profile.is_technical or (profile.domain is None and _entities_look_technical(entities)):
+        return "technical"
+    if profile.is_narrative_prose:
+        return "book"
+    return "generic"
+
+
 def _doc_templates(
     doc: DocumentModel, entities: dict[str, list[str]], headings: list[str]
 ) -> list[str]:
-    content_type = doc.content_type or "unknown"
-    if content_type == "book":
-        if _book_is_technical(doc.title or "", entities):
-            suggestions = _technical_suggestions(entities, headings)
-        else:
-            suggestions = _book_suggestions(entities, headings)
-    elif content_type in ("tech_book", "tech_article", "code"):
-        suggestions = _technical_suggestions(entities, headings)
-    elif content_type in ("video", "audio"):
-        suggestions = _video_suggestions(entities, headings)
-    else:
-        suggestions = _generic_suggestions(entities, headings)
+    suggestions = _FAMILY_TEMPLATES[_template_family(doc, entities)](entities, headings)
 
     fallbacks = [
         "What are the key takeaways from this document?",
@@ -330,16 +327,16 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
         if doc is None:
             return SuggestionResponse(suggestions=[])
 
-        content_type = doc.content_type or "unknown"
+        kind = document_kind(doc.format, doc.form, doc.domain)
 
         headings = await repo.first_headings(document_id, limit=5)
 
     entities = await get_graph_service().get_entities_by_type_for_document(document_id)
 
     logger.info(
-        "suggestions: doc=%s content_type=%s entities=%d headings=%d",
+        "suggestions: doc=%s kind=%s entities=%d headings=%d",
         document_id,
-        content_type,
+        kind,
         sum(len(v) for v in entities.values()),
         len(headings),
     )
