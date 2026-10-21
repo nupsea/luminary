@@ -11,6 +11,7 @@ import time
 
 from app.config import get_settings
 from app.database import get_session_factory
+from app.repos.document_kind_repo import DocumentKindRepo
 from app.repos.document_repo import DocumentRepo
 from app.repos.summary_repo import SummaryRepo
 from app.runtime.chat_nodes._shared import _read_rerank_enabled
@@ -100,7 +101,7 @@ async def search_node(state: ChatState) -> dict:
     effective_doc_ids = doc_ids if scope == "single" else None
 
     # Corpus-wide queries carry their own routing: "my notes this month" names a
-    # content_type (-> narrow to those documents) and a time window (-> keep only
+    # kind (-> narrow to those documents) and a time window (-> keep only
     # chunks whose content date falls inside it). Scoped queries already have an
     # explicit doc set, so we don't second-guess them.
     date_from = date_to = None
@@ -108,16 +109,16 @@ async def search_node(state: ChatState) -> dict:
     if scope != "single":
         filters = parse_query_filters(q)
         date_from, date_to = filters.date_from, filters.date_to
-        if filters.content_types:
+        if filters.kinds:
             async with get_session_factory()() as session:
-                typed_ids = await DocumentRepo(session).ids_of_types(filters.content_types)
+                typed_ids = await DocumentKindRepo(session).ids_of_kinds(filters.kinds)
             if typed_ids:
                 effective_doc_ids = typed_ids
                 narrowed = True
         if filters.has_filter:
             logger.info(
-                "search_node: applied filters content_types=%s dates=%s..%s docs=%s",
-                filters.content_types,
+                "search_node: applied filters kinds=%s dates=%s..%s docs=%s",
+                filters.kinds,
                 date_from,
                 date_to,
                 len(effective_doc_ids) if effective_doc_ids else "all",

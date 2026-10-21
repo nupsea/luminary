@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 import app.database as db_module
 from app.main import app
 from app.models import DocumentModel
-from app.repos.document_repo import kind_expr
+from app.repos.document_kind_repo import DocumentKindRepo, kind_expr
 from app.types import DocumentKind, Form, document_kind
 
 
@@ -99,3 +99,14 @@ async def test_the_list_filters_and_counts_by_kind(factory):
     }
     assert facets["kinds"] == {"technical": 1, "notes": 1, "book": 1}
     assert detail["kind"] == "technical"
+
+
+async def test_search_resolves_kinds_to_documents(factory):
+    notes, paper = await _seed(factory, [("txt", "entries", None), ("pdf", "paper", "technical")])
+    async with factory() as s:
+        repo = DocumentKindRepo(s)
+        assert await repo.ids_of_kinds(["notes"]) == [notes]
+        assert await repo.titles_and_kinds([notes, paper]) == {
+            notes: ("txt-entries-None", "notes"),
+            paper: ("pdf-paper-technical", "paper"),
+        }

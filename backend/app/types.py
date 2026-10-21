@@ -558,7 +558,7 @@ DocumentKind = Literal[
     "book", "technical", "paper", "conversation", "notes", "code", "audio", "video"
 ]
 
-# First match wins. `document_repo.kind_expr` compiles the same table to SQL for filters.
+# First match wins. `document_kind_repo.kind_expr` compiles the same table to SQL for filters.
 _KindRule = tuple[Literal["format", "form", "domain"], tuple[str, ...], DocumentKind]
 KIND_RULES: tuple[_KindRule, ...] = (
     ("format", AUDIO_EXTENSIONS, "audio"),

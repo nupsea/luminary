@@ -1,26 +1,26 @@
-// Full-text search panel with content-type filter chips and grouped
+// Full-text search panel with kind filter chips and grouped
 // document hits. Owns its debounced query + filter state internally; the
 // parent only provides the raw query string and a click callback.
 
 import { FileText } from "lucide-react"
 import { useEffect, useState } from "react"
 
-import { CONTENT_TYPE_ICONS } from "@/components/library/utils"
-import type { ContentType } from "@/components/library/types"
+import { KIND_ICONS, KIND_LABELS } from "@/components/library/utils"
+import type { DocumentKind } from "@/components/library/types"
 import { useDebounce } from "@/hooks/useDebounce"
 import { cn } from "@/lib/utils"
 
 import { fetchSearch } from "./api"
 import type { DocumentGroup } from "./types"
 
-const ALL_CONTENT_TYPES: ContentType[] = [
+const ALL_KINDS: DocumentKind[] = [
   "book",
-  "tech_book",
-  "tech_article",
+  "technical",
   "paper",
   "conversation",
   "notes",
   "audio",
+  "video",
   "code",
 ]
 
@@ -30,7 +30,7 @@ interface SearchPanelProps {
 }
 
 export function SearchPanel({ query, onDocumentClick }: SearchPanelProps) {
-  const [filterTypes, setFilterTypes] = useState<Set<ContentType>>(new Set())
+  const [filterTypes, setFilterTypes] = useState<Set<DocumentKind>>(new Set())
   const [groups, setGroups] = useState<DocumentGroup[]>([])
   const [loading, setLoading] = useState(false)
   const debouncedQuery = useDebounce(query, 300)
@@ -42,8 +42,7 @@ export function SearchPanel({ query, onDocumentClick }: SearchPanelProps) {
     }
     let cancelled = false
     setLoading(true)
-    const ctypes = [...filterTypes].join(",")
-    fetchSearch(debouncedQuery, ctypes)
+    fetchSearch(debouncedQuery, [...filterTypes].join(","))
       .then((data) => {
         if (!cancelled) setGroups(data)
       })
@@ -58,7 +57,7 @@ export function SearchPanel({ query, onDocumentClick }: SearchPanelProps) {
     }
   }, [debouncedQuery, filterTypes])
 
-  function toggleType(ct: ContentType) {
+  function toggleType(ct: DocumentKind) {
     setFilterTypes((prev) => {
       const next = new Set(prev)
       if (next.has(ct)) next.delete(ct)
@@ -72,8 +71,8 @@ export function SearchPanel({ query, onDocumentClick }: SearchPanelProps) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-2">
-        {ALL_CONTENT_TYPES.map((ct) => {
-          const Icon = CONTENT_TYPE_ICONS[ct] || FileText
+        {ALL_KINDS.map((ct) => {
+          const Icon = KIND_ICONS[ct] || FileText
           const isActive = filterTypes.has(ct)
           return (
             <button
@@ -87,7 +86,7 @@ export function SearchPanel({ query, onDocumentClick }: SearchPanelProps) {
               )}
             >
               <Icon size={12} />
-              {ct.replace(/_/g, " ")}
+              {KIND_LABELS[ct]}
             </button>
           )
         })}
@@ -121,7 +120,7 @@ export function SearchPanel({ query, onDocumentClick }: SearchPanelProps) {
                   <FileText size={15} className="shrink-0 text-primary" />
                   <span className="font-medium text-sm">{group.document_title}</span>
                   <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                    {group.content_type}
+                    {KIND_LABELS[group.kind as DocumentKind] ?? group.kind}
                   </span>
                 </button>
                 <div className="divide-y divide-border border-t border-border">

@@ -1,7 +1,7 @@
 """Extract structured retrieval filters (content-type, date range) from a query.
 
 "Generate a story from my daily thoughts notes this month" ->
-    content_types = ["notes"], date_from = 2026-07-01, date_to = 2026-07-31
+    kinds = ["notes"], date_from = 2026-07-01, date_to = 2026-07-31
 so retrieval can route to the right kind of document and the right time window
 instead of running semantic search over the raw phrase. Local-first: pure
 regex/keyword rules, no LLM call. Dates resolve relative to `now`.
@@ -15,13 +15,13 @@ from datetime import date, datetime, timedelta
 _MONTHS = {m.lower(): i for i, m in enumerate(calendar.month_name) if m}
 _MONTHS.update({m.lower(): i for i, m in enumerate(calendar.month_abbr) if m})
 
-# query keyword -> corpus content_type string(s)
-_CONTENT_TYPE_KEYWORDS: dict[str, list[str]] = {
+# query keyword -> document kind (`types.DocumentKind`). No kind is "article", so the
+# word narrows nothing: mapped to technical it reached every technical book too.
+_KIND_KEYWORDS: dict[str, list[str]] = {
     "notes": ["notes", "note", "thought", "thoughts", "journal", "diary", "jottings"],
     "conversation": ["transcript", "meeting", "conversation", "standup", "sync", "call log"],
     "book": ["book", "novel", "chapter"],
     "paper": ["paper", "papers"],
-    "tech_article": ["article", "articles", "blog post"],
     "audio": ["podcast", "audio", "recording", "lecture", "talk"],
     "code": ["source code", "codebase", "the code"],
 }
@@ -33,14 +33,14 @@ _PAST_N = re.compile(r"\b(?:past|last|previous)\s+(\d+)\s+(day|week|month|year)s
 
 @dataclass
 class QueryFilters:
-    content_types: list[str] = field(default_factory=list)
+    kinds: list[str] = field(default_factory=list)
     date_from: date | None = None
     date_to: date | None = None
     matched: list[str] = field(default_factory=list)
 
     @property
     def has_filter(self) -> bool:
-        return bool(self.content_types) or self.date_from is not None or self.date_to is not None
+        return bool(self.kinds) or self.date_from is not None or self.date_to is not None
 
 
 def _month_range(y: int, m: int) -> tuple[date, date]:
@@ -99,10 +99,10 @@ def parse_query_filters(query: str, now: date | None = None) -> QueryFilters:
     now = now or datetime.now().date()
     f = QueryFilters()
     ql = query.lower()
-    for ctype, kws in _CONTENT_TYPE_KEYWORDS.items():
+    for kind, kws in _KIND_KEYWORDS.items():
         for kw in kws:
             if re.search(rf"\b{re.escape(kw)}\b", ql):
-                f.content_types.append(ctype)
+                f.kinds.append(kind)
                 f.matched.append(kw)
                 break
     df, dt, phrase = _resolve_dates(query, now)
