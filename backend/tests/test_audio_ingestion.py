@@ -72,7 +72,7 @@ def test_chunk_audio_empty_segments():
 async def test_audio_allowed_extension_in_ingest_endpoint(test_db, monkeypatch):
     """POST /documents/ingest with .mp3 and content_type=audio returns HTTP 200."""
 
-    async def _mock_run_ingestion(document_id, file_path, format, content_type=None):
+    async def _mock_run_ingestion(document_id, file_path, format, content_type=None, **_):
         pass
 
     monkeypatch.setattr("app.routers.documents.run_ingestion", _mock_run_ingestion)

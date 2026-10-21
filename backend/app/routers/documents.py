@@ -24,7 +24,7 @@ from app.models import (
 )
 from app.repos._helpers import get_or_404
 from app.repos.collection_repo import CollectionRepo
-from app.repos.document_kind_repo import DocumentKindRepo
+from app.repos.document_kind_repo import DocumentKindRepo, apply_kind
 from app.repos.document_list_repo import (
     DocumentListFilters,
     DocumentListRepo,
@@ -131,13 +131,13 @@ from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
 from app.storage import library_root
 from app.types import (
-    FACETS_FROM_READER,
+    CONTENT_TYPE_OF_KIND,
     MEDIA_FORMATS,
     DocumentKind,
     DocumentProfile,
     EditableKind,
     document_kind,
-    facets_for_kind,
+    kind_of_content_type,
 )
 from app.workflows import ingestion as _ingestion_module  # indirect: _run_pregenerate is patched
 from app.workflows.ingestion import (
@@ -466,7 +466,7 @@ def _installable(component_ids: list[str]) -> tuple[list[str], list[str]]:
 
 @router.post("/detect-type")
 async def detect_document_type(file: UploadFile = File(...)):
-    """The content type this file would be given, without ingesting it.
+    """The kind this file would be given, without ingesting it.
 
     Classification needs the document's text, so it cannot happen in the client
     and it cannot happen before the bytes arrive. Exposing it separately lets
@@ -483,11 +483,11 @@ async def detect_document_type(file: UploadFile = File(...)):
     # Media is decided from its transcript, which does not exist yet, so the
     # extension is the whole answer and parsing would only cost time.
     if ext in ("mp3", "m4a", "wav"):
-        return {"content_type": "audio", "detected": True}
+        return {"kind": "audio", "detected": True}
     if ext == "mp4":
-        return {"content_type": "video", "detected": True}
+        return {"kind": "video", "detected": True}
     if ext == "epub":
-        return {"content_type": "book", "detected": True}
+        return {"kind": "book", "detected": True}
 
     content = await file.read()
     fmt = ext if ext in ("pdf", "docx", "txt", "md", "markdown") else "txt"
@@ -496,21 +496,27 @@ async def detect_document_type(file: UploadFile = File(...)):
         tmp.write_bytes(content)
         # Detection is a convenience -- ingestion classifies again regardless --
         # so it is bounded and gives up rather than leaving the dialog waiting.
-        content_type = await detect_content_type(
+        legacy = await detect_content_type(
             tmp, fmt, file.filename or "", timeout=_DETECT_TIMEOUT_SECONDS
         )
     finally:
         tmp.unlink(missing_ok=True)
-    return {"content_type": content_type, "detected": content_type is not None}
+    kind = kind_of_content_type(legacy, fmt) if legacy else None
+    return {"kind": kind, "detected": kind is not None}
 
 
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_document(
     file: UploadFile = File(...),
     content_type: ContentType | None = Form(None),
+    kind: EditableKind | None = Form(None),
     settings: Settings = Depends(get_settings),
 ):
-    """Ingest a file. Omit content_type to have the pipeline classify it.
+    """Ingest a file. Omit its kind to have the pipeline classify it.
+
+    A kind is the reader's choice, as from the card menu: its facets are laid over
+    the measured shape and kept by every later reprocess (#223). The legacy type
+    field is the older form of the same choice, accepted until that column goes.
 
     Optional rather than required because a supplied content_type is final:
     classify_node skips every heuristic when the caller names a type. A client
@@ -534,6 +540,9 @@ async def ingest_document(
 
     _text_fmts = ("pdf", "docx", "txt", "md", "markdown", "mp3", "m4a", "wav", "mp4", "epub")
     fmt = ext if ext in _text_fmts else "txt"
+    if kind is not None:
+        _refuse_media_kind(fmt)
+        content_type = CONTENT_TYPE_OF_KIND[kind]
 
     async with get_session_factory()() as session:
         # Deduplication: look for an existing document with the same file hash.
@@ -574,7 +583,9 @@ async def ingest_document(
                 await session.commit()
                 get_ingestion_jobs().launch(
                     existing.id,
-                    run_ingestion(existing.id, existing.file_path, existing.format, content_type),
+                    run_ingestion(
+                        existing.id, existing.file_path, existing.format, content_type, kind=kind
+                    ),
                 )
                 logger.info(
                     "Retrying failed ingestion on existing doc",
@@ -628,7 +639,9 @@ async def ingest_document(
         session.add(doc)
         await session.commit()
 
-    get_ingestion_jobs().launch(doc_id, run_ingestion(doc_id, str(dest), fmt, content_type))
+    get_ingestion_jobs().launch(
+        doc_id, run_ingestion(doc_id, str(dest), fmt, content_type, kind=kind)
+    )
     logger.info("Ingestion started", extra={"doc_id": doc_id})
     return {"document_id": doc_id, "status": "processing"}
 
@@ -1581,14 +1594,13 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
 
 def _set_kind(doc: DocumentModel, kind: EditableKind) -> None:
     """Write the facets that derive `kind`, marked as the reader's so ingestion keeps them."""
-    if doc.format in MEDIA_FORMATS:
+    _refuse_media_kind(doc.format)
+    apply_kind(doc, kind)
+
+
+def _refuse_media_kind(fmt: str) -> None:
+    if fmt in MEDIA_FORMATS:
         raise HTTPException(status_code=400, detail="A recording's kind follows its file format")
-    facets = facets_for_kind(kind, doc.form)
-    doc.form = facets["form"]
-    if "domain" in facets:
-        doc.domain = facets["domain"]
-        doc.is_technical = facets["domain"] == "technical"
-    doc.facets_source = FACETS_FROM_READER
 
 
 @router.patch("/{document_id}")

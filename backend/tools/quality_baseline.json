@@ -99,7 +99,7 @@
     "app/routers/audio.py": 1,
     "app/routers/chat_meta.py": 10,
     "app/routers/collections.py": 6,
-    "app/routers/documents.py": 47,
+    "app/routers/documents.py": 40,
     "app/routers/images.py": 6,
     "app/schemas/documents.py": 4,
     "app/scripts/reindex_entities.py": 6,

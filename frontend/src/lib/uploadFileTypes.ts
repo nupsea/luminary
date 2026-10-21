@@ -3,7 +3,7 @@
 // Shared so the dialog's drop zone and the window-wide one cannot disagree
 // about which files are allowed. Pure -- unit tested without mounting anything.
 
-import type { ContentTypeValue } from "@/lib/ingestionApi"
+import type { UploadKind } from "@/lib/ingestionApi"
 
 const TEXT_TYPES = [".pdf", ".docx", ".txt", ".md", ".epub"]
 const AUDIO_TYPES = [".mp3", ".m4a", ".wav"]
@@ -23,19 +23,13 @@ export function isKindleClippings(filename: string): boolean {
 }
 
 /**
- * The type a *filename* proves, or null when only the content can say.
- *
- * Returning null matters: the backend skips classification entirely for a
- * user-supplied content_type, so anything sent here is final. This used to
- * return "book" for every non-media file, which meant a PDF paper and a
- * markdown textbook both arrived pre-labelled as a novel and the classifier
- * never ran -- auto-detection was unreachable from the upload path no matter
- * how good the rules were.
+ * The kind a *filename* proves, or null when only the content can say.
  *
  * An extension is evidence for media and EPUB and for nothing else. `.pdf`,
- * `.txt`, `.md` and `.docx` each carry every content type there is.
+ * `.txt`, `.md` and `.docx` each carry every kind there is; a guess here once
+ * labelled every PDF paper a novel.
  */
-export function detectContentType(filename: string): ContentTypeValue | null {
+export function kindFromFilename(filename: string): UploadKind | null {
   const f = filename.toLowerCase()
   if (f.endsWith(".epub")) return "book"
   if (/\.(mp3|m4a|wav)$/.test(f)) return "audio"
@@ -43,27 +37,15 @@ export function detectContentType(filename: string): ContentTypeValue | null {
   return null
 }
 
-/** Map a classified type onto the value the picker actually offers.
+/** The detected kind as a picker option, or null for a kind the picker does not offer.
  *
- *  The classifier answers in the stored vocabulary (`tech_book`,
- *  `tech_article`, `epub`...) while the picker offers one `technical` option
- *  covering the tech_* variants, because the difference is only chunk sizing.
- *  Without this the detected value matched no option, `selected` was undefined,
- *  and a correctly detected technical book rendered as "Detect automatically" --
- *  detection looked broken precisely when it had worked.
+ *  Source code is detected but not offered: showing it as "Technical" would
+ *  claim a detection that did not happen.
  */
-export function toPickerValue(detected: string | null): ContentTypeValue | null {
+export function toPickerValue(detected: string | null): UploadKind | null {
   if (!detected) return null
-  const mapped: Record<string, ContentTypeValue> = {
-    tech_book: "technical",
-    tech_article: "technical",
-    code: "technical",
-    epub: "book",
-    kindle_clippings: "notes",
-  }
-  const value = mapped[detected] ?? (detected as ContentTypeValue)
-  // Anything the picker cannot show is better left undetected than shown wrong.
-  const offered: ContentTypeValue[] = [
+  const value = detected as UploadKind
+  const offered: UploadKind[] = [
     "book",
     "technical",
     "paper",

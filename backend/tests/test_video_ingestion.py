@@ -205,7 +205,7 @@ async def test_transcribe_node_passthrough_for_non_video(test_db, tmp_path):
 async def test_mp4_allowed_extension_in_ingest_endpoint(test_db, monkeypatch):
     """POST /documents/ingest with .mp4 and content_type=video returns HTTP 200."""
 
-    async def _mock_run_ingestion(document_id, file_path, format, content_type=None):
+    async def _mock_run_ingestion(document_id, file_path, format, content_type=None, **_):
         pass
 
     monkeypatch.setattr("app.routers.documents.run_ingestion", _mock_run_ingestion)

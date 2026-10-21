@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **A document's type in the library now comes from what was measured about it** (its format, shape and subject), not from the type chosen at upload. Cards, the filter chips and the reader show it; 9 of 69 documents in a test library changed label. Changing a document's type from its card sets that shape and subject, and a reprocess keeps the choice instead of measuring it again (#223).
+- **Search and chat filter by the same type the library shows** ("my notes", "the meeting"), and the word "article" no longer narrows a search: it had reached every technical book and read "Article 4 of the treaty" as a type (#223).
+- **A type picked at upload is kept like one picked from the card.** Its shape and subject are laid over what was measured, and later reprocessing keeps them. A detected type is only shown, never sent, so an upload left on "Detect automatically" stays measured (#223).
 - **No SQL runs outside `repos/` any more**: the retriever, the chat runtime, the ingestion and concept workflows, the maintenance scripts and startup followed the routers and services (79 statements to 0). Retrieval scores are unchanged on one library.
 
 ## [0.16.2] - 2026-10-19
