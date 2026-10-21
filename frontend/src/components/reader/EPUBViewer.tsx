@@ -10,17 +10,19 @@
  */
 
 import { useQuery } from "@tanstack/react-query"
-import { ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, RotateCcw, X } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { Bookmark, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, RotateCcw, X } from "lucide-react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
+import { settleIntoView } from "@/lib/citation/settleIntoView"
 
 import type { components } from "@/types/api"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
 import { PanelResizer } from "./PanelResizer"
 import { usePanelZoomStore } from "@/store/panelZoomStore"
 import { PanelZoomResetButton } from "@/components/PanelZoomResetButton"
+import { EPUB_BLOCK_SELECTOR, READING_LINE_PX, blockAtLine, samePlace, type EpubPlace } from "./epubPlace"
 
 type EpubTocItem = components["schemas"]["EpubChapterTocItem"]
 type EpubChapter = components["schemas"]["EpubChapterResponse"]
@@ -90,9 +92,29 @@ export function handleEpubKeyboardShortcut(
 
 interface EPUBViewerProps {
   documentId: string
+  /** Where the book opens; read once, on mount. */
+  initialPlace?: EpubPlace | null
+  bookmark?: EpubPlace | null
+  onBookmarkChange?: (place: EpubPlace | null) => void
+  /** The place the reader has scrolled to, and the title of its chapter. */
+  onReadingPlaceChange?: (place: EpubPlace, chapterTitle: string) => void
 }
 
-export function EPUBViewer({ documentId }: EPUBViewerProps) {
+export interface EPUBViewerHandle {
+  goTo: (place: EpubPlace) => void
+}
+
+/** Where to scroll once a chapter has rendered: a block, or an element the book links to. */
+type Target = { chapter: number; block: number } | { chapter: number; anchor: string }
+
+function blocksIn(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(EPUB_BLOCK_SELECTOR))
+}
+
+export const EPUBViewer = forwardRef<EPUBViewerHandle, EPUBViewerProps>(function EPUBViewer(
+  { documentId, initialPlace = null, bookmark = null, onBookmarkChange, onReadingPlaceChange },
+  ref,
+) {
   const readerZoom = usePanelZoomStore((s) => s.getZoom("reader"))
   const { attachPanel: attachTocPanel, ...tocPanel } = useResizablePanel({
     storageKey: "luminary-epub-toc",
@@ -101,8 +123,11 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
     maxWidth: 480,
     side: "right",
   })
-  const [activeChapter, setActiveChapter] = useState(0)
+  const [activeChapter, setActiveChapter] = useState(initialPlace?.chapter ?? 0)
+  const [currentBlock, setCurrentBlock] = useState(0)
   const [zoomedImgSrc, setZoomedImgSrc] = useState<string | null>(null)
+  const targetRef = useRef<Target | null>(initialPlace)
+  const [jumpNonce, setJumpNonce] = useState(0)
 
   // Fetch TOC — long stale time since EPUB structure never changes
   const {
@@ -126,11 +151,28 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
     queryKey: ["epub-chapter", documentId, activeChapter],
     queryFn: () => fetchChapter(documentId, activeChapter),
     staleTime: 60_000,
-    enabled: (toc?.length ?? 0) > 0,
+    enabled: activeChapter < (toc?.length ?? 0),
   })
 
   const totalChapters = toc?.length ?? 0
   const contentContainerRef = useRef<HTMLDivElement>(null)
+  const chapterTitle = toc?.[activeChapter]?.title ?? ""
+
+  // A saved place can outlive a re-import that produced fewer chapters.
+  useEffect(() => {
+    if (toc && toc.length > 0 && activeChapter >= toc.length) {
+      targetRef.current = null
+      setActiveChapter(0)
+    }
+  }, [toc, activeChapter])
+
+  const goTo = useCallback((target: Target) => {
+    targetRef.current = target
+    setActiveChapter(target.chapter)
+    setJumpNonce((n) => n + 1)
+  }, [])
+
+  useImperativeHandle(ref, () => ({ goTo }), [goTo])
 
   function goToPrev() {
     if (activeChapter > 0) setActiveChapter((c) => c - 1)
@@ -144,6 +186,87 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
   useEffect(() => {
     contentContainerRef.current?.scrollTo({ top: 0, behavior: "instant" })
   }, [activeChapter])
+
+  // Read through a ref so a parent re-render cannot restart a settle in progress.
+  const reportingRef = useRef({ activeChapter, chapterTitle, onReadingPlaceChange })
+  useEffect(() => {
+    reportingRef.current = { activeChapter, chapterTitle, onReadingPlaceChange }
+  })
+  const reportPlace = useCallback(() => {
+    const container = contentContainerRef.current
+    if (!container) return
+    const blocks = blocksIn(container)
+    const line = container.getBoundingClientRect().top + READING_LINE_PX
+    const block = blockAtLine(blocks.length, (i) => blocks[i].getBoundingClientRect().top, line)
+    const { activeChapter: chapterIndex, chapterTitle: title, onReadingPlaceChange: report } =
+      reportingRef.current
+    setCurrentBlock(block)
+    report?.({ chapter: chapterIndex, block }, title)
+  }, [])
+
+  // Once a chapter has rendered, go to the place asked for, or report where the
+  // reader now is. Settled rather than scrolled once: images above the target
+  // load and push it down.
+  useEffect(() => {
+    const container = contentContainerRef.current
+    if (!chapter || !container) return
+    const target = targetRef.current
+    if (!target || target.chapter !== activeChapter) {
+      reportPlace()
+      return
+    }
+    targetRef.current = null
+    const offset = (el: HTMLElement) =>
+      el.getBoundingClientRect().top - container.getBoundingClientRect().top - READING_LINE_PX / 2
+    return settleIntoView<HTMLElement>({
+      find: () =>
+        "anchor" in target
+          ? container.querySelector<HTMLElement>(`#${CSS.escape(target.anchor)}`)
+          : (blocksIn(container)[target.block] ?? null),
+      distance: offset,
+      centre: (el) => container.scrollBy({ top: offset(el), behavior: "instant" }),
+      schedule: (fn, ms) => window.setTimeout(fn, ms),
+      cancel: (handle) => window.clearTimeout(handle),
+      tolerancePx: 4,
+      userEventsTarget: container,
+    })
+  }, [chapter, activeChapter, jumpNonce, reportPlace])
+
+  const scrollFrameRef = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (scrollFrameRef.current != null) window.cancelAnimationFrame(scrollFrameRef.current)
+  }, [])
+  const handleContentScroll = useCallback(() => {
+    if (scrollFrameRef.current != null) return
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      reportPlace()
+    })
+  }, [reportPlace])
+
+  // Images loading above the reading line move the text without a scroll event,
+  // and the place saved would then be a block away from what is on screen.
+  useEffect(() => {
+    const content = contentContainerRef.current?.firstElementChild
+    if (!chapter || !content) return
+    const observer = new ResizeObserver(handleContentScroll)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [chapter, handleContentScroll])
+
+  // Mark the bookmarked block, as the PDF viewer marks its bookmarked page.
+  useEffect(() => {
+    const container = contentContainerRef.current
+    if (!chapter || !container || bookmark?.chapter !== activeChapter) return
+    const el = blocksIn(container)[bookmark.block]
+    el?.setAttribute("data-bookmark", "")
+    return () => el?.removeAttribute("data-bookmark")
+  }, [chapter, activeChapter, bookmark])
+
+  const here: EpubPlace = { chapter: activeChapter, block: currentBlock }
+  const atBookmark = samePlace(bookmark, here)
+  // I-67
+  const chapterHtml = useMemo(() => ({ __html: chapter?.html ?? "" }), [chapter?.html])
 
   // Keyboard navigation shortcuts: ArrowRight / PageDown for next chapter, ArrowLeft / PageUp for previous
   useEffect(() => {
@@ -182,6 +305,13 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
 
     e.preventDefault()
     const hash = href.startsWith("#") ? href.slice(1) : href.split("#")[1]
+    // The backend names the chapter that holds a link's target in another chapter.
+    const chapterAttr = anchor.getAttribute("data-chapter")
+    if (chapterAttr != null) {
+      const chapterIndex = Number(chapterAttr)
+      goTo(hash ? { chapter: chapterIndex, anchor: hash } : { chapter: chapterIndex, block: 0 })
+      return
+    }
     if (!hash) return
     const target =
       e.currentTarget.querySelector(`#${CSS.escape(hash)}`) ??
@@ -312,17 +442,19 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
 
         {/* Chapter content */}
         {chapter && !chapterLoading && !chapterError && (
-          <div ref={contentContainerRef} className="flex-1 overflow-auto">
+          <div ref={contentContainerRef} className="flex-1 overflow-auto" onScroll={handleContentScroll}>
             <div
               className={cn(
                 "epub-reader-content prose prose-sm dark:prose-invert max-w-3xl mx-auto px-6 py-6",
                 // Books use <pre> for verse, not only code. Prose pairs pale
                 // `pre` text with a dark background, which does not hold here.
                 "prose-pre:bg-muted/50 prose-pre:text-foreground prose-pre:border prose-pre:border-border",
+                // Prose wraps inline code in literal backticks; a printed book has none.
+                "prose-code:before:content-none prose-code:after:content-none",
               )}
               style={{ fontSize: `${readerZoom}rem` }}
               // Safe: HTML is sanitized server-side by bleach + BeautifulSoup
-              dangerouslySetInnerHTML={{ __html: chapter.html }}
+              dangerouslySetInnerHTML={chapterHtml}
               onClick={handleContentClick}
             />
           </div>
@@ -344,6 +476,30 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
               <span className="text-xs text-muted-foreground tabular-nums">
                 {activeChapter + 1} / {totalChapters}
               </span>
+              {onBookmarkChange && (
+                <button
+                  type="button"
+                  className={cn("rounded p-1 hover:bg-accent", atBookmark ? "text-red-600" : "text-muted-foreground")}
+                  onClick={() => onBookmarkChange(atBookmark ? null : here)}
+                  title={atBookmark ? "Remove bookmark" : bookmark != null ? "Move bookmark here" : "Bookmark this place"}
+                  aria-label={atBookmark ? "Remove bookmark" : "Bookmark this place"}
+                  aria-pressed={atBookmark}
+                >
+                  <Bookmark className="h-3.5 w-3.5" fill={atBookmark ? "currentColor" : "none"} />
+                </button>
+              )}
+              {bookmark != null && !atBookmark && (
+                <button
+                  type="button"
+                  className="flex items-center gap-0.5 rounded px-1 py-0.5 text-xs text-red-600 hover:bg-accent tabular-nums"
+                  onClick={() => goTo(bookmark)}
+                  title={`Go to your bookmark (chapter ${bookmark.chapter + 1})`}
+                  aria-label={`Go to your bookmark, chapter ${bookmark.chapter + 1}`}
+                >
+                  <Bookmark className="h-3 w-3" fill="currentColor" />
+                  {bookmark.chapter + 1}
+                </button>
+              )}
               <PanelZoomResetButton panelId="reader" />
             </div>
 
@@ -384,4 +540,4 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
       )}
     </div>
   )
-}
+})

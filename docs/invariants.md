@@ -65,6 +65,13 @@ An empty heading means the source gave none; only the contents panel derives a l
 (`sectionTitle()`). Empty-bodied sections are dropped. `tests/test_universal_parser.py` and
 `sectionTitle.test.ts` fail CI if a heading is invented.
 
+**I-67. Injected HTML is one `{__html}` object per string, never an object literal in JSX.**
+React 19 compares `dangerouslySetInnerHTML` by identity and assigns `innerHTML` whenever the object
+is new, so an inline literal re-parses the markup on every render: the EPUB reader rewrote a 4.5 MB
+chapter each time the block on screen changed, wiping the bookmark marker and any selection. Build
+it with `useMemo` keyed on the string. ESLint's `NO_INLINE_INNER_HTML` fails `make lint`, and
+`make verify-epub-place` fails if scrolling rewrites the chapter.
+
 ## Chat routing
 
 **I-25. Scope decides WHERE to look, never WHAT was asked.**

@@ -17,10 +17,72 @@ from urllib.parse import unquote
 
 import bleach
 import ebooklib
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from ebooklib import epub
 
 logger = logging.getLogger(__name__)
+
+# MathML Core, which every webview the app ships in renders natively. Stripped,
+# an equation became its tokens on separate lines. `annotation-xml` and `mglyph`
+# are left out: both can carry HTML back into the document.
+_MATHML_TAGS = (
+    "math",
+    "semantics",
+    "annotation",
+    "mrow",
+    "mi",
+    "mn",
+    "mo",
+    "ms",
+    "mtext",
+    "mspace",
+    "msub",
+    "msup",
+    "msubsup",
+    "mfrac",
+    "msqrt",
+    "mroot",
+    "mstyle",
+    "mpadded",
+    "mphantom",
+    "menclose",
+    "munder",
+    "mover",
+    "munderover",
+    "mmultiscripts",
+    "mprescripts",
+    "none",
+    "mtable",
+    "mtr",
+    "mtd",
+)
+
+_MATHML_ATTRIBUTES = [
+    "display",
+    "alttext",
+    "mathvariant",
+    "displaystyle",
+    "scriptlevel",
+    "stretchy",
+    "fence",
+    "separator",
+    "form",
+    "lspace",
+    "rspace",
+    "largeop",
+    "movablelimits",
+    "accent",
+    "accentunder",
+    "linethickness",
+    "width",
+    "height",
+    "depth",
+    "columnspan",
+    "rowspan",
+    "columnalign",
+    "notation",
+    "encoding",
+]
 
 # Tags allowed in rendered EPUB HTML
 _ALLOWED_TAGS = [
@@ -56,12 +118,37 @@ _ALLOWED_TAGS = [
     "aside",
     "br",
     "hr",
+    # A stripped tag keeps its text and loses its meaning: footnote markers ran
+    # into the word before them, and Gutenberg's <i> lost every italic.
+    "sup",
+    "sub",
+    "b",
+    "i",
+    "u",
+    "s",
+    "small",
+    "mark",
+    "del",
+    "ins",
+    "q",
+    "cite",
+    "abbr",
+    "kbd",
+    "samp",
+    "var",
+    "dl",
+    "dt",
+    "dd",
+    "caption",
+    "colgroup",
+    "col",
+    *_MATHML_TAGS,
 ]
 
 # Allow safe, non-event attributes on whitelisted tags
 _ALLOWED_ATTRIBUTES: dict[str, list[str] | Callable[[str, str, str], bool]] = {
     "a": lambda _tag, name, value: (
-        name in {"title", "id", "class", "name"}
+        name in {"title", "id", "class", "name", "data-chapter"}
         or (name == "href" and not value.strip().lower().startswith("data:"))
     ),
     "img": lambda _tag, name, value: (
@@ -93,18 +180,31 @@ _ALLOWED_ATTRIBUTES: dict[str, list[str] | Callable[[str, str, str], bool]] = {
     "h4": ["id", "class"],
     "h5": ["id", "class"],
     "h6": ["id", "class"],
+    "sup": ["id", "class"],
+    "sub": ["id", "class"],
+    "abbr": ["title"],
+    "dl": ["id", "class"],
+    "dt": ["id", "class"],
+    "dd": ["id", "class"],
+    "caption": ["id", "class"],
+    "col": ["span", "class"],
+    "colgroup": ["span", "class"],
+    **dict.fromkeys(_MATHML_TAGS, _MATHML_ATTRIBUTES),
 }
+
+
+def _text_of(tag: Tag) -> str:
+    # get_text(strip=True) trims each piece before joining them, so
+    # <span>Chapter 1. </span>Introduction read "Chapter 1.Introduction".
+    return " ".join(tag.get_text().split())
 
 
 def _extract_chapter_title(soup: BeautifulSoup) -> str:
     """Best-effort title extraction from chapter HTML."""
-    title_tag = soup.find("title")
-    if title_tag and title_tag.get_text(strip=True):
-        return title_tag.get_text(strip=True)
-    for heading in ("h1", "h2", "h3"):
-        tag = soup.find(heading)
-        if tag and tag.get_text(strip=True):
-            return tag.get_text(strip=True)
+    for name in ("title", "h1", "h2", "h3"):
+        tag = soup.find(name)
+        if tag and _text_of(tag):
+            return _text_of(tag)
     return ""
 
 
@@ -143,6 +243,7 @@ def _split_soup_on_headings(soup: BeautifulSoup) -> list[dict]:
             "title": _extract_chapter_title(soup),
             "html": str(soup),
             "word_count": _count_words(soup),
+            "ids": _ids_in([root]),
         }
     ]
     headings = root.find_all(_HEADING_TAGS)
@@ -176,6 +277,7 @@ def _split_soup_on_headings(soup: BeautifulSoup) -> list[dict]:
                 "title": u["title"],
                 "html": html,
                 "word_count": _count_words(BeautifulSoup(html, "html.parser")),
+                "ids": _ids_in(u["nodes"]),
             }
         )
     # Units are cut from one container. When the headings sit in a wrapper such
@@ -207,6 +309,72 @@ def _count_words(soup: BeautifulSoup) -> int:
     """Approximate word count for HTML content."""
     text = soup.get_text(" ", strip=True)
     return len(text.split())
+
+
+def _ids_in(nodes: list) -> set[str]:
+    """Every element id in these nodes and their descendants."""
+    ids: set[str] = set()
+    for node in nodes:
+        if not isinstance(node, Tag):
+            continue
+        if node.get("id"):
+            ids.add(str(node["id"]))
+        ids.update(str(el["id"]) for el in node.find_all(id=True))
+    return ids
+
+
+def _file_stem(href_path: str) -> str:
+    # The book links ch02.html while the item is ch02.xhtml, so files match by stem.
+    return unquote(href_path).rsplit("/", 1)[-1].rsplit(".", 1)[0]
+
+
+def _whole_file_unit(soup: BeautifulSoup) -> dict:
+    body = soup.body or soup
+    return {
+        "title": _extract_chapter_title(soup),
+        "html": str(body),
+        "word_count": _count_words(soup),
+        "ids": _ids_in([body]),
+    }
+
+
+class _BookLinks:
+    """Which chapter holds each element a link in the book can point at."""
+
+    def __init__(self, units: list[dict]) -> None:
+        self._owner: dict[tuple[str, str], int] = {}
+        self._first_of_file: dict[str, int] = {}
+        for i, unit in enumerate(units):
+            self._first_of_file.setdefault(unit["file"], i)
+            for element_id in unit["ids"]:
+                self._owner.setdefault((unit["file"], element_id), i)
+
+    def chapter_of(self, href: str, here: str) -> int | None:
+        path, _, fragment = href.partition("#")
+        if ":" in path or not (path or fragment):
+            return None  # http:, mailto:, data:, or a bare "#"
+        stem = _file_stem(path) if path else here
+        if fragment:
+            return self._owner.get((stem, fragment))
+        return self._first_of_file.get(stem)
+
+
+def _link_into_book(soup: BeautifulSoup, units: list[dict], chapter_index: int) -> None:
+    """Point the book's own links at the chapter that holds their target.
+
+    The reader shows one chapter at a time, so `ch05.html#x` has no target in
+    the page; it becomes `#x` with `data-chapter` naming where `x` lives.
+    """
+    links = _BookLinks(units)
+    here = units[chapter_index]["file"]
+    for a in soup.find_all("a", href=True):
+        href = str(a["href"])
+        target = links.chapter_of(href, here)
+        if target is None:
+            continue
+        a["href"] = "#" + href.partition("#")[2]
+        if target != chapter_index:
+            a["data-chapter"] = str(target)
 
 
 class EpubService:
@@ -270,16 +438,11 @@ class EpubService:
             # sections are not each served as a chapter of their own. A file the
             # TOC does not list keeps the heading split.
             if toc_entries.get(item.get_name().rsplit("/", 1)[-1]) == 1:
-                file_units = [
-                    {
-                        "title": _extract_chapter_title(soup),
-                        "html": str(soup.body or soup),
-                        "word_count": _count_words(soup),
-                    }
-                ]
+                file_units = [_whole_file_unit(soup)]
             else:
                 file_units = _split_soup_on_headings(soup)
             for unit in file_units:
+                unit["file"] = _file_stem(item.get_name())
                 # Skip near-empty items with no discernible title (cover pages)
                 if not unit["title"] and unit["word_count"] < 10:
                     continue
@@ -323,7 +486,9 @@ class EpubService:
             raise IndexError(f"chapter_index {chapter_index} out of range (0-{len(units) - 1})")
 
         unit = units[chapter_index]
-        html_content = unit["html"]
+        soup = BeautifulSoup(unit["html"], "html.parser")
+        _link_into_book(soup, units, chapter_index)
+        html_content = str(soup)
 
         # Resolve embedded EPUB images into inline base64 data URIs so diagrams render
         if "<img" in html_content.lower():
@@ -337,7 +502,6 @@ class EpubService:
                     images[raw_name] = (media_type, item.content)
                     images[base_name] = (media_type, item.content)
 
-                soup = BeautifulSoup(html_content, "html.parser")
                 for img in soup.find_all("img"):
                     src = img.get("src", "")
                     if not src:

@@ -1,3 +1,4 @@
+import { useMemo } from "react"
 import { cn } from "@/lib/utils"
 
 import type { AnnotationItem } from "./types"
@@ -18,11 +19,15 @@ interface SectionPreviewProps {
 }
 
 export function SectionPreviewWithHighlights({ preview, annotations, sectionId, searchSnippet }: SectionPreviewProps) {
+  const snippetHtml = useMemo(
+    () => ({ __html: searchSnippet ? sanitizeSnippet(searchSnippet) : "" }),
+    [searchSnippet],
+  )
   if (searchSnippet) {
     return (
       <p
         className="mt-1 line-clamp-2 text-xs text-muted-foreground section-preview"
-        dangerouslySetInnerHTML={{ __html: sanitizeSnippet(searchSnippet) }}
+        dangerouslySetInnerHTML={snippetHtml}
       />
     )
   }

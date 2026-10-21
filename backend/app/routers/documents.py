@@ -2085,7 +2085,10 @@ def _position_response(row: ReadingPositionModel) -> ReadingPositionResponse:
         last_section_heading=row.last_section_heading,
         last_pdf_page=row.last_pdf_page,
         last_epub_chapter_index=row.last_epub_chapter_index,
+        last_epub_block_index=row.last_epub_block_index,
         pdf_bookmark_page=row.pdf_bookmark_page,
+        epub_bookmark_chapter_index=row.epub_bookmark_chapter_index,
+        epub_bookmark_block_index=row.epub_bookmark_block_index,
     )
 
 
@@ -2112,6 +2115,7 @@ async def save_reading_position(
                 last_section_heading=body.last_section_heading,
                 last_pdf_page=body.last_pdf_page,
                 last_epub_chapter_index=body.last_epub_chapter_index,
+                last_epub_block_index=body.last_epub_block_index,
                 updated_at=now,
             )
             session.add(row)
@@ -2120,6 +2124,7 @@ async def save_reading_position(
             row.last_section_heading = body.last_section_heading
             row.last_pdf_page = body.last_pdf_page
             row.last_epub_chapter_index = body.last_epub_chapter_index
+            row.last_epub_block_index = body.last_epub_block_index
             row.updated_at = now
         await session.commit()
         await session.refresh(row)
@@ -2146,7 +2151,7 @@ async def get_reading_position(document_id: str) -> ReadingPositionResponse:
 
 @router.put("/{document_id}/bookmark", response_model=ReadingPositionResponse)
 async def set_bookmark(document_id: str, body: SetBookmarkRequest) -> ReadingPositionResponse:
-    """Place the document's one PDF bookmark, moving it if one exists.
+    """Place the document's one bookmark, moving it if one exists.
 
     Returns 404 if the document does not exist.
     """
@@ -2157,6 +2162,10 @@ async def set_bookmark(document_id: str, body: SetBookmarkRequest) -> ReadingPos
             row = ReadingPositionModel(document_id=document_id, updated_at=datetime.now(UTC))
             session.add(row)
         row.pdf_bookmark_page = body.pdf_page
+        row.epub_bookmark_chapter_index = body.epub_chapter_index
+        row.epub_bookmark_block_index = (
+            body.epub_block_index if body.epub_chapter_index is not None else None
+        )
         await session.commit()
         await session.refresh(row)
 
@@ -2165,15 +2174,17 @@ async def set_bookmark(document_id: str, body: SetBookmarkRequest) -> ReadingPos
 
 @router.delete("/{document_id}/bookmark", status_code=204)
 async def clear_bookmark(document_id: str) -> None:
-    """Remove the document's PDF bookmark. Removing an absent one succeeds.
+    """Remove the document's bookmark. Removing an absent one succeeds.
 
     Returns 404 if the document does not exist.
     """
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
         row = await DocumentRepo(session).reading_position(document_id)
-        if row is not None and row.pdf_bookmark_page is not None:
+        if row is not None:
             row.pdf_bookmark_page = None
+            row.epub_bookmark_chapter_index = None
+            row.epub_bookmark_block_index = None
             await session.commit()
 
 

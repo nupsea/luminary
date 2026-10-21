@@ -246,3 +246,19 @@ def assemble_summary(rows: list[SectionSummaryModel], mode: str) -> str | None:
     if mode == "executive" and chapters:
         return _executive(chapters)
     return None
+
+
+# A command followed by its argument: `\texttt{BERT}` is markup, a lone `\n` in
+# a code span is not.
+_LATEX_COMMAND = re.compile(r"\\[A-Za-z]+(?=\s*\{)")
+
+
+def foreign_latex(summary: str, source: str) -> list[str]:
+    """LaTeX commands in a summary that the text it summarised never used.
+
+    A local model wrote `{\\texttt{BERT}}` into an O'Reilly book's summary, which
+    the reader shows verbatim. A math book whose source writes `\\frac{` may
+    summarise with it.
+    """
+    used = set(re.findall(r"\\[A-Za-z]+", source))
+    return sorted(set(_LATEX_COMMAND.findall(summary)) - used)

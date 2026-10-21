@@ -8,7 +8,7 @@ via `__all__` so existing imports keep working.
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from app.schemas.membership import CollectionRef
 from app.types import ContentType, DocumentKind, EditableKind
@@ -319,7 +319,8 @@ class SavePositionRequest(BaseModel):
     last_section_id: str | None = None
     last_section_heading: str | None = None
     last_pdf_page: int | None = None
-    last_epub_chapter_index: int | None = None
+    last_epub_chapter_index: int | None = Field(default=None, ge=0)
+    last_epub_block_index: int | None = Field(default=None, ge=0)
 
 
 class ReadingPositionResponse(BaseModel):
@@ -328,11 +329,24 @@ class ReadingPositionResponse(BaseModel):
     last_section_heading: str | None
     last_pdf_page: int | None
     last_epub_chapter_index: int | None
+    last_epub_block_index: int | None = None
     pdf_bookmark_page: int | None = None
+    epub_bookmark_chapter_index: int | None = None
+    epub_bookmark_block_index: int | None = None
 
 
 class SetBookmarkRequest(BaseModel):
-    pdf_page: int = Field(ge=1)
+    """A PDF page, or an EPUB chapter and the block inside it."""
+
+    pdf_page: int | None = Field(default=None, ge=1)
+    epub_chapter_index: int | None = Field(default=None, ge=0)
+    epub_block_index: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _one_place(self) -> "SetBookmarkRequest":
+        if (self.pdf_page is None) == (self.epub_chapter_index is None):
+            raise ValueError("give either pdf_page or epub_chapter_index")
+        return self
 
 
 # Doc overview (docs/02-ingest-and-doc-overview.md) -- read aggregation

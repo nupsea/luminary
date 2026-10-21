@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-full eval-gen-full eval-cards-full eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-followups eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards golden-flashcards-corpus eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-reader-switch verify-note-nav luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-full eval-gen-full eval-cards-full eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-followups eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards golden-flashcards-corpus eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-epub-place verify-reader-switch verify-note-nav luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
 
 # install.sh puts uv (and Node on Linux) in ~/.local/bin, which a shell opened
 # before the install does not have on PATH.
@@ -466,6 +466,13 @@ verify-dock:
 	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
 		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
 	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} node scripts/verify-dock.mjs
+
+# An EPUB reopens on the block where reading stopped, keeps its bookmark marked
+# while scrolling, and follows links into other chapters. Needs an ingested EPUB.
+verify-epub-place:
+	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
+		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
+	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} node scripts/verify-epub-place.mjs
 
 # Moving between documents starts the next one's panel clean: no draft and no
 # note carried over from the last. Needs two ingested documents, no model.
