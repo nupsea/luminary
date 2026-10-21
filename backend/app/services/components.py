@@ -857,7 +857,8 @@ async def install_encoder_model(comp: Component) -> AsyncIterator[dict]:
         yield {"state": "failed", "detail": f"unknown model: {comp.id}"}
         return
     if not await asyncio.to_thread(model_prefetch.hub_reachable):
-        yield {"state": "failed", "detail": "No internet connection. Connect, then try again."}
+        detail = network_errors.unreachable("No internet connection. Connect, then try again.")
+        yield {"state": "failed", "detail": detail}
         return
 
     task = asyncio.ensure_future(asyncio.to_thread(model_prefetch.prefetch, [spec]))

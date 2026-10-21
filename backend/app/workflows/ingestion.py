@@ -90,6 +90,7 @@ async def run_ingestion(
     format: str,
     content_type: str | None = None,
     parsed_document: dict[str, Any] | None = None,
+    kind: str | None = None,
 ) -> None:
     initial_state: IngestionState = {
         "document_id": document_id,
@@ -97,6 +98,7 @@ async def run_ingestion(
         "format": format,
         "parsed_document": parsed_document,
         "content_type": content_type,
+        "kind": kind,
         "chunks": None,
         "status": "parsing" if parsed_document is None else "classifying",
         "error": None,

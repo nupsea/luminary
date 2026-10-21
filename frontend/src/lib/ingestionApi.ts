@@ -1,19 +1,10 @@
 import { renderPage } from "@/lib/pageRender"
 import { apiGet, apiPost, detailFromError } from "@/lib/apiClient"
 
-export type ContentTypeValue =
-  | "book"
-  | "technical"
-  | "paper"
-  | "conversation"
-  | "notes"
-  | "audio"
-  | "video"
-  // Legacy stored values still accepted by the backend; not offered in the
-  // upload UI ("technical" resolves to a tech_* variant at ingest).
-  | "epub"
-  | "tech_book"
-  | "tech_article"
+/** The kinds the upload picker offers. A recording's kind follows its file format. */
+export type UploadKind = "book" | "technical" | "paper" | "conversation" | "notes" | "audio" | "video"
+
+const FORMAT_KINDS: readonly UploadKind[] = ["audio", "video"]
 
 export interface IngestionStatus {
   stage: string
@@ -38,15 +29,12 @@ export interface KindleIngestResult {
  *  the value is shown to the user as what Luminary decided, and a fabricated
  *  one would be indistinguishable from a real detection.
  */
-export async function detectFileType(file: File): Promise<ContentTypeValue | null> {
+export async function detectFileType(file: File): Promise<string | null> {
   const form = new FormData()
   form.append("file", file)
   try {
-    const data = await apiPost<{ content_type: ContentTypeValue | null }>(
-      "/documents/detect-type",
-      form,
-    )
-    return data.content_type ?? null
+    const data = await apiPost<{ kind: string | null }>("/documents/detect-type", form)
+    return data.kind ?? null
   } catch {
     // Detection is an convenience, not a gate: ingestion classifies anyway.
     return null
@@ -61,14 +49,13 @@ export interface FileIngestResult {
 
 export async function submitFile(
   file: File,
-  contentType: ContentTypeValue | null,
+  kind: UploadKind | null,
 ): Promise<FileIngestResult> {
   const form = new FormData()
   form.append("file", file)
-  // Omitted, not blank, when the user did not choose: the backend skips
-  // classification for any supplied content_type, so sending a guess here
-  // silently overrides detection.
-  if (contentType) form.append("content_type", contentType)
+  // Only the person's own choice: a sent kind is kept over every later
+  // classification, so a detection or a default sent here would freeze it.
+  if (kind && !FORMAT_KINDS.includes(kind)) form.append("kind", kind)
   try {
     const data = await apiPost<{ document_id: string; status: string }>(
       "/documents/ingest",

@@ -48,7 +48,7 @@ async def test_detect_type_reads_the_document() -> None:
     status, body = await _post_detect("manual.txt", technical.encode())
     assert status == 200
     assert body["detected"] is True
-    assert body["content_type"] in ("tech_book", "tech_article")
+    assert body["kind"] == "technical"
 
 
 @pytest.mark.anyio
@@ -92,7 +92,7 @@ async def test_detect_type_decides_media_from_the_extension() -> None:
     for name, expected in (("talk.mp3", "audio"), ("lecture.mp4", "video"), ("novel.epub", "book")):
         status, body = await _post_detect(name, b"\x00\x01binary")
         assert status == 200
-        assert body["content_type"] == expected
+        assert body["kind"] == expected
 
 
 @pytest.mark.anyio
@@ -110,7 +110,7 @@ async def test_detect_type_failure_does_not_block_the_upload() -> None:
     """
     status, body = await _post_detect("empty.txt", b"")
     assert status == 200
-    assert "content_type" in body
+    assert "kind" in body
 
 
 @pytest.mark.anyio

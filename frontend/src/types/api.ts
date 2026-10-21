@@ -1102,7 +1102,7 @@ export interface paths {
         put?: never;
         /**
          * Detect Document Type
-         * @description The content type this file would be given, without ingesting it.
+         * @description The kind this file would be given, without ingesting it.
          *
          *     Classification needs the document's text, so it cannot happen in the client
          *     and it cannot happen before the bytes arrive. Exposing it separately lets
@@ -1130,7 +1130,11 @@ export interface paths {
         put?: never;
         /**
          * Ingest Document
-         * @description Ingest a file. Omit content_type to have the pipeline classify it.
+         * @description Ingest a file. Omit its kind to have the pipeline classify it.
+         *
+         *     A kind is the reader's choice, as from the card menu: its facets are laid over
+         *     the measured shape and kept by every later reprocess (#223). The legacy type
+         *     field is the older form of the same choice, accepted until that column goes.
          *
          *     Optional rather than required because a supplied content_type is final:
          *     classify_node skips every heuristic when the caller names a type. A client
@@ -7171,6 +7175,8 @@ export interface components {
             file: string;
             /** Content Type */
             content_type?: ("book" | "conversation" | "notes" | "paper" | "audio" | "video" | "epub" | "kindle_clippings" | "tech_book" | "tech_article" | "technical") | null;
+            /** Kind */
+            kind?: ("book" | "technical" | "paper" | "conversation" | "notes") | null;
         };
         /** Body_ingest_kindle_documents_ingest_kindle_post */
         Body_ingest_kindle_documents_ingest_kindle_post: {

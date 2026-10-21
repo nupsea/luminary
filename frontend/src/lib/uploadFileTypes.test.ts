@@ -4,7 +4,7 @@ import {
   acceptedExtensions,
   carriesFiles,
   describeRejection,
-  detectContentType,
+  kindFromFilename,
   toPickerValue,
   makeDragDepth,
 } from "./uploadFileTypes"
@@ -47,21 +47,21 @@ describe("describeRejection", () => {
   })
 })
 
-describe("detectContentType", () => {
+describe("kindFromFilename", () => {
   it("reads the format off the name where the format proves it", () => {
-    expect(detectContentType("novel.epub")).toBe("book")
-    expect(detectContentType("lecture.M4A")).toBe("audio")
-    expect(detectContentType("screencast.mp4")).toBe("video")
+    expect(kindFromFilename("novel.epub")).toBe("book")
+    expect(kindFromFilename("lecture.M4A")).toBe("audio")
+    expect(kindFromFilename("screencast.mp4")).toBe("video")
   })
 
   it("defers to the backend for formats that carry any content type", () => {
     // Returning a guess here is not harmless: the backend skips classification
     // entirely for a supplied content_type, so "book" for every .pdf/.txt/.md
     // silently disabled auto-detection for every document that was not media.
-    expect(detectContentType("paper.pdf")).toBeNull()
-    expect(detectContentType("textbook.md")).toBeNull()
-    expect(detectContentType("transcript.txt")).toBeNull()
-    expect(detectContentType("report.docx")).toBeNull()
+    expect(kindFromFilename("paper.pdf")).toBeNull()
+    expect(kindFromFilename("textbook.md")).toBeNull()
+    expect(kindFromFilename("transcript.txt")).toBeNull()
+    expect(kindFromFilename("report.docx")).toBeNull()
   })
 })
 
@@ -95,29 +95,15 @@ describe("carriesFiles", () => {
 })
 
 describe("toPickerValue", () => {
-  it("maps the tech_* variants onto the one option the picker offers", () => {
-    // The bug this guards: the classifier answered `tech_book`, the picker has
-    // no such option, so `options.find(...)` was undefined and a correctly
-    // detected technical book rendered as "Detect automatically". Detection
-    // looked broken exactly when it had worked.
-    expect(toPickerValue("tech_book")).toBe("technical")
-    expect(toPickerValue("tech_article")).toBe("technical")
-    expect(toPickerValue("code")).toBe("technical")
-  })
-
-  it("passes through the values the picker already offers", () => {
-    for (const v of ["book", "paper", "conversation", "notes", "audio", "video"]) {
+  it("passes through the kinds the picker offers", () => {
+    for (const v of ["book", "technical", "paper", "conversation", "notes", "audio", "video"]) {
       expect(toPickerValue(v)).toBe(v)
     }
   })
 
-  it("maps stored-only values onto their nearest option", () => {
-    expect(toPickerValue("epub")).toBe("book")
-    expect(toPickerValue("kindle_clippings")).toBe("notes")
-  })
-
-  it("returns null rather than a value the picker cannot show", () => {
+  it("returns null rather than a kind the picker cannot show", () => {
     expect(toPickerValue(null)).toBeNull()
-    expect(toPickerValue("something_new_from_the_backend")).toBeNull()
+    expect(toPickerValue("code")).toBeNull()
+    expect(toPickerValue("tech_book")).toBeNull()
   })
 })

@@ -297,7 +297,7 @@ async def run_warmup(only: set[str] | None = None) -> None:
         if missing:
             loop = asyncio.get_running_loop()
             reachable = await loop.run_in_executor(None, model_prefetch.hub_reachable)
-            status.set_offline(not reachable)
+            status.set_offline(network_errors.offline(reachable))
             if not reachable:
                 logger.warning("Model prefetch skipped: hub unreachable")
 
@@ -321,7 +321,9 @@ async def run_warmup(only: set[str] | None = None) -> None:
                     status.set_state(
                         key,
                         "failed",
-                        "No internet connection. Luminary needs to download this once.",
+                        network_errors.unreachable(
+                            "No internet connection. Luminary needs to download this once."
+                        ),
                     )
                     return
                 status.set_state(key, "downloading", spec.repo_id)

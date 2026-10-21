@@ -129,3 +129,80 @@ async def test_a_reprocess_chunks_by_the_reader_s_kind(test_db) -> None:
     assert result["status"] == "chunking"
     assert result["form"] == "dialogue"
     assert (await _row(factory, doc_id)).form == "dialogue"
+
+
+def _record_ingestion(monkeypatch) -> list[tuple[str | None, str | None]]:
+    """The (legacy type, kind) each upload hands the job; the job itself never runs."""
+    import app.routers.documents as documents_module
+
+    calls: list[tuple[str | None, str | None]] = []
+
+    async def _noop() -> None:
+        return None
+
+    def _run(document_id, file_path, format, content_type=None, parsed_document=None, kind=None):
+        calls.append((content_type, kind))
+        return _noop()
+
+    monkeypatch.setattr(documents_module, "run_ingestion", _run)
+    monkeypatch.setattr(
+        documents_module.get_ingestion_jobs(), "launch", lambda doc_id, coro: coro.close()
+    )
+    return calls
+
+
+async def _upload(name: str, body: bytes, **data):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        return await c.post("/documents/ingest", files={"file": (name, body)}, data=data)
+
+
+async def test_an_upload_s_kind_reaches_ingestion_with_its_legacy_type(test_db, monkeypatch):
+    _engine, factory, _tmp = test_db
+    calls = _record_ingestion(monkeypatch)
+    r = await _upload("talk-notes.txt", b"Two people discuss storage engines.", kind="paper")
+    assert r.status_code == 200, r.text
+    assert calls == [("paper", "paper")]
+    assert (await _row(factory, r.json()["document_id"])).content_type == "paper"
+
+
+async def test_a_recording_cannot_be_uploaded_as_another_kind(test_db, monkeypatch):
+    calls = _record_ingestion(monkeypatch)
+    r = await _upload("talk.mp3", b"\x00\x01", kind="book")
+    assert r.status_code == 400
+    assert calls == []
+
+
+async def test_an_upload_s_kind_is_laid_over_the_measured_shape(test_db) -> None:
+    _engine, factory, _tmp = test_db
+    doc_id = await _seed(factory, format="txt", form=None, domain=None, is_technical=None)
+    # Dated entries measure as `entries` (notes); the reader said technical.
+    journal = "".join(
+        f"2026-03-{d:02d}\nRead about storage engines and write-ahead logs today.\n\n"
+        for d in range(1, 29)
+    )
+    state: IngestionState = {
+        "document_id": doc_id,
+        "file_path": "/tmp/journal.txt",
+        "format": "txt",
+        "parsed_document": {
+            "title": "Journal",
+            "format": "txt",
+            "pages": 1,
+            "word_count": len(journal.split()),
+            "sections": [],
+            "raw_text": journal,
+        },
+        "content_type": "technical",
+        "kind": "technical",
+        "chunks": None,
+        "status": "classifying",
+        "error": None,
+    }
+
+    result = await classify_node(state)
+
+    row = await _row(factory, doc_id)
+    assert document_kind(row.format, row.form, row.domain) == "technical"
+    assert (row.form, row.domain, row.facets_source) == ("reference", "technical", "reader")
+    assert result["form"] == "reference"
+    assert result["is_technical"] is True

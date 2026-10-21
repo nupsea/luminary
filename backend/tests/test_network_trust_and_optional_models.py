@@ -317,6 +317,49 @@ def test_a_failed_pull_behind_a_setup_script_names_the_setting(monkeypatch):
     assert asyncio.run(_run())[-1]["detail"] == network_errors.PAC_ONLY
 
 
+def _offline_warmup(monkeypatch):
+    monkeypatch.setattr(model_prefetch, "is_cached", lambda spec: False)
+    monkeypatch.setattr(model_prefetch, "hub_reachable", lambda *a, **k: False)
+
+    async def _noop():
+        return None
+
+    for name in ("_load_embedder", "_load_ner", "_load_reranker", "_warm_llm"):
+        monkeypatch.setattr(warmup, name, _noop)
+    monkeypatch.setattr(warmup, "_check_vision_model", _noop)
+    asyncio.run(warmup.run_warmup())
+    return get_startup_status().snapshot()
+
+
+def test_a_first_run_behind_a_setup_script_names_the_setting(monkeypatch):
+    """The hub check fails behind a setup script too, and "No internet connection" sent a
+    person whose machine was online looking for a cable (Windows Server 2022, 0.16.2)."""
+    _pac(monkeypatch, "http://wpad.corp/proxy.pac")
+    snapshot = _offline_warmup(monkeypatch)
+    embedder = next(p for p in snapshot["phases"] if p["key"] == "embedder")
+    assert (embedder["state"], embedder["detail"]) == ("failed", network_errors.PAC_ONLY)
+    assert snapshot["offline"] is False
+
+
+def test_a_first_run_with_no_setup_script_is_offline(monkeypatch):
+    _pac(monkeypatch, "")
+    snapshot = _offline_warmup(monkeypatch)
+    embedder = next(p for p in snapshot["phases"] if p["key"] == "embedder")
+    assert embedder["detail"].startswith("No internet connection.")
+    assert snapshot["offline"] is True
+
+
+def test_an_encoder_install_behind_a_setup_script_names_the_setting(monkeypatch):
+    _pac(monkeypatch, "http://wpad.corp/proxy.pac")
+    monkeypatch.setattr(model_prefetch, "hub_reachable", lambda *a, **k: False)
+    comp = components.get_component("reranker")
+
+    async def _run():
+        return [e async for e in components.install_encoder_model(comp)]
+
+    assert asyncio.run(_run())[-1] == {"state": "failed", "detail": network_errors.PAC_ONLY}
+
+
 def test_a_scanning_proxy_has_time_to_release_a_large_model():
     """Behind a proxy that holds the whole file before sending any of it, the 1.1GB
     entity model failed at the hub's 10s read timeout and installed at 300s (61s)."""
