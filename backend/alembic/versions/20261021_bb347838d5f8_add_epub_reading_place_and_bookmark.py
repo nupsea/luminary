@@ -1,7 +1,7 @@
 """add epub reading place and bookmark
 
 Revision ID: bb347838d5f8
-Revises: 1822f085552e
+Revises: e6c3046251c4
 Create Date: 2026-10-21 15:22:45.258119
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'bb347838d5f8'
-down_revision: str | Sequence[str] | None = '1822f085552e'
+down_revision: str | Sequence[str] | None = 'e6c3046251c4'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
