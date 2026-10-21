@@ -226,9 +226,13 @@ _NARRATIVE_DIVISION = re.compile(r"^[ \t]{0,6}(?:Chapter|Part|Book|Canto|Act|Sce
 
 # An entry is dated by the day. A time of day, or more digits after the day,
 # makes the line a record -- a log line, a query result, a partition value.
+# A date alone on its line and closed by a full stop ends a wrapped citation
+# ("February 8, 2012."); it opens nothing. DDIA's 28 dates were all such tails (#343).
 _DATED_ENTRY = re.compile(
-    r"^[ \t]{0,6}(?:Date\s*:|\d{4}-\d{2}-\d{2}\b(?![-T ]?\d)|"
-    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}\b)",
+    r"^[ \t]{0,6}(?:Date\s*:|"
+    r"(?:\d{4}-\d{2}-\d{2}\b(?![-T ]?\d)|"
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}\b)"
+    r"(?!\.[ \t]*$))",
     re.I | re.M,
 )
 
