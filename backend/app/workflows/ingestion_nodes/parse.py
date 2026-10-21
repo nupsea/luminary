@@ -14,6 +14,8 @@ import asyncio
 import logging
 from pathlib import Path
 
+from app.database import get_session_factory
+from app.repos.document_repo import DocumentRepo
 from app.services.content_classifier import classify_content, classify_form
 from app.services.llm_admission import awaited
 from app.telemetry import trace_ingestion_node
@@ -27,6 +29,7 @@ from app.workflows.ingestion_nodes._shared import (
     _update_stage,
     detect_register,
     detect_technical_content,
+    reader_facets,
     resolve_technical_variant,
 )
 
@@ -142,6 +145,19 @@ async def _measure_domain(content_type: str, pd: dict | None) -> bool | None:
 
 
 async def classify_node(state: IngestionState) -> IngestionState:
+    result = await _measure_classification(state)
+    if result.get("status") == "error":
+        return result
+    async with get_session_factory()() as session:
+        chosen = await reader_facets(DocumentRepo(session), state["document_id"])
+    if chosen is None:
+        return result
+    # Chunking follows the kind the reader chose, which persistence kept on the row.
+    form, domain = chosen
+    return {**result, "form": form, "is_technical": domain == "technical"}
+
+
+async def _measure_classification(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "classify", "doc_id": state["document_id"]})
     # Fast-path: content_type was provided by the user — skip all heuristics and LLM.
     # Classification only runs for legacy paths where content_type is unknown.

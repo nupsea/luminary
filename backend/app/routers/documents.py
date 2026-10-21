@@ -129,7 +129,15 @@ from app.services.type_detection import detect_content_type
 from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
 from app.storage import library_root
-from app.types import DocumentKind, DocumentProfile, document_kind
+from app.types import (
+    FACETS_FROM_READER,
+    MEDIA_FORMATS,
+    DocumentKind,
+    DocumentProfile,
+    EditableKind,
+    document_kind,
+    facets_for_kind,
+)
 from app.workflows import ingestion as _ingestion_module  # indirect: _run_pregenerate is patched
 from app.workflows.ingestion import (
     ContentType,
@@ -1570,6 +1578,18 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
     return {"deleted": deleted, "count": len(deleted)}
 
 
+def _set_kind(doc: DocumentModel, kind: EditableKind) -> None:
+    """Write the facets that derive `kind`, marked as the reader's so ingestion keeps them."""
+    if doc.format in MEDIA_FORMATS:
+        raise HTTPException(status_code=400, detail="A recording's kind follows its file format")
+    facets = facets_for_kind(kind, doc.form)
+    doc.form = facets["form"]
+    if "domain" in facets:
+        doc.domain = facets["domain"]
+        doc.is_technical = facets["domain"] == "technical"
+    doc.facets_source = FACETS_FROM_READER
+
+
 @router.patch("/{document_id}")
 async def patch_document(document_id: str, body: PatchDocumentRequest):
     async with get_session_factory()() as session:
@@ -1584,6 +1604,8 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
             )
         if body.content_type is not None:
             doc.content_type = body.content_type
+        if body.kind is not None:
+            _set_kind(doc, body.kind)
         if body.is_favorite is not None:
             doc.is_favorite = body.is_favorite
         await repo.commit()
@@ -1592,8 +1614,9 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
         "document_id": document_id,
         "updated": True,
         "is_favorite": doc.is_favorite,
+        "kind": _kind(doc),
     }
-    if body.content_type is not None:
+    if body.content_type is not None or body.kind is not None:
         response["note"] = "Re-ingest document to apply new chunking strategy."
     return response
 

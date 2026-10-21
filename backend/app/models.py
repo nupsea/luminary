@@ -85,6 +85,9 @@ class DocumentModel(Base):
     form: Mapped[str | None] = mapped_column(String(20), nullable=True)
     domain: Mapped[str | None] = mapped_column(String(20), nullable=True)
     register: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # "reader" when a reader chose the kind, so ingestion keeps form and domain
+    # instead of re-measuring them; null when they were measured.
+    facets_source: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # What the importer captured and what it could not: {"captured": {...},
     # "dropped": {...}, "notes": [...], "complete": bool}. Persisted so a
     # partial import is visible to the reader rather than a silence they have
