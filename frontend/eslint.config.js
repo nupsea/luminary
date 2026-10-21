@@ -11,6 +11,13 @@ const NO_RAW_FETCH = {
     'Use the apiClient (request / apiGet / apiPost / ...) from "@/lib/apiClient" instead of raw fetch(). The only legitimate exceptions are SSE streaming, binary downloads, and local-asset reads; add `// eslint-disable-next-line no-restricted-syntax` on the line and a short comment explaining why.',
 }
 
+// I-67
+const NO_INLINE_INNER_HTML = {
+  selector: 'JSXAttribute[name.name="dangerouslySetInnerHTML"] > JSXExpressionContainer > ObjectExpression',
+  message:
+    'React 19 rewrites innerHTML whenever this object is new, so an inline {__html} re-parses the markup on every render. Build it with useMemo keyed on the string (I-67).',
+}
+
 export default defineConfig([
   globalIgnores(['dist']),
   {
@@ -49,7 +56,7 @@ export default defineConfig([
       // budget and the count roughly doubled while nothing ever failed. Every
       // legitimate exception carries an inline disable comment and a reason, so
       // adding one is a decision someone makes rather than a number that drifts.
-      'no-restricted-syntax': ['error', NO_RAW_FETCH],
+      'no-restricted-syntax': ['error', NO_RAW_FETCH, NO_INLINE_INNER_HTML],
     },
   },
 ])

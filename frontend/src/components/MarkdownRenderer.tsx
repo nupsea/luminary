@@ -129,6 +129,7 @@ function MermaidBlock({ chart }: { chart: string }) {
       cancelled = true
     }
   }, [chart, generatedId])
+  const svgHtml = useMemo(() => ({ __html: svg }), [svg])
 
   if (error) {
     return (
@@ -149,7 +150,7 @@ function MermaidBlock({ chart }: { chart: string }) {
   return (
     <div
       className="not-prose my-4 overflow-auto rounded border border-border bg-background p-3"
-      dangerouslySetInnerHTML={{ __html: svg }}
+      dangerouslySetInnerHTML={svgHtml}
     />
   )
 }
