@@ -112,8 +112,7 @@ class MockEntityExtractor:
     def extract(
         self,
         chunks: list[dict],
-        content_type: str = "unknown",
-        is_technical: bool | None = None,
+        is_technical: bool = False,
     ) -> list[dict]:
         self.calls += 1
         if not chunks:

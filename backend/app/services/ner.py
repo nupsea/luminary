@@ -34,7 +34,6 @@ from app.config import get_settings
 from app.services import model_prefetch
 from app.services.model_loading import MODEL_LOAD_LOCK, offline_model_load
 from app.storage import machine_root
-from app.types import is_technical_content
 
 logger = logging.getLogger(__name__)
 
@@ -476,8 +475,7 @@ class EntityExtractor:
     def extract(
         self,
         chunks: list[dict],
-        content_type: str = "unknown",
-        is_technical: bool | None = None,
+        is_technical: bool = False,
     ) -> list[dict]:
         """Extract named entities from a list of chunk dicts.
 
@@ -485,10 +483,8 @@ class EntityExtractor:
 
         Args:
             chunks: Chunk dicts produced by the ingestion pipeline.
-            content_type: Document content type (e.g. "code", "book", "paper").
-            is_technical: Persisted technical-content flag; decides the tech entity
-                types when set. Falls back to content_type when None, which is why a
-                technical talk stored as "audio" needs the flag to keep TECHNOLOGY.
+            is_technical: The document's `DocumentProfile.is_technical`; decides the
+                tech entity types.
 
         Returns:
             List of entity dicts:
@@ -502,9 +498,10 @@ class EntityExtractor:
         # For tech content, include the 6 tech-specific types alongside existing ones.
         # For non-tech documents, exclude TECHNOLOGY and all 6 tech-specific types —
         # these are almost always false positives in literary/prose text.
-        is_tech = is_technical_content(content_type, is_technical)
         _non_tech = {"TECHNOLOGY"} | _TECH_ENTITY_TYPES
-        active_types = ENTITY_TYPES if is_tech else [t for t in ENTITY_TYPES if t not in _non_tech]
+        active_types = (
+            ENTITY_TYPES if is_technical else [t for t in ENTITY_TYPES if t not in _non_tech]
+        )
 
         # Base confidence threshold — reduces low-confidence false positives while
         # retaining genuine entities that GLiNER is confident about.
@@ -540,7 +537,7 @@ class EntityExtractor:
 
             batch_results: list[list[dict]] = [[] for _ in batch]
 
-            if code_group and is_tech:
+            if code_group and is_technical:
                 code_texts = [c["text"] for _, c in code_group]
                 code_preds = model.batch_predict_entities(
                     code_texts, active_types, threshold=CODE_THRESHOLD
@@ -550,14 +547,14 @@ class EntityExtractor:
 
             if prose_group:
                 prose_texts = [c["text"] for _, c in prose_group]
-                # Include code_group in prose pass if not is_tech (no split needed)
+                # Include code_group in prose pass if not is_technical (no split needed)
                 prose_preds = model.batch_predict_entities(
                     prose_texts, active_types, threshold=PROSE_THRESHOLD
                 )
                 for (i, _), preds in zip(prose_group, prose_preds, strict=True):
                     batch_results[i] = preds
 
-            if not is_tech and code_group:
+            if not is_technical and code_group:
                 # Non-tech doc: run code chunks at prose threshold too
                 code_texts = [c["text"] for _, c in code_group]
                 code_preds = model.batch_predict_entities(
@@ -620,7 +617,7 @@ class EntityExtractor:
         logger.info(
             "NER complete",
             extra={
-                "content_type": content_type,
+                "is_technical": is_technical,
                 "chunks_processed": len(chunks),
                 "entities_extracted": len(entities),
                 "active_types": active_types,
