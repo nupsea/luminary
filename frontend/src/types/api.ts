@@ -1899,7 +1899,7 @@ export interface paths {
         get?: never;
         /**
          * Set Bookmark
-         * @description Place the document's one PDF bookmark, moving it if one exists.
+         * @description Place the document's one bookmark, moving it if one exists.
          *
          *     Returns 404 if the document does not exist.
          */
@@ -1907,7 +1907,7 @@ export interface paths {
         post?: never;
         /**
          * Clear Bookmark
-         * @description Remove the document's PDF bookmark. Removing an absent one succeeds.
+         * @description Remove the document's bookmark. Removing an absent one succeeds.
          *
          *     Returns 404 if the document does not exist.
          */
@@ -10402,8 +10402,14 @@ export interface components {
             last_pdf_page: number | null;
             /** Last Epub Chapter Index */
             last_epub_chapter_index: number | null;
+            /** Last Epub Block Index */
+            last_epub_block_index?: number | null;
             /** Pdf Bookmark Page */
             pdf_bookmark_page?: number | null;
+            /** Epub Bookmark Chapter Index */
+            epub_bookmark_chapter_index?: number | null;
+            /** Epub Bookmark Block Index */
+            epub_bookmark_block_index?: number | null;
         };
         /** ReadingProgressRequest */
         ReadingProgressRequest: {
@@ -10783,6 +10789,8 @@ export interface components {
             last_pdf_page?: number | null;
             /** Last Epub Chapter Index */
             last_epub_chapter_index?: number | null;
+            /** Last Epub Block Index */
+            last_epub_block_index?: number | null;
         };
         /** SearchResponse */
         SearchResponse: {
@@ -11130,10 +11138,20 @@ export interface components {
              */
             ended_at: string;
         };
-        /** SetBookmarkRequest */
+        /**
+         * SetBookmarkRequest
+         * @description A PDF page, or an EPUB chapter and the block inside it.
+         */
         SetBookmarkRequest: {
             /** Pdf Page */
-            pdf_page: number;
+            pdf_page?: number | null;
+            /** Epub Chapter Index */
+            epub_chapter_index?: number | null;
+            /**
+             * Epub Block Index
+             * @default 0
+             */
+            epub_block_index: number;
         };
         /** SettingsUpdate */
         SettingsUpdate: {

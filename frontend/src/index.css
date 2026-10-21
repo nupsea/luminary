@@ -592,6 +592,40 @@ html {
   margin: 1.75rem 0;
 }
 
+/* Keeps a footnote marker from opening a gap between lines. */
+.epub-reader-content sup,
+.epub-reader-content sub {
+  line-height: 0;
+}
+
+.epub-reader-content [data-type="footnotes"] {
+  margin-top: 2.5rem;
+  border-top: 1px solid hsl(var(--border));
+  padding-top: 1rem;
+  font-size: 0.85em;
+}
+
+.epub-reader-content [data-type="equation"] {
+  margin: 1.25rem 0;
+  overflow-x: auto;
+}
+
+/* The bookmarked block, marked like the PDF viewer's bookmarked page. */
+.epub-reader-content [data-bookmark] {
+  position: relative;
+}
+
+.epub-reader-content [data-bookmark]::before {
+  content: "";
+  position: absolute;
+  left: -1rem;
+  top: 0;
+  width: 0.5rem;
+  height: 1.25rem;
+  background-color: rgb(220 38 38);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
+}
+
 .epub-reader-content [data-type="programlisting"] pre,
 .epub-reader-content pre {
   padding: 0.75em 1em;

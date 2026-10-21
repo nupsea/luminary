@@ -189,3 +189,51 @@ async def test_bookmark_rejects_page_zero_and_missing_doc(test_db) -> None:
         assert r.status_code == 404
         r = await client.delete("/documents/nonexistent-doc-id/bookmark")
         assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_an_epub_keeps_its_place_inside_a_chapter_and_its_bookmark(test_db) -> None:
+    """A chapter runs to 20,000 words, so the chapter alone does not say where reading stopped."""
+    from httpx import ASGITransport, AsyncClient
+
+    doc_id = str(uuid.uuid4())
+    await _create_document(doc_id)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            f"/documents/{doc_id}/position",
+            json={"last_epub_chapter_index": 5, "last_epub_block_index": 212},
+        )
+        assert r.status_code == 200
+        r = await client.put(
+            f"/documents/{doc_id}/bookmark",
+            json={"epub_chapter_index": 3, "epub_block_index": 40},
+        )
+        assert r.status_code == 200
+
+        body = (await client.get(f"/documents/{doc_id}/position")).json()
+        assert (body["last_epub_chapter_index"], body["last_epub_block_index"]) == (5, 212)
+        assert (body["epub_bookmark_chapter_index"], body["epub_bookmark_block_index"]) == (3, 40)
+        assert body["pdf_bookmark_page"] is None
+
+        assert (await client.delete(f"/documents/{doc_id}/bookmark")).status_code == 204
+        body = (await client.get(f"/documents/{doc_id}/position")).json()
+        assert body["epub_bookmark_chapter_index"] is None
+        assert body["epub_bookmark_block_index"] is None
+        assert body["last_epub_block_index"] == 212
+
+
+@pytest.mark.asyncio
+async def test_a_bookmark_is_a_page_or_a_chapter_never_both_or_neither(test_db) -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    doc_id = str(uuid.uuid4())
+    await _create_document(doc_id)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        url = f"/documents/{doc_id}/bookmark"
+        assert (await client.put(url, json={})).status_code == 422
+        both = {"pdf_page": 3, "epub_chapter_index": 1}
+        assert (await client.put(url, json=both)).status_code == 422
+        negative = {"epub_chapter_index": 1, "epub_block_index": -1}
+        assert (await client.put(url, json=negative)).status_code == 422
