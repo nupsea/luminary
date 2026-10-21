@@ -17,13 +17,13 @@ import type {
 
 export async function fetchSearch(
   q: string,
-  contentTypes: string,
+  kinds: string,
 ): Promise<DocumentGroup[]> {
   try {
     const data = await apiGet<{ results: DocumentGroup[] }>("/search", {
       q,
       limit: 30,
-      content_types: contentTypes || undefined,
+      kinds: kinds || undefined,
     })
     return data.results
   } catch {

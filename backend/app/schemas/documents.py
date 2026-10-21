@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from app.schemas.membership import CollectionRef
-from app.types import ContentType, DocumentKind
+from app.types import ContentType, DocumentKind, EditableKind
 
 
 class DocumentFacets(BaseModel):
@@ -101,6 +101,8 @@ class PatchDocumentRequest(BaseModel):
     title: str | None = None
     tags: list[str] | None = None
     content_type: ContentType | None = None
+    # Sets the facets that derive this kind; ingestion keeps them from then on.
+    kind: EditableKind | None = None
     is_favorite: bool | None = None
 
 

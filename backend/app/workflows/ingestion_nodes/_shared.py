@@ -23,7 +23,10 @@ from app.repos.document_repo import DocumentRepo
 from app.services.background import task_registry
 from app.services.llm_admission import awaited
 from app.services.parser import DocumentParser
-from app.types import ContentType  # noqa: F401  re-exported via app.workflows.ingestion
+from app.types import (
+    FACETS_FROM_READER,
+    ContentType,  # noqa: F401  re-exported via app.workflows.ingestion
+)
 
 # Module-level set holding fire-and-forget background tasks (objective
 # extraction, pregenerate, etc.). All ingestion nodes share this so the
@@ -354,5 +357,18 @@ async def _persist_classification(
     if register is not None:
         values["register"] = register
     async with get_session_factory()() as session:
-        await DocumentRepo(session).update_fields(document_id, **values)
+        repo = DocumentRepo(session)
+        if await reader_facets(repo, document_id) is not None:
+            # A kind the reader chose outranks a measurement (#223).
+            for key in ("form", "domain", "is_technical"):
+                values.pop(key)
+        await repo.update_fields(document_id, **values)
         await session.commit()
+
+
+async def reader_facets(repo: DocumentRepo, document_id: str) -> tuple[str, str | None] | None:
+    """(form, domain) when a reader chose this document's kind, else None."""
+    doc = await repo.get(document_id)
+    if doc is None or doc.facets_source != FACETS_FROM_READER or not doc.form:
+        return None
+    return doc.form, doc.domain

@@ -107,6 +107,7 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | VI. Extras | 0.21.0 | Anki import; the capture extension, watch folder and Obsidian export; card review on mobile | #137, #124, #121, #25, #103, #26, #300, #314 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an offline review on the phone merges without overwriting FSRS state |
 | VII. Languages | 0.22.0 | Multi-language — **conditional** | | Non-English degradation measured on the current stack first; a swap ships only through 0.17.0's rail; a no-go decision is an allowed outcome and moves the swap to 1.1 |
 | | 1.0.0-rc → 1.0.0 | The release. **Checkpoint E** | | Zero open `bug` issues; every rung's exit gate green together, on one build; the code-quality targets met |
+| After 1.0 | 1.1.0 | Multi-page web import (HTML books, Confluence); Luminary as a read-only MCP server (§13) | #348, #349 | Each test source imports as one document whose sections match its ground-truth TOC, and 10 questions per source are answered with correct citations, read by hand; an MCP client receives passages only from collections the user scoped, and nothing with the setting off or without the token |
 
 **1.0.0 itself carries no new features.** Work not on a rung above is 1.1, not 1.0.
 
@@ -790,7 +791,7 @@ Checkpoint C (§7), so open-ended research cannot hold the architecture back.
 |---|---|---|
 | 0. Close-outs | **Open: #286, #211, #231; the rest closed** (row 0.17.0 above). Fix plain-text books stored out of order or under prose headings (#332, #333). Measure #252, #286 and #307 on a fresh library (`make eval-full`, `make eval-topics` for F1 ≥ 0.70 on d2l, thinkpython2's first chapter cards, Usher's register) and close or reopen each with the numbers. Fix the CI `database is locked` flake (#211). Put #100's measurements (§4) on the issue and close it or narrow it to what is unmeasured. Run the chapter practice offer, panel and Study list in the desktop shell (#231) | The fixes are merged and need a number to close; #211 fails PRs at random for the whole rung |
 | 1. SQL into repos | **Done** (#337, #338, #339). The last 79 statements outside `repos/`: the two retrieval services (6, under the `retrieval-change` gate: `make eval-full` scores equal when both builds read one library), the chat runtime (31), the ingestion and concept workflows (25), scripts (16) and `main.py` (1). No behaviour change beyond two bugs found on the way (CHANGELOG) | The scope is then added in repos alone, which is what the layer-linter rule checks |
-| 2. Schema | #223's wire and column, in this order. (a) **Done (#341).** A `kind` derived from format, form and domain on every document response, with the list filter and counts; the label is not stored (decided 2026-10-20; 9 of 69 dev-library documents relabel). (b) The frontend's badges, filter chips and reading profile read `kind` and the facets; the card's type menu is withdrawn until (c). Stale and wrong forms now show as wrong labels: re-measure the forms of documents from before 0.16.0 (`app.scripts.remeasure_domain --apply`; 9 of 69 change on the dev library), and fix DDIA classified `entries` by its dated citations (#343). (c) Ingestion, search and chat filters take the kind; the type menu edits facets, with a measurement of whether a reader's kind overrides the measured form, since a reprocess re-measures it; the remaining backend readers go onto `DocumentProfile`. (d) The migration fills any null facet as `DocumentProfile.of` resolves it today (rows from before 0.16.0 were filled by `f4b2c8e1a730`), then drops `content_type`, `is_technical` and the LanceDB field. Then `library_id` on the user-owned and LanceDB tables. Upgrade test from a 0.16.2 library | Migrations are one-way (`releasing.md`); one batch needs one upgrade test, not two |
+| 2. Schema | #223's wire and column, in this order. (a) **Done (#341).** A `kind` derived from format, form and domain on every document response, with the list filter and counts; the label is not stored (decided 2026-10-20; 9 of 69 dev-library documents relabel). (b) **Done (#344).** The frontend's badges, filter chips and reading profile read `kind` and the facets. Stale and wrong forms now show as wrong labels: re-measure the forms of documents from before 0.16.0 (`app.scripts.remeasure_domain --apply`; 9 of 69 change on the dev library), and DDIA classified `entries` by its dated citations is fixed (#343, #345). (c) The type menu edits facets marked `facets_source = "reader"`, which ingestion and `remeasure_domain` keep rather than re-measure, so only a reader's own choice overrides a measurement and classifier fixes still reach every other document; then ingestion, search and chat filters take the kind and the remaining backend readers go onto `DocumentProfile`. (d) The migration fills any null facet as `DocumentProfile.of` resolves it today (rows from before 0.16.0 were filled by `f4b2c8e1a730`), then drops `content_type`, `is_technical` and the LanceDB field. Then `library_id` on the user-owned and LanceDB tables. Upgrade test from a 0.16.2 library | Migrations are one-way (`releasing.md`); one batch needs one upgrade test, not two |
 | 3. Request context | `principal` and `library` from `RequestAuthMiddleware` to every repo; `library_root` takes the library; the layer-linter rule; a test that a second library sees none of the first's documents, notes, cards, vectors or graph rows | The first two parts of the exit gate |
 | 4. Settings and shared resources | `get_settings()` split; API keys scoped to the principal; the shared-resource audit, with a test for each defect it finds | Preferences are keyed on the library from batch 3 |
 | 5. Snapshot and the re-embed rail | The snapshot format and restore, then a resumable re-embed, proven against the current 384-dim embedder: a re-embed killed midway and restarted matches a clean run | The last two parts of the exit gate; a snapshot is of one library, so it follows batch 3 |
@@ -952,10 +953,27 @@ needs a different provider.
 The candidate is Checkpoint E: the checkpoint gate, plus zero open `bug` issues, plus every rung's exit
 gate green together on one build. 1.0.0 is that build with no new features.
 
+### 13. Web content and an MCP server — 1.1.0
+
+**Multi-page web content is imported, not searched live** (#348). An HTML book or a Confluence page
+tree becomes one document with chapters, so citations, the reader locus and chapter cards work
+unchanged; `oreilly_service.py` already does this for one site. MCP is only a fetch transport here:
+the local default model is weak at tool calling. #348 is a spike, and dropping the feature is an
+allowed outcome.
+
+**xerj is not the integration.** It indexes local folders only (no crawler, no Confluence connector),
+and its `file:line` hits come from a second index and embedder that citations and cards cannot use.
+
+**The MCP server is read-only, off by default and scoped to collections the user picks** (#349).
+An outside model writes the answer, so none of our grounding checks run; every result leaves the
+machine to that model's provider; imported pages are untrusted text handed to an agent with shell
+tools; and the backend leaves CSRF open, so it is a stdio adapter with a token rather than a new
+HTTP listener. No write tools: notes or cards from an outside model would pollute the learner record.
+
 ### Bugs to 1.0
 
-- **One GitHub milestone per rung** (`0.13.x` to `0.22.0`, then `1.0.0`). Every open issue carries
-  one; the table above is the mapping.
+- **One GitHub milestone per rung** (`0.13.x` to `0.22.0`, then `1.0.0`; `1.1.0` after the
+  release). Every open issue carries one; the table above is the mapping.
 - **A new bug is triaged when filed** to the current rung or the next one.
 - **A checkpoint is not tagged while a `bug` issue is milestoned to its phase or an earlier one.**
 - **A defect found while writing this file becomes an issue**, and the prose keeps only its link

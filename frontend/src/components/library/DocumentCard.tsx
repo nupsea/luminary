@@ -95,6 +95,9 @@ const KIND_BADGE: Record<DocumentKind, { label: string; className: string; icon:
 const YOUTUBE_BADGE = { label: "YouTube", className: "bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/50" }
 const KINDLE_SOURCE_BADGE = { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/50" }
 
+// What a reader can choose from the badge. A recording's kind follows its file format.
+const EDITABLE_KINDS: DocumentKind[] = ["book", "technical", "paper", "conversation", "notes"]
+
 // Accent band colors per kind (top-border gradient effect)
 const ACCENT_COLORS: Record<DocumentKind | "youtube", string> = {
   book: "from-indigo-500 to-blue-500",
@@ -150,6 +153,9 @@ export function DocumentCard({
     ({ action }) => action !== "viz" || isSurfaceVisible("map"),
   )
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [kindMenuOpen, setKindMenuOpen] = useState(false)
+  const kindMenuRef = useRef<HTMLDivElement>(null)
+  const canChangeKind = EDITABLE_KINDS.includes(doc.kind)
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const actionMenuRef = useRef<HTMLDivElement>(null)
   const [collectionPickerOpen, setCollectionPickerOpen] = useState(false)
@@ -189,8 +195,11 @@ export function DocumentCard({
 
   // Close popover on outside click
   useEffect(() => {
-    if (!actionMenuOpen) return
+    if (!kindMenuOpen && !actionMenuOpen) return
     function handleClick(e: MouseEvent) {
+      if (kindMenuOpen && kindMenuRef.current && !kindMenuRef.current.contains(e.target as Node)) {
+        setKindMenuOpen(false)
+      }
       // The menu is portalled to body, so it is not inside actionMenuRef.
       if (
         actionMenuOpen &&
@@ -204,7 +213,20 @@ export function DocumentCard({
     }
     document.addEventListener("mousedown", handleClick)
     return () => document.removeEventListener("mousedown", handleClick)
-  }, [actionMenuOpen])
+  }, [kindMenuOpen, actionMenuOpen])
+
+  async function handleKindChange(kind: DocumentKind) {
+    setKindMenuOpen(false)
+    if (kind === doc.kind) return
+    try {
+      await apiPatch(`/documents/${doc.id}`, { kind })
+      void queryClient.invalidateQueries({ queryKey: ["documents"] })
+      void queryClient.invalidateQueries({ queryKey: ["library-facets"] })
+      void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
+    } catch {
+      toast.error("Could not change the document's type")
+    }
+  }
 
   const flatCollections = collections ? flattenCollectionTree(collections) : []
   const showCollectionFilter = flatCollections.length > 7
@@ -566,16 +588,48 @@ export function DocumentCard({
         </div>
       </div>
 
-      <div className="mt-1.5">
-        <span
+      <div className="mt-1.5 relative inline-block" ref={kindMenuRef}>
+        <button
+          type="button"
+          disabled={!canChangeKind}
+          onClick={(e) => {
+            e.stopPropagation()
+            setKindMenuOpen((v) => !v)
+          }}
+          title={canChangeKind ? "Change document type" : undefined}
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border shadow-sm",
+            "flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors border shadow-sm disabled:cursor-default",
             badge.className,
           )}
         >
           {badge.icon && <badge.icon size={10} />}
           {badge.label}
-        </span>
+        </button>
+
+        {kindMenuOpen && (
+          <div
+            className="absolute left-0 top-full z-20 mt-1 w-52 rounded-lg border border-border bg-background p-2 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mb-1.5 px-1 text-xs text-muted-foreground">
+              Reprocess the document to re-chunk it as this type.
+            </p>
+            {EDITABLE_KINDS.map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => void handleKindChange(k)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                  doc.kind === k && "font-medium",
+                )}
+              >
+                {doc.kind === k ? <Check size={12} className="shrink-0 text-primary" /> : <span className="w-3" />}
+                {KIND_BADGE[k].label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">

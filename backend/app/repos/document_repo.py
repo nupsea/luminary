@@ -19,7 +19,7 @@ from datetime import UTC, date, datetime
 from typing import NamedTuple
 
 from fastapi import Depends
-from sqlalchemy import ColumnElement, and_, case, delete, func, or_, select, text, update
+from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
@@ -35,17 +35,8 @@ from app.models import (
     SectionModel,
 )
 from app.repos._helpers import get_or_404
-from app.types import DEFAULT_KIND, KIND_RULES
 
 logger = logging.getLogger(__name__)
-
-
-def kind_expr() -> ColumnElement[str]:
-    """`types.document_kind` as a SQL expression, so a kind filters and counts in the query."""
-    return case(
-        *[(getattr(DocumentModel, col).in_(values), kind) for col, values, kind in KIND_RULES],
-        else_=DEFAULT_KIND,
-    )
 
 
 class DocumentRepo:
@@ -180,12 +171,6 @@ class DocumentRepo:
     async def complete_ids(self) -> list[str]:
         result = await self.session.execute(
             select(DocumentModel.id).where(DocumentModel.stage == "complete")
-        )
-        return list(result.scalars())
-
-    async def ids_of_types(self, content_types: Sequence[str]) -> list[str]:
-        result = await self.session.execute(
-            select(DocumentModel.id).where(DocumentModel.content_type.in_(content_types))
         )
         return list(result.scalars())
 
@@ -480,11 +465,6 @@ class DocumentRepo:
             {row[0]: row[1] for row in by_type.all() if row[0]},
             {row[0]: row[1] for row in by_format.all() if row[0]},
         )
-
-    async def kind_counts(self) -> dict[str, int]:
-        kind = kind_expr()
-        rows = await self.session.execute(select(kind, func.count(DocumentModel.id)).group_by(kind))
-        return {row[0]: row[1] for row in rows.all()}
 
     async def favorite_count(self) -> int:
         result = await self.session.execute(

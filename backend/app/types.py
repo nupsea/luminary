@@ -558,7 +558,7 @@ DocumentKind = Literal[
     "book", "technical", "paper", "conversation", "notes", "code", "audio", "video"
 ]
 
-# First match wins. `document_repo.kind_expr` compiles the same table to SQL for filters.
+# First match wins. `document_kind_repo.kind_expr` compiles the same table to SQL for filters.
 _KindRule = tuple[Literal["format", "form", "domain"], tuple[str, ...], DocumentKind]
 KIND_RULES: tuple[_KindRule, ...] = (
     ("format", AUDIO_EXTENSIONS, "audio"),
@@ -579,6 +579,28 @@ def document_kind(format: str | None, form: str | None, domain: str | None) -> D
         if values[column] in matches:
             return kind
     return DEFAULT_KIND
+
+
+# What a reader can choose from a card. Media follows the file's format, and code its extension.
+EditableKind = Literal["book", "technical", "paper", "conversation", "notes"]
+MEDIA_FORMATS = (*AUDIO_EXTENSIONS, "mp4")
+FACETS_FROM_READER = "reader"
+
+_FORM_OF_KIND: dict[str, str] = {"paper": "paper", "conversation": "dialogue", "notes": "entries"}
+_KIND_FORMS = frozenset(f for column, forms, _ in KIND_RULES if column == "form" for f in forms)
+
+
+def facets_for_kind(kind: EditableKind, form: str | None) -> dict[str, str]:
+    """The form and domain that make `document_kind` answer `kind`, keeping what it can.
+
+    A book or technical document keeps a form of its own (prose, article, reference,
+    script); a form that names another kind gives way to the kind's usual shape.
+    """
+    if kind in _FORM_OF_KIND:
+        return {"form": _FORM_OF_KIND[kind]}
+    if not form or form in _KIND_FORMS:
+        form = "prose" if kind == "book" else "reference"
+    return {"form": form, "domain": "general" if kind == "book" else "technical"}
 
 
 # Technical-content gate

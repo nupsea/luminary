@@ -23,7 +23,7 @@ describe("adaptDocumentResults", () => {
         {
           document_id: "doc-1",
           document_title: "The Time Machine",
-          content_type: "book",
+          kind: "book",
           matches: [
             {
               chunk_id: "c1",
