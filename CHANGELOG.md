@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Re-indexing a document's entities dropped its book and chapter names from keyword search.** The re-index writes the same rows ingestion does.
 
 ### Changed
+- **A document's type in the library now comes from what was measured about it** (its format, shape and subject), not from the type chosen at upload. Cards, the filter chips and the reader show it; 9 of 69 documents in a test library changed label. Changing a document's type from its card is unavailable until it can survive a reprocess (#223).
 - **No SQL runs outside `repos/` any more**: the retriever, the chat runtime, the ingestion and concept workflows, the maintenance scripts and startup followed the routers and services (79 statements to 0). Retrieval scores are unchanged on one library.
 
 ## [0.16.2] - 2026-10-19

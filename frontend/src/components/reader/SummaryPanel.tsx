@@ -19,16 +19,13 @@ type PanelTab = SummaryMode | "references" | "tags"
 
 interface SummaryPanelProps {
   documentId: string
-  contentType: string
   /** The document's shape. Absent on rows nothing has classified. */
   form?: string | null
 }
 
-export function SummaryPanel({ documentId, contentType, form }: SummaryPanelProps) {
-  // Gated on form, not content_type: a recorded talk is stored as `audio` and
-  // could never reach this tab, though it is the same speaker-turn content as
-  // a meeting (#104). Falls back to content_type for unclassified rows.
-  const isDialogue = form ? form === "dialogue" : contentType === "conversation"
+export function SummaryPanel({ documentId, form }: SummaryPanelProps) {
+  // Gated on form: a recorded talk is the same speaker-turn content as a meeting (#104).
+  const isDialogue = form === "dialogue"
   const summaryTabs: SummaryTabDef[] = isDialogue
     ? [...SUMMARY_TABS, CONVERSATION_TAB]
     : SUMMARY_TABS

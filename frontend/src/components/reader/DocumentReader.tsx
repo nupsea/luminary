@@ -6,8 +6,7 @@ import { toast } from "sonner"
 
 import type { ExplainMode } from "@/components/reader/SelectionActionBar"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
-import type { ContentType } from "@/components/library/types"
-import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
+import { KIND_ICONS, KIND_LABELS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
 import { ApiError, apiDelete, apiGet, apiPost, apiPut, request } from "@/lib/apiClient"
 import { deleteNote } from "@/lib/notesApi"
 import { API_BASE } from "@/lib/config"
@@ -398,8 +397,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // Video player state — only active for video documents
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
-  const isAudio = doc?.content_type === "audio"
-  const isVideo = doc?.content_type === "video"
+  const isAudio = doc?.kind === "audio"
+  const isVideo = doc?.kind === "video"
   const isYouTube = isYouTubeDoc(doc ?? {})
 
   // Pre-calculate section map for O(1) lookups in highlight loops
@@ -1254,7 +1253,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           searchSnippet={searchSnippetMap.get(section.id)}
           progressPct={progressBySectionId.get(section.id)}
           annotations={annotationsBySection.get(section.id) ?? []}
-          feynmanEnabled={FEYNMAN_VISIBLE && (doc.content_type === "tech_book" || doc.content_type === "tech_article")}
+          feynmanEnabled={FEYNMAN_VISIBLE && doc.kind === "technical"}
           isActive={activeSectionId === section.id}
           lastPracticedAt={lastPracticedBySection?.get(section.id)}
           childCount={sectionTree.descendantCount.get(section.id) ?? 0}
@@ -1355,7 +1354,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     )
   }
 
-  const Icon = CONTENT_TYPE_ICONS[doc.content_type as ContentType] ?? CONTENT_TYPE_ICONS.notes
+  const Icon = KIND_ICONS[doc.kind]
 
   const renderedHighlightItems = (docAnnotations ?? []).map((ann) => {
     const sectionHeading = sectionMap.get(ann.section_id)?.heading ?? ""
@@ -1572,7 +1571,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 <h1 className="text-lg font-bold text-foreground">{doc.title}</h1>
                 <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                   <Icon size={14} />
-                  <span className="capitalize">{doc.content_type}</span>
+                  <span>{KIND_LABELS[doc.kind]}</span>
                   <span>·</span>
                   <span>{formatWordCount(doc.word_count)}</span>
                   <span>·</span>
@@ -1780,7 +1779,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 initialSectionId={readTargetSectionId}
                 annotations={docAnnotations ?? []}
                 highlightsVisible={highlightsVisible}
-                contentType={doc.content_type}
+                kind={doc.kind}
+                form={doc.facets?.form}
                 structureType={doc.structure_type}
                 extractionReport={doc.extraction_report}
                 sourceUrl={doc.source_url}
@@ -2162,7 +2162,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           />
           <SummaryPanel
             documentId={documentId}
-            contentType={doc.content_type}
             form={doc.facets?.form}
           />
           </div>

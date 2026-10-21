@@ -491,7 +491,8 @@ interface ReadViewProps {
   highlightsVisible?: boolean
   /** Drives the reading profile. Omitted only by callers that have no document
    *  loaded yet, which fall back to the article profile. */
-  contentType?: string | null
+  kind?: string | null
+  form?: string | null
   structureType?: string | null
   /** What the importer captured and what it could not. Undefined means fidelity
    *  was never measured for this document, which is not the same as clean. */
@@ -522,7 +523,8 @@ export function ReadView({
   initialSectionId,
   annotations = [],
   highlightsVisible = true,
-  contentType,
+  kind,
+  form,
   structureType,
   extractionReport,
   sourceUrl,
@@ -576,8 +578,8 @@ export function ReadView({
   }, [activeCitation, citationTrigger, citedSectionId])
 
   const profile = useMemo(
-    () => readingProfile({ content_type: contentType, structure_type: structureType }),
-    [contentType, structureType],
+    () => readingProfile({ kind, form, structure_type: structureType }),
+    [kind, form, structureType],
   )
   const { prefs, update: updatePref, reset: resetPrefs } = useReaderPreferences()
   const [settingsOpen, setSettingsOpen] = useState(false)

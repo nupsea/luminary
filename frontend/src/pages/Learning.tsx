@@ -21,7 +21,7 @@ import { IngestingPlaceholder } from "@/components/library/IngestingPlaceholder"
 import { SearchBar } from "@/components/library/SearchBar"
 import { SortSelect } from "@/components/library/SortSelect"
 import { ViewToggle } from "@/components/library/ViewToggle"
-import type { ContentType, SortOption } from "@/components/library/types"
+import type { DocumentKind, SortOption } from "@/components/library/types"
 import { DocumentReader } from "@/components/reader/DocumentReader"
 import { useSelectDocument } from "@/hooks/useSelectDocument"
 import { buildDocActionDetail } from "@/lib/docActionUtils"
@@ -115,7 +115,7 @@ export default function Learning() {
 
   const [search, setSearch] = useState(() => (!docParam ? searchParams.get("search") ?? "" : ""))
   const [favoriteOnly, setFavoriteOnly] = useState(() => searchParams.get("favorite") === "true")
-  const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
+  const [selectedTypes, setSelectedTypes] = useState<Set<DocumentKind>>(new Set())
   const [selectedFormats, setSelectedFormats] = useState<Set<string>>(new Set())
   const [sort, setSort] = useState<SortOption>("newest")
   const [page, setPage] = useState(1)
@@ -162,7 +162,7 @@ export default function Learning() {
   const [selectMode, setSelectMode] = useState(false)
   const [bulkConfirm, setBulkConfirm] = useState(false)
 
-  const content_type = selectedTypes.size > 0 ? [...selectedTypes].join(",") : undefined
+  const kind = selectedTypes.size > 0 ? [...selectedTypes].join(",") : undefined
   const format = selectedFormats.size > 0 ? [...selectedFormats].join(",") : undefined
   const filtered = selectedTypes.size > 0 || selectedFormats.size > 0 || favoriteOnly
 
@@ -189,7 +189,7 @@ export default function Learning() {
   const { data: pageData, isLoading, isError, isSuccess, refetch } = useQuery({
     queryKey: [
       "documents",
-      content_type,
+      kind,
       format,
       tagFilter,
       selectedCollectionId,
@@ -200,7 +200,7 @@ export default function Learning() {
     ],
     queryFn: () =>
       fetchDocuments({
-        content_type,
+        kind,
         format,
         tag: tagFilter ?? undefined,
         collection_id: selectedCollectionId ?? undefined,
@@ -288,11 +288,6 @@ export default function Learning() {
     window.dispatchEvent(new CustomEvent("luminary:navigate", { detail }))
   }
 
-  function handleContentTypeChange(_id: string, _contentType: ContentType) {
-    void queryClient.invalidateQueries({ queryKey: ["documents"] })
-    void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
-  }
-
   function handleSelect(id: string, sel: boolean) {
     setSelectedIds((prev) => {
       const next = new Set(prev)
@@ -325,7 +320,7 @@ export default function Learning() {
   }
 
   // Reset page when filters change
-  function handleTypesChange(types: Set<ContentType>) {
+  function handleTypesChange(types: Set<DocumentKind>) {
     setSelectedTypes(types)
     setPage(1)
   }
@@ -714,7 +709,6 @@ export default function Learning() {
                         doc={doc}
                         onClick={handleDocumentClick}
                         onDelete={!selectMode ? handleDeleteDocument : undefined}
-                        onContentTypeChange={handleContentTypeChange}
                         onAction={handleDocAction}
                         selected={selectedIds.has(doc.id)}
                         onSelect={selectMode ? handleSelect : undefined}

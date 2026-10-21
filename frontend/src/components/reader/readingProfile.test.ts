@@ -2,35 +2,43 @@ import { describe, expect, it } from "vitest"
 import { profileSpec, readingProfile, resolveReadingLayout } from "@/components/reader/readingProfile"
 
 describe("readingProfile", () => {
-  it("reads a novel as prose", () => {
-    expect(readingProfile({ content_type: "book", structure_type: "book" })).toBe("prose")
-    expect(readingProfile({ content_type: "epub" })).toBe("prose")
+  it("reads a book as prose", () => {
+    expect(readingProfile({ kind: "book", form: "prose", structure_type: "book" })).toBe("prose")
   })
 
-  it("separates technical books from articles and papers", () => {
-    expect(readingProfile({ content_type: "tech_book" })).toBe("technical")
-    expect(readingProfile({ content_type: "tech_article" })).toBe("article")
-    expect(readingProfile({ content_type: "paper" })).toBe("paper")
+  it("separates technical references from technical articles and papers", () => {
+    expect(readingProfile({ kind: "technical", form: "reference" })).toBe("technical")
+    expect(readingProfile({ kind: "technical", form: "prose" })).toBe("technical")
+    expect(readingProfile({ kind: "technical", form: "article" })).toBe("article")
+    expect(readingProfile({ kind: "paper", form: "paper" })).toBe("paper")
   })
 
-  it("lets structure_type name a layout content_type cannot express", () => {
-    // A recorded technical talk: content_type says audio, only structure_type
+  it("sets independent entries apart with rules", () => {
+    expect(readingProfile({ kind: "notes", form: "entries" })).toBe("reference")
+  })
+
+  it("lets structure_type name a layout the kind cannot express", () => {
+    // A recorded technical talk: the kind says audio, only structure_type
     // knows it is dialogue.
-    expect(readingProfile({ content_type: "audio", structure_type: "chat" })).toBe("dialogue")
-    expect(readingProfile({ content_type: "book", structure_type: "script" })).toBe("script")
+    expect(readingProfile({ kind: "audio", structure_type: "chat" })).toBe("dialogue")
+    expect(readingProfile({ kind: "book", structure_type: "script" })).toBe("script")
   })
 
-  it("does not let a duplicate structure_type override content_type", () => {
-    // "book" and "paper" exist on both axes; content_type is the finer of the
+  it("does not let a duplicate structure_type override the kind", () => {
+    // "book" and "paper" exist on both axes; the kind is the finer of the
     // two, so a technical book must keep its wider measure.
-    expect(readingProfile({ content_type: "tech_book", structure_type: "book" })).toBe("technical")
-    expect(readingProfile({ content_type: "tech_article", structure_type: "paper" })).toBe("article")
+    expect(readingProfile({ kind: "technical", form: "reference", structure_type: "book" })).toBe(
+      "technical",
+    )
+    expect(readingProfile({ kind: "technical", form: "article", structure_type: "paper" })).toBe(
+      "article",
+    )
   })
 
-  it("falls back to article for unknown or missing types", () => {
+  it("falls back to article for unknown or missing kinds", () => {
     expect(readingProfile({})).toBe("article")
-    expect(readingProfile({ content_type: "something_new" })).toBe("article")
-    expect(readingProfile({ content_type: null, structure_type: null })).toBe("article")
+    expect(readingProfile({ kind: "something_new" })).toBe("article")
+    expect(readingProfile({ kind: null, structure_type: null })).toBe("article")
   })
 })
 
