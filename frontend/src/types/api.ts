@@ -10238,6 +10238,8 @@ export interface components {
             tags?: string[] | null;
             /** Content Type */
             content_type?: ("book" | "conversation" | "notes" | "paper" | "audio" | "video" | "epub" | "kindle_clippings" | "tech_book" | "tech_article" | "technical") | null;
+            /** Kind */
+            kind?: ("book" | "technical" | "paper" | "conversation" | "notes") | null;
             /** Is Favorite */
             is_favorite?: boolean | null;
         };
