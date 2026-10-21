@@ -16,6 +16,7 @@ import time
 
 import httpx
 
+from app import proxy_env
 from app.config import get_settings
 from app.services import model_keepwarm, model_prefetch, network_errors, runtime_memory
 from app.services.executors import get_model_executor
@@ -297,7 +298,7 @@ async def run_warmup(only: set[str] | None = None) -> None:
         if missing:
             loop = asyncio.get_running_loop()
             reachable = await loop.run_in_executor(None, model_prefetch.hub_reachable)
-            status.set_offline(not reachable)
+            status.set_offline(not reachable and not proxy_env.pac_only())
             if not reachable:
                 logger.warning("Model prefetch skipped: hub unreachable")
 
@@ -321,7 +322,9 @@ async def run_warmup(only: set[str] | None = None) -> None:
                     status.set_state(
                         key,
                         "failed",
-                        "No internet connection. Luminary needs to download this once.",
+                        network_errors.unreachable(
+                            "No internet connection. Luminary needs to download this once."
+                        ),
                     )
                     return
                 status.set_state(key, "downloading", spec.repo_id)

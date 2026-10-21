@@ -94,3 +94,12 @@ def explain(text: str) -> str | None:
     if found != "inspected" and proxy_env.pac_only():
         return PAC_ONLY
     return _SENTENCES[found]
+
+
+def unreachable(sentence: str) -> str:
+    """*sentence* for a failed internet probe, unless the network's setup script is why.
+
+    Behind a setup script the direct probe fails the way a download would, so the
+    machine is online and the person is told the one setting that fixes it (#155).
+    """
+    return PAC_ONLY if proxy_env.pac_only() else sentence
