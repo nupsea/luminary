@@ -34,7 +34,7 @@ from app.database import get_session_factory
 from app.models import DocumentModel
 from app.repos.document_repo import DocumentRepo
 from app.services.content_classifier import classify_form
-from app.types import TECHNICAL_CONTENT_TYPES, DocumentProfile
+from app.types import FACETS_FROM_READER, TECHNICAL_CONTENT_TYPES, DocumentProfile
 from app.workflows.ingestion_nodes._shared import (
     detect_register,
     detect_technical_content,
@@ -82,6 +82,8 @@ async def main(apply: bool) -> int:
         docs = await DocumentRepo(session).all_documents()
 
         for doc in docs:
+            if doc.facets_source == FACETS_FROM_READER:
+                continue  # a kind the reader chose is not re-measured (#223)
             before = DocumentProfile.from_legacy(doc.content_type, doc.is_technical).domain
             text, sections, word_count, ext = await _read(doc, session)
             has_text = bool(text.strip())
