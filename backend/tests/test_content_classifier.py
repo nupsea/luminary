@@ -339,6 +339,20 @@ class TestFormIsStructuralOnly:
         )
         assert classify_form(long_entries, [], 48000, "txt") == "entries"
 
+    def test_dates_closing_wrapped_citations_are_not_entries(self) -> None:
+        """DDIA's reference lists wrap so the date lands alone on a line, closed by a
+        full stop: 28 of them spread through a textbook passed as dated units (#343)."""
+        chapter = "Replication keeps a copy of the same data on several machines. " * 800
+        cited = "".join(
+            f"{chapter}\n[{i}] A. Author: “A Paper,” at Some Conference,\nMarch {i}, 2013.\n"
+            for i in range(1, 8)
+        )
+        assert classify_form(cited, [], 48000, "pdf") != "entries"
+
+        # The same dates opening each stretch, without the full stop, are a journal.
+        journal = "".join(f"March {i}, 2013\n{chapter}\n" for i in range(1, 8))
+        assert classify_form(journal, [], 48000, "txt") == "entries"
+
     def test_nested_sections_make_a_long_document_a_reference(self) -> None:
         """A manual titles its sections in markdown or a PDF outline rather than
         numbering them in the text, so the markers miss it. It divides for
