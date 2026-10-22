@@ -100,8 +100,8 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | II. Stability | 0.14.x | Gates you can believe — **0.14.5 released** | #50, #101, #88, #157 | `make ci` and `make smoke` both green, nothing quarantined to keep them so; the code-quality ratchets run in `make ci` |
 | | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #158, #159, #161, #185, #186, #187, #188, #189, #191, #204, #205; #100 moved to 0.17.0, #66 to 0.18.0 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
 | III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement; chapter practice — **0.16.2 released; pairing merged (#260); chunking reads the measured form (#223, wire and column open); chapter card quality passed its gate (#305); the Practice panel's cards have not (#330)** | #160, #195, #221, #222, #226, #227, #229; #223 moved to 0.17.0, #162 to 0.18.0 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
-| | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail — **batch 1 done, batch 0 waits on three items (§6).** No SQL is left outside `repos/` (79 statements to 0, #337 to #339), and every `DATA_DIR` join goes through `app/storage.py`. Closed with numbers: #100; #307 (topic F1 1.0 on d2l, 21/21 against thinkpython2's PDF bookmarks); #252 (thinkpython2's chapter cards drawn from pp. 1–22: 10 of 14 before, 0 of 14 and 0 of 17 on two fresh runs); #332 and #333 (1,040 misplaced paragraphs across 41 local books, now 0; the Federalist Papers 8 sections to 85). Open: #286 needs Usher's register across repeated ingests; #211 has a diagnostic (a refused write names SQLite's code and the write holders) and waits for the flake to recur; #231 needs a pass in the desktop shell | #211, #223, #231, #252, #286, #332, #333 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
-| | 0.18.0 | Your own server, plus what Checkpoints A and B left open: the hardware session, the Practice panel's cards and Ask on what the documents do not say (§7). **Checkpoint C** | #24, #66, #99, #155, #156, #162, #322, #330, #334 | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key; zero open `bug` issues milestoned to Phase I, II or III |
+| | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail — **batch 1 done; batch 0 waits on #211 and part of #231; batch 2 is at its last step, the migration (§6).** No SQL is left outside `repos/` (79 statements to 0, #337 to #339), and every `DATA_DIR` join goes through `app/storage.py`. Closed with numbers: #100; #307 (topic F1 1.0 on d2l, 21/21 against thinkpython2's PDF bookmarks); #252 (thinkpython2's chapter cards drawn from pp. 1–22: 10 of 14 before, 0 of 14 and 0 of 17 on two fresh runs); #332 and #333 (1,040 misplaced paragraphs across 41 local books, now 0; the Federalist Papers 8 sections to 85); #286 (Usher stored as narrative on 5 of 5 fresh ingests). Open: #211 recurred on #352's CI as a refused `notes_fts` insert while no other connection held a write, so the cause is not contention between connections and is still unknown; #231 passed in the Linux shell except that finishing a chapter's cards leaves the reader at the last card's source rather than the reading place, and page-range windows and the macOS shell are untested | #211, #223, #231, #252, #286, #332, #333 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
+| | 0.18.0 | Your own server, plus what Checkpoints A and B left open: the hardware session, the Practice panel's cards and Ask on what the documents do not say (§7). **#155 and #156 closed on AWS (2026-10-21).** **Checkpoint C** | #24, #66, #99, #155, #156, #162, #322, #330, #334, #354, #355, #356, #357, #358 | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key; zero open `bug` issues milestoned to Phase I, II or III |
 | IV. Separation | 0.19.0 | Components separated for mobile | | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
 | V. Mobile | 0.20.0 | Topic notes and the draft inbox; mobile reading and note capture. **Checkpoint D** | #173 | A merge that leaves a source note out of every section is refused, a summary claim no source note supports is flagged, and undoing a merge restores every original; a phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated |
 | VI. Extras | 0.21.0 | Anki import; the capture extension, watch folder and Obsidian export; card review on mobile | #137, #124, #121, #25, #103, #26, #300, #314 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an offline review on the phone merges without overwriting FSRS state |
@@ -349,9 +349,8 @@ and `verify-citation` green. Not yet run:
   search in `desktop-installers.yml`), and `make smoke` there.
 - `make smoke` against the bundled macOS app, and the DMG on a cleared data directory.
 
-Defects that were written here have moved to the tracker. #154, #158, #159 and #160 are closed; the
-Windows proxy for model pulls (#155), split GPU/CPU offload (#156) and YouTube verification (#162)
-are on 0.18.0. Three instrument defects listed here were fixed
+Defects that were written here have moved to the tracker. #154, #155, #156, #158, #159 and #160 are closed;
+YouTube verification (#162) is on 0.18.0. Three instrument defects listed here were fixed
 on `master` before the move: `eval-ingest` re-resolves a document by filename (#143), atomicity is
 structural (`is_atomic`), and a judge verdict outside its enum is excluded rather than crashing
 the run.
@@ -440,8 +439,8 @@ download (I-59). Verified on AWS Windows Server 2022, m6i.xlarge with no GPU, be
 its CA in the machine store and set as the Windows proxy: 0.13.3 reproduced the laptop's screen;
 0.13.4 over it downloaded the embedder, installed both optional encoders, ingested a web article and
 an arXiv PDF by URL, reached OpenAI in Hybrid mode, opened the problem report in Notepad, and kept
-loopback off the proxy. Smoke there: 120 pass, 0 fail, 57 skip. Open: Ollama ignores the Windows
-system proxy, and PAC files are not read (#155).
+loopback off the proxy. Smoke there: 120 pass, 0 fail, 57 skip. Ollama ignores the Windows system
+proxy and PAC files are not read; a PAC-only first run names the setting to change (#155, closed by #351).
 
 **0.13.5–0.13.7: a driver is not a usable card (I-60).** Verified on AWS g4dn.xlarge, Windows Server
 2022, T4 with the AWS GRID driver (WDDM), no proxy, installed by the one-command installer. Card
@@ -453,8 +452,8 @@ disabled with the driver left on disk: warm-up measured 0 B on the card, refused
 unloaded the model and showed the banner in the same session; questions, cards and teach-back were
 refused with the key message, while reading, search, reviews and a new ingest worked, and Hybrid with
 a bad key said so. Installing the CUDA runner cleared the verdict and the next launch measured again.
-Open: a split GPU/CPU offload is not refused, and no consumer laptop GPU, integrated graphics or
-Linux GPU host has been measured (#156).
+A split GPU/CPU offload is reported and bannered, measured on a Linux T4 (#156, closed: about 5x
+slower answers); no consumer laptop GPU or integrated graphics has been measured.
 
 **0.13.8: private mode with no connection (I-61).** A desktop demo with Wi-Fi off showed an empty
 library with nothing in the backend log: TanStack Query paused every request after the webview's
@@ -485,9 +484,8 @@ retrieval and the learner record never move with it. Desktop-only code stays in 
 **Exit gate.** First run completes with no terminal on a Windows and a Linux machine that has never
 seen Luminary; each host's verdict names the accelerator it actually has, proven by a platform-pinned
 test and a Windows CI job; `make smoke` green on Windows and against the bundled macOS app; #24,
-#99, #110, #154, #155 and #156 closed. #110 and #154 are closed; the other four need a consumer Windows
-GPU laptop, Linux hardware and a PAC-proxy network, so they moved to 0.18.0 and this gate runs in
-Checkpoint C's hardware session (§7).
+#99, #110, #154, #155 and #156 closed. #110, #154, #155 and #156 are closed; #24 and #99 moved to
+0.18.0 and this gate runs in Checkpoint C's hardware session (§7).
 
 ### 3. Gates you can believe — 0.14.x
 
@@ -789,9 +787,9 @@ Checkpoint C (§7), so open-ended research cannot hold the architecture back.
 
 | Batch | Work | Why it is here |
 |---|---|---|
-| 0. Close-outs | **Open: #286, #211, #231; the rest closed** (row 0.17.0 above). Fix plain-text books stored out of order or under prose headings (#332, #333). Measure #252, #286 and #307 on a fresh library (`make eval-full`, `make eval-topics` for F1 ≥ 0.70 on d2l, thinkpython2's first chapter cards, Usher's register) and close or reopen each with the numbers. Fix the CI `database is locked` flake (#211). Put #100's measurements (§4) on the issue and close it or narrow it to what is unmeasured. Run the chapter practice offer, panel and Study list in the desktop shell (#231) | The fixes are merged and need a number to close; #211 fails PRs at random for the whole rung |
+| 0. Close-outs | **Open: #211 and part of #231; the rest closed** (row 0.17.0 above). Fix plain-text books stored out of order or under prose headings (#332, #333). Measure #252, #286 and #307 on a fresh library (`make eval-full`, `make eval-topics` for F1 ≥ 0.70 on d2l, thinkpython2's first chapter cards, Usher's register) and close or reopen each with the numbers. Fix the CI `database is locked` flake (#211). Put #100's measurements (§4) on the issue and close it or narrow it to what is unmeasured. Run the chapter practice offer, panel and Study list in the desktop shell (#231) | The fixes are merged and need a number to close; #211 fails PRs at random for the whole rung |
 | 1. SQL into repos | **Done** (#337, #338, #339). The last 79 statements outside `repos/`: the two retrieval services (6, under the `retrieval-change` gate: `make eval-full` scores equal when both builds read one library), the chat runtime (31), the ingestion and concept workflows (25), scripts (16) and `main.py` (1). No behaviour change beyond two bugs found on the way (CHANGELOG) | The scope is then added in repos alone, which is what the layer-linter rule checks |
-| 2. Schema | #223's wire and column, in this order. (a) **Done (#341).** A `kind` derived from format, form and domain on every document response, with the list filter and counts; the label is not stored (decided 2026-10-20; 9 of 69 dev-library documents relabel). (b) **Done (#344).** The frontend's badges, filter chips and reading profile read `kind` and the facets. Stale and wrong forms now show as wrong labels: re-measure the forms of documents from before 0.16.0 (`app.scripts.remeasure_domain --apply`; 9 of 69 change on the dev library), and DDIA classified `entries` by its dated citations is fixed (#343, #345). (c) **Type menu, search and chat done (#346, #347); upload done (#359).** The type menu and the upload picker write facets marked `facets_source = "reader"`, which ingestion and `remeasure_domain` keep rather than re-measure, so only a reader's own choice overrides a measurement and classifier fixes still reach every other document; a detected type is shown, never sent. Search and chat filter by the kind. Ingestion, NER and the entity graph decide from the profile and the format (#361). Open: the remaining readers in the routers, services and scripts (the ratchet's `content_type_refs`, 165 today). (d) The migration fills any null facet as `DocumentProfile.of` resolves it today (rows from before 0.16.0 were filled by `f4b2c8e1a730`), then drops `content_type`, `is_technical` and the LanceDB field. Then `library_id` on the user-owned and LanceDB tables. Upgrade test from a 0.16.2 library | Migrations are one-way (`releasing.md`); one batch needs one upgrade test, not two |
+| 2. Schema | #223's wire and column, in this order. (a) **Done (#341).** A `kind` derived from format, form and domain on every document response, with the list filter and counts; the label is not stored (decided 2026-10-20; 9 of 69 dev-library documents relabel). (b) **Done (#344).** The frontend's badges, filter chips and reading profile read `kind` and the facets. Stale and wrong forms now show as wrong labels: re-measure the forms of documents from before 0.16.0 (`app.scripts.remeasure_domain --apply`; 9 of 69 change on the dev library), and DDIA classified `entries` by its dated citations is fixed (#343, #345). (c) **Type menu, search and chat done (#346, #347); upload done (#359).** The type menu and the upload picker write facets marked `facets_source = "reader"`, which ingestion and `remeasure_domain` keep rather than re-measure, so only a reader's own choice overrides a measurement and classifier fixes still reach every other document; a detected type is shown, never sent. Search and chat filter by the kind. Ingestion, NER and the entity graph decide from the profile and the format (#361); fallback suggested questions and auto-collection names from the measured profile and the kind (#362). Open: the remaining readers, mostly the column and LanceDB writes, the legacy `content_type` filter and response field, and parse-time classification (the ratchet's `content_type_refs`, 141 in 21 files). The auto-tagger's entity types still follow `content_type`: the profile's rule differs on 21 of 69 dev-library documents and would prune person and place tags from about 14, so it waits on a decision. (d) The migration fills any null facet as `DocumentProfile.of` resolves it today (rows from before 0.16.0 were filled by `f4b2c8e1a730`), then drops `content_type`, `is_technical` and the LanceDB field. Then `library_id` on the user-owned and LanceDB tables. Upgrade test from a 0.16.2 library | Migrations are one-way (`releasing.md`); one batch needs one upgrade test, not two |
 | 3. Request context | `principal` and `library` from `RequestAuthMiddleware` to every repo; `library_root` takes the library; the layer-linter rule; a test that a second library sees none of the first's documents, notes, cards, vectors or graph rows | The first two parts of the exit gate |
 | 4. Settings and shared resources | `get_settings()` split; API keys scoped to the principal; the shared-resource audit, with a test for each defect it finds | Preferences are keyed on the library from batch 3 |
 | 5. Snapshot and the re-embed rail | The snapshot format and restore, then a resumable re-embed, proven against the current 384-dim embedder: a re-embed killed midway and restarted matches a clean run | The last two parts of the exit gate; a snapshot is of one library, so it follows batch 3 |
@@ -823,7 +821,8 @@ beside 0.17.0, rather than after it:
 
 | Track | Issues | What it needs |
 |---|---|---|
-| Hardware session | #24, #99, #155, #156, #162 | The runs below |
+| Hardware session | #24, #99, #162; #155 and #156 closed | The runs below |
+| Defects the 2026-10-21 runs found | #354, #355, #356, #357, #358 | Each is a `bug`, so each holds the tag |
 | The Practice panel's cards | #330 | The step 4 gate on the unit path (§4) |
 | Ask on what the documents do not say | #66, #322 | #322 is a `retrieval-change` and follows 0.17.0's batch 1 |
 
@@ -833,14 +832,14 @@ named in Checkpoint C's release notes as not exercised (Checkpoint releases).
 
 | Issue | The run that closes it |
 |---|---|
-| #156 | A Linux `g4dn.xlarge` whose Ollama runs with `OLLAMA_GPU_OVERHEAD` reserving all but about 2 GB of the T4, so the scheduler splits `qwen3.5:4b` between card and processor. The host verdict and banner are read in the UI, served by the backend in public mode. Not exercised: a consumer laptop's latency under a split |
-| #155 | The 0.13.4 Windows setup (m6i behind mitmproxy) with a PAC script as the only proxy setting. A stalled model download must name the setting to change, which is the issue's alternative done-when, shipped in #235. Resolving the PAC script automatically (`WinHttpGetProxyForUrl`) and WPAD are after 1.0 |
+| #156 | **Closed 2026-10-21.** A Linux `g4dn.xlarge` whose bundled Ollama ran under `LLAMA_ARG_FIT_TARGET=13000` (Ollama 0.32 ignores `OLLAMA_GPU_OVERHEAD`): 15 of 33 layers on the T4, reported as 58% of the model on the card and bannered. Three answers took 53-107 s split against 10.5-20.5 s whole. Not exercised: a consumer laptop's latency under a split |
+| #155 | **Closed 2026-10-21 by #351.** Windows Server 2022 whose only route out was a Squid proxy, with a PAC script as the only proxy setting. The first run said "No internet connection" until #351; it now names the setting to change, the issue's alternative done-when. Resolving the PAC script automatically (`WinHttpGetProxyForUrl`) and WPAD are after 1.0 |
 | #24 | `desktop-installers.yml` installs the Windows setup into a root as long as a 20-character username's. Linux is covered by the same job's `.deb` and AppImage installs and by the T4 first run (§2) |
 | #99 | The same job renders, through the installed Linux build (WebKitGTK), a local page whose text only script writes |
 | #162 | The bundled macOS app on this Mac. YouTube refuses cloud and CI addresses as bots, so Windows and Linux come from rc testers or are named as not exercised. #162 is not a `bug`, so it does not hold the tag |
 
-Both AWS runs fit inside the remaining cap (§2): about an hour each, profile `personal`, terminated
-in the same session, launched when the user says go. #314 (built-in AMD and Intel graphics) moved to
+Both AWS runs were made on 2026-10-21 for about US$1, profile `personal`, terminated in the same
+session. #314 (built-in AMD and Intel graphics) moved to
 0.21.0, because no cloud or CI machine has them to time.
 
 Then Checkpoint C.
@@ -992,16 +991,16 @@ offenders in `quality_baseline.json`, and `make ci` fails on a new one or on a f
 the list (`--prune` drops those), so the baseline only shrinks, as `KNOWN_VIOLATIONS` did in
 `layer_linter.py`. `npm run knip` holds unused files, exports and dependencies at 0.
 
-Measured 2026-09-27 on `master` (`5e8cb41e`). Each release publishes its own numbers, measured at the tag, in its GitHub release notes (by hand for 0.14.0; generated by `release.yml` from 0.15.0, #189). The targets follow the usual external bars: McCabe's
+The first five rows measured 2026-10-22 on `master` (`574841c7`), the rest 2026-09-27 (`5e8cb41e`). Each release publishes its own numbers, measured at the tag, in its GitHub release notes (by hand for 0.14.0; generated by `release.yml` from 0.15.0, #189). The targets follow the usual external bars: McCabe's
 10 per function (NIST SP 500-235), and the SonarQube default quality gate (maintainability A,
 duplication ≤ 3%, coverage ≥ 80% on new code).
 
 | Metric | Tool | Now | 1.0 target |
 |---|---|---|---|
-| Functions over 120 lines | `ast` | 57 of 2,250 | 0. Exempt: `db_init.create_all_tables` (787, frozen by I-23) |
-| Cyclomatic complexity over 20 | `radon cc` | 58 (worst: `qa.stream_answer` 93, `synthesize_node` 71, `flashcard_generators.generate` 61) | 0 |
-| Cyclomatic complexity over 10 | `radon cc` | 231 of 2,128 (10.9%) | under 5% |
-| Maintainability index below A | `radon mi` | 6 files: `routers/study.py`, `routers/documents.py`, `routers/evals.py`, `flashcard_generators.py`, `parser.py`, `qa.py` | 0 |
+| Functions over 120 lines | `ast` | 36 (was 57) | 0. Exempt: `db_init.create_all_tables` (787, frozen by I-23) |
+| Cyclomatic complexity over 20 | `radon cc` | 44 (was 58; worst: `synthesize_node` 71, `flashcard_generators.generate` 59, `parser._parse_pdf` 54) | 0 |
+| Cyclomatic complexity over 10 | `radon cc` | 208 of 2,933 (7.1%; was 10.9%) | under 5% |
+| Maintainability index below A | `radon mi` | 4 files: `routers/documents.py`, `routers/evals.py`, `flashcard_generators.py`, `parser.py` (was 6) | 0 |
 | SQL outside `repos/` | `grep` for `select(` and `session.execute` | 0 in `app/` outside `repos/` (was 310 in routers and 629 in the rest); the ratchet holds it at 0 | Met |
 | Duplicated lines | `jscpd`, 8-line clones | 1.11% (96 clones) | ≤ 3%, held |
 | Dead Python | `vulture` ≥ 80% confidence, plus unreferenced symbols | 8 unused imports/variables, ~11 unused functions/classes | 0 |
