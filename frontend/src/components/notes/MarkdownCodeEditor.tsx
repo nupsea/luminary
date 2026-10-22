@@ -40,6 +40,7 @@ import {
   type NoteLinkCompletionConfig,
 } from "./noteLinkCompletion"
 import { liveMarkdown } from "./liveMarkdown"
+import { mathSource } from "./mathSource"
 import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { slashCommandSource, type SlashCommandConfig } from "./slashCommands"
 import { toast } from "sonner"
@@ -498,6 +499,13 @@ export function noteEditorKeymaps(latest: {
         },
       },
       {
+        key: "Mod-Shift-e",
+        run: (v) => {
+          v.dispatch(toggleInlineMarkSpec(v.state, "$"))
+          return true
+        },
+      },
+      {
         key: "Mod-/",
         run: () => {
           if (latest.current.onOpenShortcuts) {
@@ -576,6 +584,7 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
             EditorView.lineWrapping,
             markdown({ base: markdownLanguage, codeLanguages: languages }),
             syntaxHighlighting(mdHighlight),
+            mathSource(),
             editorTheme,
             fontSizeRoom.of(
               EditorView.theme({

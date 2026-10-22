@@ -124,6 +124,51 @@ export function mathBlockRanges(text: string): TextRange[] {
   return found
 }
 
+function runLength(text: string, at: number, ch: string): number {
+  let n = 0
+  while (text[at + n] === ch) n++
+  return n
+}
+
+/**
+ * Inline `$…$` spans in one line, by remark-math's rule so the editor agrees
+ * with the preview: a run of N dollars closes on the next run of exactly N, a
+ * backslash escapes a dollar, and a code span opened first wins.
+ */
+export function inlineMathRanges(line: string): TextRange[] {
+  const found: TextRange[] = []
+  let i = 0
+  while (i < line.length) {
+    const ch = line[i]
+    if (ch === "\\") {
+      i += 2
+      continue
+    }
+    if (ch !== "$" && ch !== "`") {
+      i++
+      continue
+    }
+    const n = runLength(line, i, ch)
+    let close = i + n
+    while (close < line.length) {
+      if (line[close] !== ch) {
+        close++
+        continue
+      }
+      const m = runLength(line, close, ch)
+      if (m === n) break
+      close += m
+    }
+    if (close >= line.length) {
+      i += n
+      continue
+    }
+    if (ch === "$") found.push({ from: i, to: close + n })
+    i = close + n
+  }
+  return found
+}
+
 /**
  * Where the caret goes inside a table row when a cell is clicked: the end of
  * that cell's text, or just inside an empty one. The row's own end is not an

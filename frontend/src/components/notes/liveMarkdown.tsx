@@ -14,11 +14,13 @@ import { createRoot, type Root } from "react-dom/client"
 import { syntaxTree } from "@codemirror/language"
 import { Prec, StateField, type EditorState, type Extension, type Range } from "@codemirror/state"
 import { Decoration, EditorView, WidgetType, keymap, type DecorationSet } from "@codemirror/view"
+import katex from "katex"
 import { Check, ChevronDown, ChevronUp, Copy, Pencil, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
+import { mathRanges } from "./mathSource"
 import { moveBlockOrLineSpec, setImageSizeInMarkdown } from "./markdownEditorCommands"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
@@ -33,7 +35,6 @@ import {
   isDelimitedBlock,
   isImageOnlyParagraph,
   lineIsBeingEdited,
-  mathBlockRanges,
   rendersAsBlock,
   type TextRange,
 } from "./liveMarkdownRules"
@@ -44,7 +45,6 @@ const quoteLine = Decoration.line({ class: "cm-md-quote" })
 const codeLine = Decoration.line({ class: "cm-md-code" })
 const fenceLine = Decoration.line({ class: "cm-md-fence" })
 const tableLine = Decoration.line({ class: "cm-md-table-line" })
-const mathLine = Decoration.line({ class: "cm-md-math-line" })
 const orderedMark = Decoration.mark({ class: "cm-md-ordered-mark" })
 
 class BulletWidget extends WidgetType {
@@ -184,6 +184,31 @@ class NoteLinkWidget extends WidgetType {
 
   ignoreEvent(event: Event): boolean {
     return event.type === "mousedown" || event.type === "click"
+  }
+}
+
+class InlineMathWidget extends WidgetType {
+  readonly tex: string
+
+  constructor(tex: string) {
+    super()
+    this.tex = tex
+  }
+
+  eq(other: InlineMathWidget): boolean {
+    return this.tex === other.tex
+  }
+
+  toDOM(): HTMLElement {
+    const span = document.createElement("span")
+    span.className = "cm-md-inline-math"
+    span.innerHTML = katex.renderToString(this.tex, { throwOnError: false })
+    return span
+  }
+
+  // A click places the caret, which gives the line its source back.
+  ignoreEvent(): boolean {
+    return false
   }
 }
 
@@ -672,16 +697,10 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
     })
   }
 
-  for (const { from, to } of mathBlockRanges(state.doc.toString())) {
-    if (!renderBlock(from, to, true)) {
-      const first = state.doc.lineAt(from).number
-      const last = state.doc.lineAt(to).number
-      for (let n = first; n <= last; n++) {
-        const line = state.doc.line(n)
-        marks.push(mathLine.range(line.from))
-      }
-    }
-  }
+  const { display: displayMath, inline: inlineMath } = mathRanges(state)
+  const inInlineMath = (from: number, to: number) => inlineMath.some((r) => from < r.to && to > r.from)
+
+  for (const { from, to } of displayMath) renderBlock(from, to, true)
 
   syntaxTree(state).iterate({
     enter: (node) => {
@@ -814,6 +833,7 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
         return
       }
       if (!hidesMark(node.name, node.node.parent?.name)) return
+      if (inInlineMath(node.from, node.to)) return
       if (node.name === "EmphasisMark") {
         const parent = node.node.parent
         if (parent) {
@@ -837,9 +857,22 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
     },
   })
 
+  for (const span of inlineMath) {
+    if (rendered.some((r) => span.from >= r.from && span.to <= r.to)) continue
+    const line = state.doc.lineAt(span.from)
+    if (lineIsBeingEdited(selection, line.from, line.to)) continue
+    const source = state.doc.sliceString(span.from, span.to)
+    let fence = 0
+    while (source[fence] === "$") fence++
+    marks.push(
+      Decoration.replace({ widget: new InlineMathWidget(source.slice(fence, -fence)) }).range(span.from, span.to),
+    )
+  }
+
   // Render note links that are not currently being edited as interactive pills
   for (const link of noteLinks) {
     if (rendered.some((r) => link.from >= r.from && link.to <= r.to)) continue
+    if (inInlineMath(link.from, link.to)) continue
     const isEditing = selection.some((r) => r.from <= link.to && r.to >= link.from)
     if (!isEditing) {
       marks.push(
@@ -931,13 +964,7 @@ export const liveThemeSpec = {
     backgroundColor: "hsl(var(--muted) / 0.25)",
     paddingLeft: "4px",
   },
-  ".cm-md-math-line": {
-    fontFamily: "var(--font-mono)",
-    fontSize: "0.95em",
-    backgroundColor: "hsl(var(--primary) / 0.05)",
-    borderLeft: "2px solid hsl(var(--primary) / 0.5)",
-    paddingLeft: "8px",
-  },
+  ".cm-md-inline-math .katex": { fontSize: "1.1em" },
   ".cm-md-block img": { maxWidth: "100%", height: "auto" },
   ".cm-md-block table": {
     width: "auto",
