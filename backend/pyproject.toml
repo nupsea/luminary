@@ -117,6 +117,11 @@ ignore = [
 "tools/**" = ["PL", "S"]
 "app/scripts/**" = ["S"]
 
+[tool.coverage.run]
+# SQLAlchemy's async engine runs on greenlets; without this the C tracer files lines under
+# the wrong source file, so the coverage floor reads corrupt data.
+concurrency = ["thread", "greenlet"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 # 27 test files carry @pytest.mark.anyio, but asyncio_mode="auto" also makes
