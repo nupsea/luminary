@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
+from tests.factories import make_card, make_chunk, make_document, make_section
 
 # Isolated test DB fixture
 
@@ -16,15 +17,13 @@ from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
 
 
 def _make_doc(doc_id: str | None = None, title: str = "Test Doc") -> DocumentModel:
-    return DocumentModel(
-        id=doc_id or str(uuid.uuid4()),
+    return make_document(
+        id=doc_id,
         title=title,
-        format="txt",
         content_type="notes",
         word_count=100,
         page_count=1,
         file_path="/tmp/test.txt",
-        stage="complete",
     )
 
 
@@ -34,14 +33,12 @@ def _make_section(
     heading: str = "Test Section",
     preview: str = "Preview text",
 ) -> SectionModel:
-    return SectionModel(
+    return make_section(
         id=section_id,
         document_id=doc_id,
         heading=heading,
-        level=1,
         page_start=1,
         page_end=2,
-        section_order=0,
         preview=preview,
     )
 
@@ -52,14 +49,13 @@ def _make_chunk(
     section_id: str | None = None,
     pdf_page_number: int | None = None,
 ) -> ChunkModel:
-    return ChunkModel(
-        id=chunk_id or str(uuid.uuid4()),
+    return make_chunk(
+        id=chunk_id,
         document_id=doc_id,
         section_id=section_id,
         text="Chunk text content.",
         token_count=10,
         page_number=1,
-        chunk_index=0,
         pdf_page_number=pdf_page_number,
     )
 
@@ -70,23 +66,14 @@ def _make_flashcard(
     chunk_id: str | None = None,
 ) -> FlashcardModel:
     now = datetime.now(UTC)
-    return FlashcardModel(
-        id=card_id or str(uuid.uuid4()),
+    return make_card(
+        id=card_id,
         document_id=doc_id,
         chunk_id=chunk_id,
-        source="document",
-        deck="default",
         question="What is X?",
         answer="X is Y.",
         source_excerpt="x is y",
-        difficulty="medium",
-        is_user_edited=False,
-        fsrs_state="new",
-        fsrs_stability=0.0,
-        fsrs_difficulty=0.0,
         due_date=now,
-        reps=0,
-        lapses=0,
         created_at=now,
     )
 

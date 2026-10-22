@@ -18,6 +18,7 @@ from app.services.transcript_correction import (
     judge,
     parse_choice,
 )
+from tests.factories import make_chunk, make_document, make_section
 
 # Words the speech model holds whole, as its tokenizer would say.
 _COMMON = {
@@ -149,16 +150,16 @@ async def _audio_doc(factory, **fields) -> str:
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Talk",
-                format="wav",
-                content_type=fields.pop("content_type", "audio"),
-                file_path="/x.wav",
-                stage=fields.pop("stage", "complete"),
-                audio_duration_seconds=fields.pop("audio_duration_seconds", 60.0),
-                tags=[],
-                **fields,
+            make_document(
+                **{
+                    "id": doc_id,
+                    "title": "Talk",
+                    "format": "wav",
+                    "content_type": "audio",
+                    "file_path": "/x.wav",
+                    "audio_duration_seconds": 60.0,
+                    **fields,
+                }
             )
         )
         await session.commit()
@@ -204,22 +205,18 @@ async def _seed_transcript(factory, doc_id: str) -> str:
     chunk_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            SectionModel(
-                id=str(uuid.uuid4()),
+            make_section(
                 document_id=doc_id,
                 heading="Segment 1 (0s-60s)",
-                level=1,
-                section_order=0,
                 body="It stores vectors in LANs-dv, then LANs-dv again.",
                 preview="It stores vectors in LANs-dv, then LANs-dv again.",
             )
         )
         session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id,
                 document_id=doc_id,
                 text="It stores vectors in LANs-dv, then LANs-dv again.",
-                chunk_index=0,
                 start_time=0.0,
                 end_time=60.0,
             )

@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.runtime.chat_graph import build_chat_graph, get_chat_graph
+from tests.factories import make_document
 
 # Shared fixture — in-memory DB (needed for synthesize_node DB calls)
 
@@ -184,15 +185,14 @@ async def test_summary_question_resolves_targeted_book(test_db):
     _, factory, _ = test_db
 
     # Ingest a mock document in the DB
-    from app.models import DocumentModel
 
     async with factory() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id="odyssey-id",
             title="The Odyssey: Fagles Translation.pdf",
             format="pdf",
-            content_type="book",
             file_path="/path/to/odyssey",
+            stage="parsing",
         )
         session.add(doc)
         await session.commit()
@@ -216,15 +216,13 @@ async def test_summary_question_resolves_targeted_book_fuzzy(test_db):
     """scope='all' + typo in book title → classify_node resolves via fuzzy match."""
     _, factory, _ = test_db
 
-    from app.models import DocumentModel
-
     async with factory() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id="frankenstein-id",
             title="Frankenstein.epub",
             format="epub",
-            content_type="book",
             file_path="/path/to/frankenstein",
+            stage="parsing",
         )
         session.add(doc)
         await session.commit()

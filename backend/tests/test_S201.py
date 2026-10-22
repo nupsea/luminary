@@ -17,7 +17,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 from app.main import app
-from app.models import ClusterSuggestionModel, NoteModel
+from app.models import ClusterSuggestionModel
+from tests.factories import make_note
 
 # Fixture
 
@@ -34,10 +35,9 @@ async def test_suggest_tags_returns_normalized_slugs(test_db):
     note_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            NoteModel(
+            make_note(
                 id=note_id,
                 content="Some content about Machine Learning and Biology",
-                tags=[],
                 created_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),
             )
@@ -164,10 +164,9 @@ async def test_batch_accept_normalizes_collection_names(test_db):
     async with factory() as session:
         # Seed a note so the member insert doesn't violate anything
         session.add(
-            NoteModel(
+            make_note(
                 id=note_id,
                 content="Test note",
-                tags=[],
                 created_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),
             )

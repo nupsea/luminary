@@ -16,7 +16,8 @@ import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import DocumentModel, FlashcardModel, ReviewEventModel
+from app.models import FlashcardModel, ReviewEventModel
+from tests.factories import make_card, make_document
 
 
 @pytest.fixture
@@ -42,12 +43,9 @@ async def test_db(tmp_path, monkeypatch):
 
 
 def _card(stability: float = 0.0, reps: int = 0, state: str = "new") -> FlashcardModel:
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id=None,
         chunk_id=None,
-        question="q",
-        answer="a",
         source_excerpt="e",
         fsrs_stability=stability,
         fsrs_state=state,
@@ -190,19 +188,7 @@ async def test_documents_count_is_served_in_public_mode(test_db):
     _, factory = test_db
     async with factory() as s:
         for i in range(3):
-            s.add(
-                DocumentModel(
-                    id=str(uuid.uuid4()),
-                    title=f"d{i}",
-                    format="txt",
-                    content_type="book",
-                    word_count=1,
-                    page_count=0,
-                    file_path=f"/tmp/d{i}.txt",
-                    stage="complete",
-                    tags=[],
-                )
-            )
+            s.add(make_document(title=f"d{i}", word_count=1, file_path=f"/tmp/d{i}.txt"))
         await s.commit()
 
     body = await _summary()

@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import DocumentModel, FlashcardModel, PredictionEventModel
+from tests.factories import make_card, make_document
 
 
 @pytest.fixture
@@ -15,27 +16,18 @@ def test_db(memory_db):
 
 
 def _doc(doc_id: str | None = None) -> DocumentModel:
-    return DocumentModel(
-        id=doc_id or str(uuid.uuid4()),
+    return make_document(
+        id=doc_id,
         title="Mastery Test Doc",
-        format="txt",
-        content_type="book",
         word_count=500,
         page_count=10,
         file_path="/tmp/mastery_test.txt",
-        stage="complete",
     )
 
 
 def _card(doc_id: str, stability: float, bloom: int | None) -> FlashcardModel:
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
-        document_id=doc_id,
-        question="q",
-        answer="a",
-        source_excerpt="src",
-        fsrs_stability=stability,
-        bloom_level=bloom,
+    return make_card(
+        document_id=doc_id, source_excerpt="src", fsrs_stability=stability, bloom_level=bloom
     )
 
 

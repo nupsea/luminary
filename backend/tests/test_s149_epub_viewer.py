@@ -21,6 +21,7 @@ import pytest
 
 from app.main import app
 from app.services.epub_service import EpubService
+from tests.factories import make_document
 
 # Helpers
 
@@ -154,24 +155,14 @@ async def test_epub_toc_non_epub_document(test_db):
     """GET /documents/{id}/epub/toc returns 400 for a non-EPUB document."""
     from httpx import ASGITransport, AsyncClient
 
-    from app.models import DocumentModel
-
     _engine, factory, tmp_path = test_db
     doc_id = str(uuid.uuid4())
     txt_path = tmp_path / f"{doc_id}.txt"
     txt_path.write_text("Hello world")
 
     async with factory() as session:
-        doc = DocumentModel(
-            id=doc_id,
-            title="Plain Text",
-            format="txt",
-            content_type="book",
-            word_count=2,
-            page_count=0,
-            file_path=str(txt_path),
-            file_hash=None,
-            stage="complete",
+        doc = make_document(
+            id=doc_id, title="Plain Text", word_count=2, file_path=str(txt_path), file_hash=None
         )
         session.add(doc)
         await session.commit()
@@ -187,8 +178,6 @@ async def test_epub_toc_three_chapters(test_db):
     """GET /documents/{id}/epub/toc returns 3 entries for a 3-chapter EPUB."""
     from httpx import ASGITransport, AsyncClient
 
-    from app.models import DocumentModel
-
     # Clear epub_service LRU cache so each test gets a fresh instance
     from app.services.epub_service import get_epub_service
 
@@ -199,16 +188,13 @@ async def test_epub_toc_three_chapters(test_db):
     epub_path = _make_epub(3, tmp_path)
 
     async with factory() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id=doc_id,
             title="Test EPUB",
             format="epub",
-            content_type="book",
             word_count=100,
-            page_count=0,
             file_path=str(epub_path),
             file_hash=None,
-            stage="complete",
         )
         session.add(doc)
         await session.commit()
@@ -228,7 +214,6 @@ async def test_epub_chapter_zero_returns_html(test_db):
     """GET /documents/{id}/epub/chapter/0 returns non-empty sanitized HTML."""
     from httpx import ASGITransport, AsyncClient
 
-    from app.models import DocumentModel
     from app.services.epub_service import get_epub_service
 
     get_epub_service.cache_clear()
@@ -238,16 +223,13 @@ async def test_epub_chapter_zero_returns_html(test_db):
     epub_path = _make_epub(3, tmp_path)
 
     async with factory() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id=doc_id,
             title="Test EPUB",
             format="epub",
-            content_type="book",
             word_count=100,
-            page_count=0,
             file_path=str(epub_path),
             file_hash=None,
-            stage="complete",
         )
         session.add(doc)
         await session.commit()
@@ -269,7 +251,6 @@ async def test_epub_chapter_out_of_range(test_db):
     """GET /documents/{id}/epub/chapter/99 returns 404 for a 3-chapter EPUB."""
     from httpx import ASGITransport, AsyncClient
 
-    from app.models import DocumentModel
     from app.services.epub_service import get_epub_service
 
     get_epub_service.cache_clear()
@@ -279,16 +260,13 @@ async def test_epub_chapter_out_of_range(test_db):
     epub_path = _make_epub(3, tmp_path)
 
     async with factory() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id=doc_id,
             title="Test EPUB",
             format="epub",
-            content_type="book",
             word_count=100,
-            page_count=0,
             file_path=str(epub_path),
             file_hash=None,
-            stage="complete",
         )
         session.add(doc)
         await session.commit()

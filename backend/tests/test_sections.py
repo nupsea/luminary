@@ -14,21 +14,19 @@ from sqlalchemy import select
 from app.main import app
 from app.models import ChunkModel, DocumentModel
 from app.workflows.ingestion import IngestionState, _chunk_book, _chunk_conversation
+from tests.factories import make_document
 
 # Shared fixture
 
 
 def _make_doc(doc_id: str, content_type: str = "book") -> DocumentModel:
-    return DocumentModel(
+    return make_document(
         id=doc_id,
-        title="Test Doc",
-        format="txt",
         content_type=content_type,
         word_count=300,
         page_count=3,
         file_path="/tmp/test.txt",
         stage="chunking",
-        tags=[],
     )
 
 
@@ -184,16 +182,13 @@ async def test_conversation_metadata_endpoint_returns_roster(test_db):
     engine, factory, _ = test_db
     doc_id = str(uuid.uuid4())
 
-    conv_doc = DocumentModel(
+    conv_doc = make_document(
         id=doc_id,
         title="Test Conversation",
-        format="txt",
         content_type="conversation",
         word_count=100,
-        page_count=0,
         file_path="/tmp/conv.txt",
         stage="chunking",
-        tags=[],
     )
     async with factory() as session:
         session.add(conv_doc)
@@ -216,17 +211,7 @@ async def test_conversation_metadata_endpoint_returns_roster(test_db):
     book_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=book_id,
-                title="A Book",
-                format="txt",
-                content_type="book",
-                word_count=1000,
-                page_count=0,
-                file_path="/tmp/book.txt",
-                stage="complete",
-                tags=[],
-            )
+            make_document(id=book_id, title="A Book", word_count=1000, file_path="/tmp/book.txt")
         )
         await session.commit()
 

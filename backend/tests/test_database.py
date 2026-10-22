@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models import DocumentModel
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -18,7 +19,7 @@ async def db_session(memory_db):
 
 async def test_insert_and_retrieve_document(db_session: AsyncSession):
     doc_id = str(uuid.uuid4())
-    doc = DocumentModel(
+    doc = make_document(
         id=doc_id,
         title="Test Document",
         format="pdf",
@@ -26,7 +27,6 @@ async def test_insert_and_retrieve_document(db_session: AsyncSession):
         word_count=1000,
         page_count=10,
         file_path="/tmp/test.pdf",
-        stage="complete",
         created_at=datetime.now(UTC),
         last_accessed_at=datetime.now(UTC),
     )

@@ -1,6 +1,5 @@
 """Tests for S154: cloze deletion flashcard generation."""
 
-import uuid
 from unittest.mock import patch
 
 import pytest
@@ -14,23 +13,22 @@ from app.services.flashcard import (
     _build_cloze_question,
     _parse_cloze_text,
 )
+from tests.factories import make_chunk, make_document, make_section
 
 # Isolated test DB fixture
 
 
 def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
-    defaults = {
-        "id": doc_id or str(uuid.uuid4()),
-        "title": "Test Doc",
-        "format": "txt",
-        "content_type": "notes",
-        "word_count": 100,
-        "page_count": 1,
-        "file_path": "/tmp/test.txt",
-        "stage": "complete",
-    }
-    defaults.update(kwargs)
-    return DocumentModel(**defaults)
+    return make_document(
+        **{
+            "id": doc_id,
+            "content_type": "notes",
+            "word_count": 100,
+            "page_count": 1,
+            "file_path": "/tmp/test.txt",
+            **kwargs,
+        }
+    )
 
 
 def _make_chunk(
@@ -39,29 +37,22 @@ def _make_chunk(
     section_id: str | None = None,
     **kwargs,
 ) -> ChunkModel:
-    defaults = {
-        "id": chunk_id or str(uuid.uuid4()),
-        "document_id": doc_id,
-        "section_id": section_id,
-        "text": "A generator function uses yield instead of return to produce values lazily.",
-        "token_count": 15,
-        "page_number": 1,
-        "chunk_index": 0,
-    }
-    defaults.update(kwargs)
-    return ChunkModel(**defaults)
+    return make_chunk(
+        **{
+            "id": chunk_id,
+            "document_id": doc_id,
+            "section_id": section_id,
+            "text": "A generator function uses yield instead of return to produce values lazily.",
+            "token_count": 15,
+            "page_number": 1,
+            **kwargs,
+        }
+    )
 
 
 def _make_section(section_id: str, doc_id: str, heading: str = "Generators") -> SectionModel:
-    return SectionModel(
-        id=section_id,
-        document_id=doc_id,
-        heading=heading,
-        level=1,
-        page_start=0,
-        page_end=1,
-        section_order=0,
-        preview="x" * 250,
+    return make_section(
+        id=section_id, document_id=doc_id, heading=heading, page_end=1, preview="x" * 250
     )
 
 

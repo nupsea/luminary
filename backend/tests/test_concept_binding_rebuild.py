@@ -16,6 +16,7 @@ import app.database as db_module
 import app.services.graph as graph_module
 from app.models import ConceptModel, FlashcardModel
 from app.workflows.concept_nodes.persist import _sig_slug, persist_concepts
+from tests.factories import make_card
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -63,19 +64,16 @@ def _state():
 
 def _card(card_id: str, concept_slug: str, chunk_id: str, stability: float) -> FlashcardModel:
     now = datetime.now(UTC)
-    return FlashcardModel(
+    return make_card(
         id=card_id,
         document_id="bookA",
         chunk_id=chunk_id,
-        question="q",
-        answer="a",
         source_excerpt="src",
         fsrs_stability=stability,
         fsrs_state="review",
         last_review=now,
         concept_id="old-id",
         concept_slug=concept_slug,
-        mapping_status="mapped",
     )
 
 

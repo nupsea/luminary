@@ -1,19 +1,19 @@
 """Tests for S188: context-rich flashcard generation with source grounding."""
 
 import json
-import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
+from app.models import ChunkModel, DocumentModel, SectionModel
 from app.services.flashcard import (
     FlashcardService,
     _build_enriched_text,
     _get_section_context_for_chunks,
     _resolve_section_heading,
 )
+from tests.factories import make_card, make_chunk, make_document, make_section
 
 # Isolated test DB fixture
 
@@ -26,31 +26,28 @@ PARENT_SEC_ID = "sec-book12"
 
 
 def _make_doc(content_type: str = "book") -> DocumentModel:
-    return DocumentModel(
+    return make_document(
         id=DOC_ID,
         title="The Odyssey",
-        format="txt",
         content_type=content_type,
         word_count=50000,
         page_count=200,
         file_path="/tmp/odyssey.txt",
-        stage="complete",
     )
 
 
 def _make_parent_section() -> SectionModel:
-    return SectionModel(
+    return make_section(
         id=PARENT_SEC_ID,
         document_id=DOC_ID,
         heading="Book XII",
-        level=1,
         section_order=12,
         preview="The Sirens, Scylla and Charybdis",
     )
 
 
 def _make_section() -> SectionModel:
-    return SectionModel(
+    return make_section(
         id=SEC_ID,
         document_id=DOC_ID,
         heading="The Sirens",
@@ -65,15 +62,13 @@ def _make_chunks(n: int = 3) -> list[ChunkModel]:
     chunks = []
     for i in range(n):
         chunks.append(
-            ChunkModel(
+            make_chunk(
                 id=f"chunk-{i}",
                 document_id=DOC_ID,
                 section_id=SEC_ID,
-                text=(
-                    f"Chunk {i}: Ulysses ordered his men to plug their ears with wax "
-                    "while he himself was tied to the mast. The Sirens sang but could not "
-                    "lure the crew. This was a test of Ulysses' wisdom and self-control."
-                ),
+                text=f"Chunk {i}: Ulysses ordered his men to plug their ears with wax "
+                "while he himself was tied to the mast. The Sirens sang but could not "
+                "lure the crew. This was a test of Ulysses' wisdom and self-control.",
                 token_count=40,
                 page_number=i + 1,
                 chunk_index=i,
@@ -151,14 +146,13 @@ def test_resolve_section_heading_no_parent():
 
 def test_resolve_section_heading_no_section():
     """Chunk with no section_id returns None."""
-    chunk = ChunkModel(
+    chunk = make_chunk(
         id="chunk-no-sec",
         document_id=DOC_ID,
         section_id=None,
         text="No section chunk",
         token_count=5,
         page_number=1,
-        chunk_index=0,
     )
     result = _resolve_section_heading(chunk, {})
     assert result is None
@@ -275,22 +269,13 @@ async def test_flashcard_response_includes_section_heading(test_db):
     from app.routers.flashcards import FlashcardResponse
 
     now = datetime.now(UTC)
-    card = FlashcardModel(
-        id=str(uuid.uuid4()),
+    card = make_card(
         document_id=DOC_ID,
         chunk_id="chunk-0",
-        source="document",
         question="Why does Ulysses resist the Sirens?",
         answer="In Book XII, Ulysses...",
         source_excerpt="Ulysses ordered his men...",
-        difficulty="medium",
-        is_user_edited=False,
-        fsrs_state="new",
-        fsrs_stability=0.0,
-        fsrs_difficulty=0.0,
         due_date=now,
-        reps=0,
-        lapses=0,
         created_at=now,
         section_heading="Book XII - The Sirens",
         bloom_level=4,

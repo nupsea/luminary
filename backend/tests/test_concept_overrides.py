@@ -11,8 +11,9 @@ from task_drain import dispose_engine
 import app.database as db_module
 import app.services.graph as graph_module
 from app.main import app
-from app.models import ConceptModel, FlashcardModel, NoteModel, OverrideModel
+from app.models import ConceptModel, FlashcardModel, OverrideModel
 from app.services.concept_service import get_concept_service
+from tests.factories import make_card, make_note
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -77,13 +78,11 @@ async def test_merge_reassigns_cards_and_deletes_source(test_db):
     await _add_concept(factory, "tgt", "manifests")
     async with factory() as s:
         s.add(
-            FlashcardModel(
+            make_card(
                 id="f1",
                 document_id="d1",
                 chunk_id=None,
                 concept_id="src",
-                mapping_status="mapped",
-                source="document",
                 question="Q",
                 answer="A",
                 source_excerpt="e",
@@ -106,7 +105,7 @@ async def test_concepts_for_note_unions_engagement_and_lexical(test_db):
     factory = test_db
     async with factory() as s:
         s.add(
-            NoteModel(
+            make_note(
                 id="n1",
                 content="We discuss caching strategies at length.",
                 title="Notes on caching",
@@ -137,13 +136,12 @@ async def test_concepts_for_note_unions_engagement_and_lexical(test_db):
             )
         )
         s.add(
-            FlashcardModel(
+            make_card(
                 id="f1",
                 document_id="d1",
                 chunk_id=None,
                 note_id="n1",
                 concept_id="c_snap",
-                mapping_status="mapped",
                 source="note",
                 question="Q",
                 answer="A",

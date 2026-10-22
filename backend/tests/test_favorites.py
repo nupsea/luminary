@@ -2,7 +2,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models import DocumentModel
+from tests.factories import make_document
 
 
 @pytest.mark.asyncio
@@ -11,18 +11,16 @@ async def test_document_favorites(memory_db):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # Create test document directly in DB
         async with memory_db.factory() as session:
-            doc = DocumentModel(
+            doc = make_document(
                 id="doc_fav_test_1",
                 title="Test Favorite Doc",
                 format="pdf",
-                content_type="book",
                 file_path="/tmp/test.pdf",
                 file_hash="abc123hash",
                 word_count=500,
                 page_count=2,
                 stage="completed",
                 tags=["science"],
-                is_favorite=False,
             )
             session.add(doc)
             await session.commit()

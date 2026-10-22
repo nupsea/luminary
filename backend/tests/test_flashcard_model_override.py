@@ -20,7 +20,7 @@ import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import ChunkModel, DocumentModel
+from tests.factories import make_chunk, make_document
 
 
 @pytest.fixture()
@@ -38,31 +38,24 @@ async def _seed_document(factory, content_type: str = "book") -> str:
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="the_odyssey",
-                format="txt",
                 content_type=content_type,
                 word_count=500,
                 page_count=1,
                 file_path="/tmp/the_odyssey.txt",
-                stage="complete",
-                tags=[],
             )
         )
         session.add(
-            ChunkModel(
-                id=str(uuid.uuid4()),
+            make_chunk(
                 document_id=doc_id,
                 section_id=None,
-                text=(
-                    "Penelope set up a great web in her house and told the suitors she "
-                    "would choose a husband when it was finished, but she undid her work "
-                    "each night for three years."
-                ),
+                text="Penelope set up a great web in her house and told the suitors she "
+                "would choose a husband when it was finished, but she undid her work "
+                "each night for three years.",
                 token_count=40,
                 page_number=1,
-                chunk_index=0,
             )
         )
         await session.commit()

@@ -23,6 +23,7 @@ from app.models import (
 )
 from app.services.notes_service import fts_insert
 from app.services.vector_store import EMBEDDING_DIM, get_lancedb_service
+from tests.factories import make_document, make_note
 
 
 @pytest.fixture
@@ -38,23 +39,16 @@ async def _seed(memory_db, lancedb) -> tuple[str, str, str]:
     content = "Iceberg is a table layer over object files"
     async with memory_db.factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="No Lock-In",
                 format="pdf",
                 content_type="tech_book",
                 file_path=f"/nonexistent/{doc_id}.pdf",
-                stage="complete",
             )
         )
         session.add(
-            NoteModel(
-                id=note_id,
-                document_id=doc_id,
-                section_id=str(uuid.uuid4()),
-                content=content,
-                tags=[],
-            )
+            make_note(id=note_id, document_id=doc_id, section_id=str(uuid.uuid4()), content=content)
         )
         session.add(NoteSourceModel(note_id=note_id, document_id=doc_id))
         session.add(CollectionModel(id=col_id, name="No Lock-In", auto_document_id=doc_id))

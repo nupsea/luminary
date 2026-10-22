@@ -15,6 +15,7 @@ from httpx import ASGITransport, AsyncClient
 import app.config as config_module
 from app.services import llm_admission
 from app.services.llm import LLMService
+from tests.factories import make_document
 
 LOCAL = "ollama/llama3.2"
 CLOUD = "openai/gpt-5.4"
@@ -480,7 +481,6 @@ async def test_status_endpoint_reports_the_pause_the_ui_shows(memory_db, tmp_pat
     import app.database as db_module
     from app.config import get_settings
     from app.main import app
-    from app.models import DocumentModel
 
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     # One slot leaves no background reserve, so the background call must wait.
@@ -496,14 +496,7 @@ async def test_status_endpoint_reports_the_pause_the_ui_shows(memory_db, tmp_pat
     try:
         async with factory() as session:
             session.add(
-                DocumentModel(
-                    id="doc-1",
-                    title="t",
-                    format="txt",
-                    content_type="book",
-                    file_path="/tmp/t.txt",
-                    stage="entity_extract",
-                )
+                make_document(id="doc-1", title="t", file_path="/tmp/t.txt", stage="entity_extract")
             )
             await session.commit()
 

@@ -11,11 +11,12 @@ from task_drain import dispose_engine
 
 import app.database as db_module
 import app.services.graph as graph_module
-from app.models import ConceptModel, DocumentModel, FlashcardModel
+from app.models import ConceptModel
 from app.repos.graph_concept_repo import GraphConceptRepo
 from app.services.concept_service import get_concept_service
 from app.services.scope_resolver import resolve_daily, resolve_scope
 from app.services.vector_store import get_lancedb_service
+from tests.factories import make_card, make_document
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -67,11 +68,7 @@ async def test_create_concept_spans_three_stores_and_resolves(test_db):
     )
     svc = get_concept_service()
     async with factory() as s:
-        s.add(
-            DocumentModel(
-                id=_D1, title="Doc", format="txt", content_type="book", file_path="/x/doc.txt"
-            )
-        )
+        s.add(make_document(id=_D1, title="Doc", file_path="/x/doc.txt", stage="parsing"))
         c = await svc.create_concept(
             s,
             label="Iceberg Manifests",
@@ -117,13 +114,11 @@ async def test_recompute_for_concepts_writes_grounded_mastery(test_db):
         )
         for i in range(2):
             s.add(
-                FlashcardModel(
+                make_card(
                     id=f"fc{i}",
                     document_id="d1",
                     chunk_id=None,
                     concept_id="c9",
-                    mapping_status="mapped",
-                    source="document",
                     question="Q",
                     answer="A",
                     source_excerpt="e",

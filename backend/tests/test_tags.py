@@ -16,6 +16,7 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel
+from tests.factories import make_document
 
 
 class _MockEmbeddingService:
@@ -71,19 +72,16 @@ async def test_db(tmp_path, monkeypatch):
 
 
 def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
-    defaults = {
-        "id": doc_id or str(uuid.uuid4()),
-        "title": "Test Doc",
-        "format": "txt",
-        "content_type": "notes",
-        "word_count": 100,
-        "page_count": 1,
-        "file_path": "/tmp/test.txt",
-        "stage": "complete",
-        "tags": [],
-    }
-    defaults.update(kwargs)
-    return DocumentModel(**defaults)
+    return make_document(
+        **{
+            "id": doc_id,
+            "content_type": "notes",
+            "word_count": 100,
+            "page_count": 1,
+            "file_path": "/tmp/test.txt",
+            **kwargs,
+        }
+    )
 
 
 # Tests

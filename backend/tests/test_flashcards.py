@@ -13,8 +13,9 @@ from stubs import MockLLMService as _MockLLMService
 from stubs import SequenceLLMService as _SequenceLLMService
 
 from app.main import app
-from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
+from app.models import ChunkModel, DocumentModel, FlashcardModel
 from app.services.flashcard import FlashcardService
+from tests.factories import make_card, make_chunk, make_document, make_section
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -22,18 +23,16 @@ pytestmark = pytest.mark.usefixtures("card_documents")
 
 
 def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
-    defaults = {
-        "id": doc_id or str(uuid.uuid4()),
-        "title": "Test Doc",
-        "format": "txt",
-        "content_type": "notes",
-        "word_count": 100,
-        "page_count": 1,
-        "file_path": "/tmp/test.txt",
-        "stage": "complete",
-    }
-    defaults.update(kwargs)
-    return DocumentModel(**defaults)
+    return make_document(
+        **{
+            "id": doc_id,
+            "content_type": "notes",
+            "word_count": 100,
+            "page_count": 1,
+            "file_path": "/tmp/test.txt",
+            **kwargs,
+        }
+    )
 
 
 # A verbatim span of the chunk text below -- cards must quote what they came from.
@@ -41,38 +40,34 @@ _CHUNK_QUOTE = "Quantum entanglement describes a correlation between particles"
 
 
 def _make_chunk(chunk_id: str | None = None, doc_id: str = "doc-1", **kwargs) -> ChunkModel:
-    defaults = {
-        "id": chunk_id or str(uuid.uuid4()),
-        "document_id": doc_id,
-        "section_id": None,
-        "text": "Quantum entanglement describes a correlation between particles.",
-        "token_count": 12,
-        "page_number": 1,
-        "chunk_index": 0,
-    }
-    defaults.update(kwargs)
-    return ChunkModel(**defaults)
+    return make_chunk(
+        **{
+            "id": chunk_id,
+            "document_id": doc_id,
+            "section_id": None,
+            "text": "Quantum entanglement describes a correlation between particles.",
+            "token_count": 12,
+            "page_number": 1,
+            **kwargs,
+        }
+    )
 
 
 def _make_flashcard(card_id: str | None = None, doc_id: str = "doc-1", **kwargs) -> FlashcardModel:
     now = datetime.now(UTC)
-    defaults = {
-        "id": card_id or str(uuid.uuid4()),
-        "document_id": doc_id,
-        "chunk_id": str(uuid.uuid4()),
-        "question": "What is entanglement?",
-        "answer": "A quantum correlation between particles.",
-        "source_excerpt": _CHUNK_QUOTE,
-        "fsrs_state": "new",
-        "fsrs_stability": 0.0,
-        "fsrs_difficulty": 0.0,
-        "due_date": now,
-        "reps": 0,
-        "lapses": 0,
-        "created_at": now,
-    }
-    defaults.update(kwargs)
-    return FlashcardModel(**defaults)
+    return make_card(
+        **{
+            "id": card_id,
+            "document_id": doc_id,
+            "chunk_id": str(uuid.uuid4()),
+            "question": "What is entanglement?",
+            "answer": "A quantum correlation between particles.",
+            "source_excerpt": _CHUNK_QUOTE,
+            "due_date": now,
+            "created_at": now,
+            **kwargs,
+        }
+    )
 
 
 # Service unit tests
@@ -297,13 +292,7 @@ async def test_service_skips_preface(test_db):
         # Section 1: Preface
         s1_id = str(uuid.uuid4())
         session.add(
-            SectionModel(
-                id=s1_id,
-                document_id=doc_id,
-                heading="Introduction by the Editor",
-                level=1,
-                section_order=0,
-            )
+            make_section(id=s1_id, document_id=doc_id, heading="Introduction by the Editor")
         )
         session.add(
             _make_chunk(doc_id=doc_id, section_id=s1_id, text="This edition was published in...")
@@ -312,12 +301,8 @@ async def test_service_skips_preface(test_db):
         # Section 2: Chapter 1 (Actual content)
         s2_id = str(uuid.uuid4())
         session.add(
-            SectionModel(
-                id=s2_id,
-                document_id=doc_id,
-                heading="Chapter 1. The Beginning",
-                level=1,
-                section_order=1,
+            make_section(
+                id=s2_id, document_id=doc_id, heading="Chapter 1. The Beginning", section_order=1
             )
         )
         session.add(
@@ -609,11 +594,9 @@ async def test_generate_retries_to_backfill_deduped_cards(test_db):
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         # Existing card already in the document's deck:
         session.add(
-            FlashcardModel(
-                id=str(uuid.uuid4()),
+            make_card(
                 document_id=doc_id,
                 chunk_id=chunk_id,
-                deck="default",
                 question="What is a write-ahead log?",
                 answer="A durable append-only record written before applying changes.",
                 source_excerpt=_CHUNK_QUOTE,
@@ -872,9 +855,7 @@ async def test_a_technical_book_s_preface_is_skipped_and_its_indexing_chapter_ke
         for order, (heading, body) in enumerate(sections):
             sid = str(uuid.uuid4())
             session.add(
-                SectionModel(
-                    id=sid, document_id=doc_id, heading=heading, level=1, section_order=order
-                )
+                make_section(id=sid, document_id=doc_id, heading=heading, section_order=order)
             )
             session.add(_make_chunk(doc_id=doc_id, section_id=sid, text=body, chunk_index=order))
         await session.commit()

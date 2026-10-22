@@ -16,6 +16,7 @@ from app.models import (
 )
 from app.services import document_tagger as _doc_tagger_module
 from app.services.naming import normalize_tag_slug
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -33,16 +34,8 @@ def _entity_tags(names: list[str]):
 
 
 def _make_doc(doc_id: str, title: str = "A book about cells") -> DocumentModel:
-    return DocumentModel(
-        id=doc_id,
-        title=title,
-        format="txt",
-        content_type="book",
-        word_count=100,
-        page_count=1,
-        file_path="/tmp/x.txt",
-        stage="complete",
-        tags=[],
+    return make_document(
+        id=doc_id, title=title, word_count=100, page_count=1, file_path="/tmp/x.txt"
     )
 
 

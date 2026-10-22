@@ -25,11 +25,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.models import DocumentModel, LibrarySummaryModel
+from app.models import LibrarySummaryModel
 from app.runtime.chat_graph import search_node, summary_node
 from app.services.context_packer import _cap_per_document
 from app.services.qa import _split_response
 from app.types import ScoredChunk
+from tests.factories import make_document
 
 # Shared DB fixture
 
@@ -37,17 +38,7 @@ from app.types import ScoredChunk
 async def _insert_document(factory, doc_id: str) -> None:
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Test Doc",
-                format="txt",
-                content_type="book",
-                word_count=1000,
-                page_count=10,
-                file_path="/tmp/test.txt",
-                stage="complete",
-                tags=[],
-            )
+            make_document(id=doc_id, word_count=1000, page_count=10, file_path="/tmp/test.txt")
         )
         await session.commit()
 

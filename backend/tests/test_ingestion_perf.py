@@ -15,8 +15,9 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import select
 
-from app.models import ChunkModel, DocumentModel, SummaryModel
+from app.models import ChunkModel, SummaryModel
 from app.workflows.ingestion import IngestionState, chunk_node, embed_node, summarize_node
+from tests.factories import make_document
 
 # Shared DB fixture
 
@@ -24,10 +25,9 @@ from app.workflows.ingestion import IngestionState, chunk_node, embed_node, summ
 async def _insert_document(factory, doc_id: str, tmp_path: Path) -> None:
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Perf Test Doc",
-                format="txt",
                 content_type="notes",
                 word_count=200,
                 page_count=2,
@@ -214,10 +214,9 @@ async def test_chunks_written_in_batch(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Batch Test",
-                format="txt",
                 content_type="notes",
                 word_count=500,
                 page_count=1,

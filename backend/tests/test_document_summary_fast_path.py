@@ -33,9 +33,10 @@ import pytest
 from sqlalchemy import select
 
 import app.services.summarizer as summarizer
-from app.models import ChunkModel, DocumentModel, SectionModel, SectionSummaryModel, SummaryModel
+from app.models import SectionSummaryModel, SummaryModel
 from app.services.summarizer import SummarizationService, _input_token_budget
 from app.services.summary_assembly import split_for_detail
+from tests.factories import make_chunk, make_document, make_section
 
 _MAP_TOKEN_THRESHOLD = _input_token_budget()
 _MAP_BATCH_TOKENS = 3_000
@@ -47,17 +48,7 @@ _MAP_BATCH_TOKENS = 3_000
 async def _insert_document(factory, doc_id: str) -> None:
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Test Doc",
-                format="txt",
-                content_type="book",
-                word_count=1000,
-                page_count=10,
-                file_path="/tmp/test.txt",
-                stage="complete",
-                tags=[],
-            )
+            make_document(id=doc_id, word_count=1000, page_count=10, file_path="/tmp/test.txt")
         )
         await session.commit()
 
@@ -71,11 +62,10 @@ async def _insert_sections(factory, doc_id: str, count: int) -> None:
     async with factory() as session:
         for i in range(count):
             session.add(
-                SectionModel(
+                make_section(
                     id=f"sec-{i}",
                     document_id=doc_id,
                     heading=f"Section {i}",
-                    level=1,
                     section_order=i,
                     body=f"Section {i} body text discussing real content. " * 20,
                     preview=f"Section {i} body text discussing real content. " * 5,
@@ -105,8 +95,7 @@ async def _insert_chunks(factory, doc_id: str, count: int, token_count: int = 30
     async with factory() as session:
         for i in range(count):
             session.add(
-                ChunkModel(
-                    id=str(uuid.uuid4()),
+                make_chunk(
                     document_id=doc_id,
                     section_id=None,
                     text=f"Chunk text content {i}. " * 100,

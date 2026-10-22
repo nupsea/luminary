@@ -37,6 +37,7 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import ChunkModel, DocumentModel
+from tests.factories import make_document
 
 FIXTURES_FULL_DIR = Path(__file__).parent / "fixtures" / "full"
 
@@ -139,13 +140,10 @@ async def _ingest_full(
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title=src.stem.replace("_", " ").title(),
-                format="txt",
                 content_type=mock_llm_response,
-                word_count=0,
-                page_count=0,
                 file_path=str(dest),
                 stage="parsing",
             )

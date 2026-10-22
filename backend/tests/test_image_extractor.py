@@ -21,6 +21,7 @@ from app.services.image_extractor import (
     extract_images_pdf,
     image_extract_handler,
 )
+from tests.factories import make_document
 
 
 def _make_png_bytes(w: int, h: int, color: tuple[int, int, int] = (200, 200, 200)) -> bytes:
@@ -358,7 +359,7 @@ async def handler_db(memory_db):
 async def _seed_doc_and_job(factory, doc_id: str, job_id: str, file_path: Path):
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Broken PDF",
                 file_path=str(file_path),

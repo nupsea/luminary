@@ -6,33 +6,29 @@ import pytest
 
 from app.main import app
 from app.models import DocumentModel, SectionModel
+from tests.factories import make_document, make_section
 
 # Test DB fixture
 
 
 def _make_doc(doc_id: str | None = None) -> DocumentModel:
-    return DocumentModel(
-        id=doc_id or str(uuid.uuid4()),
+    return make_document(
+        id=doc_id,
         title="Reading Test Doc",
-        format="txt",
-        content_type="book",
         word_count=500,
         page_count=10,
         file_path="/tmp/reading_test.txt",
-        stage="complete",
     )
 
 
 def _make_section(doc_id: str, section_id: str | None = None, order: int = 0) -> SectionModel:
-    return SectionModel(
-        id=section_id or str(uuid.uuid4()),
+    return make_section(
+        id=section_id,
         document_id=doc_id,
         heading=f"Section {order}",
-        level=1,
         page_start=order,
         page_end=order + 1,
         section_order=order,
-        preview="",
     )
 
 

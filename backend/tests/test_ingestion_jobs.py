@@ -11,8 +11,9 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.main import app
-from app.models import DocumentModel, FlashcardModel, SectionModel
+from app.models import DocumentModel, FlashcardModel
 from app.services.ingestion_jobs import IngestionJobRegistry, get_ingestion_jobs
+from tests.factories import make_card, make_document, make_section
 
 # Registry unit tests (no DB, no FastAPI)
 
@@ -117,13 +118,10 @@ async def test_delete_cancels_in_flight_ingestion(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="In-progress doc",
-                format="txt",
                 content_type="notes",
-                word_count=0,
-                page_count=0,
                 file_path=str(file_path),
                 stage="embedding",
             )
@@ -165,18 +163,11 @@ async def test_delete_cancels_card_generation_for_uncovered_sections(test_db):
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Doc",
-                format="txt",
-                content_type="notes",
-                file_path=str(tmp_path / "doc.txt"),
-                stage="complete",
+            make_document(
+                id=doc_id, title="Doc", content_type="notes", file_path=str(tmp_path / "doc.txt")
             )
         )
-        session.add(
-            SectionModel(id="sec", document_id=doc_id, heading="One", level=1, section_order=0)
-        )
+        session.add(make_section(id="sec", document_id=doc_id, heading="One"))
         await session.commit()
 
     started = asyncio.Event()
@@ -190,13 +181,7 @@ async def test_delete_cancels_card_generation_for_uncovered_sections(test_db):
         except asyncio.CancelledError:
             cancelled.set()
             raise
-        card = FlashcardModel(
-            id=str(uuid.uuid4()),
-            document_id=document_id,
-            question="Q",
-            answer="A",
-            source_excerpt="",
-        )
+        card = make_card(document_id=document_id, question="Q", answer="A")
         session.add(card)
         await session.commit()
         return [card]
@@ -230,15 +215,13 @@ async def test_delete_without_running_ingestion_still_succeeds(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Idle doc",
-                format="txt",
                 content_type="notes",
                 word_count=10,
                 page_count=1,
                 file_path=str(file_path),
-                stage="complete",
             )
         )
         await session.commit()

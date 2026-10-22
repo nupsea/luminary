@@ -7,19 +7,20 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database import make_engine
 from app.db_init import create_all_tables
-from app.models import ChunkModel, DocumentModel
+from app.models import ChunkModel
 from app.services.flashcard import FlashcardService
 from app.services.flashcard_generators import (
     _is_lexical_duplicate,
     _passage_not_yet_used,
 )
+from tests.factories import make_chunk, make_document
 
 
 def _chunk(
     index: int,
     text: str = "A substantial text about distributed systems architecture and consensus.",
 ) -> ChunkModel:
-    return ChunkModel(
+    return make_chunk(
         id=f"chunk-{index}",
         document_id="doc-1",
         section_id=None,
@@ -157,24 +158,18 @@ async def test_generate_falls_back_to_next_passage_when_first_yields_nothing(fac
     """When the initial passage yields 0 gate-passing cards, generate() must advance
     to the next unused passage rather than returning an empty array to the user."""
     async with factory() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id="doc-1",
             title="AI Pacing",
             format="pdf",
             content_type="article",
-            stage="complete",
             file_path="/tmp/doc.pdf",
         )
         session.add(doc)
-        c0 = ChunkModel(
-            id="c0",
-            document_id="doc-1",
-            text="Title header",
-            token_count=2,
-            page_number=1,
-            chunk_index=0,
+        c0 = make_chunk(
+            id="c0", document_id="doc-1", text="Title header", token_count=2, page_number=1
         )
-        c1 = ChunkModel(
+        c1 = make_chunk(
             id="c1",
             document_id="doc-1",
             text="Therefore, the key idea of first passage is level 1 pacing requires audits.",
@@ -182,7 +177,7 @@ async def test_generate_falls_back_to_next_passage_when_first_yields_nothing(fac
             page_number=1,
             chunk_index=1,
         )
-        c2 = ChunkModel(
+        c2 = make_chunk(
             id="c2",
             document_id="doc-1",
             text="Second passage explaining enforcement and inspection of frontier clusters.",

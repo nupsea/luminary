@@ -11,23 +11,23 @@ from stubs import SequenceLLMService as _SequenceLLMService
 from app.main import app
 from app.models import ChunkModel, DocumentModel, SectionModel
 from app.services.flashcard import FlashcardService
+from tests.factories import make_chunk, make_document, make_section
 
 # Fixtures (match pattern in test_flashcards.py)
 
 
 def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
-    defaults = {
-        "id": doc_id or str(uuid.uuid4()),
-        "title": "Python Programming Guide",
-        "format": "txt",
-        "content_type": "tech_book",
-        "word_count": 500,
-        "page_count": 10,
-        "file_path": "/tmp/tech.txt",
-        "stage": "complete",
-    }
-    defaults.update(kwargs)
-    return DocumentModel(**defaults)
+    return make_document(
+        **{
+            "id": doc_id,
+            "title": "Python Programming Guide",
+            "content_type": "tech_book",
+            "word_count": 500,
+            "page_count": 10,
+            "file_path": "/tmp/tech.txt",
+            **kwargs,
+        }
+    )
 
 
 def _make_section(
@@ -35,16 +35,15 @@ def _make_section(
     doc_id: str = "doc-1",
     **kwargs,
 ) -> SectionModel:
-    defaults = {
-        "id": section_id or str(uuid.uuid4()),
-        "document_id": doc_id,
-        "heading": "Functions",
-        "level": 1,
-        "section_order": 0,
-        "admonition_type": None,
-    }
-    defaults.update(kwargs)
-    return SectionModel(**defaults)
+    return make_section(
+        **{
+            "id": section_id,
+            "document_id": doc_id,
+            "heading": "Functions",
+            "admonition_type": None,
+            **kwargs,
+        }
+    )
 
 
 def _make_chunk(
@@ -53,18 +52,17 @@ def _make_chunk(
     section_id: str | None = None,
     **kwargs,
 ) -> ChunkModel:
-    defaults = {
-        "id": chunk_id or str(uuid.uuid4()),
-        "document_id": doc_id,
-        "section_id": section_id,
-        "text": "def add(a, b):\n    return a + b",
-        "token_count": 12,
-        "page_number": 1,
-        "chunk_index": 0,
-        "has_code": False,
-    }
-    defaults.update(kwargs)
-    return ChunkModel(**defaults)
+    return make_chunk(
+        **{
+            "id": chunk_id,
+            "document_id": doc_id,
+            "section_id": section_id,
+            "text": "def add(a, b):\n    return a + b",
+            "token_count": 12,
+            "page_number": 1,
+            **kwargs,
+        }
+    )
 
 
 # AC3 — chunk with has_code=True produces trace/code_completion/debug card

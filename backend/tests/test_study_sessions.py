@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import FlashcardModel, ReviewEventModel, StudySessionModel
+from tests.factories import make_card, make_document
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -40,19 +41,14 @@ def _make_session(
 
 def _make_card(doc_id: str) -> FlashcardModel:
     now = datetime.now(UTC)
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id=doc_id,
         chunk_id=str(uuid.uuid4()),
         question="What is the capital of France?",
         answer="Paris.",
         source_excerpt="Excerpt.",
-        fsrs_state="new",
-        fsrs_stability=0.0,
         fsrs_difficulty=3.0,
         due_date=now,
-        reps=0,
-        lapses=0,
         created_at=now,
     )
 
@@ -278,7 +274,7 @@ async def test_discard_if_unused_keeps_any_run_with_an_attempt(test_db, attempt)
 @pytest.mark.asyncio
 async def test_list_sessions_filters_and_labels(test_db):
     """mode, status and collection filters; titles, names and pending flags on each row."""
-    from app.models import CollectionModel, DocumentModel, TeachbackResultModel
+    from app.models import CollectionModel, TeachbackResultModel
 
     _, factory, _ = test_db
     now = datetime.now(UTC)
@@ -290,16 +286,7 @@ async def test_list_sessions_filters_and_labels(test_db):
     async with factory() as session:
         session.add_all([flash_done, teach_open, teach_done])
         session.add(
-            DocumentModel(
-                id="doc_t",
-                title="The Doc",
-                format="txt",
-                content_type="book",
-                word_count=1,
-                page_count=0,
-                file_path="/tmp/x.txt",
-                stage="complete",
-            )
+            make_document(id="doc_t", title="The Doc", word_count=1, file_path="/tmp/x.txt")
         )
         session.add(CollectionModel(id="col", name="The Collection"))
         session.add(

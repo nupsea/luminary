@@ -1,6 +1,5 @@
 """Tests for GET /study/due-count endpoint (S118)."""
 
-import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -8,13 +7,13 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import FlashcardModel
+from tests.factories import make_card
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
 
 def _card(due_date: datetime | None = None) -> FlashcardModel:
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id="doc1",
         question="What is X?",
         answer="X is Y.",

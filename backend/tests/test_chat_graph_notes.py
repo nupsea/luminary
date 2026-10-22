@@ -18,6 +18,7 @@ from app.main import app
 from app.runtime.chat_graph import notes_node, route_node
 from app.services.intent import classify_intent_heuristic
 from app.types import ChatState, NoteSearchResult
+from tests.factories import make_note
 
 pytest_plugins = ["conftest_books"]
 
@@ -238,20 +239,14 @@ async def notes_db(tmp_path, monkeypatch):
 async def test_notes_node_generic_subject_uses_recent_notes(notes_db):
     from datetime import UTC, datetime, timedelta
 
-    from app.models import NoteModel
-
     now = datetime.now(UTC)
     async with notes_db() as s:
         for i, text in enumerate(
             ["older note", "The Cheshire Cat can vanish leaving only its grin"]
         ):
             s.add(
-                NoteModel(
-                    id=f"n{i}",
-                    content=text,
-                    tags=[],
-                    created_at=now,
-                    updated_at=now + timedelta(seconds=i),
+                make_note(
+                    id=f"n{i}", content=text, created_at=now, updated_at=now + timedelta(seconds=i)
                 )
             )
         await s.commit()

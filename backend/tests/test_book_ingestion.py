@@ -15,6 +15,7 @@ from sqlalchemy import select
 from app.main import app
 from app.models import ChunkModel, DocumentModel, SectionModel
 from app.workflows.ingestion import IngestionState, _chunk_book
+from tests.factories import make_document
 
 # Fixture
 
@@ -30,19 +31,16 @@ THREE_CHAPTER_SECTIONS = [
 
 
 def _make_doc(doc_id: str, **kwargs) -> DocumentModel:
-    defaults = {
-        "id": doc_id,
-        "title": "Test Book",
-        "format": "txt",
-        "content_type": "book",
-        "word_count": 500,
-        "page_count": 0,
-        "file_path": "/tmp/test.txt",
-        "stage": "chunking",
-        "tags": [],
-    }
-    defaults.update(kwargs)
-    return DocumentModel(**defaults)
+    return make_document(
+        **{
+            "id": doc_id,
+            "title": "Test Book",
+            "word_count": 500,
+            "file_path": "/tmp/test.txt",
+            "stage": "chunking",
+            **kwargs,
+        }
+    )
 
 
 def _make_state(doc_id: str, sections: list[dict]) -> IngestionState:

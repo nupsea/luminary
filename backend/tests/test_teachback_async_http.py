@@ -12,6 +12,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import FlashcardModel, StudySessionModel, TeachbackResultModel
+from tests.factories import make_card
 
 _MODULE = "app.services.teachback_service"
 
@@ -34,14 +35,10 @@ class _StubLLM:
 
 
 def _card() -> FlashcardModel:
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         question="What is event sourcing?",
         answer="Storing state as a log of events.",
         source_excerpt="Storing state as a log of events.",
-        fsrs_state="new",
-        fsrs_stability=0.0,
-        fsrs_difficulty=0.0,
     )
 
 

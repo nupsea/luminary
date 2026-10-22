@@ -12,6 +12,7 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -43,17 +44,7 @@ async def test_db(tmp_path, monkeypatch):
 
 
 def _doc(doc_id: str, title: str = "d") -> DocumentModel:
-    return DocumentModel(
-        id=doc_id,
-        title=title,
-        format="txt",
-        content_type="book",
-        word_count=1,
-        page_count=0,
-        file_path=f"/tmp/{doc_id}.txt",
-        stage="complete",
-        tags=[],
-    )
+    return make_document(id=doc_id, title=title, word_count=1, file_path=f"/tmp/{doc_id}.txt")
 
 
 async def _create_collection(c: AsyncClient, name: str, parent: str | None = None) -> str:

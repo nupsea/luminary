@@ -2,8 +2,8 @@
 
 import pytest
 
-from app.models import ChunkModel, DocumentModel, SectionModel
 from app.services.flashcard import _fetch_chunks, _is_reference_chunk
+from tests.factories import make_chunk, make_document, make_section
 
 ENTRIES = (
     "[11] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Deep residual learning.\n"
@@ -31,7 +31,7 @@ def test_prose_citing_a_couple_of_sources_is_kept():
 async def _document(factory, chunks: list[tuple[str, str | None]]) -> None:
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id="d1",
                 title="Attention",
                 format="pdf",
@@ -39,7 +39,6 @@ async def _document(factory, chunks: list[tuple[str, str | None]]) -> None:
                 word_count=100,
                 page_count=1,
                 file_path="/tmp/a.pdf",
-                stage="complete",
             )
         )
         for i, (text, heading) in enumerate(chunks):
@@ -47,16 +46,10 @@ async def _document(factory, chunks: list[tuple[str, str | None]]) -> None:
             if heading:
                 section_id = f"s{i}"
                 session.add(
-                    SectionModel(
-                        id=section_id,
-                        document_id="d1",
-                        heading=heading,
-                        level=1,
-                        section_order=i,
-                    )
+                    make_section(id=section_id, document_id="d1", heading=heading, section_order=i)
                 )
             session.add(
-                ChunkModel(
+                make_chunk(
                     id=f"c{i}",
                     document_id="d1",
                     section_id=section_id,

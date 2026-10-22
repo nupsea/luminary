@@ -6,6 +6,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from tests.factories import make_note
 
 
 @pytest.fixture
@@ -86,7 +87,6 @@ async def test_backfill_fills_existing_null_descriptions(test_db, monkeypatch):
     """Existing notes (no description) get summarised by the startup backfill."""
     from datetime import UTC, datetime
 
-    from app.models import NoteModel
     from app.services import note_description_generator as gen
     from app.services.notes_service import backfill_missing_descriptions
 
@@ -100,10 +100,9 @@ async def test_backfill_fills_existing_null_descriptions(test_db, monkeypatch):
     nid = str(uuid.uuid4())
     async with factory() as s:
         s.add(
-            NoteModel(
+            make_note(
                 id=nid,
                 content="An existing note long enough to deserve a generated one-line summary.",
-                tags=[],
                 description=None,
                 created_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),

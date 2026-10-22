@@ -11,6 +11,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.services import diagnostics
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -201,7 +202,7 @@ async def test_document_and_collection_names_are_removed(
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     import app.database as db_module
-    from app.models import CollectionModel, DocumentModel
+    from app.models import CollectionModel
 
     engine = memory_db.engine
     factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -209,16 +210,12 @@ async def test_document_and_collection_names_are_removed(
     monkeypatch.setattr(db_module, "_session_factory", factory)
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id="d1",
                 title="Merger Terms Draft",
                 format="pdf",
                 content_type="notes",
-                word_count=0,
-                page_count=0,
                 file_path="/x/project-falcon-v2.pdf",
-                stage="complete",
-                tags=[],
             )
         )
         session.add(CollectionModel(id="c1", name="Board Papers"))

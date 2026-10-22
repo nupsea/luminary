@@ -18,8 +18,9 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.main import app
-from app.models import DocumentModel, SectionSummaryModel, WebReferenceModel
+from app.models import SectionSummaryModel, WebReferenceModel
 from app.services.reference_validator import ReferenceValidatorService
+from tests.factories import make_document
 
 
 @pytest.fixture(autouse=True)
@@ -38,16 +39,13 @@ def _link_checks_on(monkeypatch):
 
 async def _insert_document(factory, doc_id: str) -> None:
     async with factory() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id=doc_id,
             title="Test Document",
-            format="txt",
             content_type="tech_book",
             word_count=5000,
             page_count=10,
             file_path="/tmp/test.txt",
-            stage="complete",
-            tags=[],
         )
         session.add(doc)
         await session.commit()

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 import app.database as db_module
 from app.models import DocumentModel
 from app.scripts.backfill_word_counts import recount_all
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -29,14 +30,8 @@ async def library(memory_db, tmp_path, monkeypatch):
 
 
 async def _add(factory, **kwargs):
-    defaults = {
-        "format": "txt",
-        "content_type": "book",
-        "stage": "complete",
-        "word_count": 0,
-    }
     async with factory() as session:
-        session.add(DocumentModel(**{**defaults, **kwargs}))
+        session.add(make_document(**kwargs))
         await session.commit()
 
 

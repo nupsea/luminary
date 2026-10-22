@@ -8,10 +8,8 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models import (
-    ChunkModel,
     CollectionMemberModel,
     CollectionModel,
-    DocumentModel,
     ImageModel,
     LibrarySummaryModel,
     SectionSummaryModel,
@@ -21,6 +19,7 @@ from app.repos.collection_repo import CollectionRepo
 from app.repos.document_repo import DocumentRepo
 from app.repos.image_repo import ImageRepo
 from app.repos.summary_repo import SummaryRepo
+from tests.factories import make_chunk, make_document
 
 T0 = datetime(2026, 10, 1, tzinfo=UTC)
 
@@ -31,19 +30,12 @@ async def session(memory_db):
     async with factory() as s:
         s.add_all(
             [
-                DocumentModel(
-                    id="d1",
-                    title="The Time Machine",
-                    format="txt",
-                    content_type="book",
-                    file_path="/x",
-                    stage="complete",
-                    publication_year=1895,
+                make_document(
+                    id="d1", title="The Time Machine", file_path="/x", publication_year=1895
                 ),
-                DocumentModel(
+                make_document(
                     id="d2",
                     title="Frankenstein",
-                    format="txt",
                     content_type="notes",
                     file_path="/y",
                     stage="chunking",
@@ -51,14 +43,7 @@ async def session(memory_db):
             ]
         )
         s.add_all(
-            ChunkModel(
-                id=f"c{i}",
-                document_id="d1",
-                text=f"t{i}",
-                token_count=1,
-                page_number=0,
-                chunk_index=i,
-            )
+            make_chunk(id=f"c{i}", document_id="d1", text=f"t{i}", token_count=1, chunk_index=i)
             for i in range(5)
         )
         s.add_all(
@@ -172,7 +157,7 @@ async def test_a_document_s_auto_collection_notes(session):
 async def test_a_summary_of_another_mode_written_at_the_same_instant_is_not_executive(memory_db):
     factory = async_sessionmaker(memory_db.engine, expire_on_commit=False)
     async with factory() as s:
-        s.add(DocumentModel(id="d", title="D", format="txt", content_type="book", file_path="/d"))
+        s.add(make_document(id="d", title="D", file_path="/d", stage="parsing"))
         s.add_all(
             SummaryModel(id=mode, document_id="d", mode=mode, content=mode, created_at=T0)
             for mode in ("executive", "detailed")

@@ -10,7 +10,8 @@ from PIL import Image as PILImage
 from sqlalchemy import select
 
 from app.main import app
-from app.models import DocumentModel, EnrichmentJobModel, ImageModel
+from app.models import EnrichmentJobModel, ImageModel
+from tests.factories import make_document
 
 
 @pytest.mark.asyncio
@@ -20,16 +21,7 @@ async def test_get_images_returns_empty_for_text_doc(test_db):
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Text Book",
-                format="txt",
-                content_type="book",
-                word_count=100,
-                page_count=0,
-                file_path="/fake.txt",
-                stage="complete",
-            )
+            make_document(id=doc_id, title="Text Book", word_count=100, file_path="/fake.txt")
         )
         await session.commit()
 
@@ -64,15 +56,13 @@ async def test_get_images_returns_stored_image(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="PDF Book",
                 format="pdf",
-                content_type="book",
                 word_count=1000,
                 page_count=10,
                 file_path="/fake.pdf",
-                stage="complete",
             )
         )
         session.add(
@@ -118,15 +108,13 @@ async def test_serve_image_raw_returns_200(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="PDF Book",
                 format="pdf",
-                content_type="book",
                 word_count=100,
                 page_count=1,
                 file_path="/fake.pdf",
-                stage="complete",
             )
         )
         session.add(
@@ -167,11 +155,10 @@ async def test_get_enrichment_returns_jobs(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="PDF Book",
                 format="pdf",
-                content_type="book",
                 word_count=100,
                 page_count=1,
                 file_path="/fake.pdf",
@@ -206,16 +193,7 @@ async def test_get_enrichment_returns_empty_for_text_doc(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Text Book",
-                format="txt",
-                content_type="book",
-                word_count=100,
-                page_count=0,
-                file_path="/fake.txt",
-                stage="complete",
-            )
+            make_document(id=doc_id, title="Text Book", word_count=100, file_path="/fake.txt")
         )
         await session.commit()
 
@@ -360,7 +338,7 @@ async def test_reextract_queues_an_image_extract_job(test_db):
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Paper",
                 format="pdf",
@@ -368,7 +346,6 @@ async def test_reextract_queues_an_image_extract_job(test_db):
                 word_count=100,
                 page_count=15,
                 file_path="/fake.pdf",
-                stage="complete",
             )
         )
         await session.commit()

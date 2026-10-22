@@ -7,7 +7,6 @@ from sqlalchemy import func, select
 
 from app.models import (
     ConceptModel,
-    DocumentModel,
     GraphConceptDocumentModel,
     GraphConceptEdgeModel,
     GraphDiagramDepictionModel,
@@ -17,12 +16,12 @@ from app.models import (
     GraphEntityModel,
     GraphImportStateModel,
     GraphNoteEntityModel,
-    NoteModel,
 )
 from app.repos.graph_import_repo import GraphImportRepo
 from app.services import graph_import
 from app.services.graph_connection import GraphDatabaseLockedError
 from app.services.startup_status import get_startup_status
+from tests.factories import make_document, make_note
 from tests.kuzu_legacy import legacy_graph
 
 LIVE_CONCEPTS = ("c1", "c2", "c3")
@@ -61,7 +60,7 @@ async def _seed_sqlite(memory_db):
     async with memory_db.factory() as s:
         for cid in LIVE_CONCEPTS:
             s.add(ConceptModel(id=cid, slug=f"s-{cid}", label=cid))
-        s.add(DocumentModel(id="d1", title="d1", format="txt", content_type="book", file_path="/x"))
+        s.add(make_document(id="d1", title="d1", file_path="/x", stage="parsing"))
         await s.commit()
 
 
@@ -275,7 +274,7 @@ async def test_entities_and_notes_import_live_rows_and_count_stale_ones(memory_d
     _seed_entity_graph(conn)
     await _seed_sqlite(memory_db)
     async with memory_db.factory() as s:
-        s.add(NoteModel(id="note-live", content="On Ulysses", tags=[]))
+        s.add(make_note(id="note-live", content="On Ulysses"))
         await s.commit()
 
     await graph_import.run_graph_import(str(data_dir), lambda: conn)

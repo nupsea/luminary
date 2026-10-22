@@ -18,8 +18,9 @@ import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import DocumentModel, SectionModel, SectionSummaryModel
+from app.models import SectionModel, SectionSummaryModel
 from app.services.section_summarizer import SectionSummarizerService
+from tests.factories import make_document, make_section
 
 # Shared fixture
 
@@ -52,17 +53,7 @@ async def test_db(tmp_path, monkeypatch):
 
 async def _insert_document(factory, doc_id: str) -> None:
     async with factory() as session:
-        doc = DocumentModel(
-            id=doc_id,
-            title="Test Doc",
-            format="txt",
-            content_type="book",
-            word_count=1000,
-            page_count=1,
-            file_path="/tmp/test.txt",
-            stage="complete",
-            tags=[],
-        )
+        doc = make_document(id=doc_id, word_count=1000, page_count=1, file_path="/tmp/test.txt")
         session.add(doc)
         await session.commit()
 
@@ -74,11 +65,9 @@ async def _insert_sections(
     sections = []
     async with factory() as session:
         for i in range(count):
-            s = SectionModel(
-                id=str(uuid.uuid4()),
+            s = make_section(
                 document_id=doc_id,
                 heading=f"Section {i}",
-                level=1,
                 page_start=i,
                 page_end=i,
                 section_order=i,
@@ -330,30 +319,12 @@ async def test_summarises_the_whole_section_not_the_snippet(test_db):
     from app.services.section_summarizer import section_text
 
     long_body = "B" * 40000
-    section = SectionModel(
-        id=str(uuid.uuid4()),
-        document_id="d",
-        heading="Long",
-        level=1,
-        page_start=0,
-        page_end=0,
-        section_order=0,
-        body=long_body,
-        preview=long_body[:10000],
+    section = make_section(
+        document_id="d", heading="Long", body=long_body, preview=long_body[:10000]
     )
     assert len(section_text(section)) == 40000
 
     # Rows written before `body` existed carry only the snippet, and reading it
     # is the honest interim -- a re-ingest is what restores the rest.
-    legacy = SectionModel(
-        id=str(uuid.uuid4()),
-        document_id="d",
-        heading="Legacy",
-        level=1,
-        page_start=0,
-        page_end=0,
-        section_order=1,
-        body="",
-        preview="C" * 900,
-    )
+    legacy = make_section(document_id="d", heading="Legacy", section_order=1, preview="C" * 900)
     assert section_text(legacy) == "C" * 900

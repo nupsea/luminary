@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, patch
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
+from tests.factories import make_card, make_chunk, make_document, make_section
 
 NOW = datetime.now(UTC)
 
@@ -32,22 +32,21 @@ async def _library(factory, *, chunks: int, used: list[int], section_split: int 
     chunk_ids: list[str] = []
     async with factory() as s:
         s.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Linear Programming",
-                format="txt",
                 content_type="notes",
                 created_at=NOW,
                 file_path=f"/tmp/{doc_id}.txt",
+                stage="parsing",
             )
         )
         for name, sid in (("One", section_a), ("Two", section_b)):
             s.add(
-                SectionModel(
+                make_section(
                     id=sid,
                     document_id=doc_id,
                     heading=name,
-                    level=1,
                     section_order=0 if name == "One" else 1,
                 )
             )
@@ -56,7 +55,7 @@ async def _library(factory, *, chunks: int, used: list[int], section_split: int 
             chunk_ids.append(cid)
             in_b = section_split is not None and i >= section_split
             s.add(
-                ChunkModel(
+                make_chunk(
                     id=cid,
                     document_id=doc_id,
                     chunk_index=i,
@@ -66,19 +65,13 @@ async def _library(factory, *, chunks: int, used: list[int], section_split: int 
             )
         for i in used:
             s.add(
-                FlashcardModel(
-                    id=str(uuid.uuid4()),
+                make_card(
                     document_id=doc_id,
                     chunk_id=chunk_ids[i],
                     question=f"Q about passage {i}?",
                     answer="A.",
                     source_excerpt="Passage.",
-                    fsrs_state="new",
-                    fsrs_stability=0.0,
-                    fsrs_difficulty=0.0,
                     due_date=NOW,
-                    reps=0,
-                    lapses=0,
                     created_at=NOW,
                     source_chunk_ids=[chunk_ids[i]],
                 )
@@ -142,19 +135,13 @@ async def test_a_card_that_names_no_passage_is_reported_not_counted(test_db):
     doc_id, chunk_ids, _a, _b = await _library(factory, chunks=3, used=[0])
     async with factory() as s:
         s.add(
-            FlashcardModel(
-                id=str(uuid.uuid4()),
+            make_card(
                 document_id=doc_id,
                 chunk_id=chunk_ids[1],
                 question="Legacy card?",
                 answer="A.",
                 source_excerpt="Passage.",
-                fsrs_state="new",
-                fsrs_stability=0.0,
-                fsrs_difficulty=0.0,
                 due_date=NOW,
-                reps=0,
-                lapses=0,
                 created_at=NOW,
                 source_chunk_ids=None,
             )

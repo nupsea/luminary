@@ -8,9 +8,10 @@ import pytest
 from sqlalchemy import select
 
 import app.services.enrichment_worker as ew
-from app.models import DocumentModel, EnrichmentJobModel
+from app.models import EnrichmentJobModel
 from app.services.enrichment_worker import EnrichmentQueueWorker
 from app.services.llm import LLMAPIConnectionError
+from tests.factories import make_document
 
 
 async def _drain(worker: EnrichmentQueueWorker) -> None:
@@ -29,11 +30,10 @@ async def test_worker_transitions_job_to_done(test_db):
     job_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Test",
                 format="pdf",
-                content_type="book",
                 word_count=100,
                 page_count=1,
                 file_path="/fake/test.pdf",
@@ -82,11 +82,10 @@ async def test_worker_failed_job_sets_error_message(test_db):
     job_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Test",
                 format="pdf",
-                content_type="book",
                 word_count=10,
                 page_count=1,
                 file_path="/fake.pdf",
@@ -128,11 +127,10 @@ def _seed_job(factory, doc_id, job_id, job_type):
     async def _go():
         async with factory() as session:
             session.add(
-                DocumentModel(
+                make_document(
                     id=doc_id,
                     title="Test",
                     format="pdf",
-                    content_type="book",
                     word_count=10,
                     page_count=1,
                     file_path="/fake.pdf",
@@ -349,11 +347,10 @@ async def test_worker_skips_already_active_document(test_db):
     job_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Test",
                 format="pdf",
-                content_type="book",
                 word_count=10,
                 page_count=1,
                 file_path="/fake.pdf",
@@ -393,11 +390,10 @@ async def _seed_boot_job(factory, *, status: str, attempts: int, doc_id: str = "
     job_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="t",
                 format="pdf",
-                content_type="book",
                 word_count=10,
                 page_count=1,
                 file_path="/fake.pdf",
@@ -473,11 +469,10 @@ async def test_chapter_cards_run_before_image_analysis(test_db):
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Test",
                 format="pdf",
-                content_type="book",
                 word_count=10,
                 page_count=1,
                 file_path="/fake.pdf",

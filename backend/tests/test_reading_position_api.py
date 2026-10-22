@@ -8,27 +8,19 @@ import pytest
 
 import app.database as db_module
 from app.main import app
+from tests.factories import make_document
 
 # Test DB fixture
 
 
 async def _create_document(doc_id: str) -> None:
     """Insert a minimal document row so position endpoints can verify existence."""
-    from app.models import DocumentModel
 
     factory = db_module._session_factory
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Test Book",
-                format="txt",
-                content_type="notes",
-                word_count=0,
-                page_count=0,
-                file_path="/tmp/noop.txt",
-                stage="complete",
-                tags=[],
+            make_document(
+                id=doc_id, title="Test Book", content_type="notes", file_path="/tmp/noop.txt"
             )
         )
         await session.commit()

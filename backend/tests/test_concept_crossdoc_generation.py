@@ -13,9 +13,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from task_drain import dispose_engine
 
 import app.database as db_module
-from app.models import ChunkModel, ConceptModel, DocumentModel, FlashcardModel
+from app.models import ConceptModel, FlashcardModel
 from app.services import study_assembler
 from app.services.study_assembler import _concept_evidence_text, _generate_for_concepts
+from tests.factories import make_chunk, make_document
 
 _TEXT_A = "Relational data modeling centers on normalization and foreign keys across tables."
 _TEXT_B = "Dimensional data modeling centers on star schemas with fact and dimension tables."
@@ -40,16 +41,17 @@ async def _seed_two_books_one_concept(factory):
     async with factory() as s:
         for did, title in (("bookA", "Relational DBs"), ("bookB", "Data Warehousing")):
             s.add(
-                DocumentModel(
+                make_document(
                     id=did,
                     title=title,
                     format="pdf",
                     content_type="tech_book",
                     file_path=f"/tmp/{did}.pdf",
+                    stage="parsing",
                 )
             )
-        s.add(ChunkModel(id="chA", document_id="bookA", text=_TEXT_A, chunk_index=0))
-        s.add(ChunkModel(id="chB", document_id="bookB", text=_TEXT_B, chunk_index=0))
+        s.add(make_chunk(id="chA", document_id="bookA", text=_TEXT_A))
+        s.add(make_chunk(id="chB", document_id="bookB", text=_TEXT_B))
         s.add(
             ConceptModel(
                 id="c1",
@@ -126,12 +128,13 @@ async def test_falls_back_to_whole_doc_when_no_evidence_chunks(test_db, monkeypa
     """A concept with no captured chunk_ids still generates -- grounded in the primary doc."""
     async with test_db() as s:
         s.add(
-            DocumentModel(
+            make_document(
                 id="bookA",
                 title="Relational DBs",
                 format="pdf",
                 content_type="tech_book",
                 file_path="/tmp/a.pdf",
+                stage="parsing",
             )
         )
         s.add(

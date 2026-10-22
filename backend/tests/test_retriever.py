@@ -6,10 +6,10 @@ from unittest.mock import MagicMock, patch
 from sqlalchemy import text
 from stubs import MockEmbeddingService as _MockEmbeddingService
 
-from app.models import ChunkModel, DocumentModel
 from app.services.retriever import HybridRetriever
 from app.types import ScoredChunk
 from app.workflows.ingestion import IngestionState, keyword_index_node
+from tests.factories import make_chunk, make_document
 
 # Shared fixture — in-memory SQLite with FTS5
 
@@ -18,10 +18,8 @@ async def _insert_doc_and_chunk(factory, tmp_path, doc_id: str, chunk_id: str, t
     """Helper: insert a document and one chunk into the DB."""
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
-                title="Test Doc",
-                format="txt",
                 content_type="notes",
                 word_count=10,
                 page_count=1,
@@ -30,15 +28,13 @@ async def _insert_doc_and_chunk(factory, tmp_path, doc_id: str, chunk_id: str, t
             )
         )
         session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id,
                 document_id=doc_id,
                 section_id=None,
                 text=text_content,
                 token_count=len(text_content.split()),
-                page_number=0,
                 speaker=None,
-                chunk_index=0,
             )
         )
         await session.commit()

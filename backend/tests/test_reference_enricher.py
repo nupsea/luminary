@@ -16,7 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.main import app
-from app.models import DocumentModel, SectionSummaryModel, WebReferenceModel
+from app.models import SectionSummaryModel, WebReferenceModel
 from app.services.reference_enricher import (
     _SYSTEM_PROMPT,
     ReferenceEnricherService,
@@ -24,6 +24,7 @@ from app.services.reference_enricher import (
     select_sections,
     sort_by_quality,
 )
+from tests.factories import make_document
 
 
 class _FakeSummary:
@@ -39,16 +40,13 @@ class _FakeSummary:
 
 async def _insert_document(factory, doc_id: str, content_type: str = "tech_book") -> None:
     async with factory() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id=doc_id,
             title="Python Programming",
-            format="txt",
             content_type=content_type,
             word_count=5000,
             page_count=10,
             file_path="/tmp/test.txt",
-            stage="complete",
-            tags=[],
         )
         session.add(doc)
         await session.commit()
@@ -299,16 +297,12 @@ async def test_get_document_references_returns_empty_for_no_refs(test_db):
     doc_id = str(uuid.uuid4())
     # Insert a fiction book without any section summaries or web refs
     async with factory() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id=doc_id,
             title="The Time Machine",
-            format="txt",
-            content_type="book",
             word_count=30000,
             page_count=100,
             file_path="/tmp/time_machine.txt",
-            stage="complete",
-            tags=[],
         )
         session.add(doc)
         await session.commit()

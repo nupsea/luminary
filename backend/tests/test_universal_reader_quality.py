@@ -11,8 +11,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models import ChunkModel, DocumentModel, ImageModel, SectionModel
+from app.models import ImageModel
 from app.services.parser import _epub_html_to_markdown, _split_epub_document
+from tests.factories import make_chunk, make_document, make_section
 
 
 @pytest.fixture
@@ -121,27 +122,21 @@ async def test_web_article_served_lossless_as_body(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="DataJunction as Netflix's answer",
                 format="md",
                 content_type="tech_article",
                 word_count=45,
-                page_count=0,
                 file_path=f"/tmp/{doc_id}.md",
                 source_url="https://netflixtechblog.com/datajunction",
-                stage="complete",
             )
         )
         session.add(
-            SectionModel(
+            make_section(
                 id=sec_id,
                 document_id=doc_id,
                 heading="DataJunction Architecture",
-                level=1,
-                page_start=0,
-                page_end=0,
-                section_order=0,
                 body=body_markdown,
                 preview="DataJunction preview...",
             )
@@ -176,27 +171,21 @@ async def test_youtube_audio_text_dialogue_served_lossless(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Skill Issue: Andrej Karpathy on Code Agents",
                 format="wav",
                 content_type="audio",
                 word_count=50,
-                page_count=0,
                 file_path=f"/tmp/{doc_id}.wav",
                 source_url="https://www.youtube.com/watch?v=kwSVtQ7dziU",
-                stage="complete",
             )
         )
         session.add(
-            SectionModel(
+            make_section(
                 id=sec_id,
                 document_id=doc_id,
                 heading="Transcript",
-                level=1,
-                page_start=0,
-                page_end=0,
-                section_order=0,
                 body=transcript,
                 preview="Host: Welcome back...",
             )
@@ -227,7 +216,7 @@ async def test_pdf_paginated_with_images_and_sections(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Chess Architecture Paper",
                 format="pdf",
@@ -235,29 +224,25 @@ async def test_pdf_paginated_with_images_and_sections(test_db):
                 word_count=100,
                 page_count=10,
                 file_path=f"/tmp/{doc_id}.pdf",
-                stage="complete",
             )
         )
         session.add(
-            SectionModel(
+            make_section(
                 id=sec_id,
                 document_id=doc_id,
                 heading="Methodology",
-                level=1,
                 page_start=2,
                 page_end=4,
-                section_order=0,
                 body="We evaluate search tree depths across 10,000 matches.",
                 preview="We evaluate...",
             )
         )
         session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id,
                 document_id=doc_id,
                 section_id=sec_id,
                 text="Chunk text from methodology.",
-                chunk_index=0,
             )
         )
         session.add(
@@ -309,15 +294,12 @@ async def test_document_asset_endpoint_serves_epub_images(test_db, tmp_path):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="RAG Systems Book",
                 format="epub",
-                content_type="book",
                 word_count=500,
-                page_count=0,
                 file_path=str(fake_epub),
-                stage="complete",
             )
         )
         await session.commit()

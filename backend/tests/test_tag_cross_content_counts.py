@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import DocumentModel
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -15,17 +16,7 @@ def test_db(memory_db):
 
 
 def _doc(doc_id: str) -> DocumentModel:
-    return DocumentModel(
-        id=doc_id,
-        title="d",
-        format="txt",
-        content_type="book",
-        word_count=1,
-        page_count=0,
-        file_path=f"/tmp/{doc_id}.txt",
-        stage="complete",
-        tags=[],
-    )
+    return make_document(id=doc_id, title="d", word_count=1, file_path=f"/tmp/{doc_id}.txt")
 
 
 @pytest.mark.anyio

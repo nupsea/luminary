@@ -14,10 +14,9 @@ from app.main import app
 from app.models import (
     CollectionMemberModel,
     CollectionModel,
-    FlashcardModel,
-    NoteModel,
 )
 from app.services.flashcard import FlashcardService
+from tests.factories import make_card, make_note
 
 # Fixture
 
@@ -73,7 +72,7 @@ async def test_generate_from_collection_skips_matching_hash(test_db):
             )
         )
         session.add(
-            NoteModel(
+            make_note(
                 id=note_id,
                 content=content,
                 tags="[]",
@@ -92,8 +91,7 @@ async def test_generate_from_collection_skips_matching_hash(test_db):
         )
         # Seed existing flashcard with matching hash
         session.add(
-            FlashcardModel(
-                id=str(uuid.uuid4()),
+            make_card(
                 document_id=None,
                 chunk_id=None,
                 source="note",
@@ -102,13 +100,7 @@ async def test_generate_from_collection_skips_matching_hash(test_db):
                 question="Q?",
                 answer="A.",
                 source_excerpt="excerpt",
-                difficulty="medium",
-                fsrs_state="new",
-                fsrs_stability=0.0,
-                fsrs_difficulty=0.0,
                 due_date=datetime.now(UTC),
-                reps=0,
-                lapses=0,
                 created_at=datetime.now(UTC),
             )
         )
@@ -147,7 +139,7 @@ async def test_generate_from_collection_processes_changed_content(test_db):
             )
         )
         session.add(
-            NoteModel(
+            make_note(
                 id=note_id,
                 content=content,
                 tags="[]",
@@ -166,8 +158,7 @@ async def test_generate_from_collection_processes_changed_content(test_db):
         )
         # Seed flashcard with DIFFERENT hash (simulates stale content)
         session.add(
-            FlashcardModel(
-                id=str(uuid.uuid4()),
+            make_card(
                 document_id=None,
                 chunk_id=None,
                 source="note",
@@ -176,13 +167,7 @@ async def test_generate_from_collection_processes_changed_content(test_db):
                 question="Old Q?",
                 answer="Old A.",
                 source_excerpt="excerpt",
-                difficulty="medium",
-                fsrs_state="new",
-                fsrs_stability=0.0,
-                fsrs_difficulty=0.0,
                 due_date=datetime.now(UTC),
-                reps=0,
-                lapses=0,
                 created_at=datetime.now(UTC),
             )
         )
@@ -241,8 +226,7 @@ async def test_get_flashcard_decks_collection_source_type(test_db):
             )
         )
         session.add(
-            FlashcardModel(
-                id=str(uuid.uuid4()),
+            make_card(
                 document_id=None,
                 chunk_id=None,
                 source="note",
@@ -251,13 +235,7 @@ async def test_get_flashcard_decks_collection_source_type(test_db):
                 question="Q?",
                 answer="A.",
                 source_excerpt="excerpt",
-                difficulty="medium",
-                fsrs_state="new",
-                fsrs_stability=0.0,
-                fsrs_difficulty=0.0,
                 due_date=datetime.now(UTC),
-                reps=0,
-                lapses=0,
                 created_at=datetime.now(UTC),
             )
         )

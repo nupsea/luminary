@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.models import ChunkModel, DocumentModel
 from app.services import llm_output_stats
 from app.services.flashcard import FlashcardService
 from app.services.flashcard_generators import _unit_cards
@@ -19,6 +18,7 @@ from app.services.flashcard_units import (
     split_speeches,
     split_units,
 )
+from tests.factories import make_chunk, make_document
 
 STORY = (
     "The Queen called for her servant, a huntsman.\n"
@@ -402,26 +402,18 @@ async def test_generate_takes_the_unit_path_when_it_is_on(test_db, unit_first):
     )
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id="d1",
                 title="The Odyssey",
-                format="txt",
                 content_type="notes",
                 word_count=40,
                 page_count=1,
                 file_path="/tmp/o.txt",
-                stage="complete",
             )
         )
         session.add(
-            ChunkModel(
-                id="c1",
-                document_id="d1",
-                section_id=None,
-                text=text,
-                token_count=40,
-                page_number=1,
-                chunk_index=0,
+            make_chunk(
+                id="c1", document_id="d1", section_id=None, text=text, token_count=40, page_number=1
             )
         )
         await session.commit()

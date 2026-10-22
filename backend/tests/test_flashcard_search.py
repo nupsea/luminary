@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from app.main import app
 from app.models import FlashcardModel
+from tests.factories import make_card, make_chunk
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -23,23 +24,19 @@ def _make_flashcard(
     **kwargs,
 ) -> FlashcardModel:
     now = datetime.now(UTC)
-    defaults = {
-        "id": card_id or str(uuid.uuid4()),
-        "document_id": doc_id,
-        "chunk_id": str(uuid.uuid4()),
-        "question": question,
-        "answer": answer,
-        "source_excerpt": "Some excerpt.",
-        "fsrs_state": "new",
-        "fsrs_stability": 0.0,
-        "fsrs_difficulty": 0.0,
-        "due_date": now,
-        "reps": 0,
-        "lapses": 0,
-        "created_at": now,
-    }
-    defaults.update(kwargs)
-    return FlashcardModel(**defaults)
+    return make_card(
+        **{
+            "id": card_id,
+            "document_id": doc_id,
+            "chunk_id": str(uuid.uuid4()),
+            "question": question,
+            "answer": answer,
+            "source_excerpt": "Some excerpt.",
+            "due_date": now,
+            "created_at": now,
+            **kwargs,
+        }
+    )
 
 
 # AC8: GET /flashcards/search with query param returns matching cards via FTS5
@@ -197,18 +194,13 @@ async def test_like_fallback_keeps_the_section_filter(test_db):
     """FTS matches whole tokens, so "tangle" finds nothing and the search falls back to a
     substring match. The fallback once rebuilt every filter but the section, so a
     section's search returned cards from every section."""
-    from app.models import ChunkModel
     from app.services.flashcard_search import FlashcardSearchService
 
     _, factory, _ = test_db
     async with factory() as session:
         for section in ("sec-a", "sec-b"):
             chunk_id = f"chunk-{section}"
-            session.add(
-                ChunkModel(
-                    id=chunk_id, document_id="doc-1", section_id=section, text="x", chunk_index=0
-                )
-            )
+            session.add(make_chunk(id=chunk_id, document_id="doc-1", section_id=section, text="x"))
             session.add(_make_flashcard(card_id=f"card-{section}", chunk_id=chunk_id))
         await session.commit()
 
