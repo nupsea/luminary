@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { POSITION_SETTLE_MS, settledSaver } from "./positionSave"
+import {
+  NOWHERE,
+  POSITION_SETTLE_MS,
+  placeOfPosition,
+  positionBody,
+  settledSaver,
+  withSaved,
+} from "./positionSave"
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -59,5 +66,38 @@ describe("settledSaver", () => {
     saver.stop()
     vi.advanceTimersByTime(POSITION_SETTLE_MS)
     expect(save).not.toHaveBeenCalled()
+  })
+})
+
+describe("the saved position", () => {
+  const saved = placeOfPosition({
+    document_id: "d1",
+    last_section_id: "s7",
+    last_section_heading: "Chapter 7",
+    last_pdf_page: null,
+    last_epub_chapter_index: 4,
+    last_epub_block_index: 31,
+    pdf_bookmark_page: null,
+  })
+
+  it("keeps the saved section when only the book's place was read", () => {
+    const read = { ...NOWHERE, epubPlace: { chapter: 5, block: 2 }, heading: "Chapter 8" }
+    expect(positionBody(withSaved(read, saved))).toEqual({
+      last_section_id: "s7",
+      last_section_heading: "Chapter 8",
+      last_pdf_page: null,
+      last_epub_chapter_index: 5,
+      last_epub_block_index: 2,
+    })
+  })
+
+  it("is saved unchanged when nothing was read", () => {
+    expect(positionBody(withSaved(NOWHERE, saved))).toEqual(positionBody(saved))
+  })
+
+  it("reads a chapter saved without a block as the chapter's start", () => {
+    const pos = { document_id: "d1", last_section_id: null, last_section_heading: null, last_pdf_page: null,
+      last_epub_chapter_index: 2, last_epub_block_index: null, pdf_bookmark_page: null }
+    expect(placeOfPosition(pos).epubPlace).toEqual({ chapter: 2, block: 0 })
   })
 })
