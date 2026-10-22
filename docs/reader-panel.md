@@ -65,6 +65,9 @@ thread.
   would rebind the autosaver and drop an edit still inside its debounce. Each opened note gets its
   own composer (`key`); a capture keeps one so later selections append. `make verify-note-nav`
   drives both in a browser.
+- The composer's shortcuts (keyboard button, or Mod-/ in the editor) open inline below the editor,
+  not as the full page's dialog, which would open over the document. `shortcutSections.test.ts` fails when
+  the list names a key the editor does not bind.
 - Each note in the Notes face has its own delete, confirmed inline. Without it the only delete in
   reach was the document's, and a user removed a book (and its notes) trying to remove a note.
 - Deleting the document keeps its notes as standalone notes unless "Also delete my N notes" is
@@ -80,9 +83,14 @@ thread.
 
 `liveMarkdown` renders as it writes in `layout="editor"`, the only layout with no preview pane. It
 hides inline markers on every line but the cursor's, and draws blocks (fenced code, tables, a lone
-image, `$$` math) with `MarkdownRenderer`, so editor and preview cannot disagree. The full note page
-turns it on when its preview toggle is off; it is reconfigured on the built view, not read at mount.
+image, `$$` math) with `MarkdownRenderer`, so editor and preview cannot disagree about a block. The full
+note page turns it on when its preview toggle is off; it is reconfigured on the built view, not read
+at mount.
 
+- **Inline syntax is drawn by the editor, not by `MarkdownRenderer`.** An inline feature the preview
+  gains (remark-math's `$…$`) stays raw source here until `liveMarkdown` draws it too. Inline math
+  follows remark-math's rule in `inlineMathRanges`; `liveMarkdown.test.ts` holds the editor to the
+  preview's span count. `mathSource` decides what is math for every layout and tints its source.
 - **A click answers with the character under it.** Code maps the pointer through the rendering to an
   offset in the body; a table answers with the clicked cell. A block whose first and last lines are
   fences (```` ``` ````, `$$`) never hands the caret to a fence line. Landing on a fence is what
@@ -91,8 +99,8 @@ turns it on when its preview toggle is off; it is reconfigured on the built view
   content line.
 - A drawn diagram is the image plus its sidecar HTML comment, and the block spans both so the edit
   button can reach the scene (`NoteDiagramDialog`). Offsets it returns are block-relative.
-- Three grammar traps: block decorations must come from a `StateField` (a `ViewPlugin` throws); `$$`
-  blocks are found by scanning text, since the markdown grammar has no math; an HTML comment is
+- Three grammar traps: block decorations must come from a `StateField` (a `ViewPlugin` throws); math
+  is found by scanning text, since the markdown grammar has none (`mathRanges`); an HTML comment is
   `HTMLBlock`, `CommentBlock` or `Comment` depending on context, and all three must be hidden.
 
 ## Practice in the reader

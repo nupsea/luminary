@@ -499,6 +499,13 @@ export function noteEditorKeymaps(latest: {
         },
       },
       {
+        key: "Mod-Shift-e",
+        run: (v) => {
+          v.dispatch(toggleInlineMarkSpec(v.state, "$"))
+          return true
+        },
+      },
+      {
         key: "Mod-/",
         run: () => {
           if (latest.current.onOpenShortcuts) {
