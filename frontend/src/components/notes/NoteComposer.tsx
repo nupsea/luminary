@@ -10,11 +10,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, ExternalLink, Loader2, Search, X } from "lucide-react"
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, ExternalLink, Keyboard, Loader2, Search, X } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { type MarkdownEditorHandle } from "@/components/notes/MarkdownCodeEditor"
 import { NoteEditor } from "@/components/notes/NoteEditor"
+import { NoteShortcuts } from "@/components/notes/NoteShortcuts"
 import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkCompletion"
 import {
   Sheet,
@@ -33,6 +34,7 @@ import {
   useNoteAutosave,
   type NoteDraft,
 } from "@/lib/noteAutosave"
+import { getModifierLabel } from "@/lib/keyboard"
 import { useNoteSaveShortcut } from "@/lib/noteEditorUtils"
 import {
   addNoteToCollection,
@@ -110,6 +112,7 @@ export function NoteComposer({
   const [pickerFilter, setPickerFilter] = useState("")
   const [existingNotes, setExistingNotes] = useState<ExistingNoteSummary[]>([])
   const [notesLoading, setNotesLoading] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const closingRef = useRef(false)
   const editorRef = useRef<MarkdownEditorHandle | null>(null)
   const appliedCaptureRef = useRef<string | null>(null)
@@ -407,6 +410,19 @@ export function NoteComposer({
     </div>
   )
 
+  const shortcutsToggle = (
+    <button
+      type="button"
+      onClick={() => setShortcutsOpen((v) => !v)}
+      className={`rounded p-1.5 hover:bg-accent hover:text-foreground ${shortcutsOpen ? "text-primary" : "text-muted-foreground"}`}
+      title={`Keyboard shortcuts (${getModifierLabel()}+/)`}
+      aria-label="Keyboard shortcuts"
+      aria-pressed={shortcutsOpen}
+    >
+      <Keyboard size={14} />
+    </button>
+  )
+
   const headerClass = isSheet
     ? "shrink-0 border-b border-border px-5 pt-5 pb-3"
     : "shrink-0 border-b border-border px-4 pt-3 pb-3"
@@ -422,7 +438,11 @@ export function NoteComposer({
   ) : (
     <div className={headerClass}>
       {noteNav && <NoteNavBar noteId={noteId ?? null} nav={noteNav} leave={handleDismiss} />}
-      {titleField}
+      {/* The docked footer has no room left at panel width; the title's right gutter does. */}
+      <div className="relative">
+        {titleField}
+        <div className="absolute right-0 top-1/2 -translate-y-1/2">{shortcutsToggle}</div>
+      </div>
       {appendControls}
     </div>
   )
@@ -439,8 +459,35 @@ export function NoteComposer({
           linkCompletion={appendTarget ? undefined : linkCompletion}
           editorRef={editorRef}
           autoFocus
+          onOpenShortcuts={() => setShortcutsOpen((v) => !v)}
         />
       </div>
+
+      {/* Inline, not a dialog: the docked composer opens nothing over the document. */}
+      {shortcutsOpen && (
+        <div
+          data-testid="composer-shortcuts"
+          className={`flex max-h-[45%] min-h-0 shrink-0 flex-col border-t border-border py-3 ${isSheet ? "px-5" : "px-4"}`}
+        >
+          <NoteShortcuts
+            surface="composer"
+            compact
+            heading={
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShortcutsOpen(false)}
+                  className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  aria-label="Hide shortcuts"
+                >
+                  <X size={12} />
+                </button>
+                <span className="text-xs font-semibold text-foreground">Note Editor Shortcuts</span>
+              </div>
+            }
+          />
+        </div>
+      )}
 
       <div
         className={`flex shrink-0 flex-wrap items-center gap-3 border-t border-border bg-background py-3 ${
@@ -490,6 +537,7 @@ export function NoteComposer({
           }}
           title="Dictate into note (Whisper)"
         />
+        {isSheet && shortcutsToggle}
         {appendTarget ? (
           <>
             <button
