@@ -104,7 +104,7 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | | 0.18.0 | Your own server, plus what Checkpoints A and B left open: the hardware session, the Practice panel's cards and Ask on what the documents do not say (§7). **#155 and #156 closed on AWS (2026-10-21).** **Checkpoint C** | #24, #66, #99, #155, #156, #162, #322, #330, #334, #354, #355, #356, #357, #358 | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key; zero open `bug` issues milestoned to Phase I, II or III |
 | IV. Separation | 0.19.0 | Components separated for mobile | | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
 | V. Mobile | 0.20.0 | Topic notes and the draft inbox; mobile reading and note capture. **Checkpoint D** | #173 | A merge that leaves a source note out of every section is refused, a summary claim no source note supports is flagged, and undoing a merge restores every original; a phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated |
-| VI. Extras | 0.21.0 | Anki import; the capture extension, watch folder and Obsidian export; card review on mobile | #137, #124, #121, #25, #103, #26, #300, #314 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an offline review on the phone merges without overwriting FSRS state |
+| VI. Extras | 0.21.0 | Anki import; the capture extension, watch folder and Obsidian export; card review on mobile | #137, #124, #121, #25, #103, #26, #300, #314, #367 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an offline review on the phone merges without overwriting FSRS state |
 | VII. Languages | 0.22.0 | Multi-language — **conditional** | | Non-English degradation measured on the current stack first; a swap ships only through 0.17.0's rail; a no-go decision is an allowed outcome and moves the swap to 1.1 |
 | | 1.0.0-rc → 1.0.0 | The release. **Checkpoint E** | | Zero open `bug` issues; every rung's exit gate green together, on one build; the code-quality targets met |
 | After 1.0 | 1.1.0 | Multi-page web import (HTML books, Confluence); Luminary as a read-only MCP server (§13) | #348, #349 | Each test source imports as one document whose sections match its ground-truth TOC, and 10 questions per source are answered with correct citations, read by hand; an MCP client receives passages only from collections the user scoped, and nothing with the setting off or without the token |
@@ -902,7 +902,10 @@ produces a schedule that looks continuous and is not.
 **The capture extension.** A library stays empty when filling it means opening the app and finding the
 file. The backend is already HTTP, so an extension needs a POST rather than an architecture: one click
 for a page, a PDF, a YouTube video, or a selection with its source. It pairs with 0.16.0's device auth.
-A watch folder for the desktop app, Markdown export shaped for Obsidian, and a Zotero read path ship
+It is also how a page only a signed-in browser can see gets in: a claude.ai doc loads inside an
+iframe after sign-in, so the URL import refuses it (`remote_source._refuse_signed_in_only`), and the
+extension, already signed in, imports it with one click (#367). Luminary never holds the claude.ai
+credential. A watch folder for the desktop app, Markdown export shaped for Obsidian, and a Zotero read path ship
 with it.
 
 **Card review on mobile.** It rides 0.19.0's append-only review log, so a review made offline merges

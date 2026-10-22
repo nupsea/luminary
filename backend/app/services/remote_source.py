@@ -41,6 +41,10 @@ _UNINGESTIBLE_TYPES = {
 }
 
 
+_CLAUDE_HOSTS = frozenset({"claude.ai", "www.claude.ai"})
+_CLAUDE_ARTIFACT_PATH = re.compile(r"^/(code/)?artifact/[^/]+")
+
+
 class UningestibleRemoteContent(Exception):
     """The URL resolved to a file this endpoint knowingly cannot ingest."""
 
@@ -111,15 +115,32 @@ def _is_pdf(head: bytes, declared: str, url: str) -> bool:
     return False
 
 
+def _refuse_signed_in_only(url: str) -> None:
+    """A Claude artifact link serves the same empty viewer to every fetch.
+
+    Its content loads after sign-in, inside an iframe on another origin, so
+    neither the static fetch nor the shell's render can reach it.
+    """
+    parts = urlparse(url)
+    if parts.netloc.lower() in _CLAUDE_HOSTS and _CLAUDE_ARTIFACT_PATH.match(parts.path):
+        raise UningestibleRemoteContent(
+            "That link is a Claude doc or artifact, which shows its content only to someone "
+            "signed in to claude.ai. Export it from claude.ai as Markdown or PDF and upload "
+            "the file instead."
+        )
+
+
 async def fetch_remote_document(url: str) -> RemoteDocument | None:
     """Fetch `url` if it is a document; return None if it is a page to extract.
 
     Raises UningestibleRemoteContent for a recognised file type this endpoint
-    cannot handle, and RemoteDocumentTooLarge past the size ceiling. Transport
+    cannot handle, or a link whose content only a signed-in browser can see,
+    and RemoteDocumentTooLarge past the size ceiling. Transport
     failures propagate: returning None would send the article extractor after a
     URL already known to be unreachable. A refusal is not that: Wikimedia answers
     this client 403 and the extractor's own fetch 200, so the page goes to it.
     """
+    _refuse_signed_in_only(url)
     target = canonical_source_url(url)
     if target != url:
         logger.info("remote_source: rewrote %s to its raw form %s", url, target)
