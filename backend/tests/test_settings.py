@@ -6,9 +6,7 @@ import keyring.errors
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
 import app.services.settings_service as svc_module
 from app.main import app
 from app.models import SettingsModel
@@ -26,34 +24,12 @@ from app.services.settings_service import (
 
 
 @pytest.fixture
-async def test_db(memory_db, tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+def test_db(memory_db, monkeypatch):
     # Model listing honours env keys, so a developer's own key must not reach these tests.
     for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"):
         monkeypatch.delenv(var, raising=False)
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = memory_db.engine
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    # Reset module-level cache to defaults before each test
     svc_module._cache.update(_DEFAULTS)
-
-    yield engine, factory
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
-
-    # Restore cache to defaults after test
+    yield memory_db.engine, memory_db.factory
     svc_module._cache.update(_DEFAULTS)
 
 

@@ -10,9 +10,7 @@ from unittest.mock import MagicMock, patch
 import pyarrow as pa
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
 import app.services.vector_store as vs_module
 from app.main import app
 from app.models import NoteModel, NoteTagIndexModel  # noqa: F401
@@ -23,31 +21,9 @@ from tests.factories import make_note
 
 
 @pytest.fixture
-async def test_db(memory_db, tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = memory_db.engine
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    # Reset LanceDB singleton so it picks up the temp DATA_DIR
-    orig_vs = vs_module._lancedb_service
-    vs_module._lancedb_service = None
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    vs_module._lancedb_service = orig_vs
-    get_settings.cache_clear()
-    await engine.dispose()
+def test_db(memory_db, monkeypatch):
+    monkeypatch.setattr(vs_module, "_lancedb_service", None)
+    return memory_db
 
 
 @pytest.fixture

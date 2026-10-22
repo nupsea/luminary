@@ -6,29 +6,15 @@ collections idempotently. (Study topics live in the Study tab, not this aggregat
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import async_sessionmaker
-from task_drain import dispose_engine
 
-import app.database as db_module
 from app.main import app
 from app.models import CollectionModel
 from tests.factories import make_document
 
 
 @pytest.fixture
-async def test_db(memory_db, tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    engine = memory_db.engine
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine, orig_factory = db_module._engine, db_module._session_factory
-    db_module._engine, db_module._session_factory = engine, factory
-    yield factory
-    db_module._engine, db_module._session_factory = orig_engine, orig_factory
-    await dispose_engine(engine)
+def test_db(memory_db):
+    return memory_db.factory
 
 
 async def _seed_doc(factory):

@@ -3,31 +3,16 @@ identity + RELATED_TO edges, status honoured from score_concepts (concepts.md §
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
-from task_drain import dispose_engine
 
-import app.database as db_module
 import app.services.graph as graph_module
 from app.models import ConceptModel
 from app.workflows.concept_nodes.persist import persist_concepts
 
 
 @pytest.fixture
-async def test_db(memory_db, tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    engine = memory_db.engine
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    orig_e, orig_f = db_module._engine, db_module._session_factory
-    db_module._engine, db_module._session_factory = engine, factory
-    orig_g = graph_module._graph_service
-    graph_module._graph_service = None
-    yield factory
-    db_module._engine, db_module._session_factory = orig_e, orig_f
-    graph_module._graph_service = orig_g
-    await dispose_engine(engine)
+def test_db(memory_db, monkeypatch):
+    monkeypatch.setattr(graph_module, "_graph_service", None)
+    return memory_db.factory
 
 
 def _state():

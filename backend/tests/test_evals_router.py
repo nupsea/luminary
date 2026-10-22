@@ -11,7 +11,6 @@ import json
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
 import app.routers.evals as evals_module
@@ -27,28 +26,9 @@ from tests.factories import make_chunk, make_document
 
 
 @pytest.fixture
-async def test_db(memory_db, tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = memory_db.engine
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
-
-    yield tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
+def test_db(memory_db):
+    (memory_db.tmp_path / "raw").mkdir()
+    return memory_db.tmp_path
 
 
 # Tests

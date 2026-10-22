@@ -13,11 +13,7 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.models import (
     FlashcardModel,
@@ -30,15 +26,9 @@ from tests.factories import make_card, make_document
 pytestmark = pytest.mark.usefixtures("card_documents")
 
 
-@pytest.fixture()
-async def test_db(tmp_path, monkeypatch):
-    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'repair.db'}")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    monkeypatch.setattr(db_module, "_engine", engine)
-    monkeypatch.setattr(db_module, "_session_factory", factory)
-    yield factory
-    await engine.dispose()
+@pytest.fixture
+def test_db(memory_db):
+    return memory_db.factory
 
 
 def _card(card_id: str, doc_id: str | None = "doc-1") -> FlashcardModel:

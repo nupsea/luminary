@@ -10,31 +10,10 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.models import AnnotationModel, ChunkModel, DocumentModel, SectionModel
 from tests.factories import make_chunk, make_document, make_section
-
-
-@pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path}/test.db")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    orig_engine, orig_factory = db_module._engine, db_module._session_factory
-    db_module._engine, db_module._session_factory = engine, factory
-    yield engine, factory, tmp_path
-    db_module._engine, db_module._session_factory = orig_engine, orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
 
 
 async def _seed(factory, tmp_path, *, with_url: bool) -> str:

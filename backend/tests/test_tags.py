@@ -5,15 +5,11 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import async_sessionmaker
 from task_drain import drain_background_tasks
 
-import app.database as db_module
 import app.services.embedder as embedder_module
 import app.services.graph as graph_module
 import app.services.vector_store as vs_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel
 from tests.factories import make_document
@@ -28,47 +24,16 @@ class _MockEmbeddingService:
 
 
 @pytest.fixture
-async def test_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path}/test.db")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
+async def test_db(memory_db, monkeypatch):
     from unittest.mock import MagicMock
 
-    orig_lancedb = vs_module._lancedb_service
-    orig_graph = graph_module._graph_service
-    orig_embedder = embedder_module._embedding_service
-
-    vs_module._lancedb_service = MagicMock()
-    graph_module._graph_service = MagicMock()
-    embedder_module._embedding_service = _MockEmbeddingService()  # type: ignore[assignment]
-
-    yield engine, factory, tmp_path
-
-    # Clean up note creation background tasks to avoid engine.dispose hang
+    monkeypatch.setattr(vs_module, "_lancedb_service", MagicMock())
+    monkeypatch.setattr(graph_module, "_graph_service", MagicMock())
+    monkeypatch.setattr(embedder_module, "_embedding_service", _MockEmbeddingService())
+    yield memory_db
     from app.routers.notes import _background_tasks
 
     await drain_background_tasks(_background_tasks)
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-
-    vs_module._lancedb_service = orig_lancedb
-    graph_module._graph_service = orig_graph
-    embedder_module._embedding_service = orig_embedder
-
-    get_settings.cache_clear()
-    await engine.dispose()
 
 
 def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
