@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The note panel beside a document shows the editor's keyboard shortcuts** (keyboard button, or ⌘/ / Ctrl+/ in the editor), inline rather than over the document. ⌘⇧E / Ctrl+Shift+E wraps the selection in inline math.
 - **An EPUB reopens at the paragraph where reading stopped, and can hold one bookmark,** as a PDF does. Chapters run to 20,000 words, so the place saved is the block on screen, not the chapter.
 
 ### Fixed
