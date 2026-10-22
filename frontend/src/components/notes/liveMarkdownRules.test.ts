@@ -10,6 +10,7 @@ import {
   hidesMark,
   isImageOnlyParagraph,
   lineIsBeingEdited,
+  inlineMathRanges,
   mathBlockRanges,
   rendersAsBlock,
 } from "./liveMarkdownRules"
@@ -106,6 +107,26 @@ describe("mathBlockRanges", () => {
 
   it("finds none where there is no math", () => {
     expect(mathBlockRanges("just prose\nwith $inline$ dollars")).toEqual([])
+  })
+})
+
+describe("inlineMathRanges", () => {
+  const spans = (line: string) => inlineMathRanges(line).map((r) => line.slice(r.from, r.to))
+
+  it("finds single-dollar math, with or without inner spaces", () => {
+    expect(spans("Why is this not working : $ x = y + z $ ..")).toEqual(["$ x = y + z $"])
+    expect(spans("**Term ($k_1 \\approx 1.2$)**: $k_1$ acts")).toEqual(["$k_1 \\approx 1.2$", "$k_1$"])
+  })
+
+  it("closes a run only on a run of the same length", () => {
+    expect(spans("a $$x$$ b")).toEqual(["$$x$$"])
+    expect(spans("a $x$$y$ b")).toEqual(["$x$$y$"])
+  })
+
+  it("leaves escaped, unclosed and code-span dollars as text", () => {
+    expect(spans("costs \\$5 and \\$10")).toEqual([])
+    expect(spans("a lone $ sign")).toEqual([])
+    expect(spans("run `echo $HOME` then $y$")).toEqual(["$y$"])
   })
 })
 

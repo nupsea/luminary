@@ -533,3 +533,46 @@ describe("live editor wiring", () => {
   })
 })
 
+
+describe("inline math", () => {
+  const prose = "Why is this not working : $ x = y + z $ ..\n\n- **Term ($k_1 \\approx 1.2$)**: $k_1$ acts like salt\n\nrun `echo $HOME` and pay \\$5\n"
+
+  const inlineTex = (state: EditorState): string[] => {
+    // @ts-expect-error private field access for test assertion
+    const fields = state.values as unknown[]
+    interface TestDecoSet {
+      size: number
+      between: (from: number, to: number, f: (from: number, to: number, deco: { spec?: { widget?: { tex?: string } } }) => void) => void
+    }
+    const tex: string[] = []
+    for (const val of fields) {
+      if (!val || typeof val !== "object" || !("between" in val)) continue
+      ;(val as TestDecoSet).between(0, state.doc.length, (_f, _t, deco) => {
+        if (deco.spec?.widget?.tex !== undefined) tex.push(deco.spec.widget.tex)
+      })
+      if (tex.length) break
+    }
+    return tex
+  }
+
+  it("renders every span the preview renders, and only those", () => {
+    const state = EditorState.create({
+      doc: prose,
+      selection: { anchor: prose.length },
+      extensions: [markdown({ base: markdownLanguage }), liveMarkdown()],
+    })
+    const html = ReactDOMServer.renderToStaticMarkup(React.createElement(MarkdownRenderer, null, prose))
+    const previewCount = html.match(/class="katex"/g)?.length ?? 0
+    expect(inlineTex(state)).toEqual([" x = y + z ", "k_1 \\approx 1.2", "k_1"])
+    expect(previewCount).toBe(3)
+  })
+
+  it("gives the line being edited its source back", () => {
+    const state = EditorState.create({
+      doc: prose,
+      selection: { anchor: 5 },
+      extensions: [markdown({ base: markdownLanguage }), liveMarkdown()],
+    })
+    expect(inlineTex(state)).toEqual(["k_1 \\approx 1.2", "k_1"])
+  })
+})
