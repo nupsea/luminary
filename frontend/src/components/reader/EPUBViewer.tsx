@@ -23,6 +23,7 @@ import { PanelResizer } from "./PanelResizer"
 import { usePanelZoomStore } from "@/store/panelZoomStore"
 import { PanelZoomResetButton } from "@/components/PanelZoomResetButton"
 import { EPUB_BLOCK_SELECTOR, READING_LINE_PX, blockAtLine, samePlace, type EpubPlace } from "./epubPlace"
+import { useReaderInput } from "./hooks/useReaderInput"
 
 type EpubTocItem = components["schemas"]["EpubChapterTocItem"]
 type EpubChapter = components["schemas"]["EpubChapterResponse"]
@@ -128,6 +129,10 @@ export const EPUBViewer = forwardRef<EPUBViewerHandle, EPUBViewerProps>(function
   const [zoomedImgSrc, setZoomedImgSrc] = useState<string | null>(null)
   const targetRef = useRef<Target | null>(initialPlace)
   const [jumpNonce, setJumpNonce] = useState(0)
+  // Whether the view is where the reader read their way to, as in the PDF viewer: scrolling
+  // and paging set it, and a jump (a link, the contents, a bookmark, a resume) clears it.
+  const readingRef = useRef(false)
+  const markReading = useCallback(() => { readingRef.current = true }, [])
 
   // Fetch TOC — long stale time since EPUB structure never changes
   const {
@@ -167,6 +172,7 @@ export const EPUBViewer = forwardRef<EPUBViewerHandle, EPUBViewerProps>(function
   }, [toc, activeChapter])
 
   const goTo = useCallback((target: Target) => {
+    readingRef.current = false
     targetRef.current = target
     setActiveChapter(target.chapter)
     setJumpNonce((n) => n + 1)
@@ -175,10 +181,12 @@ export const EPUBViewer = forwardRef<EPUBViewerHandle, EPUBViewerProps>(function
   useImperativeHandle(ref, () => ({ goTo }), [goTo])
 
   function goToPrev() {
+    markReading()
     if (activeChapter > 0) setActiveChapter((c) => c - 1)
   }
 
   function goToNext() {
+    markReading()
     if (activeChapter < totalChapters - 1) setActiveChapter((c) => c + 1)
   }
 
@@ -202,7 +210,7 @@ export const EPUBViewer = forwardRef<EPUBViewerHandle, EPUBViewerProps>(function
     const { activeChapter: chapterIndex, chapterTitle: title, onReadingPlaceChange: report } =
       reportingRef.current
     setCurrentBlock(block)
-    report?.({ chapter: chapterIndex, block }, title)
+    if (readingRef.current) report?.({ chapter: chapterIndex, block }, title)
   }, [])
 
   // Once a chapter has rendered, go to the place asked for, or report where the
@@ -244,6 +252,7 @@ export const EPUBViewer = forwardRef<EPUBViewerHandle, EPUBViewerProps>(function
       reportPlace()
     })
   }, [reportPlace])
+  useReaderInput(contentContainerRef, Boolean(chapter && !chapterLoading && !chapterError), markReading)
 
   // Images loading above the reading line move the text without a scroll event,
   // and the place saved would then be a block away from what is on screen.
@@ -276,15 +285,15 @@ export const EPUBViewer = forwardRef<EPUBViewerHandle, EPUBViewerProps>(function
         activeChapter,
         totalChapters,
         zoomedImgSrc,
-        onNextChapter: () => setActiveChapter((c) => c + 1),
-        onPrevChapter: () => setActiveChapter((c) => c - 1),
+        onNextChapter: () => { markReading(); setActiveChapter((c) => c + 1) },
+        onPrevChapter: () => { markReading(); setActiveChapter((c) => c - 1) },
         onCloseLightbox: () => setZoomedImgSrc(null),
       })
     }
 
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [activeChapter, totalChapters, zoomedImgSrc])
+  }, [activeChapter, totalChapters, zoomedImgSrc, markReading])
 
   /**
    * Keep the book's own links inside the book: chapter HTML is injected
@@ -317,6 +326,7 @@ export const EPUBViewer = forwardRef<EPUBViewerHandle, EPUBViewerProps>(function
     const target =
       e.currentTarget.querySelector(`#${CSS.escape(hash)}`) ??
       e.currentTarget.querySelector(`[name="${CSS.escape(hash)}"]`)
+    readingRef.current = false
     target?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
 
@@ -387,7 +397,7 @@ export const EPUBViewer = forwardRef<EPUBViewerHandle, EPUBViewerProps>(function
               {toc.map((item) => (
                 <li key={item.chapter_index}>
                   <button
-                    onClick={() => setActiveChapter(item.chapter_index)}
+                    onClick={() => goTo({ chapter: item.chapter_index, block: 0 })}
                     className={cn(
                       "w-full px-3 py-2 text-left text-xs leading-snug transition-colors",
                       activeChapter === item.chapter_index

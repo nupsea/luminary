@@ -27,6 +27,7 @@ import {
 } from "./searchHighlight"
 import { hasAuthoredHeading, sectionTitle, usableSections } from "./sectionTitle"
 import { parseSpeakerTurns, type SpeakerTurn } from "./speakerTurns"
+import { useReaderInput } from "./hooks/useReaderInput"
 import { useReaderPreferences } from "./useReaderPreferences"
 import { usePanelZoomStore } from "@/store/panelZoomStore"
 import { PanelZoomResetButton } from "@/components/PanelZoomResetButton"
@@ -751,9 +752,23 @@ export function ReadView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections])
 
+  // Only the reader's own scrolling reports a section. A citation, search hit, deep link
+  // or contents entry moves the view, not the reading place, until they scroll on from it.
+  const readingRef = useRef(false)
+  const activeSectionRef = useRef<string | null>(null)
   useEffect(() => {
-    if (activeSection) onActiveSectionChange?.(activeSection)
+    readingRef.current = false
+  }, [initialSectionId, citedSectionId, citationTrigger, tocTarget, searchTerm, searchMatchIndex])
+  useEffect(() => {
+    activeSectionRef.current = activeSection
+    if (activeSection && readingRef.current) onActiveSectionChange?.(activeSection)
   }, [activeSection, onActiveSectionChange])
+  const markReading = useCallback(() => {
+    if (readingRef.current) return
+    readingRef.current = true
+    if (activeSectionRef.current) onActiveSectionChange?.(activeSectionRef.current)
+  }, [onActiveSectionChange])
+  useReaderInput(contentRef, Boolean(sections?.length), markReading)
 
   // Track which section is visible via IntersectionObserver
   useEffect(() => {
