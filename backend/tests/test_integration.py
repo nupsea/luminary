@@ -44,6 +44,7 @@ import app.services.vector_store as vs_module
 import app.workflows.ingestion as ingestion_module
 from app.main import app
 from app.models import ChunkModel, DocumentModel
+from tests.factories import make_document
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -177,13 +178,10 @@ async def _ingest_fixture(
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title=src.stem.replace("_", " ").title(),
-                format="txt",
                 content_type="notes",
-                word_count=0,
-                page_count=0,
                 file_path=str(dest),
                 stage="parsing",
             )

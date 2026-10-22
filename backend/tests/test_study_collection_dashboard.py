@@ -19,35 +19,25 @@ from app.models import (
     CollectionMemberModel,
     CollectionModel,
     DocumentModel,
-    FlashcardModel,
-    NoteModel,
     NoteTagIndexModel,
 )
+from tests.factories import make_card, make_chunk, make_document, make_note
 
 _NOW = datetime.now(UTC)
 
 
 def _doc(doc_id: str, tags: list[str]) -> DocumentModel:
-    return DocumentModel(
-        id=doc_id,
-        title=f"Title {doc_id}",
-        format="txt",
-        content_type="book",
-        word_count=1,
-        page_count=0,
-        file_path="/tmp/x.txt",
-        stage="complete",
-        tags=tags,
+    return make_document(
+        id=doc_id, title=f"Title {doc_id}", word_count=1, file_path="/tmp/x.txt", tags=tags
     )
 
 
 def _chunk(doc_id: str, index: int) -> ChunkModel:
-    return ChunkModel(id=f"{doc_id}-{index}", document_id=doc_id, text="t", chunk_index=index)
+    return make_chunk(id=f"{doc_id}-{index}", document_id=doc_id, chunk_index=index)
 
 
 def _card(*, document_id=None, note_id=None, state="review", stability=5.0, due_in_days=10):
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id=document_id,
         note_id=note_id,
         question="Q?",
@@ -87,8 +77,8 @@ async def tree(test_db):
                 _chunk("doc_p", 0),
                 _chunk("doc_p", 1),
                 _chunk("doc_c1", 0),
-                NoteModel(id="note_p", content="First line\nrest of the note"),
-                NoteModel(id="note_g", content="x" * 3000),
+                make_note(id="note_p", content="First line\nrest of the note"),
+                make_note(id="note_g", content="x" * 3000),
                 NoteTagIndexModel(note_id="note_p", tag_full="t1", tag_root="t1"),
                 _member("P", "doc_p", "document"),
                 _member("P", "note_p", "note"),

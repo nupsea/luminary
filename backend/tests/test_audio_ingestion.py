@@ -13,8 +13,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models import DocumentModel
 from app.workflows.ingestion import IngestionState, _chunk_audio, _classify
+from tests.factories import make_document
 
 # Shared DB fixture
 
@@ -113,16 +113,13 @@ async def test_transcribe_node_populates_parsed_document(test_db, tmp_path):
     engine, factory, _ = test_db
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Test",
                 format="mp3",
                 content_type="audio",
-                word_count=0,
-                page_count=0,
                 file_path=str(audio_file),
                 stage="parsing",
-                tags=[],
             )
         )
         await session.commit()

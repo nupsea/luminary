@@ -6,7 +6,6 @@ orphans an older library already holds.
 """
 
 import sqlite3
-import uuid
 
 import pytest
 from sqlalchemy import delete, select, text
@@ -17,13 +16,12 @@ from app.database import make_engine
 from app.db_init import _alembic_config, init_database
 from app.models import DocumentModel, FlashcardModel
 from app.repos.flashcard_repo import FlashcardRepo
+from tests.factories import make_card
 from tests.graph_seed import add_documents
 
 
 def _card(document_id: str | None) -> FlashcardModel:
-    return FlashcardModel(
-        id=str(uuid.uuid4()), document_id=document_id, question="Q?", answer="A.", source_excerpt=""
-    )
+    return make_card(document_id=document_id, question="Q?", answer="A.")
 
 
 async def test_a_card_for_a_missing_document_is_refused(test_db):

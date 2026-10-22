@@ -20,9 +20,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
-from app.models import DocumentModel
 from app.runtime.chat_nodes.search import search_node
 from app.types import ScoredChunk
+from tests.factories import make_document
 
 
 @pytest.fixture()
@@ -40,7 +40,7 @@ async def test_db(tmp_path, monkeypatch):
 async def _add_document(factory, doc_id: str, title: str, stage: str) -> None:
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title=title,
                 format="pdf",
@@ -49,7 +49,6 @@ async def _add_document(factory, doc_id: str, title: str, stage: str) -> None:
                 page_count=1,
                 file_path=f"/tmp/{title}",
                 stage=stage,
-                tags=[],
             )
         )
         await session.commit()

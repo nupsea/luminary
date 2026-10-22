@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.exceptions import NotFound
-from app.models import DocumentModel, NoteModel
 from app.repos.collection_repo import CollectionRepo
+from tests.factories import make_document, make_note
 
 
 @pytest.fixture
@@ -22,24 +22,14 @@ async def repo(memory_db):
 async def _add_notes(repo: CollectionRepo, ids: list[str]) -> None:
     """member_counts joins memberships to their targets, so the rows must exist."""
     for note_id in ids:
-        repo.session.add(NoteModel(id=note_id, content=note_id, tags=[]))
+        repo.session.add(make_note(id=note_id, content=note_id))
     await repo.session.commit()
 
 
 async def _add_documents(repo: CollectionRepo, ids: list[str]) -> None:
     for doc_id in ids:
         repo.session.add(
-            DocumentModel(
-                id=doc_id,
-                title=doc_id,
-                format="txt",
-                content_type="book",
-                word_count=1,
-                page_count=0,
-                file_path=f"/tmp/{doc_id}.txt",
-                stage="complete",
-                tags=[],
-            )
+            make_document(id=doc_id, title=doc_id, word_count=1, file_path=f"/tmp/{doc_id}.txt")
         )
     await repo.session.commit()
 

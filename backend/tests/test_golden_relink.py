@@ -14,7 +14,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.main import app
-from app.models import DocumentModel, GoldenDatasetModel, GoldenQuestionModel
+from app.models import GoldenDatasetModel, GoldenQuestionModel
+from tests.factories import make_document
 
 DEAD_DOC = "dead-document-id"
 
@@ -32,15 +33,13 @@ async def _seed(factory, *, doc_ids: list[str] | None = None) -> tuple[str, str]
     pins = doc_ids or [DEAD_DOC]
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=live_doc_id,
                 title="Apache Iceberg (re-ingested)",
                 format="pdf",
-                content_type="book",
                 word_count=1000,
                 file_path="iceberg.pdf",
                 file_hash="abc",
-                stage="complete",
                 page_count=10,
             )
         )

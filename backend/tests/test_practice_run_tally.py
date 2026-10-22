@@ -27,6 +27,7 @@ from app.models import (
     TeachbackResultModel,
 )
 from app.services.teachback_service import _latest_attempt_per_card, teachback_tally
+from tests.factories import make_card
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -101,19 +102,14 @@ def test_earlier_attempts_are_kept_not_deleted():
 
 def _card(doc_id):
     now = datetime.now(UTC)
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id=doc_id,
         chunk_id=str(uuid.uuid4()),
         question="What is a vertex?",
         answer="A corner of the feasible region.",
         source_excerpt="The feasible region is a polytope.",
-        fsrs_state="new",
-        fsrs_stability=0.0,
         fsrs_difficulty=3.0,
         due_date=now,
-        reps=0,
-        lapses=0,
         created_at=now,
     )
 

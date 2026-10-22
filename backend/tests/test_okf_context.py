@@ -10,8 +10,9 @@ from task_drain import dispose_engine
 import app.database as db_module
 import app.services.graph as graph_module
 from app.main import app
-from app.models import ChunkModel, ConceptModel, GraphConceptEdgeModel
+from app.models import ConceptModel, GraphConceptEdgeModel
 from app.services.okf_context import get_okf_context_service
+from tests.factories import make_chunk
 
 
 @pytest.fixture
@@ -52,11 +53,8 @@ async def _seed(factory):
             )
         )
         s.add(
-            ChunkModel(
-                id="ch1",
-                document_id="d1",
-                text="Partitioning splits data across nodes for scale.",
-                chunk_index=0,
+            make_chunk(
+                id="ch1", document_id="d1", text="Partitioning splits data across nodes for scale."
             )
         )
         await s.commit()

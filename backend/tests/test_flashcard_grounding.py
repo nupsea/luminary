@@ -21,7 +21,7 @@ import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import ChunkModel, DocumentModel, FlashcardModel
+from app.models import FlashcardModel
 from app.services.flashcard_parsers import (
     GROUNDING_UNSUPPORTED,
     GROUNDING_UNVERIFIABLE,
@@ -29,6 +29,7 @@ from app.services.flashcard_parsers import (
     excerpt_is_verbatim,
     grounding_state,
 )
+from tests.factories import make_card, make_chunk, make_document
 
 _PASSAGE = (
     "Penelope set up a great web in her house and told the suitors she would choose "
@@ -95,8 +96,7 @@ class TestFormattingIsNotContent:
         "A cost of 2*3*4 drachmas, or a * b in the ledger."
     )
     _PDF = (
-        "Each night she undid the day’s weav‐\ning, "
-        "and the shroud of Laer­ tes stayed un‐finished."
+        "Each night she undid the day’s weav‐\ning, and the shroud of Laer­ tes stayed un‐finished."
     )
 
     @pytest.mark.parametrize(
@@ -155,27 +155,17 @@ async def _seed(factory) -> str:
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="the_odyssey",
-                format="txt",
-                content_type="book",
                 word_count=100,
                 page_count=1,
                 file_path="/tmp/the_odyssey.txt",
-                stage="complete",
-                tags=[],
             )
         )
         session.add(
-            ChunkModel(
-                id=str(uuid.uuid4()),
-                document_id=doc_id,
-                section_id=None,
-                text=_PASSAGE,
-                token_count=40,
-                page_number=1,
-                chunk_index=0,
+            make_chunk(
+                document_id=doc_id, section_id=None, text=_PASSAGE, token_count=40, page_number=1
             )
         )
         await session.commit()
@@ -183,18 +173,11 @@ async def _seed(factory) -> str:
 
 
 def _card(doc_id: str | None, excerpt: str, **kw) -> FlashcardModel:
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id=doc_id,
         question="How did Penelope delay the suitors?",
         answer="She unravelled her weaving each night.",
         source_excerpt=excerpt,
-        difficulty="medium",
-        fsrs_state="new",
-        fsrs_stability=0.0,
-        fsrs_difficulty=0.0,
-        reps=0,
-        lapses=0,
         **kw,
     )
 

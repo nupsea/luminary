@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
 from app.main import app
-from app.models import ChunkModel, DocumentModel, SectionModel
+from tests.factories import make_chunk, make_document, make_section
 
 
 @pytest_asyncio.fixture
@@ -37,58 +37,36 @@ async def _search_test_db(memory_db, tmp_path, monkeypatch):
 
     # Insert doc1 with a chunk containing "fox" using ORM (respects column defaults)
     async with factory() as session:
-        doc1 = DocumentModel(
-            id="doc1",
-            title="Test Doc",
-            format="txt",
-            content_type="book",
-            word_count=100,
-            page_count=1,
-            file_path=str(tmp_path / "raw" / "doc1.txt"),
-            stage="complete",
+        doc1 = make_document(
+            id="doc1", word_count=100, page_count=1, file_path=str(tmp_path / "raw" / "doc1.txt")
         )
-        sec1 = SectionModel(
-            id="sec1",
-            document_id="doc1",
-            heading="Chapter One",
-            level=1,
-            section_order=0,
-            preview="The quick brown fox",
+        sec1 = make_section(
+            id="sec1", document_id="doc1", heading="Chapter One", preview="The quick brown fox"
         )
-        chunk1 = ChunkModel(
+        chunk1 = make_chunk(
             id="chunk1",
             document_id="doc1",
             section_id="sec1",
             text="The quick brown fox jumps",
             token_count=5,
-            chunk_index=0,
         )
         # doc2 with "dog" — must not appear when searching doc1
-        doc2 = DocumentModel(
+        doc2 = make_document(
             id="doc2",
             title="Other Doc",
-            format="txt",
-            content_type="book",
             word_count=100,
             page_count=1,
             file_path=str(tmp_path / "raw" / "doc2.txt"),
-            stage="complete",
         )
-        sec2 = SectionModel(
-            id="sec2",
-            document_id="doc2",
-            heading="Chapter Two",
-            level=1,
-            section_order=0,
-            preview="Lazy dog",
+        sec2 = make_section(
+            id="sec2", document_id="doc2", heading="Chapter Two", preview="Lazy dog"
         )
-        chunk2 = ChunkModel(
+        chunk2 = make_chunk(
             id="chunk2",
             document_id="doc2",
             section_id="sec2",
             text="The lazy dog sits",
             token_count=4,
-            chunk_index=0,
         )
         session.add_all([doc1, sec1, chunk1, doc2, sec2, chunk2])
         await session.commit()

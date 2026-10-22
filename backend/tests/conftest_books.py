@@ -42,6 +42,7 @@ import app.database as db_module
 import app.services.graph as graph_module
 import app.services.retriever as retriever_module
 import app.services.vector_store as vs_module
+from tests.factories import make_document
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 MANIFEST_PATH = REPO_ROOT / "DATA" / "books" / "manifest.json"
@@ -73,7 +74,6 @@ async def _ingest_book(
     import litellm
 
     import app.services.llm as llm_module
-    from app.models import DocumentModel
     from app.workflows.ingestion import run_ingestion
 
     mock_resp: Any = MagicMock()
@@ -95,16 +95,7 @@ async def _ingest_book(
 
         async with factory() as session:
             session.add(
-                DocumentModel(
-                    id=doc_id,
-                    title=book["name"],
-                    format="txt",
-                    content_type="book",
-                    word_count=0,
-                    page_count=0,
-                    file_path=str(dest),
-                    stage="parsing",
-                )
+                make_document(id=doc_id, title=book["name"], file_path=str(dest), stage="parsing")
             )
             await session.commit()
 

@@ -15,7 +15,8 @@ from task_drain import dispose_engine
 import app.database as db_module
 import app.services.graph as graph_module
 from app.main import app
-from app.models import ConceptModel, FlashcardModel, NoteModel, StudyEventModel
+from app.models import ConceptModel, FlashcardModel, StudyEventModel
+from tests.factories import make_card, make_note
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -55,13 +56,11 @@ async def test_assemble_concept_scope_yields_event_and_due_card(test_db):
             )
         )
         s.add(
-            FlashcardModel(
+            make_card(
                 id="f1",
                 document_id="d1",
                 chunk_id=None,
                 concept_id="c1",
-                mapping_status="mapped",
-                source="document",
                 question="Q",
                 answer="A",
                 source_excerpt="e",
@@ -70,13 +69,11 @@ async def test_assemble_concept_scope_yields_event_and_due_card(test_db):
         )
         # not due -> must be excluded
         s.add(
-            FlashcardModel(
+            make_card(
                 id="f2",
                 document_id="d1",
                 chunk_id=None,
                 concept_id="c1",
-                mapping_status="mapped",
-                source="document",
                 question="Q2",
                 answer="A2",
                 source_excerpt="e",
@@ -133,12 +130,12 @@ async def test_assemble_note_scope_generates_unmapped_cards_on_commit(test_db, m
     """Lane B: Start on a note scope generates new cards, tagged unmapped + scoped."""
     factory = test_db
     async with factory() as s:
-        s.add(NoteModel(id="n1", content="Caching strategies.", title="Caching"))
+        s.add(make_note(id="n1", content="Caching strategies.", title="Caching"))
         await s.commit()
 
     # mock the shipped generator: persist + return one fresh card (no concept)
     async def fake_gen(self, tag, note_ids, count, session, difficulty="medium"):
-        card = FlashcardModel(
+        card = make_card(
             id="genned",
             document_id=None,
             chunk_id=None,

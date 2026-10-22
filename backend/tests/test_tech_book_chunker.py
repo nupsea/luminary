@@ -19,12 +19,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
 from app.main import app
-from app.models import ChunkModel, CodeSnippetModel, DocumentModel, SectionModel
+from app.models import ChunkModel, CodeSnippetModel, DocumentModel
 from app.services.tech_book_chunker import (
     _parse_ast_signature,
     chunk_mixed_content,
 )
 from app.workflows.ingestion import ContentType, _chunk_tech_book, _classify
+from tests.factories import make_chunk, make_document, make_section
 
 # Shared fixtures
 
@@ -93,16 +94,14 @@ async def test_db(memory_db, tmp_path, monkeypatch):
 
 
 def _make_doc(doc_id: str, content_type: str = "tech_book") -> DocumentModel:
-    return DocumentModel(
+    return make_document(
         id=doc_id,
         title="Test Tech Book",
         format="md",
         content_type=content_type,
         word_count=300,
-        page_count=0,
         file_path="/tmp/test.md",
         stage="chunking",
-        tags=[],
     )
 
 
@@ -236,28 +235,21 @@ async def test_chunk_model_has_code_columns(test_db):
     doc_id = str(uuid.uuid4())
     async with db_module._session_factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="ColTest",
                 format="md",
                 content_type="tech_book",
-                word_count=0,
-                page_count=0,
                 file_path="/tmp/col.md",
-                stage="complete",
-                tags=[],
             )
         )
         await session.flush()
-        chunk = ChunkModel(
-            id=str(uuid.uuid4()),
+        chunk = make_chunk(
             document_id=doc_id,
             section_id=None,
             text="def hello(): pass",
             token_count=3,
-            page_number=0,
             speaker=None,
-            chunk_index=0,
             has_code=True,
             code_language="python",
             code_signature="def hello()",
@@ -346,17 +338,7 @@ async def test_get_code_snippets_returns_empty_for_no_code_doc(test_db):
     doc_id = str(uuid.uuid4())
     async with db_module._session_factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Plain Book",
-                format="txt",
-                content_type="book",
-                word_count=100,
-                page_count=0,
-                file_path="/tmp/plain.txt",
-                stage="complete",
-                tags=[],
-            )
+            make_document(id=doc_id, title="Plain Book", word_count=100, file_path="/tmp/plain.txt")
         )
         await session.commit()
 
@@ -387,29 +369,16 @@ async def test_get_code_snippets_returns_snippets(test_db):
     async with db_module._session_factory() as session:
         session.add(_make_doc(doc_id))
         await session.flush()
-        session.add(
-            SectionModel(
-                id=sec_id,
-                document_id=doc_id,
-                heading="Ch1",
-                level=1,
-                page_start=0,
-                page_end=0,
-                section_order=0,
-                preview="",
-            )
-        )
+        session.add(make_section(id=sec_id, document_id=doc_id, heading="Ch1"))
         await session.flush()
         session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id,
                 document_id=doc_id,
                 section_id=sec_id,
                 text="def add(a, b): return a + b",
                 token_count=6,
-                page_number=0,
                 speaker=None,
-                chunk_index=0,
                 has_code=True,
                 code_language="python",
                 code_signature="def add(a, b)",

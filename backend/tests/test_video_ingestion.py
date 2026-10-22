@@ -13,9 +13,10 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.main import app  # noqa: F401 (used via ASGITransport)
-from app.models import ChunkModel, DocumentModel
+from app.models import ChunkModel
 from app.workflows.ingestion import IngestionState, _classify, transcribe_node
 from app.workflows.ingestion_nodes.chunk import chunk_node
+from tests.factories import make_document
 
 # Shared DB fixture
 
@@ -48,16 +49,13 @@ async def test_transcribe_node_video_no_ffmpeg(test_db, tmp_path):
     engine, factory, _ = test_db
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Test",
                 format="mp4",
                 content_type="video",
-                word_count=0,
-                page_count=0,
                 file_path=str(video_file),
                 stage="parsing",
-                tags=[],
             )
         )
         await session.commit()
@@ -93,16 +91,13 @@ async def test_transcribe_node_video_with_ffmpeg(test_db, tmp_path):
     engine, factory, _ = test_db
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Test",
                 format="mp4",
                 content_type="video",
-                word_count=0,
-                page_count=0,
                 file_path=str(video_file),
                 stage="parsing",
-                tags=[],
             )
         )
         await session.commit()
@@ -233,17 +228,14 @@ async def test_status_endpoint_returns_ffmpeg_error_message(test_db):
     engine, factory, _ = test_db
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Video",
                 format="mp4",
                 content_type="video",
-                word_count=0,
-                page_count=0,
                 file_path="/tmp/lecture.mp4",
                 stage="error",
                 error_message="ffmpeg is not installed. Install it with: brew install ffmpeg",
-                tags=[],
             )
         )
         await session.commit()
@@ -267,16 +259,8 @@ async def test_video_endpoint_returns_400_for_non_video_doc(test_db, tmp_path, m
     engine, factory, _ = test_db
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Test",
-                format="txt",
-                content_type="notes",
-                word_count=1,
-                page_count=0,
-                file_path=str(txt_file),
-                stage="complete",
-                tags=[],
+            make_document(
+                id=doc_id, title="Test", content_type="notes", word_count=1, file_path=str(txt_file)
             )
         )
         await session.commit()
@@ -298,16 +282,13 @@ async def test_transcript_chunks_keep_the_moment_they_came_from(test_db):
     _, factory, _ = test_db
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Lecture",
                 format="mp3",
                 content_type="audio",
-                word_count=0,
-                page_count=0,
                 file_path="/tmp/lecture.mp3",
                 stage="chunking",
-                tags=[],
             )
         )
         await session.commit()

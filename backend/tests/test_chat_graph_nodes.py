@@ -33,10 +33,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import (
-    ChunkModel,
-    DocumentModel,
     ImageModel,
-    SectionModel,
     SectionSummaryModel,
     SummaryModel,
 )
@@ -49,6 +46,7 @@ from app.runtime.chat_graph import (
     synthesize_node,
 )
 from app.types import ScoredChunk
+from tests.factories import make_chunk, make_document, make_section
 
 # Shared fixtures
 
@@ -97,15 +95,13 @@ def _make_state(**overrides) -> dict:
 async def _insert_doc(factory, doc_id: str, title: str = "Test Doc") -> None:
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title=title,
                 format="pdf",
-                content_type="book",
                 word_count=1000,
                 file_path=f"{doc_id}.pdf",
                 file_hash="abc",
-                stage="complete",
                 page_count=10,
             )
         )
@@ -357,12 +353,10 @@ async def test_search_node_own_text_excludes_a_neighbour_from_another_section(te
 
     async with factory() as session:
         session.add(
-            ChunkModel(
-                id=str(uuid.uuid4()),
+            make_chunk(
                 document_id=doc_id,
                 section_id=str(uuid.uuid4()),
                 text="Tail sentence that belongs to the previous section.",
-                chunk_index=0,
             )
         )
         await session.commit()
@@ -882,36 +876,23 @@ async def test_synthesize_node_collects_citations_deduplicated(test_db):
     chunk_id_3 = str(uuid.uuid4())
 
     async with factory() as session:
+        session.add(make_section(id=section_id_1, document_id=doc_id, heading="Chapter One"))
         session.add(
-            SectionModel(
-                id=section_id_1,
-                document_id=doc_id,
-                heading="Chapter One",
-                level=1,
-                section_order=0,
+            make_section(
+                id=section_id_2, document_id=doc_id, heading="Chapter Two", section_order=1
             )
         )
         session.add(
-            SectionModel(
-                id=section_id_2,
-                document_id=doc_id,
-                heading="Chapter Two",
-                level=1,
-                section_order=1,
-            )
-        )
-        session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id_1,
                 document_id=doc_id,
                 section_id=section_id_1,
                 text="text1",
-                chunk_index=0,
                 pdf_page_number=5,
             )
         )
         session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id_2,
                 document_id=doc_id,
                 section_id=section_id_2,
@@ -921,7 +902,7 @@ async def test_synthesize_node_collects_citations_deduplicated(test_db):
             )
         )
         session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id_3,
                 document_id=doc_id,
                 section_id=section_id_1,
@@ -1008,29 +989,18 @@ async def test_synthesize_node_snippet_targets_the_question_not_the_chunk_head(t
     chunk_id = str(uuid.uuid4())
 
     async with factory() as session:
+        session.add(make_section(id=section_id, document_id=doc_id, heading="Part 0"))
         session.add(
-            SectionModel(
-                id=section_id,
-                document_id=doc_id,
-                heading="Part 0",
-                level=1,
-                section_order=0,
-            )
-        )
-        session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id,
                 document_id=doc_id,
                 section_id=section_id,
-                text=(
-                    "Retrieval is the task of finding, from a large corpus of documents, "
-                    "the small subset most relevant to a query. "
-                    "Every retrieval system is solving the same optimization problem. "
-                    "Recall measures how many of the relevant items were retrieved, while "
-                    "precision measures how many of the retrieved items were actually relevant. "
-                    "Real systems chain multiple stages together to balance both."
-                ),
-                chunk_index=0,
+                text="Retrieval is the task of finding, from a large corpus of documents, "
+                "the small subset most relevant to a query. "
+                "Every retrieval system is solving the same optimization problem. "
+                "Recall measures how many of the relevant items were retrieved, while "
+                "precision measures how many of the retrieved items were actually relevant. "
+                "Real systems chain multiple stages together to balance both.",
                 pdf_page_number=5,
             )
         )
@@ -1089,22 +1059,13 @@ async def test_synthesize_node_emits_transparency_hybrid_retrieval(test_db):
     section_id = str(uuid.uuid4())
     chunk_id = str(uuid.uuid4())
     async with factory() as session:
+        session.add(make_section(id=section_id, document_id=doc_id, heading="Chapter One"))
         session.add(
-            SectionModel(
-                id=section_id,
-                document_id=doc_id,
-                heading="Chapter One",
-                level=1,
-                section_order=0,
-            )
-        )
-        session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id,
                 document_id=doc_id,
                 section_id=section_id,
                 text="Some relevant text about the topic.",
-                chunk_index=0,
                 pdf_page_number=3,
             )
         )
@@ -1152,12 +1113,11 @@ async def test_synthesize_node_transparency_augmented_hybrid(test_db):
     chunk_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id,
                 document_id=doc_id,
                 section_id=None,
                 text="Extra context from augmentation.",
-                chunk_index=0,
                 pdf_page_number=None,
             )
         )
@@ -1281,22 +1241,13 @@ async def test_a_citation_into_a_recording_carries_its_moment(test_db):
     await _insert_doc(factory, doc_id, title="Lecture")
 
     async with factory() as session:
+        session.add(make_section(id=section_id, document_id=doc_id, heading=""))
         session.add(
-            SectionModel(
-                id=section_id,
-                document_id=doc_id,
-                heading="",
-                level=1,
-                section_order=0,
-            )
-        )
-        session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id,
                 document_id=doc_id,
                 section_id=section_id,
                 text="the main argument",
-                chunk_index=0,
                 start_time=862.5,
                 end_time=925.0,
             )

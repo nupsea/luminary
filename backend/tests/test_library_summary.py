@@ -14,7 +14,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models import DocumentModel, LibrarySummaryModel, SummaryModel
+from app.models import LibrarySummaryModel, SummaryModel
+from tests.factories import make_document
 
 # Shared helpers
 
@@ -27,15 +28,13 @@ async def _async_iter(items):
 async def _insert_doc(factory, tmp_path: Path, doc_id: str, title: str) -> None:
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title=title,
-                format="txt",
                 content_type="notes",
                 word_count=100,
                 page_count=1,
                 file_path=str(tmp_path / f"{doc_id}.txt"),
-                stage="complete",
             )
         )
         await session.commit()

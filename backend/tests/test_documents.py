@@ -12,27 +12,25 @@ from app.main import app
 from app.models import (
     ChunkModel,
     DocumentModel,
-    FlashcardModel,
     StudySessionModel,
     SummaryModel,
 )
+from tests.factories import make_card, make_chunk, make_document
 
 # Test DB fixture
 
 
 def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
-    defaults = {
-        "id": doc_id or str(uuid.uuid4()),
-        "title": "Test Doc",
-        "format": "txt",
-        "content_type": "notes",
-        "word_count": 100,
-        "page_count": 1,
-        "file_path": "/tmp/test.txt",
-        "stage": "complete",
-    }
-    defaults.update(kwargs)
-    return DocumentModel(**defaults)
+    return make_document(
+        **{
+            "id": doc_id,
+            "content_type": "notes",
+            "word_count": 100,
+            "page_count": 1,
+            "file_path": "/tmp/test.txt",
+            **kwargs,
+        }
+    )
 
 
 # Unit tests for learning_status derivation
@@ -135,8 +133,7 @@ async def test_list_documents_learning_status_flashcards_generated(test_db):
     async with factory() as session:
         session.add(_make_doc(doc_id))
         session.add(
-            FlashcardModel(
-                id=str(uuid.uuid4()),
+            make_card(
                 document_id=doc_id,
                 chunk_id=str(uuid.uuid4()),
                 question="Q?",
@@ -347,14 +344,7 @@ async def test_delete_document_removes_child_rows(test_db):
     chunk_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(_make_doc(doc_id))
-        session.add(
-            ChunkModel(
-                id=chunk_id,
-                document_id=doc_id,
-                text="Some chunk text",
-                chunk_index=0,
-            )
-        )
+        session.add(make_chunk(id=chunk_id, document_id=doc_id, text="Some chunk text"))
         session.add(
             SummaryModel(
                 id=str(uuid.uuid4()),
@@ -521,14 +511,7 @@ async def test_documents_list_includes_chunk_count(test_db):
     async with factory() as session:
         session.add(_make_doc(doc_id))
         for i in range(3):
-            session.add(
-                ChunkModel(
-                    id=str(uuid.uuid4()),
-                    document_id=doc_id,
-                    text=f"Chunk text {i}",
-                    chunk_index=i,
-                )
-            )
+            session.add(make_chunk(document_id=doc_id, text=f"Chunk text {i}", chunk_index=i))
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

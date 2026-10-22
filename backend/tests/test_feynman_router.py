@@ -13,7 +13,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.main import app
-from app.models import DocumentModel, FeynmanSessionModel, FeynmanTurnModel, FlashcardModel
+from app.models import FeynmanSessionModel, FeynmanTurnModel, FlashcardModel
+from tests.factories import make_document
 
 # Test DB fixture
 
@@ -29,7 +30,7 @@ async def test_three_turn_session_stores_turns_and_generates_flashcards(test_db)
 
     # Seed a document
     async with factory() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id=doc_id,
             title="Test Book",
             format="pdf",
@@ -37,7 +38,6 @@ async def test_three_turn_session_stores_turns_and_generates_flashcards(test_db)
             word_count=1000,
             page_count=50,
             file_path="/tmp/test.pdf",
-            stage="complete",
         )
         session.add(doc)
         await session.commit()

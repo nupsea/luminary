@@ -28,6 +28,7 @@ from app.models import (
     SummaryModel,
 )
 from app.services.suggestion_service import SuggestionService, _jaccard_similarity
+from tests.factories import make_chunk, make_document, make_section
 
 # Fixtures
 
@@ -39,25 +40,19 @@ async def db_session(memory_db):
 
 
 def _make_doc(doc_id: str, title: str, content_type: str) -> DocumentModel:
-    return DocumentModel(
+    return make_document(
         id=doc_id,
         title=title,
-        format="txt",
         content_type=content_type,
         word_count=1000,
         page_count=10,
         file_path=f"/tmp/{doc_id}.txt",
+        stage="parsing",
     )
 
 
 def _make_section(doc_id: str, heading: str, order: int) -> SectionModel:
-    return SectionModel(
-        id=str(uuid.uuid4()),
-        document_id=doc_id,
-        heading=heading,
-        level=1,
-        section_order=order,
-    )
+    return make_section(document_id=doc_id, heading=heading, section_order=order)
 
 
 # (a) Book document returns suggestions with entity names
@@ -605,7 +600,7 @@ def test_prompts_carry_no_taxonomy_verb():
 @pytest.mark.asyncio
 async def test_grounding_passages_are_document_text_across_the_document(db_session):
     """Passages are chunk text spanning the document, never summaries (#66)."""
-    from app.models import ChunkModel, SectionSummaryModel
+    from app.models import SectionSummaryModel
 
     db_session.add(
         SectionSummaryModel(
@@ -619,18 +614,13 @@ async def test_grounding_passages_are_document_text_across_the_document(db_sessi
     )
     for i in range(20):
         db_session.add(
-            ChunkModel(
-                id=str(uuid.uuid4()),
+            make_chunk(
                 document_id="doc-passages",
                 text=f"Chunk {i:02d} " + "body text " * 30,
                 chunk_index=i,
             )
         )
-    db_session.add(
-        ChunkModel(
-            id=str(uuid.uuid4()), document_id="doc-passages", text="Contents", chunk_index=20
-        )
-    )
+    db_session.add(make_chunk(document_id="doc-passages", text="Contents", chunk_index=20))
     await db_session.commit()
 
     passages = await SuggestionService().get_grounding_passages("doc-passages", limit=4)
@@ -718,12 +708,12 @@ async def test_cross_document_context_is_one_latest_summary_per_live_document(db
     about the whole library must not be drawn from it, nor from a superseded summary."""
     from datetime import timedelta
 
-    from app.models import DocumentModel, SummaryModel
+    from app.models import SummaryModel
 
     t0 = datetime(2026, 1, 1, tzinfo=UTC)
     db_session.add(
-        DocumentModel(
-            id="doc-live", title="Live", format="txt", content_type="notes", file_path="/x"
+        make_document(
+            id="doc-live", title="Live", content_type="notes", file_path="/x", stage="parsing"
         )
     )
     for i, (doc_id, content) in enumerate(

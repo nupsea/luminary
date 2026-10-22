@@ -7,8 +7,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models import DocumentModel, NoteModel
+from app.models import DocumentModel
 from app.services.notes_service import sync_tag_index
+from tests.factories import make_document, make_note
 
 
 @pytest.fixture
@@ -17,17 +18,7 @@ def test_db(memory_db):
 
 
 def _make_doc(doc_id: str) -> DocumentModel:
-    return DocumentModel(
-        id=doc_id,
-        title="Doc",
-        format="txt",
-        content_type="book",
-        word_count=1,
-        page_count=0,
-        file_path="/tmp/x.txt",
-        stage="complete",
-        tags=[],
-    )
+    return make_document(id=doc_id, title="Doc", word_count=1, file_path="/tmp/x.txt")
 
 
 @pytest.mark.anyio
@@ -45,7 +36,7 @@ async def test_merge_rewrites_both_notes_and_documents(test_db):
         s.add(_make_doc(doc_id))
         now = datetime.now(UTC)
         s.add(
-            NoteModel(
+            make_note(
                 id=note_id,
                 content="n",
                 tags=[src],

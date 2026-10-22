@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from tests.factories import make_document
 
 
 @pytest.fixture()
@@ -26,19 +27,16 @@ def _create_document(client, title="Test Book", content_type="book", **facets) -
     import asyncio  # noqa: PLC0415
 
     from app.database import get_session_factory  # noqa: PLC0415
-    from app.models import DocumentModel  # noqa: PLC0415
 
     async def _insert():
         async with get_session_factory()() as session:
-            doc = DocumentModel(
+            doc = make_document(
                 id=doc_id,
                 title=title,
-                format="txt",
                 content_type=content_type,
                 word_count=1000,
                 page_count=10,
                 file_path="/tmp/fake.txt",
-                stage="complete",
                 **facets,
             )
             session.add(doc)

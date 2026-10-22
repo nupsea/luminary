@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.main import app
 from app.models import CanonicalTagModel, DocumentModel, DocumentTagIndexModel
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -16,19 +17,9 @@ def test_db(memory_db):
 
 
 def _make_doc(doc_id: str, **kw) -> DocumentModel:
-    defaults = dict(
-        id=doc_id,
-        title="Doc",
-        format="txt",
-        content_type="book",
-        word_count=1,
-        page_count=0,
-        file_path="/tmp/x.txt",
-        stage="complete",
-        tags=[],
+    return make_document(
+        **{"id": doc_id, "title": "Doc", "word_count": 1, "file_path": "/tmp/x.txt", **kw}
     )
-    defaults.update(kw)
-    return DocumentModel(**defaults)
 
 
 async def _tags_in_index(factory, doc_id: str) -> set[str]:

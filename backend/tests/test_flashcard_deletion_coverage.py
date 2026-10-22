@@ -16,8 +16,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database import make_engine
 from app.db_init import create_all_tables
-from app.models import Base, FlashcardModel, MisconceptionModel, ReviewEventModel
+from app.models import Base, MisconceptionModel, ReviewEventModel
 from app.repos.flashcard_repo import _CARD_CHILD_TABLES, FlashcardRepo
+from tests.factories import make_card
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -61,21 +62,7 @@ async def factory(tmp_path):
 async def test_deleting_a_card_takes_its_misconception_with_it(factory):
     card_id = str(uuid.uuid4())
     async with factory() as session:
-        session.add(
-            FlashcardModel(
-                id=card_id,
-                document_id="doc-1",
-                question="q",
-                answer="a",
-                source_excerpt="",
-                difficulty="medium",
-                fsrs_state="new",
-                fsrs_stability=0.0,
-                fsrs_difficulty=0.0,
-                reps=0,
-                lapses=0,
-            )
-        )
+        session.add(make_card(id=card_id, document_id="doc-1"))
         session.add(
             MisconceptionModel(
                 id=str(uuid.uuid4()),
@@ -107,21 +94,7 @@ async def test_deleting_a_card_keeps_the_review_that_happened(factory):
     """The streak is a fact about the learner, not about the card."""
     card_id = str(uuid.uuid4())
     async with factory() as session:
-        session.add(
-            FlashcardModel(
-                id=card_id,
-                document_id="doc-1",
-                question="q",
-                answer="a",
-                source_excerpt="",
-                difficulty="medium",
-                fsrs_state="new",
-                fsrs_stability=0.0,
-                fsrs_difficulty=0.0,
-                reps=1,
-                lapses=0,
-            )
-        )
+        session.add(make_card(id=card_id, document_id="doc-1", reps=1))
         session.add(
             ReviewEventModel(
                 id=str(uuid.uuid4()),

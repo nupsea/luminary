@@ -16,8 +16,9 @@ from PIL import Image as PILImage
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models import Base, DocumentModel, ImageModel
+from app.models import Base, ImageModel
 from app.services.image_enricher import ImageEnricherService, _is_decorative
+from tests.factories import make_chunk, make_document
 
 # Helpers
 
@@ -287,16 +288,7 @@ async def doc_and_image(session_factory, tmp_path: Path):
     _make_varied_png(full_img_path)
 
     async with session_factory() as session:
-        session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Test Doc",
-                file_path=str(tmp_path / "test.pdf"),
-                format="pdf",
-                content_type="book",
-                stage="complete",
-            )
-        )
+        session.add(make_document(id=doc_id, file_path=str(tmp_path / "test.pdf"), format="pdf"))
         # Use relative path matching DATA_DIR convention
         rel_path = f"images/{doc_id}/0_0.png"
         session.add(
@@ -395,16 +387,7 @@ async def test_decorative_image_skips_llm(session_factory, tmp_path: Path) -> No
     _make_rgb_png(img_path, 200, 200, (200, 200, 200))  # solid color
 
     async with session_factory() as session:
-        session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Doc",
-                file_path="/tmp/x.pdf",
-                format="pdf",
-                content_type="book",
-                stage="complete",
-            )
-        )
+        session.add(make_document(id=doc_id, title="Doc", file_path="/tmp/x.pdf", format="pdf"))
         session.add(
             ImageModel(
                 id=image_id,
@@ -533,9 +516,7 @@ async def test_one_figure_timing_out_does_not_fail_the_others(
     from sqlalchemy import select  # noqa: PLC0415
 
     async with session_factory() as session:
-        rows = {
-            r.id: r.description for r in (await session.execute(select(ImageModel))).scalars()
-        }
+        rows = {r.id: r.description for r in (await session.execute(select(ImageModel))).scalars()}
     assert rows[first_id] is None, "The timed-out figure stays in the retry set"
     assert all(rows[i] == "Bars" for i in later_ids)
 
@@ -660,13 +641,8 @@ async def test_image_analyze_handler_enqueues_diagram_extract(
 
     async with session_factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Enqueue Doc",
-                file_path="/tmp/enqueue.pdf",
-                format="pdf",
-                content_type="book",
-                stage="complete",
+            make_document(
+                id=doc_id, title="Enqueue Doc", file_path="/tmp/enqueue.pdf", format="pdf"
             )
         )
         session.add(
@@ -730,14 +706,7 @@ async def test_image_analyze_handler_deduplication_skip(
 
     async with session_factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Dedup Doc",
-                file_path="/tmp/dedup.pdf",
-                format="pdf",
-                content_type="book",
-                stage="complete",
-            )
+            make_document(id=doc_id, title="Dedup Doc", file_path="/tmp/dedup.pdf", format="pdf")
         )
         session.add(
             ImageModel(
@@ -805,14 +774,7 @@ async def test_image_analyze_handler_no_qualifying_images_skips_enqueue(
 
     async with session_factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="No Diag Doc",
-                file_path="/tmp/nodiag.pdf",
-                format="pdf",
-                content_type="book",
-                stage="complete",
-            )
+            make_document(id=doc_id, title="No Diag Doc", file_path="/tmp/nodiag.pdf", format="pdf")
         )
         session.add(
             ImageModel(
@@ -920,14 +882,7 @@ async def test_integration_vision_analysis_real_image(tmp_path: Path) -> None:
 
     async with sf() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Integration Doc",
-                file_path="/tmp/x.pdf",
-                format="pdf",
-                content_type="book",
-                stage="complete",
-            )
+            make_document(id=doc_id, title="Integration Doc", file_path="/tmp/x.pdf", format="pdf")
         )
         session.add(
             ImageModel(
@@ -1153,14 +1108,13 @@ async def test_load_image_contexts_fuses_all_sources(doc_and_image, session_fact
     section: title, anchored chunk text, and same-page text."""
     from sqlalchemy import select
 
-    from app.models import ChunkModel
     from app.services.image_enricher import _load_image_contexts
 
     doc_id, image_id, _img_path, _data_dir = doc_and_image
 
     async with session_factory() as session:
         session.add(
-            ChunkModel(
+            make_chunk(
                 id="chunk-anchor",
                 document_id=doc_id,
                 text="Figure 1: The model architecture.",
@@ -1169,11 +1123,10 @@ async def test_load_image_contexts_fuses_all_sources(doc_and_image, session_fact
             )
         )
         session.add(
-            ChunkModel(
+            make_chunk(
                 id="chunk-page",
                 document_id=doc_id,
                 text="The encoder is composed of a stack of identical layers.",
-                chunk_index=0,
                 page_number=1,
             )
         )

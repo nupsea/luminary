@@ -6,8 +6,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models import DocumentModel, FlashcardModel
+from app.models import DocumentModel
 from app.services.activity_service import ActivityService
+from tests.factories import make_card, make_document
 
 
 @pytest.fixture
@@ -16,17 +17,7 @@ def test_db(memory_db):
 
 
 def _doc(doc_id: str, title: str = "d") -> DocumentModel:
-    return DocumentModel(
-        id=doc_id,
-        title=title,
-        format="txt",
-        content_type="book",
-        word_count=1,
-        page_count=0,
-        file_path=f"/tmp/{doc_id}.txt",
-        stage="complete",
-        tags=[],
-    )
+    return make_document(id=doc_id, title=title, word_count=1, file_path=f"/tmp/{doc_id}.txt")
 
 
 @pytest.mark.anyio
@@ -121,24 +112,8 @@ async def test_overview_counts_flashcards_for_members(test_db):
     doc_id = str(uuid.uuid4())
     async with factory() as s:
         s.add(_doc(doc_id))
-        s.add(
-            FlashcardModel(
-                id=str(uuid.uuid4()),
-                document_id=doc_id,
-                question="q",
-                answer="a",
-                source_excerpt="x",
-            )
-        )
-        s.add(
-            FlashcardModel(
-                id=str(uuid.uuid4()),
-                document_id=doc_id,
-                question="q2",
-                answer="a2",
-                source_excerpt="x",
-            )
-        )
+        s.add(make_card(document_id=doc_id, source_excerpt="x"))
+        s.add(make_card(document_id=doc_id, question="q2", answer="a2", source_excerpt="x"))
         await s.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:

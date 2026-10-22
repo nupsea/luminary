@@ -12,28 +12,26 @@ from app.services.flashcard import (
     _classify_chunk,
     _filter_chunks_by_classification,
 )
+from tests.factories import make_card, make_chunk, make_document
 
 # Isolated test DB fixture
 
 
 def _make_doc(**kwargs) -> DocumentModel:
-    defaults = {
-        "id": str(uuid.uuid4()),
-        "title": "Designing Data-Intensive Applications",
-        "format": "pdf",
-        "content_type": "book",
-        "word_count": 500,
-        "page_count": 10,
-        "file_path": "/tmp/ddia.pdf",
-        "stage": "complete",
-    }
-    defaults.update(kwargs)
-    return DocumentModel(**defaults)
+    return make_document(
+        **{
+            "title": "Designing Data-Intensive Applications",
+            "format": "pdf",
+            "word_count": 500,
+            "page_count": 10,
+            "file_path": "/tmp/ddia.pdf",
+            **kwargs,
+        }
+    )
 
 
 def _make_chunk(doc_id: str, text: str, index: int = 0) -> ChunkModel:
-    return ChunkModel(
-        id=str(uuid.uuid4()),
+    return make_chunk(
         document_id=doc_id,
         section_id=None,
         text=text,
@@ -45,20 +43,14 @@ def _make_chunk(doc_id: str, text: str, index: int = 0) -> ChunkModel:
 
 def _make_flashcard(doc_id: str, question: str, deck: str = "default") -> FlashcardModel:
     now = datetime.now(UTC)
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id=doc_id,
         chunk_id=str(uuid.uuid4()),
         question=question,
         answer="A distributed system concept.",
         source_excerpt="...",
         deck=deck,
-        fsrs_state="new",
-        fsrs_stability=0.0,
-        fsrs_difficulty=0.0,
         due_date=now,
-        reps=0,
-        lapses=0,
         created_at=now,
     )
 

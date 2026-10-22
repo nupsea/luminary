@@ -17,6 +17,7 @@ import app.services.vector_store as vs_module
 from app.main import app
 from app.models import NoteModel, NoteTagIndexModel  # noqa: F401
 from app.services.vector_store import EMBEDDING_DIM
+from tests.factories import make_note
 
 # Fixtures
 
@@ -60,10 +61,9 @@ def client(test_db):
 
 
 def _make_note(note_id: str | None = None, content: str = "test", **kwargs) -> NoteModel:
-    return NoteModel(
-        id=note_id or str(uuid.uuid4()),
+    return make_note(
+        id=note_id,
         content=content,
-        tags=[],
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         **kwargs,
@@ -304,7 +304,7 @@ async def test_tag_query_p95_under_100ms_at_1000_notes(test_db):
     async with factory() as session:
         for i in range(1000):
             nid = str(uuid.uuid4())
-            note = NoteModel(
+            note = make_note(
                 id=nid,
                 content=f"note {i}",
                 tags=["science"],

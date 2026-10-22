@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
 from app.main import app
+from tests.factories import make_document
 
 # Shared fixture — in-memory SQLite DB
 
@@ -83,23 +84,14 @@ async def test_get_audio_non_audio_document_returns_400(test_db):
     import uuid
 
     import app.database as db_module
-    from app.models import DocumentModel
 
     # Insert a text document into the test DB
     doc_id = str(uuid.uuid4())
     factory = db_module._session_factory
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="A text doc",
-                format="txt",
-                content_type="notes",
-                word_count=0,
-                page_count=0,
-                file_path="/tmp/noop.txt",
-                stage="complete",
-                tags=[],
+            make_document(
+                id=doc_id, title="A text doc", content_type="notes", file_path="/tmp/noop.txt"
             )
         )
         await session.commit()
@@ -115,22 +107,17 @@ async def test_get_audio_missing_file_returns_404(test_db):
     import uuid
 
     import app.database as db_module
-    from app.models import DocumentModel
 
     doc_id = str(uuid.uuid4())
     factory = db_module._session_factory
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Phantom audio",
                 format="mp3",
                 content_type="audio",
-                word_count=0,
-                page_count=0,
                 file_path="/nonexistent/path/phantom.mp3",
-                stage="complete",
-                tags=[],
             )
         )
         await session.commit()

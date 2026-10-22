@@ -14,7 +14,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models import DocumentModel, EnrichmentJobModel
+from app.models import EnrichmentJobModel
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -27,15 +28,13 @@ async def _seed(factory, jobs: list[tuple[str, str]]) -> str:
     doc_id = str(uuid.uuid4())
     async with factory() as s:
         s.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Doc",
                 format="pdf",
-                content_type="book",
                 word_count=10,
                 page_count=1,
                 file_path="/tmp/x.pdf",
-                stage="complete",
                 created_at=datetime.now(UTC),
             )
         )

@@ -9,15 +9,14 @@ from app.models import (
     GraphConceptEdgeModel,
 )
 from app.repos.graph_concept_repo import GraphConceptRepo
+from tests.factories import make_document
 
 
 async def _seed(session, concepts=("c1", "c2", "c3"), documents=("d1",)):
     for cid in concepts:
         session.add(ConceptModel(id=cid, slug=f"s-{cid}", label=cid))
     for did in documents:
-        session.add(
-            DocumentModel(id=did, title=did, format="txt", content_type="book", file_path="/x")
-        )
+        session.add(make_document(id=did, title=did, file_path="/x", stage="parsing"))
     await session.flush()
 
 

@@ -21,6 +21,7 @@ from app.services.document_deletion_service import (
     _SPECIAL_CASE_TABLES,
     DocumentDeletionService,
 )
+from tests.factories import make_document
 
 
 def _models_with_document_id() -> set[type]:
@@ -80,15 +81,13 @@ async def test_deleting_a_document_clears_it_from_chat_session_scopes(memory_db)
     async with memory_db.factory() as session:
         for doc_id in (gone, kept):
             session.add(
-                DocumentModel(
+                make_document(
                     id=doc_id,
                     title=doc_id,
-                    format="txt",
                     content_type="notes",
                     word_count=1,
                     page_count=1,
                     file_path=f"/nonexistent/{doc_id}.txt",
-                    stage="complete",
                 )
             )
         session.add(ChatSessionModel(id="only", scope="single", document_ids=[gone]))

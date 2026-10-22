@@ -20,6 +20,7 @@ from app.main import app
 from app.models import ChunkModel, DocumentModel
 from app.services.conversation_chunker import ConversationChunker
 from app.workflows.ingestion import IngestionState, _chunk_conversation
+from tests.factories import make_document
 
 # Sample texts
 
@@ -72,16 +73,13 @@ out and touched the cover, feeling the weight of history beneath his fingertips.
 
 
 def _make_conv_doc(doc_id: str) -> DocumentModel:
-    return DocumentModel(
+    return make_document(
         id=doc_id,
         title="Test Conversation",
-        format="txt",
         content_type="conversation",
         word_count=200,
-        page_count=0,
         file_path="/tmp/conv.txt",
         stage="chunking",
-        tags=[],
     )
 
 

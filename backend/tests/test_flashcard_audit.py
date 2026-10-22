@@ -10,6 +10,7 @@ from stubs import MockLLMService
 
 from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
 from app.services.flashcard_audit import FlashcardAuditService
+from tests.factories import make_card, make_chunk, make_document, make_section
 
 # Isolated test DB fixture (mirrors test_flashcards.py pattern)
 
@@ -18,18 +19,17 @@ from app.services.flashcard_audit import FlashcardAuditService
 
 
 def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
-    defaults = {
-        "id": doc_id or str(uuid.uuid4()),
-        "title": "Audit Test Doc",
-        "format": "txt",
-        "content_type": "notes",
-        "word_count": 100,
-        "page_count": 1,
-        "file_path": "/tmp/test.txt",
-        "stage": "complete",
-    }
-    defaults.update(kwargs)
-    return DocumentModel(**defaults)
+    return make_document(
+        **{
+            "id": doc_id,
+            "title": "Audit Test Doc",
+            "content_type": "notes",
+            "word_count": 100,
+            "page_count": 1,
+            "file_path": "/tmp/test.txt",
+            **kwargs,
+        }
+    )
 
 
 def _make_section(
@@ -37,11 +37,10 @@ def _make_section(
     doc_id: str = "doc-1",
     heading: str = "Chapter 1",
 ) -> SectionModel:
-    return SectionModel(
-        id=section_id or str(uuid.uuid4()),
+    return make_section(
+        id=section_id,
         document_id=doc_id,
         heading=heading,
-        level=1,
         page_start=1,
         page_end=2,
         section_order=1,
@@ -53,14 +52,13 @@ def _make_chunk(
     doc_id: str = "doc-1",
     section_id: str | None = None,
 ) -> ChunkModel:
-    return ChunkModel(
-        id=chunk_id or str(uuid.uuid4()),
+    return make_chunk(
+        id=chunk_id,
         document_id=doc_id,
         section_id=section_id,
         text="Sample chunk text for Bloom's audit tests.",
         token_count=10,
         page_number=1,
-        chunk_index=0,
     )
 
 
@@ -71,19 +69,14 @@ def _make_card(
     bloom_level: int | None = None,
 ) -> FlashcardModel:
     now = datetime.now(UTC)
-    return FlashcardModel(
-        id=card_id or str(uuid.uuid4()),
+    return make_card(
+        id=card_id,
         document_id=doc_id,
         chunk_id=chunk_id,
         question="What is X?",
         answer="X is Y.",
         source_excerpt="X is Y.",
-        fsrs_state="new",
-        fsrs_stability=0.0,
-        fsrs_difficulty=0.0,
         due_date=now,
-        reps=0,
-        lapses=0,
         created_at=now,
         bloom_level=bloom_level,
     )

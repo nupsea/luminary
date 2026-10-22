@@ -27,6 +27,7 @@ from app.services.teachback_service import (
     _rubric_from_evaluation,
     _score_from_dimensions,
 )
+from tests.factories import make_card
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -100,19 +101,14 @@ def test_rubric_survives_a_missing_points_field_of_the_wrong_shape():
 
 def _make_card(doc_id: str) -> FlashcardModel:
     now = datetime.now(UTC)
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id=doc_id,
         chunk_id=str(uuid.uuid4()),
         question="What is event sourcing?",
         answer="Event sourcing stores state changes as immutable events.",
         source_excerpt="Events are immutable records.",
-        fsrs_state="new",
-        fsrs_stability=0.0,
         fsrs_difficulty=3.0,
         due_date=now,
-        reps=0,
-        lapses=0,
         created_at=now,
     )
 

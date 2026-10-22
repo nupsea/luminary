@@ -13,10 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
 from app.main import app
-from app.models import (
-    DocumentModel,
-    SectionModel,
-)
+from tests.factories import make_document, make_section
 
 
 @pytest.fixture
@@ -96,25 +93,15 @@ async def test_get_mastery_heatmap_with_data(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Tech Book",
-                format="txt",
                 content_type="tech_book",
                 page_count=5,
                 file_path="/tmp/x.pdf",
-                stage="complete",
             )
         )
-        session.add(
-            SectionModel(
-                id=section_id,
-                document_id=doc_id,
-                heading="Chapter 1: Closures",
-                level=1,
-                section_order=0,
-            )
-        )
+        session.add(make_section(id=section_id, document_id=doc_id, heading="Chapter 1: Closures"))
         await session.commit()
 
     with patch("app.services.mastery_service.get_graph_service") as mock_graph_factory:

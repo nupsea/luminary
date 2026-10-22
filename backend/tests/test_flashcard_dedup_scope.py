@@ -10,8 +10,9 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import CollectionMemberModel, CollectionModel, FlashcardModel
+from app.models import CollectionMemberModel, CollectionModel
 from app.services.flashcard import _study_scope_member_ids
+from tests.factories import make_card
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -26,15 +27,13 @@ async def session(memory_db):
 
 
 def _card(card_id: str, question: str, *, deck: str, document_id=None, note_id=None):
-    return FlashcardModel(
+    return make_card(
         id=card_id,
         document_id=document_id,
         note_id=note_id,
         source="document" if document_id else "note",
         deck=deck,
         question=question,
-        answer="a",
-        source_excerpt="",
     )
 
 

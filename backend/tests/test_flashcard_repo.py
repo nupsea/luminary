@@ -8,8 +8,9 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.exceptions import NotFound
-from app.models import ChunkModel, FlashcardModel
+from app.models import FlashcardModel
 from app.repos.flashcard_repo import FlashcardRepo
+from tests.factories import make_card, make_chunk
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -32,16 +33,13 @@ def _make_card(
     created_at: datetime | None = None,
 ) -> FlashcardModel:
     now = created_at or datetime.now(UTC)
-    return FlashcardModel(
+    return make_card(
         id=id,
         document_id=document_id,
         chunk_id=chunk_id,
-        source="document",
-        deck="default",
         question=f"q-{id}",
         answer=f"a-{id}",
         source_excerpt="excerpt",
-        difficulty="medium",
         bloom_level=bloom_level,
         created_at=now,
         due_date=now,
@@ -78,23 +76,9 @@ async def test_list_for_document_bloom_filter(repo: FlashcardRepo) -> None:
 
 @pytest.mark.asyncio
 async def test_list_for_section_join(repo: FlashcardRepo) -> None:
+    repo.session.add(make_chunk(id="c1", document_id="doc-1", section_id="sec-1", text="hello"))
     repo.session.add(
-        ChunkModel(
-            id="c1",
-            document_id="doc-1",
-            section_id="sec-1",
-            text="hello",
-            chunk_index=0,
-        )
-    )
-    repo.session.add(
-        ChunkModel(
-            id="c2",
-            document_id="doc-1",
-            section_id="sec-2",
-            text="world",
-            chunk_index=1,
-        )
+        make_chunk(id="c2", document_id="doc-1", section_id="sec-2", text="world", chunk_index=1)
     )
     repo.session.add(_make_card(id="card-a", chunk_id="c1"))
     repo.session.add(_make_card(id="card-b", chunk_id="c2"))

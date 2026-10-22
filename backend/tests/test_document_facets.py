@@ -5,15 +5,13 @@ content type at all, `epub` is a format no document carries as its type -- and a
 client cannot tell an empty filter from an empty page without asking the server.
 """
 
-import uuid
-
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
 from app.main import app
-from app.models import DocumentModel
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -31,13 +29,11 @@ async def _seed(factory, rows: list[tuple[str, str]]) -> None:
     async with factory() as s:
         for content_type, fmt in rows:
             s.add(
-                DocumentModel(
-                    id=str(uuid.uuid4()),
+                make_document(
                     title=f"{content_type}-{fmt}",
                     content_type=content_type,
                     format=fmt,
                     file_path="/tmp/x",
-                    stage="complete",
                 )
             )
         await s.commit()

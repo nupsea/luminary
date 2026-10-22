@@ -6,16 +6,13 @@ from sqlalchemy import select
 
 from app.models import DocumentModel, GraphEntityEdgeModel, GraphNoteEntityModel, NoteModel
 from app.services.graph import DocumentGraph, get_graph_service
+from tests.factories import make_document, make_note
 
 
 async def add_documents(memory_db, *doc_ids: str) -> None:
     async with memory_db.factory() as s:
         for doc_id in doc_ids:
-            s.add(
-                DocumentModel(
-                    id=doc_id, title=doc_id, format="txt", content_type="book", file_path="/x"
-                )
-            )
+            s.add(make_document(id=doc_id, title=doc_id, file_path="/x", stage="parsing"))
         await s.commit()
 
 
@@ -57,7 +54,7 @@ async def add_note(
 ) -> None:
     async with memory_db.factory() as s:
         if await s.get(NoteModel, note_id) is None:
-            s.add(NoteModel(id=note_id, content=content, tags=[]))
+            s.add(make_note(id=note_id, content=content))
             await s.flush()  # no ORM relationship orders the two inserts
         if entity_id:
             s.add(

@@ -5,32 +5,29 @@ from datetime import UTC, datetime, timedelta
 
 from app.main import app
 from app.models import DocumentModel, FlashcardModel, ReviewEventModel
+from tests.factories import make_card, make_document
 
 # Fixtures
 
 
 def _make_doc(doc_id: str | None = None) -> DocumentModel:
-    return DocumentModel(
-        id=doc_id or str(uuid.uuid4()),
+    return make_document(
+        id=doc_id,
         title="Struggling Test Doc",
-        format="txt",
-        content_type="book",
         word_count=500,
         page_count=10,
         file_path="/tmp/struggling_test.txt",
-        stage="complete",
     )
 
 
 def _make_card(doc_id: str, card_id: str | None = None) -> FlashcardModel:
-    return FlashcardModel(
-        id=card_id or str(uuid.uuid4()),
+    return make_card(
+        id=card_id,
         document_id=doc_id,
         chunk_id=None,
         question="What is X?",
         answer="X is Y.",
         source_excerpt="X is Y.",
-        fsrs_stability=0.0,
     )
 
 

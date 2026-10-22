@@ -15,6 +15,7 @@ from app.services.captions import captions_path, parse_vtt
 from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.transcript_vocabulary import hotwords, vocabulary_from_metadata
 from app.services.youtube_downloader import uploader_caption_language
+from tests.factories import make_document
 
 _TALK = {
     "title": "Building RAG pipelines on your laptop",
@@ -153,14 +154,13 @@ async def _ingest_node(factory, wav: Path, vocabulary: list[str] | None):
     doc_id = wav.stem
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Talk",
                 format="wav",
                 content_type="audio",
                 file_path=str(wav),
                 stage="parsing",
-                tags=[],
                 transcript_vocabulary=vocabulary,
             )
         )

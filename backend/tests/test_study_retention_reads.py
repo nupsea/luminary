@@ -8,32 +8,21 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import (
-    ChunkModel,
     DocumentModel,
     FlashcardModel,
     ReviewEventModel,
-    SectionModel,
 )
+from tests.factories import make_card, make_chunk, make_document, make_section
 
 _NOW = datetime.now(UTC)
 
 
 def _doc(doc_id: str) -> DocumentModel:
-    return DocumentModel(
-        id=doc_id,
-        title=f"Title {doc_id}",
-        format="txt",
-        content_type="book",
-        word_count=1,
-        page_count=0,
-        file_path="/tmp/x.txt",
-        stage="complete",
-    )
+    return make_document(id=doc_id, title=f"Title {doc_id}", word_count=1, file_path="/tmp/x.txt")
 
 
 def _card(document_id, stability, due_in_days, chunk_id=None) -> FlashcardModel:
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id=document_id,
         chunk_id=chunk_id,
         question="Q?",
@@ -151,10 +140,10 @@ async def test_stats_per_section_stability_weakest_first(test_db):
         session.add_all(
             [
                 _doc("d"),
-                SectionModel(id="s1", document_id="d", heading="One", level=1, section_order=0),
-                SectionModel(id="s2", document_id="d", heading="Two", level=1, section_order=1),
-                ChunkModel(id="k1", document_id="d", section_id="s1", text="t", chunk_index=0),
-                ChunkModel(id="k2", document_id="d", section_id="s2", text="t", chunk_index=1),
+                make_section(id="s1", document_id="d", heading="One"),
+                make_section(id="s2", document_id="d", heading="Two", section_order=1),
+                make_chunk(id="k1", document_id="d", section_id="s1"),
+                make_chunk(id="k2", document_id="d", section_id="s2", chunk_index=1),
                 _card("d", 10.0, 3, chunk_id="k1"),
                 _card("d", 20.0, 3, chunk_id="k1"),
                 _card("d", 2.0, 3, chunk_id="k2"),
