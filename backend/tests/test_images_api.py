@@ -33,11 +33,24 @@ async def test_get_images_returns_empty_for_text_doc(test_db):
     assert data["total"] == 0
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param(
+            "/documents/nonexistent-id/images", id="get_images_returns_404_for_unknown_doc"
+        ),
+        pytest.param(
+            "/images/nonexistent-image-id/raw", id="serve_image_raw_404_for_missing_image"
+        ),
+        pytest.param(
+            "/documents/nonexistent-id/enrichment", id="get_enrichment_returns_404_for_unknown_doc"
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_get_images_returns_404_for_unknown_doc(test_db):
-    """GET /documents/{unknown}/images returns 404."""
+async def test_unknown_image_resource_returns_404(path, test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get("/documents/nonexistent-id/images")
+        resp = await client.get(path)
     assert resp.status_code == 404
 
 
@@ -136,14 +149,6 @@ async def test_serve_image_raw_returns_200(test_db):
         resp = await client.get(f"/images/{img_id}/raw")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("image/png")
-
-
-@pytest.mark.asyncio
-async def test_serve_image_raw_404_for_missing_image(test_db):
-    """GET /images/{unknown}/raw returns 404."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get("/images/nonexistent-image-id/raw")
-    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -320,14 +325,6 @@ async def test_upload_note_image_tiff(test_db):
 
     assert served.status_code == 200
     assert served.headers["content-type"] == "image/tiff"
-
-
-@pytest.mark.asyncio
-async def test_get_enrichment_returns_404_for_unknown_doc(test_db):
-    """GET /documents/{unknown}/enrichment returns 404."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get("/documents/nonexistent-id/enrichment")
-    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio

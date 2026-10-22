@@ -57,25 +57,16 @@ def test_low_confidence_first_attempt_routes_to_augment():
     assert _route_after_confidence_gate(state) == "augment_node"
 
 
-def test_medium_confidence_skips_retry():
-    """_route_after_confidence_gate routes to END when confidence is medium."""
-    state = _make_state(confidence="medium", retry_attempted=False)
-    from langgraph.graph import END  # noqa: PLC0415
-
-    assert _route_after_confidence_gate(state) == END
-
-
-def test_high_confidence_skips_retry():
-    """_route_after_confidence_gate routes to END when confidence is high."""
-    state = _make_state(confidence="high", retry_attempted=False)
-    from langgraph.graph import END  # noqa: PLC0415
-
-    assert _route_after_confidence_gate(state) == END
-
-
-def test_no_double_retry():
-    """_route_after_confidence_gate routes to END even if confidence='low' on second pass."""
-    state = _make_state(confidence="low", retry_attempted=True)
+@pytest.mark.parametrize(
+    "confidence, retry_attempted",
+    [
+        pytest.param("medium", False, id="medium_confidence_skips_retry"),
+        pytest.param("high", False, id="high_confidence_skips_retry"),
+        pytest.param("low", True, id="no_double_retry"),
+    ],
+)
+def test_route_ends_without_retry(confidence, retry_attempted):
+    state = _make_state(confidence=confidence, retry_attempted=retry_attempted)
     from langgraph.graph import END  # noqa: PLC0415
 
     assert _route_after_confidence_gate(state) == END

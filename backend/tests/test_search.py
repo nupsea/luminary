@@ -158,15 +158,43 @@ def test_search_kind_filter_no_matches_returns_empty():
     retriever.retrieve.assert_not_called()
 
 
-def test_search_missing_query_returns_422():
-    """Missing required query param returns 422."""
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("/search", id="search_missing_query_returns_422"),
+        pytest.param(
+            "/search?q=test&rerank=true&rerank_depth=500",
+            id="search_rerank_depth_over_cap_returns_422",
+        ),
+        pytest.param("/search?q=test&limit=201", id="search_limit_over_cap_returns_422"),
+    ],
+)
+def test_search_rejects_invalid_query(url):
     with TestClient(app) as client:
-        resp = client.get("/search")
+        resp = client.get(url)
     assert resp.status_code == 422
 
 
-def test_search_hyde_flag_passes_through_to_retriever():
-    """?hyde=true forwards hyde=True to retriever.retrieve (S212 iter 4)."""
+@pytest.mark.parametrize(
+    "url, flag, expected",
+    [
+        pytest.param(
+            "/search?q=test&hyde=true",
+            "hyde",
+            True,
+            id="search_hyde_flag_passes_through_to_retriever",
+        ),
+        pytest.param("/search?q=test", "hyde", False, id="search_hyde_default_false"),
+        pytest.param(
+            "/search?q=test&rerank=true",
+            "rerank",
+            True,
+            id="search_rerank_flag_passes_through_to_retriever",
+        ),
+        pytest.param("/search?q=test", "rerank", False, id="search_rerank_default_false"),
+    ],
+)
+def test_search_flag_passes_through_to_retriever(url, flag, expected):
     chunks = [_make_chunk("c1", "doc-a", 0.9)]
     retriever = MagicMock()
     retriever.retrieve = AsyncMock(return_value=chunks)
@@ -176,65 +204,11 @@ def test_search_hyde_flag_passes_through_to_retriever():
     app.dependency_overrides[get_retriever] = _retriever_override(retriever)
 
     with TestClient(app) as client:
-        resp = client.get("/search?q=test&hyde=true")
+        resp = client.get(url)
 
     assert resp.status_code == 200
     call_kwargs = retriever.retrieve.call_args.kwargs
-    assert call_kwargs.get("hyde") is True
-
-
-def test_search_hyde_default_false():
-    """When hyde is not passed, retriever receives hyde=False."""
-    chunks = [_make_chunk("c1", "doc-a", 0.9)]
-    retriever = MagicMock()
-    retriever.retrieve = AsyncMock(return_value=chunks)
-    session = _mock_session([[("doc-a", "Paper A", "paper")]])
-
-    app.dependency_overrides[get_db] = _db_override(session)
-    app.dependency_overrides[get_retriever] = _retriever_override(retriever)
-
-    with TestClient(app) as client:
-        resp = client.get("/search?q=test")
-
-    assert resp.status_code == 200
-    call_kwargs = retriever.retrieve.call_args.kwargs
-    assert call_kwargs.get("hyde") is False
-
-
-def test_search_rerank_flag_passes_through_to_retriever():
-    """?rerank=true forwards rerank=True to retriever.retrieve (S212 iter 5)."""
-    chunks = [_make_chunk("c1", "doc-a", 0.9)]
-    retriever = MagicMock()
-    retriever.retrieve = AsyncMock(return_value=chunks)
-    session = _mock_session([[("doc-a", "Paper A", "paper")]])
-
-    app.dependency_overrides[get_db] = _db_override(session)
-    app.dependency_overrides[get_retriever] = _retriever_override(retriever)
-
-    with TestClient(app) as client:
-        resp = client.get("/search?q=test&rerank=true")
-
-    assert resp.status_code == 200
-    call_kwargs = retriever.retrieve.call_args.kwargs
-    assert call_kwargs.get("rerank") is True
-
-
-def test_search_rerank_default_false():
-    """When rerank is not passed, retriever receives rerank=False."""
-    chunks = [_make_chunk("c1", "doc-a", 0.9)]
-    retriever = MagicMock()
-    retriever.retrieve = AsyncMock(return_value=chunks)
-    session = _mock_session([[("doc-a", "Paper A", "paper")]])
-
-    app.dependency_overrides[get_db] = _db_override(session)
-    app.dependency_overrides[get_retriever] = _retriever_override(retriever)
-
-    with TestClient(app) as client:
-        resp = client.get("/search?q=test")
-
-    assert resp.status_code == 200
-    call_kwargs = retriever.retrieve.call_args.kwargs
-    assert call_kwargs.get("rerank") is False
+    assert call_kwargs.get(flag) is expected
 
 
 def test_search_rerank_depth_and_threshold_pass_through():
@@ -256,13 +230,6 @@ def test_search_rerank_depth_and_threshold_pass_through():
     assert call_kwargs.get("rerank_threshold") == 0.5
 
 
-def test_search_rerank_depth_over_cap_returns_422():
-    """rerank_depth beyond the guardrail is rejected at the API boundary."""
-    with TestClient(app) as client:
-        resp = client.get("/search?q=test&rerank=true&rerank_depth=500")
-    assert resp.status_code == 422
-
-
 def test_search_limit_200_passes_through():
     """limit=200 is accepted and forwarded as k -- the eval pool-recall arm needs it."""
     chunks = [_make_chunk("c1", "doc-a", 0.9)]
@@ -278,13 +245,6 @@ def test_search_limit_200_passes_through():
 
     assert resp.status_code == 200
     assert retriever.retrieve.call_args.kwargs.get("k") == 200
-
-
-def test_search_limit_over_cap_returns_422():
-    """limit shares the depth guardrail ceiling."""
-    with TestClient(app) as client:
-        resp = client.get("/search?q=test&limit=201")
-    assert resp.status_code == 422
 
 
 def test_search_expand_context_flag_passes_through():

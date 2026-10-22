@@ -36,37 +36,20 @@ def _base_state(**overrides) -> dict:
     return state
 
 
-# web_augment_node -- firing conditions
-
-
+@pytest.mark.parametrize(
+    "web_enabled, confidence, web_calls_used",
+    [
+        pytest.param(False, "low", 0, id="web_augment_node_skips_when_disabled"),
+        pytest.param(True, "medium", 0, id="web_augment_node_skips_on_medium_confidence"),
+        pytest.param(True, "high", 0, id="web_augment_node_skips_on_high_confidence"),
+        pytest.param(True, "low", 3, id="web_augment_node_rate_limit"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_web_augment_node_skips_when_disabled():
-    """Returns {} (no-op) when web_enabled=False."""
-    state = _base_state(web_enabled=False, confidence="low", web_calls_used=0)
-    result = await web_augment_node(state)
-    assert result == {}
-
-
-@pytest.mark.asyncio
-async def test_web_augment_node_skips_on_medium_confidence():
-    """Returns {} when confidence=medium even if web_enabled=True."""
-    state = _base_state(web_enabled=True, confidence="medium", web_calls_used=0)
-    result = await web_augment_node(state)
-    assert result == {}
-
-
-@pytest.mark.asyncio
-async def test_web_augment_node_skips_on_high_confidence():
-    """Returns {} when confidence=high even if web_enabled=True."""
-    state = _base_state(web_enabled=True, confidence="high", web_calls_used=0)
-    result = await web_augment_node(state)
-    assert result == {}
-
-
-@pytest.mark.asyncio
-async def test_web_augment_node_rate_limit():
-    """Returns {} (no-op) when web_calls_used >= 3 (rate limit)."""
-    state = _base_state(web_enabled=True, confidence="low", web_calls_used=3)
+async def test_web_augment_node_skips(web_enabled, confidence, web_calls_used):
+    state = _base_state(
+        web_enabled=web_enabled, confidence=confidence, web_calls_used=web_calls_used
+    )
     result = await web_augment_node(state)
     assert result == {}
 
@@ -142,24 +125,38 @@ async def test_web_augment_node_accumulates_web_calls():
     assert r4 == {}  # rate-limited
 
 
-# _route_after_confidence_gate with web_enabled
-
-
-def test_route_after_confidence_gate_routes_to_web_augment_when_enabled():
-    """Routes to web_augment_node when web_enabled=True and confidence=low."""
-    state = _base_state(web_enabled=True, confidence="low", web_calls_used=0, retry_attempted=False)
-    route = _route_after_confidence_gate(state)
-    assert route == "web_augment_node"
-
-
-def test_route_after_confidence_gate_routes_to_augment_when_web_disabled():
-    """Routes to augment_node when web_enabled=False and confidence=low."""
-
+@pytest.mark.parametrize(
+    "web_enabled, web_calls_used, expected",
+    [
+        pytest.param(
+            True,
+            0,
+            "web_augment_node",
+            id="route_after_confidence_gate_routes_to_web_augment_when_enabled",
+        ),
+        pytest.param(
+            False,
+            0,
+            "augment_node",
+            id="route_after_confidence_gate_routes_to_augment_when_web_disabled",
+        ),
+        pytest.param(
+            True,
+            3,
+            "augment_node",
+            id="route_after_confidence_gate_routes_to_web_augment_respects_rate_limit",
+        ),
+    ],
+)
+def test_route_after_confidence_gate(web_enabled, web_calls_used, expected):
     state = _base_state(
-        web_enabled=False, confidence="low", web_calls_used=0, retry_attempted=False
+        web_enabled=web_enabled,
+        confidence="low",
+        web_calls_used=web_calls_used,
+        retry_attempted=False,
     )
     route = _route_after_confidence_gate(state)
-    assert route == "augment_node"
+    assert route == expected
 
 
 def test_route_after_confidence_gate_routes_to_end_after_retry():
@@ -169,13 +166,6 @@ def test_route_after_confidence_gate_routes_to_end_after_retry():
     state = _base_state(web_enabled=True, confidence="low", web_calls_used=0, retry_attempted=True)
     route = _route_after_confidence_gate(state)
     assert route == END
-
-
-def test_route_after_confidence_gate_routes_to_web_augment_respects_rate_limit():
-    """Routes to augment_node (local fallback) when web rate limit reached."""
-    state = _base_state(web_enabled=True, confidence="low", web_calls_used=3, retry_attempted=False)
-    route = _route_after_confidence_gate(state)
-    assert route == "augment_node"
 
 
 # Version mismatch prompt extension in synthesize_node

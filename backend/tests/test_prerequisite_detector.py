@@ -41,34 +41,44 @@ def test_builds_on_returns_medium_confidence():
     assert conf == pytest.approx(0.7)
 
 
-def test_is_a_subclass_of_returns_high_confidence():
-    chunks = [_chunk("Mammal is a subclass of Animal")]
-    result = detect_prerequisites(chunks, {"mammal", "animal"})
+@pytest.mark.parametrize(
+    "text, source, target, confidence",
+    [
+        pytest.param(
+            "Mammal is a subclass of Animal",
+            "mammal",
+            "animal",
+            0.9,
+            id="is_a_subclass_of_returns_high_confidence",
+        ),
+        pytest.param(
+            "Gravity depends on Mass",
+            "gravity",
+            "mass",
+            0.7,
+            id="depends_on_returns_medium_confidence",
+        ),
+        pytest.param(
+            "Gravity was first introduced as Force",
+            "gravity",
+            "force",
+            0.5,
+            id="first_introduced_as_returns_low_confidence",
+        ),
+    ],
+)
+def test_pattern_sets_confidence(text, source, target, confidence):
+    chunks = [_chunk(text)]
+    result = detect_prerequisites(chunks, {source, target})
     assert len(result) == 1
     _, _, conf = result[0]
-    assert conf == pytest.approx(0.9)
-
-
-def test_depends_on_returns_medium_confidence():
-    chunks = [_chunk("Gravity depends on Mass")]
-    result = detect_prerequisites(chunks, {"gravity", "mass"})
-    assert len(result) == 1
-    _, _, conf = result[0]
-    assert conf == pytest.approx(0.7)
+    assert conf == pytest.approx(confidence)
 
 
 def test_defined_as_a_type_of():
     chunks = [_chunk("A dog is defined as a type of Mammal")]
     result = detect_prerequisites(chunks, {"a dog", "mammal"})
     assert len(result) == 1
-
-
-def test_first_introduced_as_returns_low_confidence():
-    chunks = [_chunk("Gravity was first introduced as Force")]
-    result = detect_prerequisites(chunks, {"gravity", "force"})
-    assert len(result) == 1
-    _, _, conf = result[0]
-    assert conf == pytest.approx(0.5)
 
 
 # Entity guard

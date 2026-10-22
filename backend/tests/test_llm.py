@@ -198,9 +198,35 @@ async def test_cloud_models_do_not_get_think_param():
     assert "think" not in mock_ac.call_args.kwargs
 
 
+@pytest.mark.parametrize(
+    "env_var, key, model, expected",
+    [
+        pytest.param(
+            "OPENAI_API_KEY",
+            "sk-test123",
+            "openai/gpt-4o",
+            "sk-test123",
+            id="openai_prefix_sets_api_key",
+        ),
+        pytest.param(
+            "ANTHROPIC_API_KEY",
+            "ant-key-xyz",
+            "anthropic/claude-3-haiku",
+            "ant-key-xyz",
+            id="anthropic_prefix_sets_api_key",
+        ),
+        pytest.param(
+            "GOOGLE_API_KEY",
+            "goog-key-abc",
+            "gemini/gemini-2.0-flash",
+            "goog-key-abc",
+            id="gemini_prefix_sets_api_key",
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_openai_prefix_sets_api_key(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test123")
+async def test_provider_prefix_sets_api_key(env_var, key, model, expected, monkeypatch):
+    monkeypatch.setenv(env_var, key)
     from app.config import get_settings
 
     get_settings.cache_clear()
@@ -209,43 +235,9 @@ async def test_openai_prefix_sets_api_key(monkeypatch):
     with patch(
         "litellm.acompletion", new_callable=AsyncMock, return_value=mock_response
     ) as mock_ac:
-        await svc.generate("hi", model="openai/gpt-4o")
+        await svc.generate("hi", model=model)
     kwargs = mock_ac.call_args.kwargs
-    assert kwargs["api_key"] == "sk-test123"
-    get_settings.cache_clear()
-
-
-@pytest.mark.asyncio
-async def test_anthropic_prefix_sets_api_key(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-key-xyz")
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    svc = LLMService()
-    mock_response = _make_completion_response("ok")
-    with patch(
-        "litellm.acompletion", new_callable=AsyncMock, return_value=mock_response
-    ) as mock_ac:
-        await svc.generate("hi", model="anthropic/claude-3-haiku")
-    kwargs = mock_ac.call_args.kwargs
-    assert kwargs["api_key"] == "ant-key-xyz"
-    get_settings.cache_clear()
-
-
-@pytest.mark.asyncio
-async def test_gemini_prefix_sets_api_key(monkeypatch):
-    monkeypatch.setenv("GOOGLE_API_KEY", "goog-key-abc")
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    svc = LLMService()
-    mock_response = _make_completion_response("ok")
-    with patch(
-        "litellm.acompletion", new_callable=AsyncMock, return_value=mock_response
-    ) as mock_ac:
-        await svc.generate("hi", model="gemini/gemini-2.0-flash")
-    kwargs = mock_ac.call_args.kwargs
-    assert kwargs["api_key"] == "goog-key-abc"
+    assert kwargs["api_key"] == expected
     get_settings.cache_clear()
 
 
