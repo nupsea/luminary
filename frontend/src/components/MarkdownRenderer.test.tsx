@@ -82,3 +82,30 @@ Paragraph two text.`
 })
 
 
+
+describe("MarkdownRenderer bracket math", () => {
+  // From a local model's Ask answer, which rendered as "Mean ((\mu))" and "[ f(x) = … ]".
+  const answer = [
+    "- **Mean (\\(\\mu\\))**: Central tendency of the data.",
+    "- **Standard Deviation (\\(\\sigma\\))**: Spread about the mean.",
+    "- Probability density function (PDF) for \\( x \\):",
+    "  \\[",
+    "  f(x) = \\frac{1}{\\sqrt{2\\pi}\\sigma} e^{-\\frac{(x-\\mu)^2}{2\\sigma^2}}",
+    "  \\]",
+  ].join("\n")
+  const count = (html: string, cls: string) => html.match(new RegExp(`class="${cls}"`, "g"))?.length ?? 0
+
+  it("renders a model's \\( \\) and \\[ \\] as KaTeX, display math as a block", () => {
+    const html = renderToStaticMarkup(<MarkdownRenderer>{answer}</MarkdownRenderer>)
+
+    expect(count(html, "katex")).toBe(4)
+    expect(count(html, "katex-display")).toBe(1)
+    expect(html).not.toContain("((")
+  })
+
+  it("leaves them as text where a person wrote them", () => {
+    const html = renderToStaticMarkup(<MarkdownRenderer bracketMath={false}>{answer}</MarkdownRenderer>)
+
+    expect(count(html, "katex")).toBe(0)
+  })
+})

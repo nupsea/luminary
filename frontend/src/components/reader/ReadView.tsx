@@ -272,6 +272,7 @@ const LazySection = memo(({
           // this element rather than inherited.
           <MarkdownRenderer
             documentId={documentId}
+            bracketMath={false}
             className={cn(spec.family, "text-[length:var(--reader-size)]")}
           >
             {highlighted}

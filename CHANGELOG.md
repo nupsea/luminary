@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An EPUB reopens at the paragraph where reading stopped, and can hold one bookmark,** as a PDF does. Chapters run to 20,000 words, so the place saved is the block on screen, not the chapter.
 
 ### Fixed
+- **Math in an Ask answer showed as text, such as "Mean ((\mu))" and "[ f(x) = … ]".** Models write TeX between `\(` `\)` and `\[` `\]`; answers, summaries, explanations and cards now render it. Notes and document text still read those as escaped brackets.
 - **Adding a claude.ai doc by link stored a 5-word document titled "Claude Artifact" and reported success.** Such a link is now refused with a pointer to export and upload, and any link whose page has under 50 words of text is refused instead of stored.
 - **Inline math such as `$x = y + z$` showed as raw text in the note editor**, though the preview rendered it. It renders as you write, and its source is highlighted on the line being edited and in the split view's editor.
 - **The EPUB reader dropped footnote markers, subscripts, equations, definition lists and table captions.** One chapter of an O'Reilly book lost 85 markers and 19 equations; they render now, equations as MathML. Chapter titles keep their spaces ("Chapter 1. Introduction"), inline code shows no backticks, and links into other chapters open them.
