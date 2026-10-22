@@ -5,6 +5,7 @@ tree carried zero headings, so the article extracted as one unbroken wall. These
 tests pin the shape of the output that replaced it.
 """
 
+import pytest
 from bs4 import BeautifulSoup
 
 from app.services.html_to_markdown import to_markdown
@@ -67,24 +68,38 @@ class TestLists:
 
 
 class TestBlocks:
-    def test_table_becomes_a_markdown_table(self):
-        out = _md(
-            "<table><tr><th>Model</th><th>Score</th></tr><tr><td>A</td><td>0.91</td></tr></table>"
-        )
-        assert "| Model | Score |" in out
-        assert "| A | 0.91 |" in out
+    @pytest.mark.parametrize(
+        "html, first, second",
+        [
+            pytest.param(
+                "<table><tr><th>Model</th><th>Score</th></tr><tr><td>A</td><td>0.91</td></tr></table>",
+                "| Model | Score |",
+                "| A | 0.91 |",
+                id="table_becomes_a_markdown_table",
+            ),
+            pytest.param(
+                '<figure><img src="/d.png" alt="Arch">'
+                "<figcaption>Figure 1: pipeline</figcaption></figure>",
+                "![Arch](/d.png)",
+                "Figure 1: pipeline",
+                id="figure_keeps_image_and_caption",
+            ),
+            pytest.param(
+                "<details><summary>Show proof</summary><p>The proof body.</p></details>",
+                "**Show proof**",
+                "The proof body.",
+                id="details_content_is_not_swallowed",
+            ),
+        ],
+    )
+    def test_block_keeps_its_content(self, html, first, second):
+        out = _md(html)
+        assert first in out
+        assert second in out
 
     def test_blockquote_is_marked(self):
         out = _md("<blockquote><p>A quoted claim.</p></blockquote>")
         assert "> A quoted claim." in out
-
-    def test_figure_keeps_image_and_caption(self):
-        out = _md(
-            '<figure><img src="/d.png" alt="Arch">'
-            "<figcaption>Figure 1: pipeline</figcaption></figure>"
-        )
-        assert "![Arch](/d.png)" in out
-        assert "Figure 1: pipeline" in out
 
     def test_link_card_figure_keeps_its_prose_link_and_one_image(self):
         """A Ghost bookmark card: prose inside a <figure>, wrapped in a block link.
@@ -103,12 +118,6 @@ class TestBlocks:
         assert "How a loop shipped six repos overnight." in out
         assert out.count("/thumb.jpg") == 1
         assert out.index("Ralph") < out.index("/thumb.jpg")
-
-    def test_details_content_is_not_swallowed(self):
-        """A collapsed section is still the author's content."""
-        out = _md("<details><summary>Show proof</summary><p>The proof body.</p></details>")
-        assert "**Show proof**" in out
-        assert "The proof body." in out
 
     def test_pre_keeps_its_lines(self):
         out = _md("<pre>line one\n    line two</pre>")

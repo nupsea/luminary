@@ -3,6 +3,8 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.main import app
 from app.models import DocumentModel, FlashcardModel, ReviewEventModel
 from tests.factories import make_card, make_document
@@ -73,59 +75,23 @@ async def test_get_struggling_cards_returns_card_with_3_agains(test_db):
     assert results[0]["again_count"] == 3
 
 
-async def test_card_with_2_agains_not_returned(test_db):
-    """2 again ratings (below threshold of 3) should not be returned."""
+@pytest.mark.parametrize(
+    "count, rating, days_ago",
+    [
+        pytest.param(2, "again", 1, id="card_with_2_agains_not_returned"),
+        pytest.param(3, "again", 20, id="old_agains_excluded_from_window"),
+        pytest.param(5, "good", 1, id="good_ratings_not_counted"),
+    ],
+)
+async def test_ratings_below_threshold_are_not_returned(count, rating, days_ago, test_db):
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
     card_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(_make_doc(doc_id))
         session.add(_make_card(doc_id, card_id))
-        for _ in range(2):
-            session.add(_make_review(card_id, "again", days_ago=1))
-        await session.commit()
-
-    from app.services.fsrs_service import get_fsrs_service
-
-    async with factory() as session:
-        svc = get_fsrs_service()
-        results = await svc.get_struggling_cards(session, document_id=doc_id)
-
-    assert len(results) == 0
-
-
-async def test_old_agains_excluded_from_window(test_db):
-    """Again ratings older than the window (default 14 days) are excluded."""
-    _, factory, _ = test_db
-    doc_id = str(uuid.uuid4())
-    card_id = str(uuid.uuid4())
-    async with factory() as session:
-        session.add(_make_doc(doc_id))
-        session.add(_make_card(doc_id, card_id))
-        # 3 agains at 20 days ago -- outside 14-day window
-        for _ in range(3):
-            session.add(_make_review(card_id, "again", days_ago=20))
-        await session.commit()
-
-    from app.services.fsrs_service import get_fsrs_service
-
-    async with factory() as session:
-        svc = get_fsrs_service()
-        results = await svc.get_struggling_cards(session, document_id=doc_id)
-
-    assert len(results) == 0
-
-
-async def test_good_ratings_not_counted(test_db):
-    """Only 'again' ratings count towards the threshold."""
-    _, factory, _ = test_db
-    doc_id = str(uuid.uuid4())
-    card_id = str(uuid.uuid4())
-    async with factory() as session:
-        session.add(_make_doc(doc_id))
-        session.add(_make_card(doc_id, card_id))
-        for _ in range(5):
-            session.add(_make_review(card_id, "good", days_ago=1))
+        for _ in range(count):
+            session.add(_make_review(card_id, rating, days_ago=days_ago))
         await session.commit()
 
     from app.services.fsrs_service import get_fsrs_service
