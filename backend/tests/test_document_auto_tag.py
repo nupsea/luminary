@@ -784,9 +784,7 @@ async def test_removing_doc_tag_clears_provenance(test_db, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_retag_reads_the_newest_one_sentence_summary_when_there_are_two(
-    test_db, monkeypatch
-):
+async def test_retag_reads_the_newest_one_sentence_summary_when_there_are_two(test_db, monkeypatch):
     """A re-summarised document keeps both rows; the tagger must not fail on the second."""
     _, factory = test_db
     doc_id = str(uuid.uuid4())

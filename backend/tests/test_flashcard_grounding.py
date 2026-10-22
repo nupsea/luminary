@@ -95,8 +95,7 @@ class TestFormattingIsNotContent:
         "A cost of 2*3*4 drachmas, or a * b in the ledger."
     )
     _PDF = (
-        "Each night she undid the day’s weav‐\ning, "
-        "and the shroud of Laer­ tes stayed un‐finished."
+        "Each night she undid the day’s weav‐\ning, and the shroud of Laer­ tes stayed un‐finished."
     )
 
     @pytest.mark.parametrize(

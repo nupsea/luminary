@@ -533,9 +533,7 @@ async def test_one_figure_timing_out_does_not_fail_the_others(
     from sqlalchemy import select  # noqa: PLC0415
 
     async with session_factory() as session:
-        rows = {
-            r.id: r.description for r in (await session.execute(select(ImageModel))).scalars()
-        }
+        rows = {r.id: r.description for r in (await session.execute(select(ImageModel))).scalars()}
     assert rows[first_id] is None, "The timed-out figure stays in the retry set"
     assert all(rows[i] == "Bars" for i in later_ids)
 
