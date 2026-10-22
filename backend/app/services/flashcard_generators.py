@@ -84,7 +84,7 @@ from app.services.flashcard_units import (
 )
 from app.services.llm import LLMAPIConnectionError, LLMServiceUnavailableError
 from app.telemetry import trace_chain
-from app.types import DocumentProfile
+from app.types import MEDIA_FORMATS, DocumentProfile
 
 logger = logging.getLogger(__name__)
 
@@ -916,9 +916,9 @@ async def generate(
 
     # Whether this recording has more than one participant, which is what
     # separates a meeting from a talk when no profile decided it. Only asked for
-    # the content types where the answer changes the prompt.
+    # recordings, where the answer changes the prompt.
     has_speakers: bool | None = None
-    if doc.content_type in ("audio", "video"):
+    if doc.format in MEDIA_FORMATS:
         has_speakers = await DocumentRepo(session).has_speaker_turns(document_id)
 
     # infer genre for genre-aware system prompt

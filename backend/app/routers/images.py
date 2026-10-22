@@ -93,13 +93,13 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
     notes_img_dir = data_dir / "images" / "notes"
     notes_img_dir.mkdir(parents=True, exist_ok=True)
 
-    content_type = file.content_type or ""
+    mime = file.content_type or ""
     filename = file.filename or "asset"
     ext = Path(filename).suffix.lower()
-    is_excalidraw_scene = content_type in {"application/json", "text/json"} and filename.endswith(
+    is_excalidraw_scene = mime in {"application/json", "text/json"} and filename.endswith(
         ".excalidraw.json"
     )
-    if not content_type.startswith("image/") and not is_excalidraw_scene:
+    if not mime.startswith("image/") and not is_excalidraw_scene:
         raise HTTPException(
             status_code=400,
             detail="Only image files or Excalidraw JSON scenes are allowed",
@@ -107,8 +107,8 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
 
     if ext == ".json" and filename.endswith(".excalidraw.json"):
         ext = ".excalidraw.json"
-    elif not ext and content_type.startswith("image/"):
-        subtype = content_type.split("/")[-1].split("+")[0].lower()
+    elif not ext and mime.startswith("image/"):
+        subtype = mime.split("/")[-1].split("+")[0].lower()
         if subtype == "jpeg":
             subtype = "jpg"
         allowed_subtypes = {"png", "jpg", "gif", "webp", "svg", "bmp", "tiff", "tif"}

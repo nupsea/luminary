@@ -491,23 +491,36 @@ def test_jaccard_filter():
     assert filtered[0]["question"] == "explain the economic system"
 
 
-def test_book_is_technical_routing():
+@pytest.mark.parametrize(
+    ("fields", "entities", "family"),
+    [
+        # A textbook stored as `book`: its domain decides, not a title keyword.
+        ({"content_type": "book", "form": "article", "domain": "technical"}, {}, "technical"),
+        ({"content_type": "book", "form": "prose", "domain": "general"}, {}, "book"),
+        # A journal is not a story.
+        ({"content_type": "book", "form": "entries", "domain": "general"}, {}, "generic"),
+        ({"content_type": "paper", "form": "paper", "domain": "technical"}, {}, "technical"),
+        # A recording follows its format, technical talk or not.
+        (
+            {"content_type": "audio", "format": "flac", "form": "dialogue", "domain": "technical"},
+            {},
+            "video",
+        ),
+        # No measured domain: the entity mix decides between textbook and story.
+        (
+            {"content_type": "book"},
+            {"CONCEPT": ["gradient descent", "dropout", "attention"], "PERSON": ["users"]},
+            "technical",
+        ),
+        ({"content_type": "book"}, {"PERSON": ["Ulysses"], "PLACE": ["Ithaca"]}, "book"),
+    ],
+)
+def test_templates_follow_the_measured_profile(fields, entities, family):
     """A technical book must not get narrative ('throughout the story') templates."""
-    from app.routers.chat_meta import _book_is_technical
+    from app.routers.chat_meta import _template_family
 
-    # technical by title (underscores normalised)
-    assert _book_is_technical("d2l_dive_into_deep_learning", {})
-    # narrative book with people/places -> not technical
-    assert not _book_is_technical(
-        "The Odyssey", {"PERSON": ["Ulysses", "Telemachus"], "PLACE": ["Ithaca"]}
-    )
-    # technical by entity mix even when the title is uninformative
-    assert _book_is_technical(
-        "Field Notes",
-        {"CONCEPT": ["gradient descent", "dropout", "attention"], "PERSON": ["users"]},
-    )
-    # sparse/ambiguous -> default to narrative (not technical)
-    assert not _book_is_technical("Field Notes", {"PERSON": ["Alice"]})
+    doc = DocumentModel(id="d", title="Field Notes", file_path="/x", **{"format": "txt", **fields})
+    assert _template_family(doc, entities) == family
 
 
 def test_parses_unterminated_json_array():

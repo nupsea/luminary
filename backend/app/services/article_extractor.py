@@ -114,8 +114,8 @@ def _decoded(response) -> str:
     A declared charset is the server's own statement and is trusted. Only when
     none is declared do we fall back to detection.
     """
-    content_type = (response.headers.get("content-type") or "").lower()
-    if "charset=" not in content_type:
+    declared = (response.headers.get("content-type") or "").lower()
+    if "charset=" not in declared:
         detected = response.apparent_encoding
         if detected:
             response.encoding = detected

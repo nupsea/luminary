@@ -20,7 +20,7 @@ def client():
         yield c
 
 
-def _create_document(client, title="Test Book", content_type="book") -> str:
+def _create_document(client, title="Test Book", content_type="book", **facets) -> str:
     """Create a minimal document and return its id."""
     doc_id = str(uuid.uuid4())
     import asyncio  # noqa: PLC0415
@@ -39,6 +39,7 @@ def _create_document(client, title="Test Book", content_type="book") -> str:
                 page_count=10,
                 file_path="/tmp/fake.txt",
                 stage="complete",
+                **facets,
             )
             session.add(doc)
             await session.commit()
@@ -84,6 +85,15 @@ def test_create_auto_collection(client):
     assert data["name"] == "THE-ODYSSEY-BOOK"
     assert data["auto_document_id"] == doc_id
     assert data["color"] == "#8B5CF6"  # book color
+
+
+def test_an_auto_collection_is_named_for_the_kind_the_library_shows(client):
+    """A technical book stored as `tech_book` was suffixed "Tech_book"; it follows the kind now."""
+    doc_id = _create_document(
+        client, title="Kubernetes", content_type="tech_book", form="reference", domain="technical"
+    )
+    data = client.post(f"/collections/auto/{doc_id}").json()
+    assert data["name"] == "KUBERNETES-TECHNICAL"
 
 
 def test_create_auto_collection_idempotent(client):
