@@ -33,20 +33,15 @@ from app.services.tech_section_parser import (
     is_objective_candidate,
 )
 from app.telemetry import trace_ingestion_node
-from app.types import PREVIEW_CHARS, DocumentProfile, chunk_config_for_form
+from app.types import MEDIA_FORMATS, PREVIEW_CHARS, chunk_config_for_form
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _background_tasks,
     _update_stage,
+    profile_of_state,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _profile(state: IngestionState) -> DocumentProfile:
-    """`DocumentProfile.of` mid-ingest: the measured form is in the state, not yet the row."""
-    legacy = DocumentProfile.from_legacy(state.get("content_type"), state.get("is_technical"))
-    return legacy.with_measured_form(state.get("form"))
 
 
 def _context_header(doc_title: str, section_heading: str) -> str:
@@ -341,7 +336,7 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
     4. Store extracted code blocks in CodeSnippetModel with language and AST signature.
     """
 
-    profile = _profile(state)
+    profile = profile_of_state(state)
     cfg = profile.chunk_config
 
     async with get_session_factory()() as session:
@@ -678,11 +673,10 @@ async def chunk_node(state: IngestionState) -> IngestionState:
     with trace_ingestion_node("chunk", state):
         try:
             pd = state["parsed_document"]
-            content_type = state["content_type"] or "notes"
             doc_id = state["document_id"]
             file_path = state["file_path"]
 
-            if content_type in ("audio", "video"):
+            if state["format"] in MEDIA_FORMATS:
                 audio_chunks = state.get("_audio_chunks") or []
                 chunks = []
                 async with get_session_factory()() as session:
@@ -746,13 +740,12 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                     session.add_all(chunk_models)
                     await session.commit()
                 logger.info(
-                    "%s chunked",
-                    content_type,
+                    "transcript chunked",
                     extra={"doc_id": doc_id, "num_chunks": len(chunks)},
                 )
                 return {**state, "chunks": chunks, "status": "embedding"}
 
-            if content_type == "code":
+            if profile_of_state(state).form == "source_code":
                 raw_text = pd["raw_text"] if pd else ""
                 raw_chunks, code_metas = _chunk_code_file(raw_text, file_path, doc_id)
                 chunks = []
@@ -788,7 +781,7 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                 )
                 return {**state, "chunks": chunks, "status": "embedding"}
 
-            profile = _profile(state)
+            profile = profile_of_state(state)
             if profile.form in ("reference", "article"):
                 return await _chunk_tech_book(state, pd, doc_id)
 
@@ -936,7 +929,7 @@ async def _chunk_generic(state: IngestionState, pd: dict | None, doc_id: str) ->
     Also the fallback for forms with a specialised chunker, so an
     unrecognised or malformed document still ingests instead of failing.
     """
-    cfg = _profile(state).chunk_config
+    cfg = profile_of_state(state).chunk_config
     splitter = _splitter_cls()(chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"])
     chunks = []
     async with get_session_factory()() as session:

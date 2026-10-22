@@ -36,6 +36,7 @@ import uuid
 
 from app.database import get_session_factory
 from app.repos.document_repo import DocumentRepo, index_chunks_fts
+from app.types import DocumentProfile
 from app.workflows.ingestion import build_entity_tail
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
             logger.warning("reindex_entities: doc_id not found", extra={"doc_id": doc_id})
             return metrics
         content_type = doc_row.content_type or "notes"
-        is_technical = doc_row.is_technical
+        profile = DocumentProfile.of(doc_row)
 
         chunk_rows = await docs.chunk_ner_inputs(doc_id)
         if not chunk_rows:
@@ -112,7 +113,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
         loop = asyncio.get_event_loop()
         ner_chunks = select_ner_chunks(chunk_dicts)
         entities = await loop.run_in_executor(
-            None, extractor.extract, ner_chunks, content_type, is_technical
+            None, extractor.extract, ner_chunks, profile.is_technical
         )
 
         canonical_triples = canonicalize_batch(
@@ -141,8 +142,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
                 alias_map,
                 ner_chunks,
                 chunk_dicts,
-                content_type,
-                is_technical,
+                profile,
             )
             await graph.write_document_graph(doc_id, document_graph, replace=True)
             await record_entity_coverage(doc_id, len(ner_chunks))

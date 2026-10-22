@@ -26,6 +26,7 @@ from app.services.parser import DocumentParser
 from app.types import (
     FACETS_FROM_READER,
     ContentType,  # noqa: F401  re-exported via app.workflows.ingestion
+    DocumentProfile,
 )
 
 # Module-level set holding fire-and-forget background tasks (objective
@@ -44,8 +45,8 @@ _parser = DocumentParser()
 # No longer read by the chunkers -- `DocumentProfile.chunk_config` decides
 # sizing now. Kept as the pinned record of what each content type used to get,
 # and `tests/test_document_profile.py` asserts the profile still reproduces it.
-# Deleting this as dead code would silently void that comparison. It goes when
-# content_type does.
+# Deleting this as dead code would silently void that comparison. It goes with
+# the legacy type column (#223, step d).
 CHUNK_CONFIGS: dict[str, dict[str, int]] = {
     # Papers are the densest content type and previously had the smallest budget,
     # tight enough that splits fell past word boundaries into mid-word cuts. The
@@ -144,6 +145,12 @@ class IngestionState(TypedDict):
     structure_type: str | None
     defer_section_summaries: bool | None
     _audio_chunks: list[dict[str, Any]] | None
+
+
+def profile_of_state(state: IngestionState) -> DocumentProfile:
+    """`DocumentProfile.of` mid-ingest: the measured form is in the state, not yet the row."""
+    legacy = DocumentProfile.from_legacy(state.get("content_type"), state.get("is_technical"))
+    return legacy.with_measured_form(state.get("form"))
 
 
 def resolve_technical_variant(raw_text: str, word_count: int | None = None) -> str:

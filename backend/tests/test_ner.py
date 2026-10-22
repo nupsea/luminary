@@ -170,7 +170,7 @@ def test_tech_noise_filter_rejects_generic_library_terms(extractor: EntityExtrac
 
     # Use tech content_type so tech entity types are active
     chunks = [_make_chunk("use the class method on the object")]
-    result = extractor.extract(chunks, content_type="tech_book")
+    result = extractor.extract(chunks, is_technical=True)
     assert result == [], f"Expected no entities, got: {result}"
 
 
@@ -181,7 +181,7 @@ def test_tech_noise_filter_allows_legitimate_library_names(extractor: EntityExtr
     extractor._model = mock_model
 
     chunks = [_make_chunk("import numpy for array operations")]
-    result = extractor.extract(chunks, content_type="tech_book")
+    result = extractor.extract(chunks, is_technical=True)
     assert len(result) == 1
     assert result[0]["name"] == "numpy"
 
@@ -200,7 +200,7 @@ def test_code_block_boost_code_chunk_uses_lower_threshold(extractor: EntityExtra
     extractor._model = mock_model
 
     code_chunk = _make_chunk("import numpy", has_code=True)
-    extractor.extract([code_chunk], content_type="tech_book")
+    extractor.extract([code_chunk], is_technical=True)
 
     # Verify the lower threshold (0.55) was used for the code chunk
     calls = mock_model.batch_predict_entities.call_args_list
@@ -219,7 +219,7 @@ def test_code_block_boost_prose_chunk_uses_higher_threshold(extractor: EntityExt
     extractor._model = mock_model
 
     prose_chunk = _make_chunk("numpy is used here", has_code=False)
-    extractor.extract([prose_chunk], content_type="tech_book")
+    extractor.extract([prose_chunk], is_technical=True)
 
     calls = mock_model.batch_predict_entities.call_args_list
     thresholds_used = [
@@ -235,7 +235,7 @@ def test_non_tech_content_type_excludes_tech_types(extractor: EntityExtractor):
     extractor._model = mock_model
 
     chunks = [_make_chunk("some prose text")]
-    extractor.extract(chunks, content_type="book")
+    extractor.extract(chunks, is_technical=False)
 
     call_args = mock_model.batch_predict_entities.call_args
     active_types = call_args.args[1] if call_args.args else call_args.kwargs.get("labels", [])
@@ -250,7 +250,7 @@ def test_tech_content_type_includes_all_types(extractor: EntityExtractor):
     extractor._model = mock_model
 
     chunks = [_make_chunk("some tech text")]
-    extractor.extract(chunks, content_type="tech_book")
+    extractor.extract(chunks, is_technical=True)
 
     # All batch_predict_entities calls for prose (and code if any) should include LIBRARY
     for call in mock_model.batch_predict_entities.call_args_list:

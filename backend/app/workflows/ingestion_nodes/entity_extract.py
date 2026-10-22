@@ -36,11 +36,12 @@ from app.services.graph import DocumentGraph
 from app.services.prerequisite_detector import detect_prerequisites
 from app.services.tech_relation_extractor import extract_tech_relations
 from app.telemetry import trace_ingestion_node
-from app.types import is_technical_content
+from app.types import DocumentProfile
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _update_stage,
     build_entity_tail,
+    profile_of_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -165,8 +166,7 @@ def build_document_graph(
     alias_map: dict[str, list[str]],
     ner_chunks: list[dict],
     chunks: list[dict],
-    content_type: str,
-    is_technical: bool | None = None,
+    profile: DocumentProfile,
 ) -> DocumentGraph:
     """A document's entities, CO_OCCURS, prerequisite/tech/version edges and call graph.
 
@@ -187,9 +187,9 @@ def build_document_graph(
             graph.add_co_occurrence(eid_a, eid_b)
 
     _add_prerequisites(graph, canonical_entities, ner_chunks, doc_id)
-    if is_technical_content(content_type, is_technical):
+    if profile.is_technical:
         _add_tech_relations(graph, canonical_entities, ner_chunks, doc_id)
-    if content_type == "code":
+    if profile.form == "source_code":
         _build_call_graph(chunks, graph, doc_id)
     return graph
 
@@ -222,12 +222,9 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             # CPU-bound — run in thread pool to keep event loop free for status polls.
             # Timeout guards against GLiNER hanging on pathological chunk text.
             loop = _asyncio.get_event_loop()
-            content_type = state.get("content_type") or "unknown"
-            is_technical = state.get("is_technical")
+            profile = profile_of_state(state)
             entities = await _asyncio.wait_for(
-                loop.run_in_executor(
-                    None, extractor.extract, ner_chunks, content_type, is_technical
-                ),
+                loop.run_in_executor(None, extractor.extract, ner_chunks, profile.is_technical),
                 timeout=300.0,
             )
             entity_count = len(entities)
@@ -278,8 +275,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 alias_map,
                 ner_chunks,
                 chunks,
-                state.get("content_type") or "",
-                is_technical,
+                profile,
             )
             await graph.write_document_graph(doc_id, document_graph)
             await record_entity_coverage(doc_id, len(ner_chunks))

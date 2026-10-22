@@ -77,7 +77,7 @@ class NoteGraphService:
         try:
             extractor = _ner_module.get_entity_extractor()
             chunks = [{"id": note_id, "document_id": document_id or "", "text": content}]
-            return extractor.extract(chunks, content_type="unknown")
+            return extractor.extract(chunks)
         except Exception as exc:
             logger.warning("GLiNER extraction failed for note %s: %s", note_id, exc)
             return None

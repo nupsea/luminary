@@ -31,6 +31,7 @@ from app.services.captions import captions_path, parse_vtt
 from app.services.components import resolve_tool
 from app.services.transcript_correction import correct_transcript
 from app.services.transcript_vocabulary import hotwords
+from app.types import MEDIA_FORMATS
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _persist_classification,
@@ -148,20 +149,20 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
     Builds parsed_document from segments, writes audio_duration_seconds to
     DocumentModel, stores pre-built _audio_chunks.
     """
-    content_type = state.get("content_type")
-    if content_type not in ("audio", "video"):
+    fmt = state["format"]
+    if fmt not in MEDIA_FORMATS:
         return state
 
     doc_id = state["document_id"]
     await _update_stage(doc_id, "transcribing")
-    logger.info("transcribe_node: start", extra={"doc_id": doc_id, "content_type": content_type})
+    logger.info("transcribe_node: start", extra={"doc_id": doc_id, "format": fmt})
 
     wav_path: Path | None = None
     try:
         fp = Path(state["file_path"])
 
         # For video: extract audio with ffmpeg before passing to Whisper
-        if content_type == "video":
+        if fmt == "mp4":
             ffmpeg = resolve_tool("ffmpeg")
             if not ffmpeg:
                 return {
@@ -248,9 +249,10 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
         is_technical = await detect_technical_transcript(raw_text)
         register = await detect_register(raw_text)
         if is_technical is not None or register is not None:
-            # Writes the facets too: a technical talk keeps content_type
-            # "audio" for the player and carries its subject in `domain`.
-            await _persist_classification(doc_id, content_type, is_technical, register)
+            # A technical talk keeps its media type for the player and carries its
+            # subject in `domain`.
+            legacy_type = "video" if fmt == "mp4" else "audio"
+            await _persist_classification(doc_id, legacy_type, is_technical, register)
 
         logger.info(
             "transcribe_node: done",

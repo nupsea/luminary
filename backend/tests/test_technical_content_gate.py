@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.types import TECHNICAL_CONTENT_TYPES, is_technical_content
+from app.types import TECHNICAL_CONTENT_TYPES, DocumentProfile, is_technical_content
 from app.workflows.ingestion_nodes._shared import detect_technical_transcript
 
 
@@ -76,10 +76,12 @@ def test_ner_extract_honours_the_flag():
     chunks = [{"id": "c1", "document_id": "d1", "text": "We built it with Automerge."}]
 
     with patch.object(EntityExtractor, "_load_model", return_value=_FakeModel()):
-        extractor.extract(chunks, content_type="audio", is_technical=True)
+        extractor.extract(
+            chunks, is_technical=DocumentProfile.from_legacy("audio", True).is_technical
+        )
         tech_labels = set(captured[0])
         captured.clear()
-        extractor.extract(chunks, content_type="audio", is_technical=None)
+        extractor.extract(chunks, is_technical=DocumentProfile.from_legacy("audio").is_technical)
         prose_labels = set(captured[0])
 
     assert "TECHNOLOGY" in tech_labels

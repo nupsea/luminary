@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.types import DocumentProfile
 from app.workflows.ingestion_nodes.entity_extract import build_document_graph
 
 
@@ -23,8 +24,7 @@ def test_an_entity_named_twice_in_a_chunk_does_not_co_occur_with_itself():
         alias_map={},
         ner_chunks=[],
         chunks=[],
-        content_type="prose",
-        is_technical=False,
+        profile=DocumentProfile(form="prose", domain="general"),
     )
 
     assert dict(graph.co_occurrences) == {("minerva", "ulysses"): 1}
@@ -45,8 +45,7 @@ def test_a_pair_is_one_edge_and_not_two_disagreeing_ones():
         alias_map={},
         ner_chunks=[],
         chunks=[],
-        content_type="prose",
-        is_technical=False,
+        profile=DocumentProfile(form="prose", domain="general"),
     )
 
     assert dict(graph.co_occurrences) == {("minerva", "ulysses"): 2}
