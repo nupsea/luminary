@@ -3,10 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import ChunkModel
 from app.services.flashcard import FlashcardService
 from app.services.flashcard_generators import (
@@ -145,12 +142,9 @@ class TestLexicalAndExcerptDeduplication:
         assert _is_lexical_duplicate(c2, [c1]) is False
 
 
-@pytest.fixture()
-async def factory(tmp_path):
-    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'passage_test.db'}")
-    await create_all_tables(engine)
-    yield async_sessionmaker(engine, expire_on_commit=False)
-    await engine.dispose()
+@pytest.fixture
+def factory(memory_db):
+    return memory_db.factory
 
 
 @pytest.mark.asyncio

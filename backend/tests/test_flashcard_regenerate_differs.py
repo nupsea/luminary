@@ -20,10 +20,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import ChunkModel, FlashcardModel
 from app.services.flashcard import FlashcardService
 from app.services.flashcard_generators import _drop_near_duplicates, _passage_not_yet_used
@@ -89,12 +86,9 @@ class TestThePassageMoves:
         assert _passage_not_yet_used(every, every, used) == every
 
 
-@pytest.fixture()
-async def factory(tmp_path):
-    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'regen.db'}")
-    await create_all_tables(engine)
-    yield async_sessionmaker(engine, expire_on_commit=False)
-    await engine.dispose()
+@pytest.fixture
+def factory(memory_db):
+    return memory_db.factory
 
 
 def _card(question: str, source_chunk_ids: list[str] | None) -> FlashcardModel:

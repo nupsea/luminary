@@ -11,10 +11,7 @@ read as either of the others.
 """
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import ChunkModel, FlashcardModel
 from app.services.flashcard import _CHUNK_CHAR_LIMIT, _build_text
 from app.services.flashcard_grounding import passage_for_card
@@ -59,12 +56,9 @@ class TestBuildTextReportsWhatItUsed:
         assert _build_text([]) == ("", "", [])
 
 
-@pytest.fixture()
-async def factory(tmp_path):
-    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'passage.db'}")
-    await create_all_tables(engine)
-    yield async_sessionmaker(engine, expire_on_commit=False)
-    await engine.dispose()
+@pytest.fixture
+def factory(memory_db):
+    return memory_db.factory
 
 
 def _card(**kw) -> FlashcardModel:

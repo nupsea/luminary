@@ -12,14 +12,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
 import app.services.graph as graph_module
 import app.services.retriever as retriever_module
 import app.services.vector_store as vs_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from tests.factories import make_document
 
@@ -32,43 +28,13 @@ pytestmark = pytest.mark.slow
 
 
 @pytest.fixture
-async def graph_api_db(tmp_path, monkeypatch):
+def graph_api_db(memory_db, monkeypatch):
     """Isolated environment with real SQLite, LanceDB, and ML services."""
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    db_url = f"sqlite+aiosqlite:///{tmp_path}/luminary.db"
-    engine = make_engine(db_url)
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    orig_lancedb = vs_module._lancedb_service
-    orig_graph = graph_module._graph_service
-    orig_retriever = retriever_module._retriever
-
-    vs_module._lancedb_service = None
-    graph_module._graph_service = None
-    retriever_module._retriever = None
-
-    (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    vs_module._lancedb_service = orig_lancedb
-    graph_module._graph_service = orig_graph
-    retriever_module._retriever = orig_retriever
-    get_settings.cache_clear()
-    await engine.dispose()
+    monkeypatch.setattr(vs_module, "_lancedb_service", None)
+    monkeypatch.setattr(graph_module, "_graph_service", None)
+    monkeypatch.setattr(retriever_module, "_retriever", None)
+    (memory_db.tmp_path / "raw").mkdir()
+    return memory_db
 
 
 # Test

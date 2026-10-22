@@ -214,25 +214,8 @@ def test_notes_subject_is_generic(question, generic):
 
 
 @pytest.fixture
-async def notes_db(tmp_path, monkeypatch):
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-
-    import app.database as db_module
-    from app.config import get_settings
-    from app.database import make_engine
-    from app.db_init import create_all_tables
-
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    get_settings.cache_clear()
-    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path}/test.db")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    orig = db_module._engine, db_module._session_factory
-    db_module._engine, db_module._session_factory = engine, factory
-    yield factory
-    db_module._engine, db_module._session_factory = orig
-    get_settings.cache_clear()
-    await engine.dispose()
+def notes_db(memory_db):
+    return memory_db.factory
 
 
 @pytest.mark.asyncio

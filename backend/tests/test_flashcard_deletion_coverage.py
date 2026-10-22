@@ -12,10 +12,7 @@ import uuid
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import Base, MisconceptionModel, ReviewEventModel
 from app.repos.flashcard_repo import _CARD_CHILD_TABLES, FlashcardRepo
 from tests.factories import make_card
@@ -50,12 +47,9 @@ def test_the_two_lists_do_not_overlap():
     assert not set(_CARD_CHILD_TABLES) & set(_CARD_LEARNER_RECORD_TABLES)
 
 
-@pytest.fixture()
-async def factory(tmp_path):
-    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'cards.db'}")
-    await create_all_tables(engine)
-    yield async_sessionmaker(engine, expire_on_commit=False)
-    await engine.dispose()
+@pytest.fixture
+def factory(memory_db):
+    return memory_db.factory
 
 
 @pytest.mark.asyncio
