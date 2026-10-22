@@ -659,6 +659,7 @@ export default function NotePage() {
               {editContent.trim() ? (
                 <MarkdownRenderer
                   reading
+                  bracketMath={false}
                   onNoteLinkClick={(id) => void handleOpenLinkedNote(id)}
                   onSetImageSize={handleSetImageSize}
                 >

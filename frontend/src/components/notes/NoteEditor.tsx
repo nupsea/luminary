@@ -112,6 +112,7 @@ export function NoteEditor({
               <MarkdownRenderer
                 reading
                 trackSourceLines
+                bracketMath={false}
                 onNoteLinkClick={onNoteLinkClick}
                 onEditExcalidrawDiagram={openDiagramEditor}
                 onSetImageSize={handleSetImageSize}

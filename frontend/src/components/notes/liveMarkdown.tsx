@@ -354,6 +354,7 @@ function RenderedBlockContent({
 
       <MarkdownRenderer
         reading={false}
+        bracketMath={false}
         className="[&_.prose]:my-0 [&_figure]:my-1.5 [&_img]:my-1"
         onNoteLinkClick={onNoteLinkClick}
         onImageLoad={() => {

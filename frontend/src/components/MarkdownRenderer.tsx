@@ -19,6 +19,7 @@ import rehypeKatex from "rehype-katex"
 import rehypeRaw from "rehype-raw"
 import type { PluggableList } from "unified"
 import "katex/dist/katex.min.css"
+import { bracketMathToDollars } from "@/lib/bracketMath"
 import { API_BASE } from "@/lib/config"
 import { findExcalidrawDiagrams, type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { resolveLuminaryAssetUrl } from "@/lib/noteAssets"
@@ -53,6 +54,10 @@ export interface MarkdownRendererProps {
   documentId?: string
   /** Notified when any image finishes loading in the DOM. */
   onImageLoad?: () => void
+  /** Read `\(…\)` and `\[…\]` as math, the way models write it. Off for text a
+   * person wrote: there they are escaped brackets (a regex in a book), and the
+   * notes live editor draws only dollar math. */
+  bracketMath?: boolean
 }
 
 const IMAGE_SIZE_STYLE: Record<ImageSize, { maxWidth: string; maxHeight: string; objectFit: "contain" }> = {
@@ -379,9 +384,11 @@ function MarkdownBody({
   sourceLineOffset = 0,
   documentId,
   onImageLoad,
+  bracketMath = true,
 }: MarkdownRendererProps) {
   // Only inline substitutions — line numbering must survive for scroll sync.
-  const processed = preprocessLinks(children)
+  // Bracket math can add lines, but the notes editors that sync scroll turn it off.
+  const processed = preprocessLinks(bracketMath ? bracketMathToDollars(children) : children)
   const [sizeMenu, setSizeMenu] = useState<{ src: string; x: number; y: number } | null>(null)
 
   const rehypePlugins: PluggableList = useMemo(
@@ -465,6 +472,7 @@ export function MarkdownRenderer({
   trackSourceLines = false,
   documentId,
   onImageLoad,
+  bracketMath = true,
 }: MarkdownRendererProps) {
   const diagrams = useMemo(() => findExcalidrawDiagrams(children), [children])
 
@@ -480,6 +488,7 @@ export function MarkdownRenderer({
         trackSourceLines={trackSourceLines}
         documentId={documentId}
         onImageLoad={onImageLoad}
+        bracketMath={bracketMath}
       >
         {children}
       </MarkdownBody>
@@ -507,6 +516,7 @@ export function MarkdownRenderer({
                 sourceLineOffset={lineOffset}
                 documentId={documentId}
                 onImageLoad={onImageLoad}
+                bracketMath={bracketMath}
               >
                 {before}
               </MarkdownBody>
@@ -534,6 +544,7 @@ export function MarkdownRenderer({
           sourceLineOffset={lineOffsetAt(children, lastEnd)}
           documentId={documentId}
           onImageLoad={onImageLoad}
+          bracketMath={bracketMath}
         >
           {children.substring(lastEnd)}
         </MarkdownBody>
