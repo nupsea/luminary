@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import FlashcardModel, StudySessionModel
+from tests.factories import make_card
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -24,24 +25,23 @@ def _make_card(
     **kwargs,
 ) -> FlashcardModel:
     now = datetime.now(UTC)
-    defaults = {
-        "id": str(uuid.uuid4()),
-        "document_id": doc_id,
-        "chunk_id": str(uuid.uuid4()),
-        "question": "Question?",
-        "answer": "Answer.",
-        "source_excerpt": "Excerpt.",
-        "fsrs_state": fsrs_state,
-        "fsrs_stability": fsrs_stability,
-        "fsrs_difficulty": 3.0,
-        "due_date": now + timedelta(days=3),
-        "reps": reps,
-        "lapses": 0,
-        "last_review": last_review or now - timedelta(days=1),
-        "created_at": now,
-    }
-    defaults.update(kwargs)
-    return FlashcardModel(**defaults)
+    return make_card(
+        **{
+            "document_id": doc_id,
+            "chunk_id": str(uuid.uuid4()),
+            "question": "Question?",
+            "answer": "Answer.",
+            "source_excerpt": "Excerpt.",
+            "fsrs_state": fsrs_state,
+            "fsrs_stability": fsrs_stability,
+            "fsrs_difficulty": 3.0,
+            "due_date": now + timedelta(days=3),
+            "reps": reps,
+            "last_review": last_review or now - timedelta(days=1),
+            "created_at": now,
+            **kwargs,
+        }
+    )
 
 
 def _make_session(

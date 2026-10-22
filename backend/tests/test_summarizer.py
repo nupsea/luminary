@@ -12,7 +12,7 @@ from stubs import CapturingLLMService as _CapturingLLMService
 from stubs import MockLLMService as _MockLLMService
 
 from app.main import app
-from app.models import ChunkModel, DocumentModel, SectionSummaryModel, SummaryModel
+from app.models import SectionSummaryModel, SummaryModel
 from app.services.qa import QA_SYSTEM_PROMPT
 from app.services.summarizer import SummarizationService, _input_token_budget
 from app.services.summary_prompts import (
@@ -21,6 +21,7 @@ from app.services.summary_prompts import (
     MODE_INSTRUCTIONS,
     build_system_prompt,
 )
+from tests.factories import make_chunk, make_document
 
 # Shared DB fixture
 
@@ -38,22 +39,18 @@ async def _insert_doc_and_chunks(
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
-                title="Test Doc",
-                format="txt",
                 content_type="notes",
                 word_count=sum(token_counts),
                 page_count=1,
                 file_path=str(tmp_path / "doc.txt"),
-                stage="complete",
             )
         )
         await session.flush()
         for idx, (text, tokens) in enumerate(zip(chunk_texts, token_counts)):
             session.add(
-                ChunkModel(
-                    id=str(uuid.uuid4()),
+                make_chunk(
                     document_id=doc_id,
                     text=text,
                     token_count=tokens,

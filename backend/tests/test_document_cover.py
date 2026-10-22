@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
 from app.main import app
-from app.models import DocumentModel, ImageModel
+from app.models import ImageModel
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -53,11 +54,10 @@ async def test_get_document_cover_pdf(test_db):
     _create_dummy_pdf(pdf_path)
 
     async with factory() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id=doc_id,
             title="Test PDF Document",
             format="pdf",
-            content_type="book",
             word_count=100,
             page_count=1,
             file_path=str(pdf_path),
@@ -97,10 +97,9 @@ async def test_get_document_cover_from_image_model(test_db):
     )
 
     async with factory() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id=doc_id,
             title="Article with Diagram",
-            format="txt",
             content_type="tech_article",
             word_count=500,
             page_count=1,
@@ -150,13 +149,11 @@ async def test_get_document_cover_epub(test_db):
     epub.write_epub(str(epub_path), book)
 
     async with factory() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id=doc_id,
             title="Test EPUB Document",
             format="epub",
-            content_type="book",
             word_count=50,
-            page_count=0,
             file_path=str(epub_path),
             stage="ready",
         )
@@ -185,10 +182,9 @@ async def test_get_document_cover_204_when_document_has_no_image(test_db):
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Plain notes",
-                format="txt",
                 content_type="notes",
                 word_count=10,
                 page_count=1,

@@ -29,6 +29,7 @@ from app.models import (
 )
 from app.repos.study_repo import StudyRepo
 from app.services.flashcard import FlashcardService
+from tests.factories import make_card
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -44,20 +45,8 @@ async def factory(tmp_path):
 
 
 def _card(question: str, document_id: str = "doc-1") -> FlashcardModel:
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
-        document_id=document_id,
-        chunk_id="chunk-0",
-        question=question,
-        answer="a",
-        source_excerpt="",
-        difficulty="medium",
-        fsrs_state="new",
-        fsrs_stability=0.0,
-        fsrs_difficulty=0.0,
-        reps=0,
-        lapses=0,
-        source_chunk_ids=["chunk-0"],
+    return make_card(
+        document_id=document_id, chunk_id="chunk-0", question=question, source_chunk_ids=["chunk-0"]
     )
 
 

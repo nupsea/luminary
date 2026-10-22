@@ -15,8 +15,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models import ChunkModel, DocumentModel, SectionModel
 from app.routers.sections import _reader_safe
+from tests.factories import make_chunk, make_document, make_section
 
 
 class TestReaderSafe:
@@ -50,7 +50,7 @@ async def test_content_endpoint_exposes_page_range_and_sanitises(test_db):
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Paper",
                 format="pdf",
@@ -58,18 +58,14 @@ async def test_content_endpoint_exposes_page_range_and_sanitises(test_db):
                 word_count=10,
                 page_count=5,
                 file_path="/tmp/p.pdf",
-                stage="complete",
             )
         )
         session.add(
-            SectionModel(
-                id=str(uuid.uuid4()),
+            make_section(
                 document_id=doc_id,
                 heading="Results",
-                level=1,
                 page_start=3,
                 page_end=4,
-                section_order=0,
                 preview="trailing prose\n-\nfollowing line",
             )
         )
@@ -90,40 +86,15 @@ async def _seed(factory, *, body: str, preview: str, chunks: tuple[str, ...] = (
     doc_id = str(uuid.uuid4())
     section_id = str(uuid.uuid4())
     async with factory() as session:
+        session.add(make_document(id=doc_id, title="Novel", word_count=10, file_path="/tmp/n.txt"))
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Novel",
-                format="txt",
-                content_type="book",
-                word_count=10,
-                page_count=0,
-                file_path="/tmp/n.txt",
-                stage="complete",
-            )
-        )
-        session.add(
-            SectionModel(
-                id=section_id,
-                document_id=doc_id,
-                heading="Chapter I",
-                level=1,
-                page_start=0,
-                page_end=0,
-                section_order=0,
-                body=body,
-                preview=preview,
+            make_section(
+                id=section_id, document_id=doc_id, heading="Chapter I", body=body, preview=preview
             )
         )
         for idx, text in enumerate(chunks):
             session.add(
-                ChunkModel(
-                    id=str(uuid.uuid4()),
-                    document_id=doc_id,
-                    section_id=section_id,
-                    text=text,
-                    chunk_index=idx,
-                )
+                make_chunk(document_id=doc_id, section_id=section_id, text=text, chunk_index=idx)
             )
         await session.commit()
     return doc_id
@@ -218,7 +189,7 @@ async def _seed_sections(factory, doc_id: str, bodies: list[str]) -> list[str]:
     ids = []
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Manual",
                 format="pdf",
@@ -226,18 +197,16 @@ async def _seed_sections(factory, doc_id: str, bodies: list[str]) -> list[str]:
                 word_count=10,
                 page_count=5,
                 file_path="/tmp/m.pdf",
-                stage="complete",
             )
         )
         for i, body in enumerate(bodies):
             sid = str(uuid.uuid4())
             ids.append(sid)
             session.add(
-                SectionModel(
+                make_section(
                     id=sid,
                     document_id=doc_id,
                     heading=f"S{i}",
-                    level=1,
                     page_start=i,
                     page_end=i,
                     section_order=i,

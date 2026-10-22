@@ -11,6 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from app.main import app
 from app.models import FlashcardModel, MisconceptionModel, TeachbackResultModel
 from app.services.teachback_service import _parse_teachback_response
+from tests.factories import make_card
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -26,23 +27,23 @@ def _make_card(
     **kwargs,
 ) -> FlashcardModel:
     now = datetime.now(UTC)
-    defaults = {
-        "id": card_id or str(uuid.uuid4()),
-        "document_id": doc_id or str(uuid.uuid4()),
-        "chunk_id": str(uuid.uuid4()),
-        "question": "What is spaced repetition?",
-        "answer": "A learning method using increasing intervals.",
-        "source_excerpt": "Spaced repetition...",
-        "fsrs_state": fsrs_state,
-        "fsrs_stability": fsrs_stability,
-        "fsrs_difficulty": 3.0,
-        "due_date": now,
-        "reps": reps,
-        "lapses": 0,
-        "created_at": now,
-    }
-    defaults.update(kwargs)
-    return FlashcardModel(**defaults)
+    return make_card(
+        **{
+            "id": card_id,
+            "document_id": doc_id or str(uuid.uuid4()),
+            "chunk_id": str(uuid.uuid4()),
+            "question": "What is spaced repetition?",
+            "answer": "A learning method using increasing intervals.",
+            "source_excerpt": "Spaced repetition...",
+            "fsrs_state": fsrs_state,
+            "fsrs_stability": fsrs_stability,
+            "fsrs_difficulty": 3.0,
+            "due_date": now,
+            "reps": reps,
+            "created_at": now,
+            **kwargs,
+        }
+    )
 
 
 # _parse_teachback_response unit tests

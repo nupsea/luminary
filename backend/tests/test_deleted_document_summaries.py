@@ -24,6 +24,7 @@ from app.services.document_deletion_service import DocumentDeletionService
 from app.services.library_summary import LibrarySummaryService
 from app.services.summarizer import SummarizationService, get_summarization_service
 from app.workflows.ingestion_nodes.finalize import _run_pregenerate, launch_followup
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -45,15 +46,13 @@ async def factory(memory_db, tmp_path, monkeypatch):
 async def _add_doc(factory, doc_id: str, summary: str | None = None) -> None:
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title=f"Doc {doc_id[:4]}",
-                format="txt",
                 content_type="notes",
                 word_count=100,
                 page_count=1,
                 file_path=f"/nonexistent/{doc_id}.txt",
-                stage="complete",
             )
         )
         if summary is not None:

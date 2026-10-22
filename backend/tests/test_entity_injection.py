@@ -14,8 +14,8 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
-from app.models import ChunkModel, DocumentModel
 from app.workflows.ingestion import ENTITY_TAIL_MAX, build_entity_tail
+from tests.factories import make_chunk, make_document
 
 # Unit tests: build_entity_tail
 
@@ -107,19 +107,14 @@ async def test_fts5_match_finds_canonical_when_only_surface_form_in_text(fts_db)
 
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Holmes test",
-                format="txt",
-                content_type="book",
-                file_path="/tmp/holmes.txt",
+            make_document(
+                id=doc_id, title="Holmes test", file_path="/tmp/holmes.txt", stage="parsing"
             )
         )
         session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id,
                 document_id=doc_id,
-                chunk_index=0,
                 text="Mr. Holmes greeted the inspector calmly at the door.",
                 entities_text=build_entity_tail({"sherlock holmes"}),
             )
@@ -174,19 +169,18 @@ async def test_fts5_skips_concat_when_entities_text_null(fts_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="No entities",
-                format="txt",
                 content_type="notes",
                 file_path="/tmp/none.txt",
+                stage="parsing",
             )
         )
         session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id,
                 document_id=doc_id,
-                chunk_index=0,
                 text="A plain chunk with no named entities at all.",
                 entities_text=None,
             )

@@ -181,8 +181,12 @@ def test_text_before_the_first_bookmark_is_kept_without_a_heading(tmp_path):
     path = _pdf_with_blocks(
         tmp_path / "paper.pdf",
         [
-            ["PAPERTITLE and its authors", "ABSTRACTBODY the paper's summary.", "Introduction",
-             "INTROBODY the first section."],
+            [
+                "PAPERTITLE and its authors",
+                "ABSTRACTBODY the paper's summary.",
+                "Introduction",
+                "INTROBODY the first section.",
+            ],
             ["BACKGROUNDBODY the second section."],
         ],
         [[1, "Introduction", 1], [1, "Background", 2]],

@@ -14,6 +14,7 @@ from app.models import (
     NoteSourceModel,
 )
 from app.repos.note_repo import NoteRepo
+from tests.factories import make_note
 
 
 @pytest.fixture
@@ -35,13 +36,12 @@ def _make_note(
     created_at: datetime | None = None,
 ) -> NoteModel:
     now = created_at or datetime.now(UTC)
-    return NoteModel(
+    return make_note(
         id=id,
         content=content,
         document_id=document_id,
         section_id=section_id,
         content_hash=content_hash,
-        tags=[],
         created_at=now,
         updated_at=now,
     )

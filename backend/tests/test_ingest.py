@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app.main import app
 from app.models import ChunkModel, DocumentModel
 from app.workflows.ingestion import IngestionState, _classify, chunk_node
+from tests.factories import make_document
 
 # Classification heuristic unit tests (pure functions, no DB)
 
@@ -55,10 +56,8 @@ async def test_chunk_node_writes_to_db(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
-                title="Test Doc",
-                format="txt",
                 content_type="notes",
                 word_count=20,
                 page_count=1,
@@ -138,13 +137,10 @@ async def test_status_endpoint_returns_stage(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Test",
-                format="txt",
                 content_type="notes",
-                word_count=0,
-                page_count=0,
                 file_path="/tmp/test.txt",
                 stage="chunking",
             )
@@ -168,15 +164,8 @@ async def test_status_endpoint_done_when_complete(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Done Doc",
-                format="txt",
-                content_type="notes",
-                word_count=0,
-                page_count=0,
-                file_path="/tmp/done.txt",
-                stage="complete",
+            make_document(
+                id=doc_id, title="Done Doc", content_type="notes", file_path="/tmp/done.txt"
             )
         )
         await session.commit()
@@ -356,13 +345,11 @@ async def test_classify_node_resolves_merged_technical_choice(test_db):
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Tech Upload",
                 format="md",
                 content_type="technical",
-                word_count=0,
-                page_count=0,
                 file_path="/tmp/tech.md",
                 stage="classifying",
             )
@@ -409,13 +396,10 @@ async def test_classify_node_reports_classifying_while_its_probes_wait(test_db, 
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Chapter",
-                format="txt",
                 content_type="notes",
-                word_count=0,
-                page_count=0,
                 file_path="/tmp/chapter.txt",
                 stage="parsing",
             )

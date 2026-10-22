@@ -26,7 +26,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.models import DocumentModel, SectionModel, SectionSummaryModel
+from app.models import SectionSummaryModel
 from app.services.section_summarizer import (
     MIN_PREVIEW_LEN,
     SectionSummarizerService,
@@ -34,6 +34,7 @@ from app.services.section_summarizer import (
 )
 from app.services.summarizer import SummarizationService
 from app.services.summary_prompts import MODE_INSTRUCTIONS
+from tests.factories import make_document, make_section
 
 # Shared fixture
 
@@ -41,17 +42,7 @@ from app.services.summary_prompts import MODE_INSTRUCTIONS
 async def _insert_document(factory, doc_id: str) -> None:
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="Test Doc",
-                format="txt",
-                content_type="book",
-                word_count=1000,
-                page_count=10,
-                file_path="/tmp/test.txt",
-                stage="complete",
-                tags=[],
-            )
+            make_document(id=doc_id, word_count=1000, page_count=10, file_path="/tmp/test.txt")
         )
         await session.commit()
 
@@ -119,11 +110,9 @@ async def test_metadata_section_filtered_in_generate(test_db):
     async with factory() as session:
         for i in range(3):
             session.add(
-                SectionModel(
-                    id=str(uuid.uuid4()),
+                make_section(
                     document_id=doc_id,
                     heading=f"Chapter {i + 1}",
-                    level=1,
                     page_start=i,
                     page_end=i,
                     section_order=i,
@@ -132,11 +121,9 @@ async def test_metadata_section_filtered_in_generate(test_db):
             )
         # Metadata section — long enough to pass MIN_PREVIEW_LEN but should be skipped
         session.add(
-            SectionModel(
-                id=str(uuid.uuid4()),
+            make_section(
                 document_id=doc_id,
                 heading="Terms of Use",
-                level=1,
                 page_start=99,
                 page_end=99,
                 section_order=99,

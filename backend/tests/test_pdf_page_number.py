@@ -13,26 +13,26 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 
 from app.main import app
-from app.models import ChunkModel, DocumentModel, SectionModel
+from app.models import ChunkModel, DocumentModel
 from app.workflows.ingestion import IngestionState, _chunk_book
+from tests.factories import make_document, make_section
 
 # Shared fixture
 
 
 def _make_doc(doc_id: str, **kwargs) -> DocumentModel:
-    defaults: dict = {
-        "id": doc_id,
-        "title": "Test PDF",
-        "format": "pdf",
-        "content_type": "book",
-        "word_count": 200,
-        "page_count": 5,
-        "file_path": "/tmp/test.pdf",
-        "stage": "chunking",
-        "tags": [],
-    }
-    defaults.update(kwargs)
-    return DocumentModel(**defaults)
+    return make_document(
+        **{
+            "id": doc_id,
+            "title": "Test PDF",
+            "format": "pdf",
+            "word_count": 200,
+            "page_count": 5,
+            "file_path": "/tmp/test.pdf",
+            "stage": "chunking",
+            **kwargs,
+        }
+    )
 
 
 def _make_state(doc_id: str, sections: list[dict], format: str = "pdf") -> IngestionState:
@@ -276,15 +276,12 @@ async def test_get_pdf_meta_200(test_db):
         # Add 2 sections so has_toc=True
         for i in range(2):
             session.add(
-                SectionModel(
-                    id=str(uuid.uuid4()),
+                make_section(
                     document_id=doc_id,
                     heading=f"Section {i}",
-                    level=1,
                     page_start=i + 1,
                     page_end=i + 1,
                     section_order=i,
-                    preview="",
                 )
             )
         await session.commit()

@@ -18,29 +18,19 @@ from app.models import (
     CollectionModel,
     DocumentModel,
     FlashcardModel,
-    NoteModel,
     NoteTagIndexModel,
 )
+from tests.factories import make_card, make_document, make_note
 
 _PAST = datetime.now(UTC) - timedelta(days=1)
 
 
 def _doc(doc_id: str, tags: list[str]) -> DocumentModel:
-    return DocumentModel(
-        id=doc_id,
-        title=doc_id,
-        format="txt",
-        content_type="book",
-        word_count=1,
-        page_count=0,
-        file_path="/tmp/x.txt",
-        stage="complete",
-        tags=tags,
-    )
+    return make_document(id=doc_id, title=doc_id, word_count=1, file_path="/tmp/x.txt", tags=tags)
 
 
 def _card(card_id: str, *, document_id=None, note_id=None, due=_PAST) -> FlashcardModel:
-    return FlashcardModel(
+    return make_card(
         id=card_id,
         document_id=document_id,
         note_id=note_id,
@@ -72,9 +62,9 @@ async def library(test_db):
                 _doc("doc_a", ["alpha"]),
                 _doc("doc_b", ["beta"]),
                 _doc("doc_out", ["alpha"]),
-                NoteModel(id="note_a", content="a"),
-                NoteModel(id="note_b", content="b"),
-                NoteModel(id="note_out", content="o"),
+                make_note(id="note_a", content="a"),
+                make_note(id="note_b", content="b"),
+                make_note(id="note_out", content="o"),
                 NoteTagIndexModel(note_id="note_a", tag_full="alpha", tag_root="alpha"),
                 NoteTagIndexModel(note_id="note_out", tag_full="alpha", tag_root="alpha"),
                 CollectionModel(id="P", name="P"),
@@ -137,7 +127,7 @@ async def test_tagged_card_listed_once_whatever_its_note_tags(library, test_db):
     async with factory() as session:
         session.add_all(
             [
-                NoteModel(id="note_two", content="t"),
+                make_note(id="note_two", content="t"),
                 NoteTagIndexModel(note_id="note_two", tag_full="alpha", tag_root="alpha"),
                 NoteTagIndexModel(note_id="note_two", tag_full="gamma", tag_root="gamma"),
                 _card("c_both", document_id="doc_a", note_id="note_two"),

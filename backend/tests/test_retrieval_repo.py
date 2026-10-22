@@ -8,9 +8,9 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import ChunkModel, DocumentModel
 from app.repos.document_repo import index_chunks_fts
 from app.repos.retrieval_repo import RetrievalRepo
+from tests.factories import make_chunk, make_document
 
 
 @pytest.fixture
@@ -18,13 +18,9 @@ async def session(memory_db):
     factory = async_sessionmaker(memory_db.engine, expire_on_commit=False)
     async with factory() as s:
         for doc_id in ("d1", "d2"):
-            s.add(
-                DocumentModel(
-                    id=doc_id, title=doc_id, format="txt", content_type="book", file_path="/x"
-                )
-            )
+            s.add(make_document(id=doc_id, title=doc_id, file_path="/x", stage="parsing"))
         s.add_all(
-            ChunkModel(
+            make_chunk(
                 id=f"{doc_id}-c{i}",
                 document_id=doc_id,
                 text=f"morlocks chunk {i}" if doc_id == "d1" else "eloi only",

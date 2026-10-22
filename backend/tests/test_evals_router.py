@@ -17,12 +17,11 @@ import app.database as db_module
 import app.routers.evals as evals_module
 from app.main import app
 from app.models import (
-    ChunkModel,
-    DocumentModel,
     EvalRunModel,
     GoldenDatasetModel,
     GoldenQuestionModel,
 )
+from tests.factories import make_chunk, make_document
 
 # Shared fixture — in-memory SQLite DB
 
@@ -205,22 +204,19 @@ async def test_create_generated_dataset_returns_status(test_db, monkeypatch):
 @pytest.mark.asyncio
 async def test_generated_dataset_detail_golden_and_runs(test_db, monkeypatch):
     """Generated dataset endpoints expose status, questions, JSONL-shaped rows, and runs."""
-    from app.models import DocumentModel
 
     async with db_module.get_session_factory()() as session:
         # The pinned source document must exist — a dataset whose documents
         # were all deleted is refused by the run endpoint (409, dead-document
         # guard) rather than silently scoring 0%.
         session.add(
-            DocumentModel(
+            make_document(
                 id="doc-1",
                 title="Doc 1",
                 format="pdf",
-                content_type="book",
                 word_count=100,
                 file_path="doc1.pdf",
                 file_hash="h1",
-                stage="complete",
                 page_count=1,
             )
         )
@@ -404,18 +400,16 @@ async def test_environment_counts_the_corpus_it_measures(test_db):
     """The fingerprint tracks the library, so a run in a changed corpus is visible as changed."""
     async with db_module.get_session_factory()() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id="d1",
                 title="t",
-                format="txt",
                 content_type="technical",
                 word_count=1,
                 page_count=1,
                 file_path="/tmp/x.txt",
-                stage="complete",
             )
         )
-        session.add(ChunkModel(id="c1", document_id="d1", text="hello", chunk_index=0))
+        session.add(make_chunk(id="c1", document_id="d1", text="hello"))
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

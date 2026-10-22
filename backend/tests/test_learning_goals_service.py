@@ -8,8 +8,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.models import (
-    FlashcardModel,
-    NoteModel,
     PomodoroSessionModel,
     QAHistoryModel,
     ReviewEventModel,
@@ -21,6 +19,7 @@ from app.services.goal_service import (
     LearningGoalsService,
     SessionNotFound,
 )
+from tests.factories import make_card, make_note
 
 
 @pytest.fixture
@@ -385,26 +384,9 @@ async def test_progress_recall_counts_distinct_cards_in_window(test_db):
 
         # Three flashcards in the deck, plus one NOT in the deck.
         cards = [
-            FlashcardModel(
-                id=f"c{i}",
-                document_id=None,
-                question="q",
-                answer="a",
-                source_excerpt="e",
-                deck="d1",
-            )
-            for i in range(3)
+            make_card(id=f"c{i}", document_id=None, source_excerpt="e", deck="d1") for i in range(3)
         ]
-        cards.append(
-            FlashcardModel(
-                id="other",
-                document_id=None,
-                question="q",
-                answer="a",
-                source_excerpt="e",
-                deck="other_deck",
-            )
-        )
+        cards.append(make_card(id="other", document_id=None, source_excerpt="e", deck="other_deck"))
         db.add_all(cards)
 
         # Reviews inside the session window
@@ -519,13 +501,7 @@ async def test_progress_write_counts_notes_in_session_window(test_db):
         in_s2 = now - timedelta(minutes=15)
         outside = now - timedelta(hours=3)
         notes = [
-            NoteModel(
-                id=f"n{i}",
-                document_id=None,
-                content="x",
-                created_at=ts,
-                updated_at=ts,
-            )
+            make_note(id=f"n{i}", document_id=None, content="x", created_at=ts, updated_at=ts)
             for i, ts in enumerate([in_s1, in_s1, in_s2, outside])
         ]
         db.add_all(notes)

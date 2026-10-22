@@ -18,6 +18,7 @@ from app.main import app
 from app.models import DocumentModel
 from app.repos.document_kind_repo import DocumentKindRepo, kind_expr
 from app.types import DocumentKind, Form, document_kind
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -36,15 +37,13 @@ async def _seed(factory, rows: list[tuple[str, str | None, str | None]]) -> list
             doc_id = str(uuid.uuid4())
             ids.append(doc_id)
             s.add(
-                DocumentModel(
+                make_document(
                     id=doc_id,
                     title=f"{fmt}-{form}-{domain}",
-                    content_type="book",
                     format=fmt,
                     form=form,
                     domain=domain,
                     file_path="/tmp/x",
-                    stage="complete",
                 )
             )
         await s.commit()

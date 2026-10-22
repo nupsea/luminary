@@ -15,34 +15,27 @@ from app.models import (
     ChunkModel,
     DocumentModel,
     FlashcardModel,
-    NoteModel,
     PredictionEventModel,
 )
 from app.services.mastery_service import MasteryService
+from tests.factories import make_card, make_chunk, make_document, make_note
 
 # Test DB fixture
 
 
 def _make_doc(doc_id: str, suffix: str = "") -> DocumentModel:
-    return DocumentModel(
+    return make_document(
         id=doc_id,
         title=f"Test Book{suffix}",
-        format="txt",
         content_type="tech_book",
         page_count=10,
         file_path=f"/tmp/t{suffix}.pdf",
-        stage="complete",
     )
 
 
 def _make_chunk(chunk_id: str, doc_id: str, text: str) -> ChunkModel:
-    return ChunkModel(
-        id=chunk_id,
-        document_id=doc_id,
-        section_id=None,
-        text=text,
-        token_count=len(text.split()),
-        chunk_index=0,
+    return make_chunk(
+        id=chunk_id, document_id=doc_id, section_id=None, text=text, token_count=len(text.split())
     )
 
 
@@ -52,16 +45,12 @@ def _make_card(
     stability: float,
     bloom: int | None,
 ) -> FlashcardModel:
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id=doc_id,
         chunk_id=chunk_id,
-        source="document",
-        deck="default",
         question="Q?",
         answer="A.",
         source_excerpt="excerpt",
-        difficulty="medium",
         fsrs_stability=stability,
         bloom_level=bloom,
     )
@@ -246,11 +235,7 @@ async def test_gap_report_weak_field(test_db):
         # Low-stability card -> mastery = 1/21 ~ 0.048 (well below 0.3)
         session.add(_make_card(doc_id, chunk_id, 1.0, 2))
         session.add(
-            NoteModel(
-                id=note_id,
-                document_id=doc_id,
-                content="decorator pattern in python",
-            )
+            make_note(id=note_id, document_id=doc_id, content="decorator pattern in python")
         )
         await session.commit()
 

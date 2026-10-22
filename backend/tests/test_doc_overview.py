@@ -11,7 +11,8 @@ from task_drain import dispose_engine
 
 import app.database as db_module
 from app.main import app
-from app.models import CollectionModel, DocumentModel
+from app.models import CollectionModel
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -33,13 +34,13 @@ async def test_db(memory_db, tmp_path, monkeypatch):
 async def _seed_doc(factory):
     async with factory() as s:
         s.add(
-            DocumentModel(
+            make_document(
                 id="d1",
                 title="Iceberg Book",
                 format="pdf",
-                content_type="book",
                 file_path="/tmp/x.pdf",
                 tags=["data"],
+                stage="parsing",
             )
         )
         s.add(CollectionModel(id="col1", name="DATA-ENG", color="#6366F1"))

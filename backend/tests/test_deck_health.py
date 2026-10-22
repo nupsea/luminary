@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
 from app.services.deck_health import DeckHealthService
+from tests.factories import make_card, make_chunk, make_document, make_section
 
 # Isolated test DB fixture (mirrors test_flashcard_audit.py pattern)
 
@@ -14,15 +15,13 @@ from app.services.deck_health import DeckHealthService
 
 
 def _make_doc(doc_id: str | None = None) -> DocumentModel:
-    return DocumentModel(
-        id=doc_id or str(uuid.uuid4()),
+    return make_document(
+        id=doc_id,
         title="Health Test Doc",
-        format="txt",
         content_type="notes",
         word_count=100,
         page_count=1,
         file_path="/tmp/test.txt",
-        stage="complete",
     )
 
 
@@ -31,11 +30,10 @@ def _make_section(
     doc_id: str = "doc-1",
     heading: str = "Chapter 1",
 ) -> SectionModel:
-    return SectionModel(
-        id=section_id or str(uuid.uuid4()),
+    return make_section(
+        id=section_id,
         document_id=doc_id,
         heading=heading,
-        level=1,
         page_start=1,
         page_end=2,
         section_order=1,
@@ -47,14 +45,13 @@ def _make_chunk(
     doc_id: str = "doc-1",
     section_id: str | None = None,
 ) -> ChunkModel:
-    return ChunkModel(
-        id=chunk_id or str(uuid.uuid4()),
+    return make_chunk(
+        id=chunk_id,
         document_id=doc_id,
         section_id=section_id,
         text="Sample chunk text for deck health tests.",
         token_count=10,
         page_number=1,
-        chunk_index=0,
     )
 
 
@@ -67,8 +64,8 @@ def _make_card(
     last_review: datetime | None = None,
 ) -> FlashcardModel:
     now = datetime.now(UTC)
-    return FlashcardModel(
-        id=card_id or str(uuid.uuid4()),
+    return make_card(
+        id=card_id,
         document_id=doc_id,
         chunk_id=chunk_id,
         question="What is X?",
@@ -76,10 +73,7 @@ def _make_card(
         source_excerpt="X is Y.",
         fsrs_state=fsrs_state,
         fsrs_stability=fsrs_stability,
-        fsrs_difficulty=0.0,
         due_date=now,
-        reps=0,
-        lapses=0,
         last_review=last_review,
         created_at=now,
     )

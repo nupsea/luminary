@@ -17,37 +17,36 @@ from app.main import app
 from app.models import ChunkModel, DocumentModel
 from app.services.flashcard import FlashcardService
 from app.types import ScoredChunk
+from tests.factories import make_chunk, make_document
 
 # Isolated test DB fixture
 
 
 def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
-    defaults = {
-        "id": doc_id or str(uuid.uuid4()),
-        "title": "Test Doc",
-        "format": "txt",
-        "content_type": "notes",
-        "word_count": 100,
-        "page_count": 1,
-        "file_path": "/tmp/test.txt",
-        "stage": "complete",
-    }
-    defaults.update(kwargs)
-    return DocumentModel(**defaults)
+    return make_document(
+        **{
+            "id": doc_id,
+            "content_type": "notes",
+            "word_count": 100,
+            "page_count": 1,
+            "file_path": "/tmp/test.txt",
+            **kwargs,
+        }
+    )
 
 
 def _make_chunk(chunk_id: str | None = None, doc_id: str = "doc-1", **kwargs) -> ChunkModel:
-    defaults = {
-        "id": chunk_id or str(uuid.uuid4()),
-        "document_id": doc_id,
-        "section_id": None,
-        "text": "The Time Traveller met Weena in the future.",
-        "token_count": 9,
-        "page_number": 1,
-        "chunk_index": 0,
-    }
-    defaults.update(kwargs)
-    return ChunkModel(**defaults)
+    return make_chunk(
+        **{
+            "id": chunk_id,
+            "document_id": doc_id,
+            "section_id": None,
+            "text": "The Time Traveller met Weena in the future.",
+            "token_count": 9,
+            "page_number": 1,
+            **kwargs,
+        }
+    )
 
 
 def _make_scored_chunk(chunk_id: str, doc_id: str) -> ScoredChunk:

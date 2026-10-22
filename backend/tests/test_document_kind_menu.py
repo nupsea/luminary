@@ -12,6 +12,7 @@ from app.models import DocumentModel
 from app.types import EditableKind, Form, document_kind, facets_for_kind
 from app.workflows.ingestion import IngestionState, classify_node
 from app.workflows.ingestion_nodes._shared import _persist_classification
+from tests.factories import make_document
 
 
 @pytest.mark.parametrize(
@@ -39,14 +40,13 @@ async def _seed(factory, **fields) -> str:
         "format": "pdf",
         "content_type": "tech_book",
         "file_path": "/tmp/ddia.pdf",
-        "stage": "complete",
         "form": "entries",
         "domain": "technical",
         "is_technical": True,
         **fields,
     }
     async with factory() as s:
-        s.add(DocumentModel(id=doc_id, **values))
+        s.add(make_document(id=doc_id, **values))
         await s.commit()
     return doc_id
 

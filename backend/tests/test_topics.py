@@ -12,8 +12,8 @@ from task_drain import dispose_engine
 import app.database as db_module
 import app.services.graph as graph_module
 from app.main import app
-from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
 from app.services.topic_service import is_junk_heading
+from tests.factories import make_card, make_chunk, make_document, make_section
 
 
 @pytest.fixture
@@ -38,22 +38,18 @@ async def _doc(factory, doc_id, headings):
     """headings: list of (heading, level)."""
     async with factory() as s:
         s.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
-                title="Test Doc",
                 format="pdf",
                 content_type="application/pdf",
                 file_path="/x",
+                stage="parsing",
             )
         )
         for i, (h, lvl) in enumerate(headings):
             s.add(
-                SectionModel(
-                    id=f"{doc_id}-s{i}",
-                    document_id=doc_id,
-                    heading=h,
-                    level=lvl,
-                    section_order=i,
+                make_section(
+                    id=f"{doc_id}-s{i}", document_id=doc_id, heading=h, level=lvl, section_order=i
                 )
             )
         await s.commit()
@@ -163,28 +159,30 @@ async def test_sections_search_returns_subsections(test_db):
 async def test_due_cards_filter_by_section(test_db):
     past = datetime.now(UTC) - timedelta(days=1)
     async with test_db() as s:
-        s.add(DocumentModel(id="d", title="D", format="pdf", content_type="x", file_path="/x"))
-        for sec, ch in [("s1", "c1"), ("s2", "c2")]:
-            s.add(SectionModel(id=sec, document_id="d", heading=sec, level=1, section_order=0))
-            s.add(ChunkModel(id=ch, document_id="d", text="t", chunk_index=0, section_id=sec))
         s.add(
-            FlashcardModel(
+            make_document(
+                id="d", title="D", format="pdf", content_type="x", file_path="/x", stage="parsing"
+            )
+        )
+        for sec, ch in [("s1", "c1"), ("s2", "c2")]:
+            s.add(make_section(id=sec, document_id="d", heading=sec))
+            s.add(make_chunk(id=ch, document_id="d", section_id=sec))
+        s.add(
+            make_card(
                 id="f1",
                 document_id="d",
                 chunk_id="c1",
                 question="q1",
-                answer="a",
                 source_excerpt="e",
                 due_date=past,
             )
         )
         s.add(
-            FlashcardModel(
+            make_card(
                 id="f2",
                 document_id="d",
                 chunk_id="c2",
                 question="q2",
-                answer="a",
                 source_excerpt="e",
                 due_date=past,
             )
@@ -202,7 +200,7 @@ async def test_messy_doc_falls_back_to_llm_outline(test_db, monkeypatch):
     # one usable heading -> below the clean floor -> outline path
     await _doc(test_db, "d2", [("Some Heading", 1), ("Index", 1)])
     async with test_db() as s:
-        s.add(ChunkModel(id="c0", document_id="d2", text="intro text about systems", chunk_index=0))
+        s.add(make_chunk(id="c0", document_id="d2", text="intro text about systems"))
         await s.commit()
 
     async def _complete(messages, **k):

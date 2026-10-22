@@ -10,15 +10,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.models import (
     ConceptModel,
     ContentActivityModel,
-    DocumentModel,
-    FlashcardModel,
     MisconceptionModel,
     ReadingProgressModel,
     RecommendationFeedbackModel,
     ReviewEventModel,
-    SectionModel,
 )
 from app.services import recommender_service as svc
+from tests.factories import make_card, make_document, make_section
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -36,10 +34,8 @@ def _naive(days_ago: float = 0.0) -> datetime:
 
 
 def _card(card_id: str, *, slug: str | None = None, due_days_ago: float | None = None):
-    return FlashcardModel(
+    return make_card(
         id=card_id,
-        question="q",
-        answer="a",
         source_excerpt="s",
         concept_slug=slug,
         due_date=_naive(due_days_ago) if due_days_ago is not None else None,
@@ -85,17 +81,13 @@ def _misconception(card_id: str, *, days_ago: float = 3.0, status: str = "open")
 
 def _stalled_doc(doc_id: str, *, days_ago: float, read: int, total: int):
     rows = [
-        DocumentModel(
-            id=doc_id, title="Stalled Book", format="txt", content_type="book", file_path="/x"
-        ),
+        make_document(id=doc_id, title="Stalled Book", file_path="/x", stage="parsing"),
         ContentActivityModel(
             member_type="document", member_id=doc_id, last_meaningful_at=_naive(days_ago)
         ),
     ]
     rows += [
-        SectionModel(
-            id=f"{doc_id}-s{i}", document_id=doc_id, heading=f"h{i}", level=1, section_order=i
-        )
+        make_section(id=f"{doc_id}-s{i}", document_id=doc_id, heading=f"h{i}", section_order=i)
         for i in range(total)
     ]
     rows += [

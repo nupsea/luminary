@@ -29,6 +29,7 @@ from app.models import (
     ReviewEventModel,
     StudySessionModel,
 )
+from tests.factories import make_card
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -52,19 +53,13 @@ async def factory(memory_db, tmp_path, monkeypatch):
 
 
 def _card(cid: str, *, document_id: str | None = "doc-1") -> FlashcardModel:
-    return FlashcardModel(
+    return make_card(
         id=cid,
         document_id=document_id,
         chunk_id="chunk-0",
         question=f"Q {cid}?",
         answer="A real multi-word answer here.",
         source_excerpt="s",
-        difficulty="medium",
-        fsrs_state="new",
-        fsrs_stability=0.0,
-        fsrs_difficulty=0.0,
-        reps=0,
-        lapses=0,
         source_chunk_ids=["chunk-0"],
     )
 

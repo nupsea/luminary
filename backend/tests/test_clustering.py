@@ -15,19 +15,14 @@ from app.models import (
     NoteModel,
 )
 from app.services.clustering_service import ClusteringService
+from tests.factories import make_note
 
 # Fixture
 
 
 def _make_note(content: str, note_id: str | None = None) -> NoteModel:
     now = datetime.now(UTC)
-    return NoteModel(
-        id=note_id or str(uuid.uuid4()),
-        content=content,
-        tags=[],
-        created_at=now,
-        updated_at=now,
-    )
+    return make_note(id=note_id, content=content, created_at=now, updated_at=now)
 
 
 def _make_suggestion(

@@ -17,6 +17,7 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.models import ChunkModel, DocumentModel
 from app.scripts.reindex_entities import _run, main
+from tests.factories import make_chunk, make_document
 
 
 @pytest.fixture
@@ -57,29 +58,16 @@ async def test_missing_document_exits_zero(factory):
 @pytest.mark.asyncio
 async def test_reindex_writes_entity_tail_fts_and_vectors(factory):
     async with factory() as s:
+        s.add(make_document(id="d1", title="t", word_count=8, file_path="x.txt"))
         s.add(
-            DocumentModel(
-                id="d1",
-                title="t",
-                format="txt",
-                content_type="book",
-                word_count=8,
-                page_count=0,
-                file_path="x.txt",
-                stage="complete",
-                tags=[],
-            )
-        )
-        s.add(
-            ChunkModel(
+            make_chunk(
                 id="c1",
                 document_id="d1",
                 text="Holmes met Watson.",
-                chunk_index=0,
                 context_header="A Study in Scarlet > Mr. Sherlock Holmes",
             )
         )
-        s.add(ChunkModel(id="c2", document_id="d1", text="It rained.", chunk_index=1))
+        s.add(make_chunk(id="c2", document_id="d1", text="It rained.", chunk_index=1))
         await s.commit()
 
     extractor = MagicMock()
@@ -130,21 +118,9 @@ async def test_reindex_reads_the_sample_ingest_reads_and_records_it(factory, mon
 
     monkeypatch.setattr(entity_extract, "NER_CHUNK_LIMIT", 4)
     async with factory() as s:
-        s.add(
-            DocumentModel(
-                id="d1",
-                title="t",
-                format="txt",
-                content_type="book",
-                word_count=8,
-                page_count=0,
-                file_path="x.txt",
-                stage="complete",
-                tags=[],
-            )
-        )
+        s.add(make_document(id="d1", title="t", word_count=8, file_path="x.txt"))
         for i in reversed(range(13)):
-            s.add(ChunkModel(id=f"c{i}", document_id="d1", text=f"text {i}", chunk_index=i))
+            s.add(make_chunk(id=f"c{i}", document_id="d1", text=f"text {i}", chunk_index=i))
         await s.commit()
 
     extractor = MagicMock()

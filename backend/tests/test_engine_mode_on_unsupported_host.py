@@ -17,7 +17,8 @@ from sqlalchemy import select
 
 from app.exceptions import LocalInferenceRefused
 from app.host_support import HostSupport
-from app.models import DocumentModel, EnrichmentJobModel
+from app.models import EnrichmentJobModel
+from tests.factories import make_document
 
 UNSUPPORTED = HostSupport(False, "no_accelerator", "Linux/x86_64", "no local models here")
 SUPPORTED = HostSupport(True, None, "Darwin/arm64", None)
@@ -114,11 +115,10 @@ async def _seed_job(factory, job_type: str) -> tuple[str, str]:
     doc_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Doc",
                 format="pdf",
-                content_type="book",
                 word_count=100,
                 page_count=1,
                 file_path="/fake/doc.pdf",

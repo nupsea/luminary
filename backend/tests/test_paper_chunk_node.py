@@ -9,8 +9,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
-from app.models import ChunkModel, DocumentModel, SectionModel
+from app.models import ChunkModel, SectionModel
 from app.workflows.ingestion import chunk_node
+from tests.factories import make_document
 
 PROSE = " ".join(f"Sentence {i} states a claim about the model." for i in range(60))
 
@@ -34,7 +35,7 @@ async def test_db(memory_db, tmp_path, monkeypatch):
 async def _insert_document(factory, doc_id: str, tmp_path: Path) -> None:
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="A Research Paper",
                 format="pdf",

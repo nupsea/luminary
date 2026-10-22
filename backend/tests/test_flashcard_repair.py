@@ -20,12 +20,12 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import (
-    DocumentModel,
     FlashcardModel,
     MisconceptionModel,
     ReviewEventModel,
 )
 from app.services.document_deletion_service import DocumentDeletionService
+from tests.factories import make_card, make_document
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -42,18 +42,11 @@ async def test_db(tmp_path, monkeypatch):
 
 
 def _card(card_id: str, doc_id: str | None = "doc-1") -> FlashcardModel:
-    return FlashcardModel(
+    return make_card(
         id=card_id,
         document_id=doc_id,
         question="How did Penelope delay the suitors?",
         answer="She unravelled her weaving each night.",
-        source_excerpt="",
-        difficulty="medium",
-        fsrs_state="new",
-        fsrs_stability=0.0,
-        fsrs_difficulty=0.0,
-        reps=0,
-        lapses=0,
     )
 
 
@@ -167,16 +160,12 @@ async def test_deleting_a_document_clears_its_cards_from_the_index(test_db):
     doc_id = str(uuid.uuid4())
     card_id = str(uuid.uuid4())
     async with test_db() as session:
-        doc = DocumentModel(
+        doc = make_document(
             id=doc_id,
             title="the_odyssey",
-            format="txt",
-            content_type="book",
             word_count=100,
             page_count=1,
             file_path="/tmp/the_odyssey.txt",
-            stage="complete",
-            tags=[],
         )
         session.add(doc)
         session.add(_card(card_id, doc_id))

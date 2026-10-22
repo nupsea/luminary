@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.models import FlashcardModel, MisconceptionModel
 from app.services.fsrs_service import FSRSService
 from app.services.misconceptions import get_stats, resolve_for_flashcard, resolve_on_review
+from tests.factories import make_card
 
 
 @pytest.fixture
@@ -21,7 +22,7 @@ async def session_factory(memory_db):
 
 
 def _card(card_id: str = "card-1") -> FlashcardModel:
-    return FlashcardModel(id=card_id, question="q", answer="a", source_excerpt="s")
+    return make_card(id=card_id, source_excerpt="s")
 
 
 def _misconception(card_id: str = "card-1", status: str = "open") -> MisconceptionModel:

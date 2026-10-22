@@ -22,8 +22,9 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import ChunkModel, FlashcardModel
+from app.models import FlashcardModel
 from app.services.teachback_service import _card_scope_passage, _source_passage
+from tests.factories import make_card, make_chunk
 
 _TEXT = {
     12: "If you care about the outcome, whatever it is, technical or usage, you can do it.",
@@ -48,36 +49,22 @@ async def _seed(factory, doc_id: str) -> dict[int, str]:
         for index, text in _TEXT.items():
             chunk_id = str(uuid.uuid4())
             ids[index] = chunk_id
-            session.add(
-                ChunkModel(
-                    id=chunk_id,
-                    document_id=doc_id,
-                    text=text,
-                    chunk_index=index,
-                    token_count=0,
-                    page_number=0,
-                )
-            )
+            session.add(make_chunk(id=chunk_id, document_id=doc_id, text=text, chunk_index=index))
         await session.commit()
     return ids
 
 
 def _card(doc_id: str, chunk_ids: list[str], *, excerpt: str = _QUOTE) -> FlashcardModel:
     now = datetime.now(UTC)
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id=doc_id,
         chunk_id=chunk_ids[0],
         question="What happens when you ask an agent to be skeptical about a bug report?",
         answer="It checks the code.",
         source_excerpt=excerpt,
         source_chunk_ids=chunk_ids,
-        fsrs_state="new",
-        fsrs_stability=0.0,
         fsrs_difficulty=3.0,
         due_date=now,
-        reps=0,
-        lapses=0,
         created_at=now,
     )
 
@@ -188,7 +175,7 @@ def test_a_new_card_records_the_window_it_was_written_from():
     from app.services.flashcard_generators import _card_chunk_ids
 
     chunks = [
-        ChunkModel(id=f"c{i}", document_id="d", text=_TEXT[i], chunk_index=i)
+        make_chunk(id=f"c{i}", document_id="d", text=_TEXT[i], chunk_index=i)
         for i in (12, 20, 28, 29)
     ]
     batch = [c.id for c in chunks]
@@ -209,7 +196,7 @@ def test_an_unlocatable_new_card_keeps_the_whole_batch(label, excerpt):
     from app.services.flashcard_generators import _card_chunk_ids
 
     chunks = [
-        ChunkModel(id=f"c{i}", document_id="d", text=_TEXT[i], chunk_index=i)
+        make_chunk(id=f"c{i}", document_id="d", text=_TEXT[i], chunk_index=i)
         for i in (12, 20, 28, 29)
     ]
     batch = [c.id for c in chunks]

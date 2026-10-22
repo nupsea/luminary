@@ -17,6 +17,7 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import AnnotationModel, ChunkModel, DocumentModel, SectionModel
+from tests.factories import make_chunk, make_document, make_section
 
 
 @pytest.fixture
@@ -42,32 +43,16 @@ async def _seed(factory, tmp_path, *, with_url: bool) -> str:
     raw.write_text("Some source text for the document.", encoding="utf-8")
     async with factory() as s:
         s.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Doc",
-                format="txt",
-                content_type="book",
                 word_count=6,
-                page_count=0,
                 file_path=str(raw),
-                stage="complete",
-                tags=[],
                 source_url="https://example.test/post" if with_url else None,
             )
         )
-        s.add(
-            SectionModel(
-                id="sec1",
-                document_id=doc_id,
-                heading="H",
-                level=1,
-                section_order=0,
-                body="B",
-            )
-        )
-        s.add(
-            ChunkModel(id="chunk1", document_id=doc_id, section_id="sec1", text="t", chunk_index=0)
-        )
+        s.add(make_section(id="sec1", document_id=doc_id, heading="H", body="B"))
+        s.add(make_chunk(id="chunk1", document_id=doc_id, section_id="sec1"))
         s.add(
             AnnotationModel(
                 id="ann1",

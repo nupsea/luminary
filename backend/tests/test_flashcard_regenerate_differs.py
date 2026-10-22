@@ -16,7 +16,6 @@ The first attempt at this listed the previous questions in the prompt under
 are exemplars a small model copies, not a signal it steers away from.
 """
 
-import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -25,15 +24,16 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database import make_engine
 from app.db_init import create_all_tables
-from app.models import ChunkModel, FlashcardModel, NoteModel
+from app.models import ChunkModel, FlashcardModel
 from app.services.flashcard import FlashcardService
 from app.services.flashcard_generators import _drop_near_duplicates, _passage_not_yet_used
+from tests.factories import make_card, make_chunk, make_note
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
 
 def _chunk(index: int, text: str = "passage text") -> ChunkModel:
-    return ChunkModel(
+    return make_chunk(
         id=f"chunk-{index}",
         document_id="doc-1",
         section_id=None,
@@ -98,19 +98,10 @@ async def factory(tmp_path):
 
 
 def _card(question: str, source_chunk_ids: list[str] | None) -> FlashcardModel:
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id="doc-1",
         chunk_id="chunk-0",
         question=question,
-        answer="a",
-        source_excerpt="",
-        difficulty="medium",
-        fsrs_state="new",
-        fsrs_stability=0.0,
-        fsrs_difficulty=0.0,
-        reps=0,
-        lapses=0,
         source_chunk_ids=source_chunk_ids,
     )
 
@@ -216,21 +207,8 @@ async def test_a_short_delivery_is_reported_rather_than_silently_shipped(factory
 
 
 def _note_card(question: str, note_id: str | None) -> FlashcardModel:
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
-        document_id=None,
-        chunk_id=None,
-        note_id=note_id,
-        source="note",
-        question=question,
-        answer="a",
-        source_excerpt="",
-        difficulty="medium",
-        fsrs_state="new",
-        fsrs_stability=0.0,
-        fsrs_difficulty=0.0,
-        reps=0,
-        lapses=0,
+    return make_card(
+        document_id=None, chunk_id=None, note_id=note_id, source="note", question=question
     )
 
 
@@ -413,7 +391,7 @@ async def test_a_card_from_one_note_records_which_note(factory):
     from app.services.flashcard_generators import generate_from_notes
 
     async with factory() as session:
-        session.add(NoteModel(id="note-1", content=_NOTE_TEXT, tags=[]))
+        session.add(make_note(id="note-1", content=_NOTE_TEXT))
         await session.commit()
 
         with patch("app.services.llm.LLMService.generate", _llm_returning_one_card()):
@@ -430,8 +408,8 @@ async def test_a_card_from_several_notes_records_no_note(factory):
     from app.services.flashcard_generators import generate_from_notes
 
     async with factory() as session:
-        session.add(NoteModel(id="note-1", content=_NOTE_TEXT, tags=[]))
-        session.add(NoteModel(id="note-2", content="A queue absorbs bursts.", tags=[]))
+        session.add(make_note(id="note-1", content=_NOTE_TEXT))
+        session.add(make_note(id="note-2", content="A queue absorbs bursts."))
         await session.commit()
 
         with patch("app.services.llm.LLMService.generate", _llm_returning_one_card()):

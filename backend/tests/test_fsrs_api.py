@@ -13,6 +13,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import ChunkModel, DocumentModel, FlashcardModel
+from tests.factories import make_card, make_chunk, make_document
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -20,46 +21,29 @@ pytestmark = pytest.mark.usefixtures("card_documents")
 
 
 def _make_card(doc_id: str, question: str = "Q?", answer: str = "A.") -> FlashcardModel:
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id=doc_id,
         chunk_id=str(uuid.uuid4()),
         question=question,
         answer=answer,
-        source_excerpt="",
-        fsrs_state="new",
-        fsrs_stability=0.0,
-        fsrs_difficulty=0.0,
         due_date=None,
-        reps=0,
-        lapses=0,
         created_at=datetime.now(UTC),
-        is_user_edited=False,
     )
 
 
 def _make_doc(doc_id: str) -> DocumentModel:
-    return DocumentModel(
-        id=doc_id,
-        title="Test Doc",
-        format="txt",
-        content_type="notes",
-        word_count=100,
-        page_count=1,
-        file_path="/tmp/test.txt",
-        stage="complete",
+    return make_document(
+        id=doc_id, content_type="notes", word_count=100, page_count=1, file_path="/tmp/test.txt"
     )
 
 
 def _make_chunk(doc_id: str) -> ChunkModel:
-    return ChunkModel(
-        id=str(uuid.uuid4()),
+    return make_chunk(
         document_id=doc_id,
         section_id=None,
         text="Test chunk text for LLM flashcard generation.",
         token_count=10,
         page_number=1,
-        chunk_index=0,
     )
 
 
@@ -165,21 +149,14 @@ async def test_due_date_updated(test_db):
 
     async with factory() as session:
         session.add(
-            FlashcardModel(
+            make_card(
                 id=card_id,
                 document_id=doc_id,
                 chunk_id=str(uuid.uuid4()),
                 question="Test Q?",
                 answer="Test A.",
-                source_excerpt="",
-                fsrs_state="new",
-                fsrs_stability=0.0,
-                fsrs_difficulty=0.0,
                 due_date=None,
-                reps=0,
-                lapses=0,
                 created_at=datetime.now(UTC),
-                is_user_edited=False,
             )
         )
         await session.commit()

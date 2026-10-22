@@ -10,8 +10,6 @@ a recorded passage, NULL (never recorded, or a path with no chunks), and []
 read as either of the others.
 """
 
-import uuid
-
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -20,12 +18,13 @@ from app.db_init import create_all_tables
 from app.models import ChunkModel, FlashcardModel
 from app.services.flashcard import _CHUNK_CHAR_LIMIT, _build_text
 from app.services.flashcard_grounding import passage_for_card
+from tests.factories import make_card, make_chunk
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
 
 def _chunk(index: int, text: str) -> ChunkModel:
-    return ChunkModel(
+    return make_chunk(
         id=f"chunk-{index}",
         document_id="doc-1",
         section_id=None,
@@ -69,20 +68,7 @@ async def factory(tmp_path):
 
 
 def _card(**kw) -> FlashcardModel:
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
-        document_id="doc-1",
-        question="q",
-        answer="a",
-        source_excerpt="",
-        difficulty="medium",
-        fsrs_state="new",
-        fsrs_stability=0.0,
-        fsrs_difficulty=0.0,
-        reps=0,
-        lapses=0,
-        **kw,
-    )
+    return make_card(document_id="doc-1", **kw)
 
 
 @pytest.mark.asyncio

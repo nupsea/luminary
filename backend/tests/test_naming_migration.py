@@ -14,6 +14,7 @@ from app.models import (
     NoteModel,
     NoteTagIndexModel,
 )
+from tests.factories import make_note
 
 # Fixture
 
@@ -32,7 +33,7 @@ async def test_tag_migration_merges_duplicates(test_db):
     async with factory() as session:
         # Create two notes with different casing of same tag
         session.add(
-            NoteModel(
+            make_note(
                 id=note1_id,
                 content="Note 1",
                 tags=["Python"],
@@ -41,7 +42,7 @@ async def test_tag_migration_merges_duplicates(test_db):
             )
         )
         session.add(
-            NoteModel(
+            make_note(
                 id=note2_id,
                 content="Note 2",
                 tags=["python"],
@@ -116,7 +117,7 @@ async def test_tag_migration_renames_a_lone_tag(test_db):
     note_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            NoteModel(
+            make_note(
                 id=note_id,
                 content="Note",
                 tags=["Machine_Learning", "machine-learning", "Other Tag"],
@@ -186,24 +187,8 @@ async def test_collection_migration_merges_duplicates(test_db):
         )
 
         # Create notes
-        session.add(
-            NoteModel(
-                id=note1_id,
-                content="Note 1",
-                tags=[],
-                document_id=None,
-                group_name="manual",
-            )
-        )
-        session.add(
-            NoteModel(
-                id=note2_id,
-                content="Note 2",
-                tags=[],
-                document_id=None,
-                group_name="manual",
-            )
-        )
+        session.add(make_note(id=note1_id, content="Note 1", document_id=None, group_name="manual"))
+        session.add(make_note(id=note2_id, content="Note 2", document_id=None, group_name="manual"))
 
         # Add members: col1 has 2 notes (more members), col2 has 1 note
         await session.execute(
@@ -300,7 +285,7 @@ async def test_sync_tag_index_normalizes(test_db):
     note_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            NoteModel(
+            make_note(
                 id=note_id,
                 content="Test",
                 tags=["Machine Learning"],

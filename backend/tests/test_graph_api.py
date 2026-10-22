@@ -21,7 +21,7 @@ import app.services.vector_store as vs_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import DocumentModel
+from tests.factories import make_document
 
 FIXTURES_FULL_DIR = Path(__file__).parent / "fixtures" / "full"
 
@@ -107,16 +107,7 @@ async def test_graph_returns_nodes_after_ingest(graph_api_db, monkeypatch):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="The Time Machine",
-                format="txt",
-                content_type="book",
-                word_count=0,
-                page_count=0,
-                file_path=str(dest),
-                stage="parsing",
-            )
+            make_document(id=doc_id, title="The Time Machine", file_path=str(dest), stage="parsing")
         )
         await session.commit()
 

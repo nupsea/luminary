@@ -12,8 +12,8 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
-from app.models import ChunkModel, DocumentModel
 from app.workflows.ingestion_nodes.embed import keyword_index_node
+from tests.factories import make_chunk, make_document
 
 
 @pytest.fixture
@@ -47,19 +47,14 @@ async def test_context_header_indexed_in_fts_but_not_in_chunk_text(fts_db):
     doc_id, chunk_id = str(uuid.uuid4()), str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
-                id=doc_id,
-                title="The Time Machine",
-                format="txt",
-                content_type="book",
-                file_path="/tmp/tm.txt",
+            make_document(
+                id=doc_id, title="The Time Machine", file_path="/tmp/tm.txt", stage="parsing"
             )
         )
         session.add(
-            ChunkModel(
+            make_chunk(
                 id=chunk_id,
                 document_id=doc_id,
-                chunk_index=0,
                 text="The Traveller vanished into the fourth dimension.",
                 context_header="[The Time Machine > Chapter 3]",
             )

@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import ChunkModel, DocumentModel, QAHistoryModel
+from tests.factories import make_chunk, make_document
 
 # Test DB fixture
 
@@ -17,23 +18,11 @@ from app.models import ChunkModel, DocumentModel, QAHistoryModel
 
 
 def _make_document(doc_id: str | None = None) -> DocumentModel:
-    return DocumentModel(
-        id=doc_id or str(uuid.uuid4()),
-        title="Test Document",
-        format="pdf",
-        content_type="book",
-        stage="complete",
-        file_path="/tmp/test.pdf",
-    )
+    return make_document(id=doc_id, title="Test Document", format="pdf", file_path="/tmp/test.pdf")
 
 
 def _make_chunk(doc_id: str) -> ChunkModel:
-    return ChunkModel(
-        id=str(uuid.uuid4()),
-        document_id=doc_id,
-        text="Some text",
-        chunk_index=0,
-    )
+    return make_chunk(document_id=doc_id, text="Some text")
 
 
 def _make_qa(doc_id: str, created_at: datetime) -> QAHistoryModel:

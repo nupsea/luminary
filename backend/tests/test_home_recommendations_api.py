@@ -7,7 +7,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models import ConceptModel, FlashcardModel, ReviewEventModel
+from app.models import ConceptModel, ReviewEventModel
+from tests.factories import make_card
 
 
 def _naive(days_ago: float = 0.0) -> datetime:
@@ -16,15 +17,7 @@ def _naive(days_ago: float = 0.0) -> datetime:
 
 async def _seed_due_card(factory) -> None:
     async with factory() as session:
-        session.add(
-            FlashcardModel(
-                id="card-due",
-                question="q",
-                answer="a",
-                source_excerpt="s",
-                due_date=_naive(2),
-            )
-        )
+        session.add(make_card(id="card-due", source_excerpt="s", due_date=_naive(2)))
         await session.commit()
 
 
@@ -39,15 +32,7 @@ async def _seed_weak_concept(factory) -> None:
                 status="confirmed",
             )
         )
-        session.add(
-            FlashcardModel(
-                id="card-weak",
-                question="q",
-                answer="a",
-                source_excerpt="s",
-                concept_slug="btree-splits",
-            )
-        )
+        session.add(make_card(id="card-weak", source_excerpt="s", concept_slug="btree-splits"))
         session.add_all(
             ReviewEventModel(
                 id=str(uuid.uuid4()),

@@ -25,12 +25,13 @@ import numpy as np
 import pytest
 from sqlalchemy import select
 
-from app.models import ChunkModel, DocumentModel, FlashcardModel
+from app.models import FlashcardModel
 from app.services.flashcard import (
     FlashcardService,
     _is_near_duplicate,
     _repeats_this_call,
 )
+from tests.factories import make_chunk, make_document
 
 
 def _at(cosine: float) -> list[float]:
@@ -122,21 +123,18 @@ async def test_a_first_batch_is_checked_against_itself(test_db):
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Distributed Systems Engineering",
                 format="pdf",
-                content_type="book",
                 word_count=500,
                 page_count=10,
                 file_path="/tmp/ddia.pdf",
-                stage="complete",
             )
         )
         for index, text in enumerate(["Introduction to distributed systems.", _PASSAGE]):
             session.add(
-                ChunkModel(
-                    id=str(uuid.uuid4()),
+                make_chunk(
                     document_id=doc_id,
                     section_id=None,
                     text=text,

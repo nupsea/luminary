@@ -16,6 +16,7 @@ from app.models import (
     CollectionModel,
     DocumentModel,
 )
+from tests.factories import make_card, make_document
 
 
 @pytest.fixture
@@ -30,15 +31,12 @@ def _make_doc(
     tags: list[str] | None = None,
     created_at: datetime | None = None,
 ) -> DocumentModel:
-    return DocumentModel(
-        id=str(uuid.uuid4()),
+    return make_document(
         title=title,
-        format="txt",
         content_type=content_type,
         word_count=10,
         page_count=1,
         file_path="/tmp/x.txt",
-        stage="complete",
         tags=tags or [],
         created_at=created_at or datetime.now(UTC),
     )
@@ -222,14 +220,8 @@ async def test_every_sort_and_filter_orders_and_counts_as_before(test_db):
     d.is_favorite = True
 
     def card(doc, stability: float, bloom: int = 1) -> FlashcardModel:
-        return FlashcardModel(
-            id=str(uuid.uuid4()),
-            document_id=doc.id,
-            question="q",
-            answer="a",
-            source_excerpt="s",
-            fsrs_stability=stability,
-            bloom_level=bloom,
+        return make_card(
+            document_id=doc.id, source_excerpt="s", fsrs_stability=stability, bloom_level=bloom
         )
 
     async with factory() as s:

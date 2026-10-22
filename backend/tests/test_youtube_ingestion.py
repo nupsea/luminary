@@ -16,6 +16,7 @@ from app.main import app  # noqa: F401 (used via ASGITransport)
 from app.models import DocumentModel
 from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.youtube_downloader import is_youtube_url
+from tests.factories import make_chunk, make_document
 
 
 @pytest.fixture(autouse=True)
@@ -196,16 +197,13 @@ async def test_document_list_includes_source_url(test_db):
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="My YouTube Talk",
                 format="wav",
                 content_type="audio",
                 word_count=500,
-                page_count=0,
                 file_path="/tmp/test.wav",
-                stage="complete",
-                tags=[],
                 source_url="https://www.youtube.com/watch?v=test123",
                 video_title="My YouTube Talk",
             )
@@ -229,16 +227,12 @@ async def test_document_list_includes_source_url(test_db):
 
 def test_document_model_has_youtube_url_and_channel_name():
     """DocumentModel includes youtube_url and channel_name nullable columns."""
-    doc = DocumentModel(
+    doc = make_document(
         id="test-id",
         title="Test",
         format="wav",
         content_type="audio",
-        word_count=0,
-        page_count=0,
         file_path="/tmp/test.wav",
-        stage="complete",
-        tags=[],
         source_url="https://www.youtube.com/watch?v=abc",
         video_title="Test",
         channel_name="Test Channel",
@@ -247,16 +241,12 @@ def test_document_model_has_youtube_url_and_channel_name():
     assert doc.channel_name == "Test Channel"
     assert doc.youtube_url == "https://www.youtube.com/watch?v=abc"
     # Nullable: can be None
-    doc2 = DocumentModel(
+    doc2 = make_document(
         id="test-id-2",
         title="Test2",
         format="wav",
         content_type="audio",
-        word_count=0,
-        page_count=0,
         file_path="/tmp/test2.wav",
-        stage="complete",
-        tags=[],
     )
     assert doc2.channel_name is None
     assert doc2.youtube_url is None
@@ -269,27 +259,22 @@ async def test_get_document_chunks_returns_youtube_chunks(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="YouTube Lecture",
                 format="wav",
                 content_type="audio",
                 word_count=300,
-                page_count=0,
                 file_path="/tmp/lecture.wav",
-                stage="complete",
-                tags=[],
                 source_url="https://www.youtube.com/watch?v=xyz",
                 video_title="YouTube Lecture",
                 channel_name="Lecture Channel",
             )
         )
-        from app.models import ChunkModel
 
         for i in range(3):
             session.add(
-                ChunkModel(
-                    id=str(uuid.uuid4()),
+                make_chunk(
                     document_id=doc_id,
                     text=f"Transcript chunk {i} text.",
                     chunk_index=i,
@@ -327,16 +312,13 @@ async def test_get_document_chunks_returns_empty_for_no_chunks(test_db):
 
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="Processing Video",
                 format="wav",
                 content_type="audio",
-                word_count=0,
-                page_count=0,
                 file_path="/tmp/processing.wav",
                 stage="parsing",
-                tags=[],
                 source_url="https://www.youtube.com/watch?v=new",
             )
         )

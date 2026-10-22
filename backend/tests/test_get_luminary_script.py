@@ -355,7 +355,7 @@ def test_both_installers_offer_the_models_the_app_knows():
 
     known = {key.split("/", 1)[1] for key in REGISTRY if key.startswith("ollama/")}
     sh = _assigned(SCRIPT.read_text(encoding="utf-8"), r'^KNOWN_MODELS="(.+)"$')
-    ps1 = _assigned(PS1.read_text(encoding="utf-8"), r'^\$KnownModels = @\((.+)\)$')
+    ps1 = _assigned(PS1.read_text(encoding="utf-8"), r"^\$KnownModels = @\((.+)\)$")
     assert set(sh.split()) == known
     assert {m.strip().strip('"') for m in ps1.split(",")} == known
 

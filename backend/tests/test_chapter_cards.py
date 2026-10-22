@@ -13,7 +13,6 @@ from app.models import (
     DocumentModel,
     FlashcardModel,
     ReadingPositionModel,
-    SectionModel,
 )
 from app.repos.flashcard_repo import FlashcardRepo
 from app.repos.study_repo import DueScope, StudyRepo
@@ -30,6 +29,7 @@ from app.services.flashcard_chapter import (
 )
 from app.services.flashcard_prompts import CHAPTER_NOTES_SYSTEM
 from app.services.flashcard_units import split_units
+from tests.factories import make_card, make_chunk, make_document, make_section
 
 DDIA = Book(title="DDIA", genre="technical")
 
@@ -211,20 +211,12 @@ class _FakeLLM:
 async def book(memory_db):
     async with memory_db.factory() as session:
         session.add(
-            DocumentModel(
-                id="doc",
-                title="DDIA",
-                format="pdf",
-                content_type="book",
-                file_path="/tmp/ddia.pdf",
+            make_document(
+                id="doc", title="DDIA", format="pdf", file_path="/tmp/ddia.pdf", stage="parsing"
             )
         )
-        session.add(
-            SectionModel(id="s1", document_id="doc", heading="Logs", level=1, section_order=0)
-        )
-        session.add(
-            ChunkModel(id="c1", document_id="doc", section_id="s1", text=LOG, chunk_index=0)
-        )
+        session.add(make_section(id="s1", document_id="doc", heading="Logs"))
+        session.add(make_chunk(id="c1", document_id="doc", section_id="s1", text=LOG))
         await session.commit()
     return memory_db
 
@@ -307,21 +299,17 @@ _CHAPTER_TEXT = (LOG + " ") * 120
 async def long_book(memory_db):
     async with memory_db.factory() as session:
         session.add(
-            DocumentModel(id="bk", title="DDIA", format="pdf", content_type="book", file_path="/x")
+            make_document(id="bk", title="DDIA", format="pdf", file_path="/x", stage="parsing")
         )
         for i in range(5):
             sid = f"ch{i}"
             session.add(
-                SectionModel(
-                    id=sid,
-                    document_id="bk",
-                    heading=f"Chapter {i + 1}. Part",
-                    level=1,
-                    section_order=i,
+                make_section(
+                    id=sid, document_id="bk", heading=f"Chapter {i + 1}. Part", section_order=i
                 )
             )
             session.add(
-                ChunkModel(
+                make_chunk(
                     id=f"k{i}", document_id="bk", section_id=sid, text=_CHAPTER_TEXT, chunk_index=i
                 )
             )
@@ -601,7 +589,7 @@ async def test_practising_part_of_a_chapter_leaves_the_rest_new(book):
     async with book.factory() as session:
         for i in range(5):
             session.add(
-                FlashcardModel(
+                make_card(
                     id=f"card{i}",
                     document_id="doc",
                     chunk_id="c1",

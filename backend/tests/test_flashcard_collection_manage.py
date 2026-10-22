@@ -10,7 +10,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models import CollectionMemberModel, CollectionModel, FlashcardModel
+from app.models import CollectionMemberModel, CollectionModel
+from tests.factories import make_card
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -21,7 +22,7 @@ def test_db(memory_db):
 
 
 def _card(cid: str, *, document_id=None, note_id=None, source="document", deck="default"):
-    return FlashcardModel(
+    return make_card(
         id=cid,
         question=f"Q {cid}?",
         answer="A real multi-word answer here.",

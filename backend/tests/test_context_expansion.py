@@ -13,6 +13,7 @@ import pytest
 from app.models import ChunkModel, DocumentModel
 from app.services.retriever import _expand_context
 from app.types import ScoredChunk
+from tests.factories import make_chunk, make_document
 
 # Fixture — in-memory DB with documents and chunks
 
@@ -23,27 +24,18 @@ def test_db(memory_db):
 
 
 def _make_doc(doc_id: str, content_type: str = "book") -> DocumentModel:
-    return DocumentModel(
-        id=doc_id,
-        title="Test Doc",
-        format="txt",
-        content_type=content_type,
-        word_count=100,
-        page_count=0,
-        file_path="/tmp/test.txt",
-        stage="complete",
-        tags=[],
+    return make_document(
+        id=doc_id, content_type=content_type, word_count=100, file_path="/tmp/test.txt"
     )
 
 
 def _make_chunk(doc_id: str, idx: int, text: str, chunk_id: str | None = None) -> ChunkModel:
-    return ChunkModel(
-        id=chunk_id or str(uuid.uuid4()),
+    return make_chunk(
+        id=chunk_id,
         document_id=doc_id,
         section_id=None,
         text=text,
         token_count=len(text.split()),
-        page_number=0,
         speaker=None,
         chunk_index=idx,
     )

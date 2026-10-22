@@ -20,6 +20,7 @@ from app.models import (
     SectionModel,
 )
 from app.services.objective_tracker import ObjectiveTrackerService
+from tests.factories import make_card, make_chunk, make_document, make_section
 
 # Test DB fixture (same pattern as test_learning.py)
 
@@ -29,41 +30,25 @@ from app.services.objective_tracker import ObjectiveTrackerService
 
 def _make_doc(doc_id: str | None = None) -> DocumentModel:
     now = datetime.now(UTC)
-    return DocumentModel(
-        id=doc_id or str(uuid.uuid4()),
-        title="Test Doc",
-        format="txt",
+    return make_document(
+        id=doc_id,
         content_type="tech_book",
         word_count=100,
         page_count=1,
         file_path="/tmp/test.txt",
-        stage="complete",
         created_at=now,
         last_accessed_at=now,
     )
 
 
 def _make_section(doc_id: str, section_id: str | None = None) -> SectionModel:
-    return SectionModel(
-        id=section_id or str(uuid.uuid4()),
-        document_id=doc_id,
-        heading="Chapter 1",
-        level=1,
-        section_order=1,
-        preview="",
-    )
+    return make_section(id=section_id, document_id=doc_id, heading="Chapter 1", section_order=1)
 
 
 def _make_chunk(doc_id: str, section_id: str) -> ChunkModel:
     now = datetime.now(UTC)
-    return ChunkModel(
-        id=str(uuid.uuid4()),
-        document_id=doc_id,
-        section_id=section_id,
-        text="Test chunk",
-        token_count=10,
-        chunk_index=0,
-        created_at=now,
+    return make_chunk(
+        document_id=doc_id, section_id=section_id, text="Test chunk", token_count=10, created_at=now
     )
 
 
@@ -74,8 +59,7 @@ def _make_card(
     flashcard_type: str | None = None,
 ) -> FlashcardModel:
     now = datetime.now(UTC)
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id=doc_id,
         chunk_id=chunk_id,
         question="Q?",
@@ -86,7 +70,6 @@ def _make_card(
         fsrs_difficulty=3.0,
         due_date=now,
         reps=5,
-        lapses=0,
         created_at=now,
         flashcard_type=flashcard_type,
     )

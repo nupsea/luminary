@@ -11,6 +11,7 @@ from app.main import app
 from app.models import FlashcardModel
 from app.repos.flashcard_repo import FlashcardRepo
 from app.services.flashcard_search import _sanitize_fts5_query
+from tests.factories import make_card
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -25,23 +26,19 @@ def _make_flashcard(
     **kwargs,
 ) -> FlashcardModel:
     now = datetime.now(UTC)
-    defaults = {
-        "id": card_id or str(uuid.uuid4()),
-        "document_id": doc_id,
-        "chunk_id": str(uuid.uuid4()),
-        "question": question,
-        "answer": answer,
-        "source_excerpt": "Some excerpt.",
-        "fsrs_state": "new",
-        "fsrs_stability": 0.0,
-        "fsrs_difficulty": 0.0,
-        "due_date": now,
-        "reps": 0,
-        "lapses": 0,
-        "created_at": now,
-    }
-    defaults.update(kwargs)
-    return FlashcardModel(**defaults)
+    return make_card(
+        **{
+            "id": card_id,
+            "document_id": doc_id,
+            "chunk_id": str(uuid.uuid4()),
+            "question": question,
+            "answer": answer,
+            "source_excerpt": "Some excerpt.",
+            "due_date": now,
+            "created_at": now,
+            **kwargs,
+        }
+    )
 
 
 # AC1: keyword in question returns flashcard

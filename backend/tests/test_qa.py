@@ -35,6 +35,7 @@ from app.services.qa import (
     _split_response,
 )
 from app.types import ScoredChunk
+from tests.factories import make_document
 
 # Shared DB fixture
 
@@ -42,15 +43,13 @@ from app.types import ScoredChunk
 async def _insert_doc(factory, tmp_path: Path, doc_id: str, title: str = "Test Doc") -> None:
     async with factory() as session:
         session.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title=title,
-                format="txt",
                 content_type="notes",
                 word_count=100,
                 page_count=2,
                 file_path=str(tmp_path / "doc.txt"),
-                stage="complete",
             )
         )
         await session.commit()

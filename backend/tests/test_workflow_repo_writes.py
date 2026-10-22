@@ -7,37 +7,28 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import ChunkModel, ConceptModel, DocumentModel, FlashcardModel
+from app.models import ConceptModel, DocumentModel, FlashcardModel
 from app.repos.concept_repo import ConceptRepo
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
+from tests.factories import make_card, make_chunk, make_document
 
 
 @pytest.fixture
 async def session(memory_db):
     factory = async_sessionmaker(memory_db.engine, expire_on_commit=False)
     async with factory() as s:
-        s.add(
-            DocumentModel(id="d1", title="Book", format="txt", content_type="book", file_path="/x")
-        )
+        s.add(make_document(id="d1", title="Book", file_path="/x", stage="parsing"))
         s.add_all(
-            ChunkModel(
-                id=f"c{i}",
-                document_id="d1",
-                text="t",
-                token_count=1,
-                page_number=0,
-                chunk_index=i,
-                entities_text=f"e{i}",
+            make_chunk(
+                id=f"c{i}", document_id="d1", token_count=1, chunk_index=i, entities_text=f"e{i}"
             )
             for i in range(2)
         )
         s.add(ConceptModel(id="k1", slug="time-travel", label="Time travel"))
         s.add_all(
-            FlashcardModel(
+            make_card(
                 id=cid,
-                question="q",
-                answer="a",
                 source_excerpt="s",
                 concept_id=concept,
                 concept_slug=slug,
@@ -87,17 +78,7 @@ async def test_a_concept_rebuild_unmaps_and_remaps_cards_by_slug(session):
 
 async def test_script_reads_and_the_startup_reconcile(session):
     docs = DocumentRepo(session)
-    session.add(
-        DocumentModel(
-            id="d2",
-            title="Done",
-            format="txt",
-            content_type="book",
-            file_path="/z",
-            stage="complete",
-            word_count=0,
-        )
-    )
+    session.add(make_document(id="d2", title="Done", file_path="/z"))
     await session.commit()
 
     assert sorted(await docs.all_ids()) == ["d1", "d2"]

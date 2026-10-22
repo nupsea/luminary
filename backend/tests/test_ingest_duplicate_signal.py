@@ -15,7 +15,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models import DocumentModel
+from tests.factories import make_document
 
 
 @pytest.fixture
@@ -33,10 +33,9 @@ async def _seed_existing(factory, *, stage: str) -> str:
     doc_id = str(uuid.uuid4())
     async with factory() as s:
         s.add(
-            DocumentModel(
+            make_document(
                 id=doc_id,
                 title="already here",
-                format="txt",
                 content_type="notes",
                 word_count=5,
                 page_count=1,

@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from app.main import app
 from app.models import ChunkModel, FlashcardModel, SectionModel
 from app.routers.study import SectionHeatmapItem, _compute_section_heatmap
+from tests.factories import make_card, make_chunk, make_section
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
@@ -20,22 +21,14 @@ pytestmark = pytest.mark.usefixtures("card_documents")
 
 
 def _make_section(doc_id: str) -> SectionModel:
-    return SectionModel(
-        id=str(uuid.uuid4()),
-        document_id=doc_id,
-        heading="Chapter 1",
-        level=1,
-        section_order=0,
-    )
+    return make_section(document_id=doc_id, heading="Chapter 1")
 
 
 def _make_chunk(doc_id: str, section_id: str) -> ChunkModel:
-    return ChunkModel(
-        id=str(uuid.uuid4()),
+    return make_chunk(
         document_id=doc_id,
         section_id=section_id,
         text="Some text content for the chunk.",
-        chunk_index=0,
         token_count=50,
     )
 
@@ -48,8 +41,7 @@ def _make_card(
     due_date: datetime | None = None,
 ) -> FlashcardModel:
     now = datetime.now(UTC)
-    return FlashcardModel(
-        id=str(uuid.uuid4()),
+    return make_card(
         document_id=doc_id,
         chunk_id=chunk_id,
         question="Question?",
@@ -60,7 +52,6 @@ def _make_card(
         fsrs_difficulty=3.0,
         due_date=due_date or now + timedelta(days=3),
         reps=3,
-        lapses=0,
         last_review=last_review or now - timedelta(days=1),
         created_at=now,
     )
@@ -195,19 +186,14 @@ def test_compute_section_heatmap_never_reviewed_card():
     section_id = str(uuid.uuid4())
     chunk_id = str(uuid.uuid4())
 
-    card = FlashcardModel(
-        id=str(uuid.uuid4()),
+    card = make_card(
         document_id=doc_id,
         chunk_id=chunk_id,
         question="Q?",
         answer="A.",
         source_excerpt="Ex.",
-        fsrs_state="new",
-        fsrs_stability=0.0,
         fsrs_difficulty=3.0,
         due_date=now,
-        reps=0,
-        lapses=0,
         last_review=None,  # never reviewed
         created_at=now,
     )

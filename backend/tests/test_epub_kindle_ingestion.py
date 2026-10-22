@@ -8,9 +8,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models import DocumentModel
 from app.services.parser import DocumentParser
 from app.workflows.ingestion import _classify
+from tests.factories import make_chunk, make_document, make_section
 
 # Shared DB fixture
 
@@ -192,37 +192,24 @@ async def test_flashcard_generation_works_on_kindle_doc(test_db):
 
     doc_id = str(uuid.uuid4())
     async with factory() as session:
-        from app.models import ChunkModel, SectionModel  # noqa: PLC0415
-
-        doc = DocumentModel(
+        doc = make_document(
             id=doc_id,
             title="The Great Gatsby",
-            format="txt",
             content_type="kindle_clippings",
             word_count=200,
-            page_count=0,
             file_path="/tmp/test.txt",
             file_hash=None,
-            stage="complete",
             tags=["kindle"],
         )
-        section = SectionModel(
-            id=str(uuid.uuid4()),
+        section = make_section(
             document_id=doc_id,
             heading="Highlight (June 14, 2021)",
-            level=1,
-            page_start=0,
-            page_end=0,
-            section_order=0,
             preview="So we beat on, boats against the current.",
         )
-        chunk = ChunkModel(
-            id=str(uuid.uuid4()),
+        chunk = make_chunk(
             document_id=doc_id,
             section_id=section.id,
             text="So we beat on, boats against the current, borne back ceaselessly into the past.",
-            chunk_index=0,
-            page_number=0,
         )
 
         session.add_all([doc, section, chunk])
