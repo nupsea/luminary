@@ -23,6 +23,7 @@ import { usableSections } from "./sectionTitle"
 import { PdfSearchBar } from "./PdfSearchBar"
 import { PdfPage, type ScrollMarks } from "./PdfPage"
 import { resolvePdfPageFromDom } from "./resolveSourceRefUtils"
+import { useReaderInput } from "./hooks/useReaderInput"
 import {
   PAGE_PAD,
   type ScrollAnchor,
@@ -276,24 +277,17 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         cancelAnimationFrame(frame)
         frame = requestAnimationFrame(syncToScroll)
       }
-      // The reader's own scrolling. A pointerdown on the scroller itself is its scrollbar.
-      const onPointerDown = (e: PointerEvent) => { if (e.target === el) markReading() }
       el.addEventListener("scroll", schedule, { passive: true })
-      el.addEventListener("wheel", markReading, { passive: true })
-      el.addEventListener("touchmove", markReading, { passive: true })
-      el.addEventListener("pointerdown", onPointerDown)
       const observer = new ResizeObserver(schedule)
       observer.observe(el)
       return () => {
         cancelAnimationFrame(frame)
         el.removeEventListener("scroll", schedule)
-        el.removeEventListener("wheel", markReading)
-        el.removeEventListener("touchmove", markReading)
-        el.removeEventListener("pointerdown", onPointerDown)
         observer.disconnect()
       }
-    }, [loadStatus, syncToScroll, markReading])
+    }, [loadStatus, syncToScroll])
 
+    useReaderInput(scrollAreaRef, loadStatus === "ready", markReading)
     usePdfKeyScroll(scrollAreaRef, loadStatus === "ready", markReading)
 
     // Expose goToPage for parent (section list page-jump badges)

@@ -54,12 +54,14 @@ export function useReadingPlace(documentId: string, sections: readonly { id: str
         const saved = placeOfPosition(pos)
         placeRef.current = withSaved(placeRef.current, saved)
         savedRef.current = JSON.stringify(positionBody(saved))
-        const epubBookmarkPlace = epubPlaceOf(pos.epub_bookmark_chapter_index, pos.epub_bookmark_block_index)
         setPdfBookmarkState(pos.pdf_bookmark_page)
-        setEpubBookmarkState(epubBookmarkPlace)
-        setPdfOpenOn(pos.pdf_bookmark_page ?? (dismissed ? null : saved.pdfPage))
-        setEpubOpenOn(epubBookmarkPlace ?? (dismissed ? null : saved.epubPlace))
-        if (!dismissed && (saved.sectionId || saved.pdfPage != null || saved.epubPlace)) setResume(pos)
+        setEpubBookmarkState(epubPlaceOf(pos.epub_bookmark_chapter_index, pos.epub_bookmark_block_index))
+        if (!dismissed) {
+          // Opens where reading stopped; the bookmark is a button away.
+          setPdfOpenOn(saved.pdfPage)
+          setEpubOpenOn(saved.epubPlace)
+          if (saved.sectionId || saved.pdfPage != null || saved.epubPlace) setResume(pos)
+        }
       })
       .catch((err) => {
         // 404 is a book never opened. Any other failure leaves saving off rather than

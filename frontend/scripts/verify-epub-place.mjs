@@ -73,16 +73,30 @@ const topBlock = () =>
   }, BLOCKS)
 const scrollBy = (dy) =>
   page.evaluate((y) => document.querySelector(".epub-reader-content").parentElement.scrollBy(0, y), dy)
+// The reader's own scrolling: only this moves the saved place.
+async function wheel(dy) {
+  await page.locator(".epub-reader-content").hover()
+  for (let left = dy; left !== 0;) {
+    const step = Math.sign(left) * Math.min(Math.abs(left), 1000)
+    await page.mouse.wheel(0, step)
+    left -= step
+    await page.waitForTimeout(50)
+  }
+}
+const savedPlace = async () => {
+  const p = await (await api("/position")).json()
+  return `${p.last_epub_chapter_index}/${p.last_epub_block_index}`
+}
 
 async function run() {
   await page.goto(`${APP}/library?doc=${docId}`, { waitUntil: "domcontentloaded" })
   await page.waitForSelector(".epub-reader-content", { timeout: 30000 })
   await page.locator("button", { hasText: longest.title }).first().click()
   await settle()
-  await page.evaluate(() => {
-    const c = document.querySelector(".epub-reader-content").parentElement
-    c.scrollTo({ top: c.scrollHeight * 0.4, behavior: "instant" })
-  })
+  check("picking a chapter from the contents leaves the saved place alone", (await savedPlace()) === "null/null",
+    await savedPlace())
+  await wheel(await page.evaluate(() =>
+    Math.round(document.querySelector(".epub-reader-content").parentElement.scrollHeight * 0.4)))
   await settle()
   const readHere = await topBlock()
   let pos = await (await api("/position")).json()
@@ -125,8 +139,15 @@ async function run() {
   if (await link.count()) {
     const target = await link.evaluate((a) => ({ chapter: Number(a.dataset.chapter), id: a.getAttribute("href").slice(1) }))
     await link.evaluate((a) => a.scrollIntoView({ block: "center" }))
-    await link.click()
+    await wheel(100)
     await settle()
+    const beforeLink = await savedPlace()
+    await link.click()
+    // Long enough for the other chapter to load and a place reported there to be saved.
+    await settle()
+    await settle()
+    check("following a link leaves the saved place alone", (await savedPlace()) === beforeLink,
+      `${beforeLink} -> ${await savedPlace()}`)
     const offset = await page.evaluate((id) => {
       const el = document.getElementById(id)
       const c = document.querySelector(".epub-reader-content")?.parentElement
@@ -145,6 +166,15 @@ async function run() {
   await page.getByRole("button", { name: /Go to your bookmark/ }).click()
   await settle()
   check("go-to-bookmark returns to the bookmarked block", (await topBlock()) === readHere)
+
+  await wheel(3000)
+  await settle()
+  const readOn = await topBlock()
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await page.waitForSelector(".epub-reader-content", { timeout: 30000 })
+  await settle()
+  check("reopening goes where reading stopped, not to the bookmark", readOn !== readHere && (await topBlock()) === readOn,
+    `${JSON.stringify(readOn)} vs ${JSON.stringify(await topBlock())}`)
 }
 
 try {
