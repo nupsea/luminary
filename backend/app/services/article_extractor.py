@@ -54,6 +54,11 @@ _JS_HYDRATION_MARKERS = (
 # unremarkable and must not trigger a warning.
 _MIN_ARTICLE_WORDS_FOR_VISUAL_WARNING = 200
 
+# Fewer words than this is a page whose content never reached the fetch, not an
+# article: a claude.ai artifact's viewer yields 5, the shortest article in a real
+# library is 517.
+_MIN_PAGE_WORDS = 50
+
 # Placeholder tokens for content restored after extraction. Letters and digits
 # only, and long enough that no article writes one by accident: trafilatura
 # normalises punctuation and drops paragraphs that read as bare symbols.
@@ -264,8 +269,14 @@ class ArticleExtractor:
         # headings, so a page extracted through it reads as one unbroken wall.
         markdown_text, serializer = self._serialize(prepared_html, reference or "")
 
-        if not markdown_text:
-            raise ValueError("Could not extract any meaningful content from the article.")
+        # Counted with code blocks restored, so a page that is mostly code is not refused.
+        found = len(self._restore_protected(markdown_text, protected).split())
+        if found < _MIN_PAGE_WORDS:
+            raise ValueError(
+                f"That page has almost no readable text ({found} words). Its content probably "
+                "loads in the browser or only after you sign in. Save the page from your "
+                "browser, or export it, and upload the file instead."
+            )
 
         logger.debug(
             "ArticleExtractor: extracted markdown (first 500 chars): %s",

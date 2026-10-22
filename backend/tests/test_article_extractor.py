@@ -400,6 +400,40 @@ class TestAccessGate:
         assert ArticleExtractor._detect_access_gate(html) == []
 
 
+class TestPagesWithoutContent:
+    """A page whose content never reached the fetch is refused, not stored as an article."""
+
+    async def test_an_empty_app_shell_is_refused(self):
+        # The body claude.ai serves at an artifact link, minus its scripts.
+        html = (
+            '<html><head><title>Claude Artifact</title></head><body><header id="hdr"></header>'
+            '<div id="hdr-degraded"><span class="byline">Content is user-generated and '
+            'unverified.</span></div><main><div id="frame-slot"><div id="loading"></div>'
+            "</div></main></body></html>"
+        )
+        with pytest.raises(ValueError, match=r"almost no readable text \(\d+ words\)"):
+            await ArticleExtractor().extract(
+                "https://example.com/app", doc_id="shell", rendered_html=html
+            )
+
+    async def test_a_short_article_is_kept(self):
+        parsed = await ArticleExtractor().extract(
+            "https://example.com/post", doc_id="short", rendered_html=_wrap("")
+        )
+        assert parsed.word_count >= 50
+
+    async def test_a_page_that_is_mostly_code_is_kept(self):
+        code = "\n".join(f"value_{i} = compute(value_{i - 1}) + {i}" for i in range(1, 25))
+        html = (
+            "<html><body><article><h1>Snippet</h1><p>The whole loop:</p>"
+            f'<pre><code class="language-python">{code}</code></pre></article></body></html>'
+        )
+        parsed = await ArticleExtractor().extract(
+            "https://example.com/snippet", doc_id="code", rendered_html=html
+        )
+        assert "value_24 = compute(value_23) + 24" in parsed.raw_text
+
+
 class TestWikipediaEditLinks:
     """MediaWiki's section-edit links are page chrome, not article text (#159)."""
 

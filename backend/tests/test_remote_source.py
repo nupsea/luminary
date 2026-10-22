@@ -209,6 +209,30 @@ async def test_a_missing_page_still_fails_the_request(serve):
         await fetch_remote_document("https://example.com/typo")
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://claude.ai/artifact/Ras74RueBG78azA9UQckRo#8db0990c-95bf",
+        "https://claude.ai/code/artifact/c715c00e-c05a-4f02-8df6-bb92da9b41f2",
+    ],
+)
+async def test_a_claude_artifact_link_is_refused_without_fetching_it(serve, url):
+    requested = serve({"https://": httpx.Response(200, content=b"<html></html>")})
+
+    with pytest.raises(UningestibleRemoteContent) as exc:
+        await fetch_remote_document(url)
+    assert "signed in to claude.ai" in str(exc.value)
+    assert requested == []
+
+
+async def test_a_claude_page_that_is_not_an_artifact_is_still_fetched(serve):
+    page = httpx.Response(200, content=b"<html></html>", headers={"content-type": "text/html"})
+    requested = serve({"https://": page})
+
+    assert await fetch_remote_document("https://claude.ai/download") is None
+    assert requested == ["https://claude.ai/download"]
+
+
 # End to end through the endpoint
 
 
@@ -265,6 +289,22 @@ async def test_ingest_url_refuses_a_linked_word_document_with_415(test_db, serve
 
     assert resp.status_code == 415
     assert "upload the file" in resp.json()["detail"]
+
+
+async def test_ingest_url_refuses_a_claude_artifact_with_415(test_db, serve):
+    _engine, factory, _tmp = test_db
+    serve({})
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/documents/ingest-url",
+            json={"url": "https://claude.ai/artifact/Ras74RueBG78azA9UQckRo"},
+        )
+
+    assert resp.status_code == 415
+    assert "Export it from claude.ai" in resp.json()["detail"]
+    async with factory() as session:
+        assert (await session.execute(select(DocumentModel))).first() is None
 
 
 async def test_ingest_url_still_creates_an_article_for_a_web_page(test_db, serve, monkeypatch):
