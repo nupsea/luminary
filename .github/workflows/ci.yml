@@ -23,6 +23,27 @@ jobs:
             exit 1
           fi
 
+  # The desktop shell compiles only src-tauri/, so a branch that leaves it alone
+  # cannot break it. Master runs it on every push, which still catches a new
+  # stable toolchain's lints.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      shell: ${{ steps.diff.outputs.shell }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - id: diff
+        run: |
+          if [ "$GITHUB_REF" = refs/heads/master ] \
+            || git diff --name-only origin/master...HEAD | grep -qE '^(src-tauri/|Makefile$|\.github/workflows/ci\.yml$)'; then
+            echo shell=true >> "$GITHUB_OUTPUT"
+          else
+            echo shell=false >> "$GITHUB_OUTPUT"
+          fi
+
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -64,8 +85,8 @@ jobs:
   desktop-shell:
     runs-on: macos-14
     timeout-minutes: 20
-    needs: [branch-check]
-    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+    needs: [branch-check, changes]
+    if: always() && needs.changes.outputs.shell == 'true' && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -92,8 +113,8 @@ jobs:
   desktop-shell-windows:
     runs-on: windows-latest
     timeout-minutes: 30
-    needs: [branch-check]
-    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+    needs: [branch-check, changes]
+    if: always() && needs.changes.outputs.shell == 'true' && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
     defaults:
       run:
         working-directory: src-tauri
@@ -188,8 +209,11 @@ jobs:
       - name: Download the local models
         run: uv run python -m app.services.model_prefetch --models-dir "$HOME/.cache/luminary/test-models"
 
+      # Serial, this was 20 minutes against ubuntu's 6 and set every PR's wait.
+      # Each worker gets its own DATA_DIR (conftest); only the model cache is shared,
+      # read-only. loadfile keeps a module's tests, and its fixtures, on one worker.
       - name: Full backend suite, on the platform it got wrong
-        run: uv run pytest
+        run: uv run --with pytest-xdist==3.8.0 pytest -n auto --dist loadfile
 
       - name: Manifest schema
         run: uv run python ../scripts/check_manifest_schema.py
