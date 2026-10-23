@@ -6,10 +6,7 @@ and mastery recompute (I-19).
 """
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
-from task_drain import dispose_engine
 
-import app.database as db_module
 import app.services.graph as graph_module
 from app.models import ConceptModel
 from app.repos.graph_concept_repo import GraphConceptRepo
@@ -22,23 +19,9 @@ pytestmark = pytest.mark.usefixtures("card_documents")
 
 
 @pytest.fixture
-async def test_db(memory_db, tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    engine = memory_db.engine
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine, orig_factory = db_module._engine, db_module._session_factory
-    db_module._engine, db_module._session_factory = engine, factory
-    # fresh graph service (singleton is otherwise suite-wide)
-    orig_graph = graph_module._graph_service
-    graph_module._graph_service = None
-    yield engine, factory
-    db_module._engine, db_module._session_factory = orig_engine, orig_factory
-    graph_module._graph_service = orig_graph
-    await dispose_engine(engine)
+def test_db(memory_db, monkeypatch):
+    monkeypatch.setattr(graph_module, "_graph_service", None)
+    return memory_db.engine, memory_db.factory
 
 
 # LanceDB predicates are interpolated, so ids are shape-checked before they reach

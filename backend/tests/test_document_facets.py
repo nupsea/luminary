@@ -7,22 +7,14 @@ client cannot tell an empty filter from an empty page without asking the server.
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
 from app.main import app
 from tests.factories import make_document
 
 
 @pytest.fixture
-async def test_db(memory_db, tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    engine = memory_db.engine
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    monkeypatch.setattr(db_module, "_engine", engine)
-    monkeypatch.setattr(db_module, "_session_factory", factory)
-    yield engine, factory
-    await engine.dispose()
+def test_db(memory_db):
+    return memory_db.engine, memory_db.factory
 
 
 async def _seed(factory, rows: list[tuple[str, str]]) -> None:

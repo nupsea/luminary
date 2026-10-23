@@ -9,10 +9,7 @@ one-line hint with no source text).
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
-from task_drain import dispose_engine
 
-import app.database as db_module
 from app.models import ConceptModel, FlashcardModel
 from app.services import study_assembler
 from app.services.study_assembler import _concept_evidence_text, _generate_for_concepts
@@ -23,18 +20,8 @@ _TEXT_B = "Dimensional data modeling centers on star schemas with fact and dimen
 
 
 @pytest.fixture
-async def test_db(memory_db, tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    engine = memory_db.engine
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    orig_e, orig_f = db_module._engine, db_module._session_factory
-    db_module._engine, db_module._session_factory = engine, factory
-    yield factory
-    db_module._engine, db_module._session_factory = orig_e, orig_f
-    await dispose_engine(engine)
+def test_db(memory_db):
+    return memory_db.factory
 
 
 async def _seed_two_books_one_concept(factory):

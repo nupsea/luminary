@@ -5,10 +5,7 @@ Override keyed by slug, and apply_overrides re-applies them after re-parse (I-22
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
-from task_drain import dispose_engine
 
-import app.database as db_module
 import app.services.graph as graph_module
 from app.main import app
 from app.models import ConceptModel, FlashcardModel, OverrideModel
@@ -19,22 +16,9 @@ pytestmark = pytest.mark.usefixtures("card_documents")
 
 
 @pytest.fixture
-async def test_db(memory_db, tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    engine = memory_db.engine
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine, orig_factory = db_module._engine, db_module._session_factory
-    db_module._engine, db_module._session_factory = engine, factory
-    orig_graph = graph_module._graph_service
-    graph_module._graph_service = None
-    yield factory
-    db_module._engine, db_module._session_factory = orig_engine, orig_factory
-    graph_module._graph_service = orig_graph
-    await dispose_engine(engine)
+def test_db(memory_db, monkeypatch):
+    monkeypatch.setattr(graph_module, "_graph_service", None)
+    return memory_db.factory
 
 
 async def _add_concept(factory, cid, slug, label="L", kind="concept", status="proposed"):

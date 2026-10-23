@@ -17,10 +17,7 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import (
     FlashcardModel,
     ReviewEventModel,
@@ -36,12 +33,9 @@ pytestmark = pytest.mark.usefixtures("card_documents")
 _T0 = datetime(2026, 9, 10, 9, 0, tzinfo=UTC)
 
 
-@pytest.fixture()
-async def factory(tmp_path):
-    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'purge.db'}")
-    await create_all_tables(engine)
-    yield async_sessionmaker(engine, expire_on_commit=False)
-    await engine.dispose()
+@pytest.fixture
+def factory(memory_db):
+    return memory_db.factory
 
 
 def _card(question: str, document_id: str = "doc-1") -> FlashcardModel:

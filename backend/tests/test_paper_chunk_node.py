@@ -6,30 +6,12 @@ from unittest.mock import patch
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
 from app.models import ChunkModel, SectionModel
 from app.workflows.ingestion import chunk_node
 from tests.factories import make_document
 
 PROSE = " ".join(f"Sentence {i} states a claim about the model." for i in range(60))
-
-
-@pytest.fixture
-async def test_db(memory_db, tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    engine = memory_db.engine
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    orig_engine, orig_factory = db_module._engine, db_module._session_factory
-    db_module._engine, db_module._session_factory = engine, factory
-    yield engine, factory, tmp_path
-    db_module._engine, db_module._session_factory = orig_engine, orig_factory
-    get_settings.cache_clear()
-    await engine.dispose()
 
 
 async def _insert_document(factory, doc_id: str, tmp_path: Path) -> None:

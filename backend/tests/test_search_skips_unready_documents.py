@@ -15,26 +15,15 @@ import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.runtime.chat_nodes.search import search_node
 from app.types import ScoredChunk
 from tests.factories import make_document
 
 
-@pytest.fixture()
-async def test_db(tmp_path, monkeypatch):
-    db_path = tmp_path / "search.db"
-    engine = make_engine(f"sqlite+aiosqlite:///{db_path}")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    monkeypatch.setattr(db_module, "_engine", engine)
-    monkeypatch.setattr(db_module, "_session_factory", factory)
-    yield factory
-    await engine.dispose()
+@pytest.fixture
+def test_db(memory_db):
+    return memory_db.factory
 
 
 async def _add_document(factory, doc_id: str, title: str, stage: str) -> None:

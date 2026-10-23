@@ -10,31 +10,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.models import ChunkModel, DocumentModel
 from app.scripts.reindex_entities import _run, main
 from tests.factories import make_chunk, make_document
 
 
 @pytest.fixture
-async def factory(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path}/test.db")
-    await create_all_tables(engine)
-    f = async_sessionmaker(engine, expire_on_commit=False)
-    orig = db_module._engine, db_module._session_factory
-    db_module._engine, db_module._session_factory = engine, f
-    yield f
-    db_module._engine, db_module._session_factory = orig
-    get_settings.cache_clear()
-    await engine.dispose()
+def factory(memory_db):
+    return memory_db.factory
 
 
 def _args(document_id: str) -> argparse.Namespace:

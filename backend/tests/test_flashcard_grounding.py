@@ -15,11 +15,7 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
-from app.database import make_engine
-from app.db_init import create_all_tables
 from app.main import app
 from app.models import FlashcardModel
 from app.services.flashcard_parsers import (
@@ -140,15 +136,9 @@ class TestFormattingIsNotContent:
         assert excerpt_is_verbatim(quote, self._MARKDOWN + "\n" + self._PDF) is verbatim
 
 
-@pytest.fixture()
-async def test_db(tmp_path, monkeypatch):
-    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'grounding.db'}")
-    await create_all_tables(engine)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    monkeypatch.setattr(db_module, "_engine", engine)
-    monkeypatch.setattr(db_module, "_session_factory", factory)
-    yield factory
-    await engine.dispose()
+@pytest.fixture
+def test_db(memory_db):
+    return memory_db.factory
 
 
 async def _seed(factory) -> str:

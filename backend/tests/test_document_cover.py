@@ -4,37 +4,11 @@ import uuid
 from pathlib import Path
 
 import fitz
-import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import app.database as db_module
 from app.main import app
 from app.models import ImageModel
 from tests.factories import make_document
-
-
-@pytest.fixture
-async def test_db(memory_db, tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    engine = memory_db.engine
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    orig_engine = db_module._engine
-    orig_factory = db_module._session_factory
-    db_module._engine = engine
-    db_module._session_factory = factory
-
-    yield engine, factory, tmp_path
-
-    db_module._engine = orig_engine
-    db_module._session_factory = orig_factory
-    await engine.dispose()
-    get_settings.cache_clear()
 
 
 def _create_dummy_pdf(path: Path):
