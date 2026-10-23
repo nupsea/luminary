@@ -72,7 +72,8 @@ from this repo. The full set is in `docs/invariants.md`.
   request, so a blocking call stalls the whole app. (I-2)
 - **New endpoints need a pytest test**, and the surface manifest must stay covered.
 - **Branch names are CI-enforced**: `feature/ feat/ fix/ bugfix/ hotfix/ chore/ docs/ refactor/ ci/`.
-  A push to any other name fails before the suite runs.
+  A PR from any other name fails before the suite runs. CI runs on PRs and on master,
+  not on a branch push: open the PR to get a run.
 
 ## Do not read
 
