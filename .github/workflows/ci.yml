@@ -1,8 +1,10 @@
 name: CI
 
+# A branch is tested through its PR, which runs it merged into current master.
+# Pushing to the branch as well ran every PR commit twice.
 on:
   push:
-    branches: ["**"]
+    branches: ["master"]
   pull_request:
     branches: ["master"]
 
@@ -13,11 +15,12 @@ concurrency:
 jobs:
   branch-check:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref != 'refs/heads/master'
+    if: github.event_name == 'pull_request'
     steps:
       - name: Check Branch Name
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
         run: |
-          BRANCH_NAME=$(echo ${{ github.ref }} | sed 's/refs\/heads\///')
           if [[ ! $BRANCH_NAME =~ ^(feature\/|bugfix\/|hotfix\/|chore\/|docs\/|feat\/|fix\/|refactor\/|ci\/).+ ]]; then
             echo "Error: Branch name '$BRANCH_NAME' does not follow the convention (feature/..., bugfix/..., hotfix/..., chore/..., docs/..., feat/..., fix/..., refactor/..., ci/...)!"
             exit 1
@@ -48,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [branch-check]
-    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master')
 
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +89,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 20
     needs: [branch-check, changes]
-    if: always() && needs.changes.outputs.shell == 'true' && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+    if: always() && needs.changes.outputs.shell == 'true' && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master')
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -114,7 +117,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     needs: [branch-check, changes]
-    if: always() && needs.changes.outputs.shell == 'true' && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+    if: always() && needs.changes.outputs.shell == 'true' && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master')
     defaults:
       run:
         working-directory: src-tauri
@@ -163,7 +166,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 50
     needs: [branch-check]
-    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master')
     defaults:
       run:
         working-directory: backend
@@ -231,7 +234,7 @@ jobs:
   powershell-syntax:
     runs-on: ubuntu-latest
     needs: [branch-check]
-    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master')
     steps:
       - uses: actions/checkout@v4
       # pwsh is preinstalled on ubuntu-latest; run the parser directly so a
