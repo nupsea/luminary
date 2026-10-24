@@ -42,7 +42,8 @@ _AMBIGUOUS_HINT = re.compile(r"header|footer|comment|related|banner", re.I)
 # Bracketing cases: a site header with a wordmark, eight nav items and a search
 # label measures about twenty words; the "Related work" section of a paper runs
 # to hundreds. Anything also matching an unambiguous hint is furniture at any
-# length -- `footer-nav` is navigation however much text it carries.
+# length -- `footer-nav` is navigation however much text it carries -- unless it holds a
+# large share of the article's prose (`_CONTENT_SHARE`).
 _AMBIGUOUS_KEEP_WORDS = 60
 
 # Class/id names authors give to furniture. Matched as a substring, case-insensitively,
@@ -69,19 +70,43 @@ _FURNITURE_HINT = re.compile(f"{_UNAMBIGUOUS_HINT.pattern}|{_AMBIGUOUS_HINT.patt
 _MIN_REGION_WORDS = 120
 
 
+# A hinted element that holds section headings and this share of the region's words, in prose
+# rather than links, is content whatever it is named. Bracketing cases (#354):
+# andymatuschak.org/prompts keeps 53% of its article in `div.containerForSidebar`, while the real
+# sidebar inside it, `div.recipe.sidebar`, is 4%. A footer or nav menu has no section headings
+# and is mostly link text at any size.
+_CONTENT_SHARE = 0.25
+_MAX_LINK_SHARE = 0.5
+
+
+def _is_article_body(tag: Tag, region_words: int) -> bool:
+    words = len(tag.get_text().split())
+    if region_words == 0 or words < region_words * _CONTENT_SHARE:
+        return False
+    if tag.find(["h2", "h3", "h4", "h5", "h6"]) is None:
+        return False
+    link_words = sum(len(a.get_text().split()) for a in tag.find_all("a"))
+    return link_words < words * _MAX_LINK_SHARE
+
+
+def _is_long_ambiguous(tag: Tag, attribute: str) -> bool:
+    raw = tag.get(attribute) or ""
+    value = " ".join(raw) if isinstance(raw, list) else raw
+    return not _UNAMBIGUOUS_HINT.search(value) and (
+        len(tag.get_text().split()) > _AMBIGUOUS_KEEP_WORDS
+    )
+
+
 def _strip_furniture(root: Tag) -> None:
     for tag in root.find_all(_FURNITURE_TAGS):
         tag.decompose()
+    region_words = len(root.get_text().split())
     for attribute in ("class", "id"):
         for tag in root.find_all(attrs={attribute: _FURNITURE_HINT}):
             # A hint on the region itself is not licence to delete the article.
             if tag is root or tag.decomposed:
                 continue
-            raw = tag.get(attribute) or ""
-            value = " ".join(raw) if isinstance(raw, list) else raw
-            if not _UNAMBIGUOUS_HINT.search(value) and (
-                len(tag.get_text().split()) > _AMBIGUOUS_KEEP_WORDS
-            ):
+            if _is_long_ambiguous(tag, attribute) or _is_article_body(tag, region_words):
                 continue
             tag.decompose()
 

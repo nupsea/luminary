@@ -147,3 +147,37 @@ class TestAmbiguouslyNamedContent:
         )
         region = select_region(_page(f"<article>{PROSE}{footer}</article>"))
         assert "Careers Press Privacy" not in region.get_text()
+
+
+class TestContentInAFurnitureNamedContainer:
+    """andymatuschak.org/prompts holds 53% of its article in `div.containerForSidebar` (#354)."""
+
+    @staticmethod
+    def _section(title: str) -> str:
+        return f"<h2>{title}</h2><p>" + (f"{title} is explained in prose here. " * 15) + "</p>"
+
+    def _page_with_sidebar_container(self, sidebar: str) -> str:
+        middle = (
+            '<div class="containerForSidebar">'
+            + self._section("Simple facts")
+            + self._section("Open lists")
+            + sidebar
+            + "</div>"
+        )
+        return _page(
+            f"<article>{self._section('Introduction')}{middle}"
+            f"{self._section('Conclusion')}</article>"
+        )
+
+    def test_sections_inside_it_are_kept_and_its_real_sidebar_is_not(self):
+        sidebar = '<div class="recipe sidebar"><p>Make chicken stock on Sundays.</p></div>'
+        text = select_region(self._page_with_sidebar_container(sidebar)).get_text()
+        assert "Simple facts is explained" in text
+        assert "Open lists is explained" in text
+        assert "Make chicken stock" not in text
+
+    def test_a_large_menu_of_links_under_a_heading_is_still_removed(self):
+        links = "".join(f'<li><a href="/{i}">Archive page number {i}</a></li>' for i in range(60))
+        menu = f'<div class="sidebar"><h3>Archive</h3><ul>{links}</ul></div>'
+        page = _page(f"<article>{self._section('Introduction')}{menu}</article>")
+        assert "Archive page number" not in select_region(page).get_text()

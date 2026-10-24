@@ -6,6 +6,13 @@
     ],
     "resources": {
       "../build/stage/": ""
+    },
+    "linux": {
+      "deb": {
+        "recommends": [
+          "libvulkan1"
+        ]
+      }
     }
   }
 }

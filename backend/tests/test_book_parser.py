@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from app.services.book_parser import BookParser
+from app.services.parser import DocumentParser
 
 # Helpers
 
@@ -606,3 +607,31 @@ def test_frankenstein_opens_on_its_letters():
     assert "St. Petersburgh" in sections[0].text
     assert "St. Petersburgh" not in sections[-1].text
     assert _in_reading_order(sections, path.read_text(encoding="utf-8"))
+
+
+_HAUNTED_PALACE = [
+    "In the greenest of our valleys,\nBy good angels tenanted,\nOnce a fair and stately palace",
+    "Banners yellow, glorious, golden,\nOn its roof did float and flow;\n(This, all this, was",
+    "Wanderers in that happy valley\nThrough two luminous windows saw\nSpirits moving musically",
+    "And all with pearl and ruby glowing\nWas the fair palace door,\nThrough which came flowing",
+    "But evil things, in robes of sorrow,\nAssailed the monarch's high estate;\n(Ah, let us mourn",
+    "And travellers now within that valley,\nThrough the red-litten windows, see\nVast forms",
+]
+
+
+@pytest.mark.parametrize("indent", ["", "     "])
+def test_a_numbered_poem_inside_a_story_is_not_its_chapters(tmp_path, indent):
+    """Usher's "Haunted Palace" stanzas, I. to VI., were stored as the story's six sections,
+    the opening under "I — In the greenest of our valleys," (#357)."""
+    prose = "\n\n".join(f"Paragraph {i}. {_PROSE}" for i in range(110))
+    poem = "\n\n".join(
+        f"{indent}{n}.\n\n" + "\n".join(indent + line for line in stanza.splitlines())
+        for n, stanza in zip(("I", "II", "III", "IV", "V", "VI"), _HAUNTED_PALACE, strict=True)
+    )
+    f = tmp_path / "usher.txt"
+    f.write_text(f"{prose}\n\n{poem}\n\n{prose[:7000]}\n")
+
+    sections = DocumentParser().parse(f, "txt").sections
+
+    assert {s.heading for s in sections} == {""}
+    assert "In the greenest of our valleys" in "\n".join(s.text for s in sections)
