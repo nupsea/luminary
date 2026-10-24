@@ -141,7 +141,6 @@ from app.types import (
 )
 from app.workflows import ingestion as _ingestion_module  # indirect: _run_pregenerate is patched
 from app.workflows.ingestion import (
-    ContentType,
     _background_tasks,
     run_ingestion,
 )
@@ -244,16 +243,14 @@ def _kind(doc: DocumentModel) -> DocumentKind:
 
 @router.get("", response_model=DocumentListResponse)
 async def list_documents(
-    content_type: str | None = Query(default=None, description="Comma-separated content types"),
     kind: str | None = Query(
         default=None, description="Comma-separated kinds, derived from the format and facets"
     ),
     format: str | None = Query(
         default=None,
         description=(
-            "Comma-separated file formats. Distinct from content_type: an EPUB is "
-            "format `epub` and content_type `book`, which is why filtering for "
-            "e-books by type never matched one."
+            "Comma-separated file formats. Distinct from kind: an EPUB is "
+            "format `epub` and kind `book`."
         ),
     ),
     tag: str | None = Query(default=None, description="Filter by tag value"),
@@ -268,7 +265,6 @@ async def list_documents(
     """Return paginated documents with optional filtering and sorting."""
     filters = DocumentListFilters(
         formats=_csv(format),
-        content_types=_csv(content_type),
         kinds=_csv(kind),
         tag=tag,
         collection_id=collection_id,
@@ -305,7 +301,6 @@ def _list_item(row: DocumentListRow, collections: list[tuple]) -> DocumentListIt
         id=doc.id,
         title=doc.title,
         format=doc.format,
-        content_type=doc.content_type,
         kind=_kind(doc),
         facets=_facets(doc),
         word_count=doc.word_count,
@@ -508,21 +503,15 @@ async def detect_document_type(file: UploadFile = File(...)):
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_document(
     file: UploadFile = File(...),
-    content_type: ContentType | None = Form(None),
     kind: EditableKind | None = Form(None),
     settings: Settings = Depends(get_settings),
 ):
     """Ingest a file. Omit its kind to have the pipeline classify it.
 
     A kind is the reader's choice, as from the card menu: its facets are laid over
-    the measured shape and kept by every later reprocess (#223). The legacy type
-    field is the older form of the same choice, accepted until that column goes.
-
-    Optional rather than required because a supplied content_type is final:
-    classify_node skips every heuristic when the caller names a type. A client
-    that guesses -- the upload dialog defaulted every non-media file to "book"
-    -- silently disables classification, which is not a behaviour a caller
-    should be able to trigger by accident.
+    the measured shape and kept by every later reprocess (#223). Optional because a
+    client that guesses -- the upload dialog once defaulted every file to "book" --
+    overrides the measurement, which no caller should do by accident.
     """
     ext = Path(file.filename or "upload.txt").suffix.lstrip(".").lower()
     if ext and ext not in _ALLOWED_EXTENSIONS:
@@ -540,6 +529,7 @@ async def ingest_document(
 
     _text_fmts = ("pdf", "docx", "txt", "md", "markdown", "mp3", "m4a", "wav", "mp4", "epub")
     fmt = ext if ext in _text_fmts else "txt"
+    content_type = None
     if kind is not None:
         _refuse_media_kind(fmt)
         content_type = CONTENT_TYPE_OF_KIND[kind]
@@ -975,20 +965,19 @@ async def ingest_url(
 
 @router.get("/facets", response_model=DocumentFacetsResponse)
 async def document_facets() -> DocumentFacetsResponse:
-    """Counts per content type, kind and format, for deciding which filters to show.
+    """Counts per kind and format, for deciding which filters to show.
 
     Declared above `/{document_id}` so the router does not read `facets` as an id.
     """
     async with get_session_factory()() as session:
         repo = DocumentRepo(session)
-        by_type, by_format = await repo.facet_counts()
+        by_format = await repo.format_counts()
         by_kind = await DocumentKindRepo(session).kind_counts()
         favorite_count = await repo.favorite_count()
     return DocumentFacetsResponse(
-        content_types=by_type,
         kinds=by_kind,
         formats=by_format,
-        total=sum(by_type.values()),
+        total=sum(by_kind.values()),
         favorite_count=favorite_count,
     )
 
@@ -1033,7 +1022,6 @@ async def get_document(document_id: str):
         id=doc.id,
         title=doc.title,
         format=doc.format,
-        content_type=doc.content_type,
         kind=_kind(doc),
         facets=_facets(doc),
         is_favorite=bool(doc.is_favorite),
@@ -1113,7 +1101,6 @@ async def get_document_overview(document_id: str) -> DocumentOverviewResponse:
         id=doc.id,
         title=doc.title,
         format=doc.format,
-        content_type=doc.content_type,
         kind=_kind(doc),
         tags=_safe_tags(doc.tags),
         reading_progress_pct=reading_progress_pct,
@@ -1173,7 +1160,7 @@ async def serve_audio_file(document_id: str) -> FileResponse:
     """Stream the raw audio file for audio documents (used by the mini-player)."""
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
-    if doc.content_type != "audio":
+    if _kind(doc) != "audio":
         raise HTTPException(status_code=400, detail="Not an audio document")
     fp = Path(doc.file_path)
     if not fp.exists():
@@ -1189,7 +1176,7 @@ async def serve_video_file(document_id: str) -> FileResponse:
     """Stream the raw video file for video documents (used by the HTML5 video player)."""
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
-    if doc.content_type != "video":
+    if _kind(doc) != "video":
         raise HTTPException(status_code=400, detail="Not a video document")
     fp = Path(doc.file_path)
     if not fp.exists():
@@ -1615,8 +1602,6 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
             await sync_document_tag_index(
                 document_id, doc.tags, session, record_manual_provenance=True
             )
-        if body.content_type is not None:
-            doc.content_type = body.content_type
         if body.kind is not None:
             _set_kind(doc, body.kind)
         if body.is_favorite is not None:
@@ -1629,7 +1614,7 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
         "is_favorite": doc.is_favorite,
         "kind": _kind(doc),
     }
-    if body.content_type is not None or body.kind is not None:
+    if body.kind is not None:
         response["note"] = "Re-ingest document to apply new chunking strategy."
     return response
 
@@ -1930,15 +1915,15 @@ async def search_document_sections(
 async def get_conversation_metadata(document_id: str) -> dict:
     """Return speaker roster and timeline for a conversation document.
 
-    Returns 404 if not found, 400 if content_type != 'conversation'.
+    Returns 404 if not found, 400 if its kind is not `conversation`.
     """
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
 
-    if doc.content_type != "conversation":
+    if _kind(doc) != "conversation":
         raise HTTPException(
             status_code=400,
-            detail=f"Document is not a conversation (content_type={doc.content_type})",
+            detail=f"Document is not a conversation (kind={_kind(doc)})",
         )
 
     metadata = doc.conversation_metadata or {

@@ -15,13 +15,13 @@ smoke_requires_local_model
 echo "Sherlock Holmes examined the room carefully. The mystery deepened each moment." > "$SMOKE_TMP/smoke_s83_a.txt"
 DOC1=$(curl -sf -X POST "$BASE/documents/ingest" \
   -F "file=@$SMOKE_TMP/smoke_s83_a.txt;filename=smoke_s83_a.txt;type=text/plain" \
-  -F "content_type=book" \
+  -F "kind=book" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['document_id'])")
 
 echo "Watson recorded the events in his journal. The adventure concluded successfully." > "$SMOKE_TMP/smoke_s83_b.txt"
 DOC2=$(curl -sf -X POST "$BASE/documents/ingest" \
   -F "file=@$SMOKE_TMP/smoke_s83_b.txt;filename=smoke_s83_b.txt;type=text/plain" \
-  -F "content_type=book" \
+  -F "kind=book" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['document_id'])")
 
 # Both documents go however this exits; the script had been leaving two per run.

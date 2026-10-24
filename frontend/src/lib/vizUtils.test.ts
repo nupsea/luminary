@@ -29,15 +29,15 @@ describe("graphEmptyReason", () => {
 
 describe("isCodeDocument", () => {
   it("returns true for canonical code format", () => {
-    expect(isCodeDocument("code", "book")).toBe(true)
+    expect(isCodeDocument("code")).toBe(true)
   })
 
   it("returns false for pdf book document", () => {
-    expect(isCodeDocument("pdf", "book")).toBe(false)
+    expect(isCodeDocument("pdf")).toBe(false)
   })
 
   it("returns true for py extension (python file)", () => {
-    expect(isCodeDocument("py", "tech_article")).toBe(true)
+    expect(isCodeDocument("py")).toBe(true)
   })
 
   it("returns true for ts extension", () => {
@@ -49,7 +49,7 @@ describe("isCodeDocument", () => {
   })
 
   it("returns false for txt format", () => {
-    expect(isCodeDocument("txt", "notes")).toBe(false)
+    expect(isCodeDocument("txt")).toBe(false)
   })
 
   it("returns false for md format", () => {

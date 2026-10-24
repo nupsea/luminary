@@ -77,7 +77,7 @@ async def test_list_documents_returns_basic_fields(test_db):
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
     async with factory() as session:
-        session.add(_make_doc(doc_id, title="My Paper", content_type="paper"))
+        session.add(_make_doc(doc_id, title="My Paper", form="paper"))
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -88,7 +88,7 @@ async def test_list_documents_returns_basic_fields(test_db):
     item = data["items"][0]
     assert item["id"] == doc_id
     assert item["title"] == "My Paper"
-    assert item["content_type"] == "paper"
+    assert item["kind"] == "paper"
     assert item["flashcard_count"] == 0
     assert item["summary_one_sentence"] is None
     assert item["learning_status"] == "not_started"
@@ -210,24 +210,6 @@ async def test_list_documents_shows_the_newest_one_sentence_summary(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents")
     assert resp.json()["items"][0]["summary_one_sentence"] == "Whole book."
-
-
-async def test_list_documents_filter_by_content_type(test_db):
-    """content_type query param filters to matching documents only."""
-    _, factory, _ = test_db
-    async with factory() as session:
-        session.add(_make_doc(content_type="book"))
-        session.add(_make_doc(content_type="paper"))
-        session.add(_make_doc(content_type="notes"))
-        await session.commit()
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get("/documents?content_type=book,paper")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 2
-    types = {item["content_type"] for item in data["items"]}
-    assert types == {"book", "paper"}
 
 
 async def test_list_documents_filter_by_tag(test_db):

@@ -186,6 +186,7 @@ async def test_conversation_metadata_endpoint_returns_roster(test_db):
         id=doc_id,
         title="Test Conversation",
         content_type="conversation",
+        form="dialogue",
         word_count=100,
         file_path="/tmp/conv.txt",
         stage="chunking",

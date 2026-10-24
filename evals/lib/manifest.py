@@ -126,7 +126,7 @@ def ingest_document(backend_url: str, source_file: str) -> str | None:
 
     try:
         with file_path.open("rb") as fh:
-            # No content_type: a supplied one skips classification, so every document
+            # No kind: a supplied one overrides classification, so every document
             # would be chunked as a book rather than as what a user's upload becomes.
             resp = httpx.post(
                 f"{backend_url}/documents/ingest",
@@ -164,8 +164,8 @@ def ingest_document(backend_url: str, source_file: str) -> str | None:
         if stage != last_stage:
             last_stage, last_change = stage, time.time()
         if stage == "complete":
-            kind = httpx.get(f"{backend_url}/documents/{doc_id}", timeout=10.0).json()
-            print(f"  Ingestion complete: {source_file} -> {doc_id} ({kind.get('content_type')})")
+            kind = httpx.get(f"{backend_url}/documents/{doc_id}", timeout=10.0).json().get("kind")
+            print(f"  Ingestion complete: {source_file} -> {doc_id} ({kind})")
             return doc_id
         if stage == "error":
             print(f"  ERROR: ingestion failed for {source_file}", file=sys.stderr)

@@ -132,13 +132,12 @@ async def test_ingest_epub_accepted(test_db, tmp_path):
             resp = await client.post(
                 "/documents/ingest",
                 files={"file": ("book.epub", b"fake content", "application/epub+zip")},
-                data={"content_type": "book"},
+                data={"kind": "book"},
             )
 
     assert resp.status_code == 200
     assert mock_run.called
-    # Check the 4th argument (content_type)
-    assert mock_run.call_args[0][3] == "book"
+    assert mock_run.call_args.kwargs["kind"] == "book"
 
 
 KINDLE_SAMPLE = """\
