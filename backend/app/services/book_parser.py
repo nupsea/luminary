@@ -36,7 +36,7 @@ from markdown_it import MarkdownIt
 
 from app.services import pdf_furniture, pdf_hyphens
 from app.services.source_text import read_source_text
-from app.services.universal_parser import _drop_bodyless, _is_nav_line
+from app.services.universal_parser import _drop_bodyless, _is_nav_line, is_stanza_run
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
@@ -664,7 +664,7 @@ class BookParser:
             if pid == "P7" and not _RE_ENDETH.search(text):
                 continue
             found = [m for m in pat.finditer(text) if _is_heading_line(text, m, pid)]
-            if len(found) >= _MIN_CHAPTERS:
+            if len(found) >= _MIN_CHAPTERS and not is_stanza_run(text, found):
                 all_matches += [_match(m, pid, level) for m in found]
         if all_matches:
             all_matches += [_match(m, "ND", None) for m in _RE_NAMED_DIVISION.finditer(text)]

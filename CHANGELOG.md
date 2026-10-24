@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An EPUB reopens at the paragraph where reading stopped, and can hold one bookmark,** as a PDF does. Chapters run to 20,000 words, so the place saved is the block on screen, not the chapter.
 
 ### Fixed
+- **A numbered poem inside a story became the story's chapters**: *The Fall of the House of Usher* was stored as six sections named after stanzas of "The Haunted Palace". Numerals a few lines apart in a small share of the text are stanzas, not chapters (#357). Existing documents pick this up when reprocessed.
 - **The Linux installer failed with "held broken packages" on a machine whose package lists were days old.** It now refreshes them once and tries again (#358).
 - **The banner for a model split between graphics card and processor said indexing, search, transcription and the learner record would be slower.** None of them runs on the local model; it now names only the work that does (#356).
 - **Math in an Ask answer showed as text, such as "Mean ((\mu))" and "[ f(x) = … ]".** Models write TeX between `\(` `\)` and `\[` `\]`; answers, summaries, explanations and cards now render it. Notes and document text still read those as escaped brackets.

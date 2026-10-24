@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 
 from app.services.source_text import is_nav_line as _is_nav_line
@@ -77,6 +78,21 @@ _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 # A fenced code block's lines are code: "# load the data" in Python and Rust's hidden
 # "# extern crate" lines read as headings otherwise (the Rust book gained two topics).
 _MD_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$", re.M)
+
+
+# A numbered run is a poem's stanzas or a list inside one piece, not chapters, when every
+# marker but the last is this close to the next and the run covers this little of the text.
+# Usher's six stanzas sit 230-260 characters apart in 4% of the story (#357); the closest real
+# chapters measured are The Time Machine's, 2,672 apart. A book of short numbered poems covers
+# all of its text, so it keeps them.
+_STANZA_SPAN_MAX = 1000
+_STANZA_RUN_SHARE = 0.1
+
+
+def is_stanza_run(text: str, matches: list[re.Match[str]]) -> bool:
+    starts = [m.start() for m in matches]
+    close = all(b - a < _STANZA_SPAN_MAX for a, b in pairwise(starts))
+    return close and (starts[-1] - starts[0]) < len(text) * _STANZA_RUN_SHARE
 
 
 def _fenced_spans(text: str) -> list[tuple[int, int]]:
@@ -400,6 +416,8 @@ class UniversalParser:
                 valid_matches.append(m)
 
             if not valid_matches:
+                continue
+            if sig.id.startswith("book_roman") and is_stanza_run(probe_text, valid_matches):
                 continue
 
             # Base Score: match frequency (normalized: 5 matches = 1.0 base score)
