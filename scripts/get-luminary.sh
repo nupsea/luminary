@@ -476,6 +476,14 @@ tell_installed() {
     printf '    To remove the app: %s\n' "$2"
 }
 
+# One attempt, logged on its own so a retry reads only its own messages.
+apt_install() {
+    as_root apt-get install -y -o DPkg::Lock::Timeout=300 "$1" </dev/null 2>&1 | tee "$WORK/apt.log"
+    local status="${PIPESTATUS[0]}"
+    cat "$WORK/apt.log" >>"$WORK/steps.log"
+    return "$status"
+}
+
 install_deb() {
     local deb="$1" pkg exe
     need_space /usr "$NEED_DEB_MB" "the .deb"
@@ -483,10 +491,17 @@ install_deb() {
     # apt reads the file as its sandbox user `_apt`, which cannot enter a 0700 temp dir.
     case "$deb" in "$WORK"/*) chmod 755 "$WORK" && chmod 644 "$deb" || true ;; esac
     say "Installing $(basename "$deb") with apt (asks for your password once)"
-    if ! as_root apt-get install -y -o DPkg::Lock::Timeout=300 "$deb" </dev/null 2>&1 | tee -a "$WORK/steps.log"; then
-        grep -q 'dpkg --configure -a' "$WORK/steps.log" \
+    if ! apt_install "$deb"; then
+        grep -q 'dpkg --configure -a' "$WORK/apt.log" \
             && die "an earlier package install was interrupted; run 'sudo dpkg --configure -a', then run this again"
-        die "apt could not install $(basename "$deb"); its messages are above"
+        # Package lists days old name dependency versions the mirror no longer has (#358).
+        grep -qE 'not installable|held broken packages|Unable to correct problems' "$WORK/apt.log" \
+            || die "apt could not install $(basename "$deb"); its messages are above"
+        say "apt's package lists look out of date; refreshing them and trying again"
+        as_root apt-get update -o DPkg::Lock::Timeout=300 </dev/null 2>&1 | tee -a "$WORK/steps.log" \
+            || die "'apt-get update' failed, so the package lists could not be refreshed; its messages are above"
+        apt_install "$deb" \
+            || die "apt could not install $(basename "$deb"), even with fresh package lists; its messages are above"
     fi
     exe="$(dpkg -L "$pkg" | grep '^/usr/bin/' | head -1)" || true
     [ -n "$exe" ] || die "$pkg installed but no executable was found in /usr/bin"

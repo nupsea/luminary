@@ -184,6 +184,54 @@ def test_a_refusal_saves_no_report(tmp_path):
     assert not (tmp_path / "home/luminary-install-report.txt").exists()
 
 
+def _fake_apt(tmp_path: Path, *, update_fixes: bool) -> Path:
+    """apt-get, dpkg and sudo stand-ins: install fails as on stale lists until an update."""
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir()
+    fresh = tmp_path / "lists-fresh"
+    calls = tmp_path / "apt-calls"
+    update = f'touch "{fresh}"' if update_fixes else ":"
+    scripts = {
+        "sudo": '#!/bin/sh\nexec "$@"\n',
+        "dpkg-deb": "#!/bin/sh\necho luminary\n",
+        "dpkg": '#!/bin/sh\n[ "$1" = -L ] && echo /usr/bin/luminary-desktop\nexit 0\n',
+        "apt-get": (
+            "#!/bin/sh\n"
+            f'echo "$1" >> "{calls}"\n'
+            f'if [ "$1" = update ]; then {update}; exit 0; fi\n'
+            f'[ -e "{fresh}" ] && exit 0\n'
+            "echo ' libsoup-3.0-0 : Depends: libc6 but it is not installable'\n"
+            "echo 'E: Unable to correct problems, you have held broken packages.'\n"
+            "exit 100\n"
+        ),
+    }
+    for name, body in scripts.items():
+        (bin_dir / name).write_text(body)
+        (bin_dir / name).chmod(0o755)
+    return bin_dir
+
+
+@linux_only
+@pytest.mark.parametrize(
+    ("update_fixes", "code", "said", "calls"),
+    [
+        (True, 0, "refreshing them and trying again", "install update install"),
+        (False, 1, "even with fresh package lists", "install update install"),
+    ],
+)
+def test_stale_package_lists_are_refreshed_once(tmp_path, update_fixes, code, said, calls):
+    bin_dir = _fake_apt(tmp_path, update_fixes=update_fixes)
+    result = _run(
+        tmp_path,
+        _release(tmp_path),
+        LUMINARY_FORMAT="deb",
+        PATH=f"{bin_dir}:{os.environ['PATH']}",
+    )
+    assert result.returncode == code, result.stderr
+    assert said in result.stdout + result.stderr
+    assert (tmp_path / "apt-calls").read_text().split() == calls.split()
+
+
 def _library(tmp_path: Path) -> Path:
     data = tmp_path / "home/.local/share/sh.luminary.app"
     for piece in ("luminary.db", "engine/ollama/ollama", "ollama/models/blobs/sha256-x"):
