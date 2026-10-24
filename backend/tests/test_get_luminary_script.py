@@ -436,3 +436,11 @@ def test_both_installers_apply_the_apps_floor_and_device_checks():
     for device in ("nvcuda.dll", "amdhip64.dll", "nvidia-smi", "CUDA_VISIBLE_DEVICES"):
         assert device in ps1 and device in host, device
     assert "CUDA_VISIBLE_DEVICES" in sh
+
+
+def test_the_deb_brings_a_vulkan_loader():
+    """Without libvulkan.so.1 the bundled Vulkan runner cannot load, so an NVIDIA card sat
+    unused on an image whose driver shipped only the ICD file (#355). A recommends, not a
+    depends: apt installs it by default and a host without it can still install the app."""
+    conf = json.loads((SCRIPTS.parent / "src-tauri" / "tauri.linux.conf.json").read_text())
+    assert "libvulkan1" in conf["bundle"]["linux"]["deb"]["recommends"]
