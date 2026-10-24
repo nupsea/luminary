@@ -266,6 +266,35 @@ def test_decode_replaces_an_undecodable_byte_rather_than_raising():
     assert "hello" in decode(b"hello \xff world")
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The Duke of Marlborough.\n" * 40 + "Vide Principes des Negociations, l'Abbé de Mably.\n",
+        "Here is a cool link to read later.\n" * 10 + "\U0001f60e done\n",
+    ],
+    ids=["one-accent-in-long-ascii", "one-emoji"],
+)
+def test_valid_utf8_is_never_guessed_as_a_windows_codepage(text):
+    """I-68: chardet read both as WINDOWS-1252 and stored "AbbÃ©" in the Federalist Papers."""
+    assert decode(text.encode()) == text
+
+
+def test_a_utf8_byte_order_mark_is_not_content():
+    assert decode("﻿café\n".encode()) == "café\n"
+
+
+@pytest.mark.parametrize(
+    ("text", "encoding"),
+    [
+        ("He said “hello” — it’s fine… " * 5, "cp1252"),
+        ("Le café est très bon, à côté de la rivière. " * 5, "latin-1"),
+        ("café naïve\n", "utf-16"),
+    ],
+)
+def test_bytes_that_are_not_utf8_are_still_detected(text, encoding):
+    assert decode(text.encode(encoding)) == text
+
+
 # Every text-reading parser goes through it. Three did their own chardet decode
 # before this module existed, and a fourth that reintroduced one would silently
 # ingest furniture -- so the parsers are tested, not just the module.

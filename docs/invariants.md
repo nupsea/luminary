@@ -253,6 +253,13 @@ corrected sentence wins in both orders. On the same talk: none of the 49 accepte
 mishearings fixed in the unprimed transcript, all 5 left after priming in the primed one, and two runs
 agreed. `tests/test_transcript_correction.py` guards both orders, the locality and the floor.
 
+**I-68. A text source that is valid UTF-8 is decoded as UTF-8; the encoding is guessed only for bytes that are not.**
+Statistical detectors call valid UTF-8 a Windows codepage when non-ASCII is sparse, and the result has
+no replacement characters, so nothing downstream notices. chardet 6 misread 3 of 72 text sources in a
+real library, storing "AbbÃ©" in the Federalist Papers; charset-normalizer misread 1 and reports a
+BOM file as plain `utf_8`, which leaves U+FEFF in front of the text. `source_text.decode` tries strict
+`utf-8-sig` first. `tests/test_source_text.py` guards it.
+
 ## Quality gates
 
 **I-32. An eval metric that could not be computed is a failure, never a pass.**
