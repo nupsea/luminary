@@ -61,7 +61,7 @@ export interface GoldenDatasetDetail extends GoldenDataset {
 export interface DocumentOption {
   id: string
   title: string
-  content_type: string
+  kind: string
   stage: string
 }
 

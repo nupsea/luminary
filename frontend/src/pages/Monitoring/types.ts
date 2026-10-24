@@ -28,7 +28,6 @@ export interface Document {
   id: string
   title: string
   stage: string
-  content_type: string
 }
 
 // Per-section state -- each panel tracks its own loading/error envelope

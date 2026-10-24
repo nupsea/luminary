@@ -191,7 +191,7 @@ export function GenerateDatasetDialog({
                       }}
                     />
                     <span className="min-w-0 flex-1 truncate">{doc.title}</span>
-                    <span className="text-xs text-muted-foreground">{doc.content_type}</span>
+                    <span className="text-xs text-muted-foreground">{doc.kind}</span>
                   </label>
                 ))
               )}

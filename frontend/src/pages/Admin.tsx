@@ -60,7 +60,6 @@ interface Document {
   id: string
   title: string
   stage: string
-  content_type: string
 }
 
 interface SectionState<T> {

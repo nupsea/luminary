@@ -36,11 +36,11 @@ def test_ingest_leaves_classification_to_the_pipeline(tmp_path, monkeypatch):
     def get(url, **kwargs):
         if url.endswith("/status"):
             return _Response({"stage": "complete"})
-        return _Response({"content_type": "paper"})
+        return _Response({"kind": "paper"})
 
     monkeypatch.setattr(httpx, "post", post)
     monkeypatch.setattr(httpx, "get", get)
 
     assert manifest.ingest_document("http://backend", "paper.txt") == "d1"
-    # A supplied content_type is final, so any value here would skip classification.
-    assert "content_type" not in (posted.get("data") or {})
+    # A supplied kind overrides classification, so any value here would skip it.
+    assert not (posted.get("data") or {})

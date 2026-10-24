@@ -45,8 +45,8 @@ history goes to `.luminary-eval/`, apart from the dev library's: the two are dif
 `EVAL_BACKEND=<checkout>/backend` runs the same harness against another build, which is how a
 release is compared with master.
 
-The harness uploads with no `content_type`, as the upload dialog does: a supplied type is final, so
-a forced one measures a corpus no user would have.
+The harness uploads with no `kind`, as the upload dialog does: a supplied kind overrides the
+measurement, so a forced one measures a corpus no user would have.
 
 ## What is not covered
 

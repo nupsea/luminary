@@ -1,19 +1,3 @@
-export type ContentType =
-  | "book"
-  | "paper"
-  | "conversation"
-  | "notes"
-  | "code"
-  | "audio"
-  | "video"
-  | "epub"
-  | "kindle_clippings"
-  | "tech_book"
-  | "tech_article"
-  // Transient: uploads may carry this until ingestion resolves it to a
-  // tech_* variant; rows can render mid-ingest, so display maps cover it.
-  | "technical"
-
 /** What the library calls a document, derived server-side from its format and facets. */
 export type DocumentKind =
   | "book"
@@ -53,7 +37,6 @@ export interface DocumentListItem {
   id: string
   title: string
   format: string
-  content_type: ContentType
   kind: DocumentKind
   facets?: DocumentFacets | null
   word_count: number

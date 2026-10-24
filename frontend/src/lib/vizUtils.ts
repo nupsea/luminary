@@ -49,10 +49,8 @@ const CODE_FORMATS: ReadonlySet<string> = new Set([
  * The format field from the documents API contains either the canonical "code"
  * value or an inferred file extension (e.g., "py", "ts").
  */
-export function isCodeDocument(format: string, contentType?: string): boolean {
-  if (CODE_FORMATS.has(format.toLowerCase())) return true
-  if (contentType === "code") return true
-  return false
+export function isCodeDocument(format: string): boolean {
+  return CODE_FORMATS.has(format.toLowerCase())
 }
 
 export type GraphEmptyReason = "no_documents" | "model_missing" | "extraction_off" | "no_entities"

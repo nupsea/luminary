@@ -37,7 +37,6 @@ DocumentSort = Literal[
 @dataclass(frozen=True)
 class DocumentListFilters:
     formats: list[str]
-    content_types: list[str]
     kinds: list[str] = field(default_factory=list)
     tag: str | None = None
     collection_id: str | None = None
@@ -158,8 +157,6 @@ def _where(filters: DocumentListFilters) -> list[ColumnElement[bool]]:
     clauses: list[ColumnElement[bool]] = []
     if filters.formats:
         clauses.append(DocumentModel.format.in_(filters.formats))
-    if filters.content_types:
-        clauses.append(DocumentModel.content_type.in_(filters.content_types))
     if filters.kinds:
         clauses.append(kind_expr().in_(filters.kinds))
     if filters.tag:
