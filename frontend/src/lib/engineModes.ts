@@ -193,7 +193,7 @@ export function isSplit(host: HostVerdict | undefined): boolean {
 
 /**
  * The banner line for a model split between card and processor, or null. A split is
- * supported, only slower (#156), so it names what runs locally and is slowed, and
+ * supported, only slower (#156), so it names the local-model work it slows, and
  * what Cloud mode would cost. Null in Cloud mode, which already runs that work with
  * the key, and until the routing report says what runs here.
  */
@@ -202,7 +202,9 @@ export function splitNotice(
   routing: RoutingResponse | undefined,
 ): string | null {
   if (!isSplit(host) || !routing || engineMode(routing.mode).id === "cloud") return null
-  const slowed = routing.work.filter((w) => w.on_device && !w.refused_reason)
+  // Only routable rows go through the local model; fixed rows (embedder, reranker,
+  // Whisper, NER, the learner record) never touch the split (#356).
+  const slowed = routing.work.filter((w) => w.routable && w.on_device && !w.refused_reason)
   if (slowed.length === 0) return null
   const pct = Math.floor((host?.gpu_share ?? 0) * 100)
   const labels = joinLabels(slowed.map((w) => w.label.toLowerCase()))

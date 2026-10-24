@@ -120,6 +120,29 @@ describe("splitNotice", () => {
     expect(text).toContain("your provider charges for each request")
   })
 
+  it("names only work that runs on the local model, never a fixed component", () => {
+    const fixed = (id: string, label: string, model: string | null): WorkRoutingItem => ({
+      ...row(id, label, false),
+      model,
+      routable: false,
+    })
+    const text = splitNotice(
+      split(0.58),
+      routing("private", [
+        fixed("indexing", "Indexing your library", "bge-small"),
+        fixed("retrieval", "Finding the passage", "cross-encoder"),
+        fixed("transcription", "Transcribing audio and video", "whisper-base"),
+        fixed("extraction", "Extracting topics and entities", "gliner"),
+        row("study_material", "Writing cards and study material", false),
+        fixed("learner_record", "Your learner record", null),
+      ]),
+    )
+    expect(text).toContain("so writing cards and study material will be slower")
+    for (const label of ["indexing", "finding the passage", "transcribing", "extracting", "learner record"]) {
+      expect(text).not.toContain(label)
+    }
+  })
+
   it("says nothing when the whole model is on the card, or none of it is measured", () => {
     expect(splitNotice(split(1), routing("private", work))).toBeNull()
     expect(splitNotice(split(null), routing("private", work))).toBeNull()

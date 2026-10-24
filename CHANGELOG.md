@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An EPUB reopens at the paragraph where reading stopped, and can hold one bookmark,** as a PDF does. Chapters run to 20,000 words, so the place saved is the block on screen, not the chapter.
 
 ### Fixed
+- **The banner for a model split between graphics card and processor said indexing, search, transcription and the learner record would be slower.** None of them runs on the local model; it now names only the work that does (#356).
 - **Math in an Ask answer showed as text, such as "Mean ((\mu))" and "[ f(x) = … ]".** Models write TeX between `\(` `\)` and `\[` `\]`; answers, summaries, explanations and cards now render it. Notes and document text still read those as escaped brackets.
 - **Adding a claude.ai doc by link stored a 5-word document titled "Claude Artifact" and reported success.** Such a link is now refused with a pointer to export and upload, and any link whose page has under 50 words of text is refused instead of stored.
 - **Inline math such as `$x = y + z$` showed as raw text in the note editor**, though the preview rendered it. It renders as you write, and its source is highlighted on the line being edited and in the split view's editor.
