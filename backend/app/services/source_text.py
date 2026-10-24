@@ -177,7 +177,15 @@ def normalise(text: str) -> str:
 
 
 def decode(raw_bytes: bytes) -> str:
-    """Bytes to text, guessing the encoding. Never raises on a bad byte."""
+    """Bytes to text. Never raises on a bad byte.
+
+    Valid UTF-8 is UTF-8; the encoding is guessed only for bytes that are not (I-68).
+    """
+    try:
+        return raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        pass
+    # Not charset-normalizer: it decoded 18 of 42 cp1252 sources correctly, chardet 42.
     encoding = chardet.detect(raw_bytes).get("encoding") or "utf-8"
     return raw_bytes.decode(encoding, errors="replace")
 

@@ -1870,7 +1870,7 @@ requires-dist = [
     { name = "langchain-core", specifier = ">=1.2.15" },
     { name = "langchain-text-splitters", specifier = ">=1.1.1" },
     { name = "langgraph", specifier = ">=1.0.9" },
-    { name = "litellm", specifier = ">=1.102.2" },
+    { name = "litellm", specifier = "==1.102.2" },
     { name = "markdown-it-py", specifier = ">=4.0.0" },
     { name = "numpy", specifier = ">=2.4.2" },
     { name = "openinference-instrumentation-litellm", specifier = ">=0.1.29" },
