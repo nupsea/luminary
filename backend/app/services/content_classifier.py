@@ -445,6 +445,13 @@ _REFERENCE_MARKER_RATE = 1.5
 # `luminary_conceptual_foundations` at 5,312 is a reference.
 _ARTICLE_MAX_WORDS = 5000
 
+# Titled sub-sections per 1,000 words, against the capped length. Bracketed by
+# `Industrial Policy for the Intelligence Age` at 0.58 (an essay) and DDIA at 0.97.
+_NESTED_TOPIC_RATE = 0.75
+
+# A bare numeral titles nothing: Sherlock Holmes numbers each story's parts I, II, III.
+_UNTITLED_HEADING = re.compile(r"^(?:[IVXLCDM]+|\d+)\.?$")
+
 
 def classify_form(
     raw_text: str,
@@ -506,7 +513,7 @@ def classify_form(
         return "article"
     # A manual titles its sections in markdown or a PDF outline rather than
     # numbering them in the text, which the markers above cannot see.
-    if has_nested_sections(sections):
+    if has_nested_sections(sections, word_count):
         return "reference"
     return "prose"
 
@@ -526,20 +533,27 @@ def is_made_of_dated_units(text: str) -> bool:
     return longest_stretch <= len(text) / 2
 
 
-def has_nested_sections(sections: list[dict]) -> bool:
-    """Whether the document's divisions split into titled sub-sections.
+def has_nested_sections(sections: list[dict], word_count: int) -> bool:
+    """Whether the document's divisions split into titled sub-sections, densely.
 
     A reference is organised for lookup, so its divisions nest: chapter, then
     the topics inside it. A narrative is read in order, and when it nests at all
     it nests narrative divisions -- Part into Chapter, Act into Scene -- so depth
-    counts only where the deeper levels hold topics.
+    counts only where the deeper levels hold topics. An essay or a treatise
+    titles a few of its sub-sections; a reference titles one every page or two.
     """
     divisions = _divisions_by_level(sections)
-    if len(divisions) < 2:
+    if len(divisions) < 2 or word_count <= 0:
         return False
     _top, *deeper = sorted(divisions)
-    topics = [h for lvl in deeper for h in divisions[lvl] if not _NARRATIVE_DIVISION.match(h)]
-    return len(topics) > 1
+    topics = [
+        h
+        for lvl in deeper
+        for h in divisions[lvl]
+        if not _NARRATIVE_DIVISION.match(h) and not _UNTITLED_HEADING.match(h)
+    ]
+    rate = len(topics) / (min(word_count, _MARKER_RATE_WORD_CAP) / 1000)
+    return len(topics) > 1 and rate >= _NESTED_TOPIC_RATE
 
 
 def _divisions_by_level(sections: list[dict]) -> dict[int, list[str]]:
