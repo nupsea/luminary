@@ -20,7 +20,7 @@ from app.repos.document_repo import DocumentRepo
 from app.services.content_classifier import classify_content, classify_form
 from app.services.llm_admission import awaited
 from app.telemetry import trace_ingestion_node
-from app.types import AUDIO_EXTENSIONS, TECHNICAL_CONTENT_TYPES, register_for_form
+from app.types import AUDIO_EXTENSIONS, register_for_form
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _parser,
@@ -29,7 +29,7 @@ from app.workflows.ingestion_nodes._shared import (
     _persist_structure_type,
     _update_stage,
     detect_register,
-    detect_technical_content,
+    measure_domain,
     reader_facets,
     resolve_technical_variant,
 )
@@ -113,36 +113,16 @@ async def _measure_register(form: str | None, pd: dict | None) -> str | None:
     return await detect_register(raw_text) if raw_text.strip() else None
 
 
-async def _measure_facets(
-    content_type: str, form: str | None, pd: dict | None
-) -> tuple[bool | None, str | None]:
+async def _measure_facets(form: str | None, pd: dict | None) -> tuple[bool | None, str | None]:
     """Read the domain and the register from the document, in one pass.
 
     Both are asked of the text rather than derived from the type, because the
     type carries neither: `book` covers a novel and a deep-learning textbook,
     and nothing about a content type says whether a work tells or explains.
+    None when a probe cannot answer, never False; `remeasure_domain` retries.
     """
-    is_technical = await _measure_domain(content_type, pd)
+    is_technical = await measure_domain(form, (pd or {}).get("raw_text") or "")
     return is_technical, await _measure_register(form, pd)
-
-
-async def _measure_domain(content_type: str, pd: dict | None) -> bool | None:
-    """Whether this document's subject is technical.
-
-    Read from the document unless the content type names the subject outright:
-    `paper` says a work has an abstract, not what field it is in. The type list
-    this replaced answered for every type, writing a hard False for every paper
-    and book -- which stripped the technical entity types from "Attention Is All
-    You Need" (70 entities, 0 technical).
-
-    None when the probe cannot answer, never False; `remeasure_domain` retries.
-    """
-    if content_type in TECHNICAL_CONTENT_TYPES:
-        return True
-    raw_text = (pd or {}).get("raw_text") or ""
-    if not raw_text.strip():
-        return None
-    return await detect_technical_content(raw_text)
 
 
 async def classify_node(state: IngestionState) -> IngestionState:
@@ -200,7 +180,7 @@ async def _measure_classification(state: IngestionState) -> IngestionState:
             )
             return {**state, "status": "chunking"}
         form = _measure_form(state)
-        is_technical, register = await _measure_facets(provided, form, state.get("parsed_document"))
+        is_technical, register = await _measure_facets(form, state.get("parsed_document"))
         await _persist_classification(state["document_id"], provided, is_technical, register, form)
         logger.info(
             "classify_node: skipping (user-provided content_type)",
@@ -275,7 +255,7 @@ async def _measure_classification(state: IngestionState) -> IngestionState:
             # legacy map reaches `reference` only through `tech_book`, so a
             # non-technical manual could never be one.
             form = _measure_form(state)
-            is_technical, register = await _measure_facets(content_type, form, pd)
+            is_technical, register = await _measure_facets(form, pd)
             # The classified facets reach the row, not just the state: the library,
             # filters and every later read come from the row.
             await _persist_classification(
