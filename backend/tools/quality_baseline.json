@@ -94,8 +94,6 @@
   "unstable_tests": {},
   "content_type_refs": {
     "app/models.py": 4,
-    "app/repos/document_list_repo.py": 1,
-    "app/repos/document_repo.py": 3,
     "app/routers/audio.py": 1,
     "app/routers/documents.py": 19,
     "app/routers/images.py": 1,
