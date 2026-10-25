@@ -36,6 +36,7 @@ from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _persist_classification,
     _update_stage,
+    as_domain,
     detect_register,
     detect_technical_transcript,
 )
@@ -247,7 +248,7 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
         # which a media document has text to judge. Decided once and persisted so
         # entity reindexing reaches the same answer.
         is_technical = await detect_technical_transcript(raw_text)
-        domain = None if is_technical is None else ("technical" if is_technical else "general")
+        domain = as_domain(is_technical)
         register = await detect_register(raw_text)
         # Turns, whatever the subject: the format keeps it media for the player.
         await _persist_classification(doc_id, "dialogue", domain, register)

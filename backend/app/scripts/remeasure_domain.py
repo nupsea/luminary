@@ -35,10 +35,11 @@ from app.models import DocumentModel
 from app.repos.document_repo import DocumentRepo
 from app.services.content_classifier import classify_form
 from app.types import FACETS_FROM_READER, MEDIA_FORMATS
-from app.workflows.ingestion_nodes._shared import detect_register, measure_domain
+from app.workflows.ingestion_nodes._shared import as_domain, detect_register, measure_domain
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("remeasure_domain")
+
 
 async def _read(doc: DocumentModel, session) -> tuple[str, list[dict], int, str]:
     """(text, sections, word_count, extension) -- everything the measurements need.
@@ -92,7 +93,7 @@ async def main(apply: bool) -> int:
             register = doc.register or (await detect_register(text) if has_text else None)
 
             # A question that goes unanswered again keeps what was known.
-            after = before if measured is None else ("technical" if measured else "general")
+            after = as_domain(measured) or before
             if after == before and register == doc.register and form == doc.form:
                 if after is None or register is None:
                     undecided.append(doc.title)

@@ -199,6 +199,13 @@ async def measure_domain(form: str | None, raw_text: str) -> bool | None:
     return await detect_technical_content(raw_text) if raw_text.strip() else None
 
 
+def as_domain(is_technical: bool | None) -> str | None:
+    """The stored domain for a technical-or-not answer; None stays unanswered, never "general"."""
+    if is_technical is None:
+        return None
+    return "technical" if is_technical else "general"
+
+
 # Kept: transcribe_node imported this name before the probe was generalised.
 detect_technical_transcript = detect_technical_content
 

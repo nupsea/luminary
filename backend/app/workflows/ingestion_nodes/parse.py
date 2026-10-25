@@ -26,6 +26,7 @@ from app.workflows.ingestion_nodes._shared import (
     _persist_extraction_report,
     _persist_structure_type,
     _update_stage,
+    as_domain,
     detect_register,
     measure_domain,
     reader_facets,
@@ -115,8 +116,7 @@ async def _measure_facets(form: str, pd: dict) -> tuple[str | None, str | None]:
     a work tells or explains. None when a probe cannot answer, never "general";
     `remeasure_domain` retries.
     """
-    is_technical = await measure_domain(form, pd.get("raw_text") or "")
-    domain = None if is_technical is None else ("technical" if is_technical else "general")
+    domain = as_domain(await measure_domain(form, pd.get("raw_text") or ""))
     return domain, await _measure_register(form, pd)
 
 
