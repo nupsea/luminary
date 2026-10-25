@@ -903,12 +903,12 @@ if (paraCount) {
       const tech = await page.evaluate(async (api) => {
         const res = await fetch(`${api}/documents?page=1&page_size=100`)
         const data = await res.json()
-        return (data.items ?? []).find((d) => ["tech_book", "tech_article"].includes(d.content_type)) ?? null
+        return (data.items ?? []).find((d) => d.kind === "technical") ?? null
       }, API)
       if (!tech) {
         console.log("  SKIP the Feynman checks: the library holds no tech book or article")
       } else {
-        console.log(`feynman document: ${tech.title} (${tech.content_type})`)
+        console.log(`feynman document: ${tech.title} (${tech.kind})`)
         await page.goto(`${APP}/library?doc=${tech.id}`, { waitUntil: "domcontentloaded" })
         await page.waitForTimeout(3500)
         // The section list is where the button is, and it is not the landing tab.
@@ -943,12 +943,12 @@ if (paraCount) {
 const recording = await page.evaluate(async (api) => {
   const res = await fetch(`${api}/documents?page=1&page_size=50&sort=last_accessed`)
   const data = await res.json()
-  return (data.items ?? []).find((d) => ["audio", "video"].includes(d.content_type)) ?? null
+  return (data.items ?? []).find((d) => ["audio", "video"].includes(d.kind)) ?? null
 }, API)
 if (!recording) {
   console.log("  SKIP the capture-locus checks: the library holds no recording")
 } else {
-  console.log(`recording: ${recording.title} (${recording.content_type})`)
+  console.log(`recording: ${recording.title} (${recording.kind})`)
   await page.goto(`${APP}/library?doc=${recording.id}`, { waitUntil: "domcontentloaded" })
   await page.waitForTimeout(4000)
   const turn = page.locator("[data-chunk-id]").first()

@@ -27,13 +27,14 @@ def test_db(memory_db):
 def _make_doc(
     *,
     title: str,
-    content_type: str = "book",
+    form: str = "prose",
     tags: list[str] | None = None,
     created_at: datetime | None = None,
 ) -> DocumentModel:
     return make_document(
         title=title,
-        content_type=content_type,
+        form=form,
+        domain="general",
         word_count=10,
         page_count=1,
         file_path="/tmp/x.txt",
@@ -69,30 +70,30 @@ async def test_pagination_total_and_page_window(test_db):
 
 
 @pytest.mark.anyio
-async def test_content_type_filter_total_reflects_filter(test_db):
+async def test_kind_filter_total_reflects_filter(test_db):
     _, factory = test_db
     async with factory() as s:
         for i in range(5):
-            s.add(_make_doc(title=f"B{i}", content_type="book"))
+            s.add(_make_doc(title=f"B{i}", form="prose"))
         for i in range(3):
-            s.add(_make_doc(title=f"P{i}", content_type="paper"))
+            s.add(_make_doc(title=f"P{i}", form="paper"))
         await s.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        r = (await c.get("/documents?content_type=book")).json()
+        r = (await c.get("/documents?kind=book")).json()
         assert r["total"] == 5
-        assert all(d["content_type"] == "book" for d in r["items"])
+        assert all(d["kind"] == "book" for d in r["items"])
 
-        r = (await c.get("/documents?content_type=book,paper")).json()
+        r = (await c.get("/documents?kind=book,paper")).json()
         assert r["total"] == 8
 
 
 @pytest.mark.anyio
-async def test_combined_content_type_and_tag_filter(test_db):
+async def test_combined_kind_and_tag_filter(test_db):
     _, factory = test_db
-    a = _make_doc(title="A", content_type="book")
-    b = _make_doc(title="B", content_type="book")
-    cdoc = _make_doc(title="C", content_type="paper")
+    a = _make_doc(title="A", form="prose")
+    b = _make_doc(title="B", form="prose")
+    cdoc = _make_doc(title="C", form="paper")
     async with factory() as s:
         s.add(a)
         s.add(b)
@@ -104,7 +105,7 @@ async def test_combined_content_type_and_tag_filter(test_db):
         await c.patch(f"/documents/{b.id}/tags", json={"tags": ["history"]})
         await c.patch(f"/documents/{cdoc.id}/tags", json={"tags": ["physics"]})
 
-        r = (await c.get("/documents?content_type=book&tag=physics")).json()
+        r = (await c.get("/documents?kind=book&tag=physics")).json()
         assert r["total"] == 1
         assert r["items"][0]["title"] == "A"
 
@@ -115,8 +116,8 @@ async def test_collection_id_filter_returns_members_only(test_db):
     async with factory() as s:
         col = _make_collection("Reading")
         s.add(col)
-        d_in = _make_doc(title="In", content_type="book")
-        d_out = _make_doc(title="Out", content_type="book")
+        d_in = _make_doc(title="In", form="prose")
+        d_out = _make_doc(title="Out", form="prose")
         s.add(d_in)
         s.add(d_out)
         s.add(
@@ -144,7 +145,7 @@ async def test_collection_id_filter_ignores_note_memberships(test_db):
     async with factory() as s:
         col = _make_collection("Mixed")
         s.add(col)
-        d = _make_doc(title="D", content_type="book")
+        d = _make_doc(title="D", form="prose")
         s.add(d)
         # Note membership using doc.id as member_id -- should NOT match.
         s.add(
@@ -170,7 +171,7 @@ async def test_empty_collection_returns_zero(test_db):
     async with factory() as s:
         col = _make_collection("Empty")
         s.add(col)
-        s.add(_make_doc(title="Loose", content_type="book"))
+        s.add(_make_doc(title="Loose", form="prose"))
         await s.commit()
         cid = col.id
 
@@ -210,7 +211,7 @@ async def test_every_sort_and_filter_orders_and_counts_as_before(test_db):
     base = datetime.now(UTC)
     # created oldest first: a, b, c, d
     a = _make_doc(title="delta", created_at=base - timedelta(days=4))
-    b = _make_doc(title="Alpha", created_at=base - timedelta(days=3), content_type="paper")
+    b = _make_doc(title="Alpha", created_at=base - timedelta(days=3), form="paper")
     c = _make_doc(title="charlie", created_at=base - timedelta(days=2))
     d = _make_doc(title="Bravo", created_at=base - timedelta(days=1))
     a.last_accessed_at = base - timedelta(hours=1)
@@ -259,7 +260,7 @@ async def test_every_sort_and_filter_orders_and_counts_as_before(test_db):
         assert await titles("sort=last_accessed") == (4, ["delta", "charlie", "Alpha", "Bravo"])
         assert await titles("sort=weakest-first") == (4, ["Alpha", "charlie", "delta", "Bravo"])
         assert await titles("sort=most-studied") == (4, ["charlie", "Alpha", "delta", "Bravo"])
-        assert await titles("content_type=paper") == (1, ["Alpha"])
+        assert await titles("kind=paper") == (1, ["Alpha"])
         assert await titles("format=txt,pdf&sort=oldest") == (
             4,
             ["delta", "Alpha", "charlie", "Bravo"],

@@ -22,7 +22,7 @@ fi
 echo "Ingesting fixture..."
 INGEST_RESP=$(curl -s -X POST "${BASE}/documents/ingest" \
   -F "file=@${FIXTURE};type=text/plain" \
-  -F "content_type=notes")
+  -F "kind=notes")
 
 DOC_ID=$(echo "$INGEST_RESP" | python3 -c "import sys, json; print(json.load(sys.stdin)['document_id'])" 2>/dev/null || echo "")
 

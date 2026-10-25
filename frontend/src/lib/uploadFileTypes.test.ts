@@ -54,9 +54,9 @@ describe("kindFromFilename", () => {
     expect(kindFromFilename("screencast.mp4")).toBe("video")
   })
 
-  it("defers to the backend for formats that carry any content type", () => {
+  it("defers to the backend for formats that carry any kind", () => {
     // Returning a guess here is not harmless: the backend skips classification
-    // entirely for a supplied content_type, so "book" for every .pdf/.txt/.md
+    // entirely for a supplied kind, so "book" for every .pdf/.txt/.md
     // silently disabled auto-detection for every document that was not media.
     expect(kindFromFilename("paper.pdf")).toBeNull()
     expect(kindFromFilename("textbook.md")).toBeNull()

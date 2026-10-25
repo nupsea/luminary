@@ -22,7 +22,7 @@ echo "=== S197 Smoke: auto-collection gap analysis ==="
 MISSING_ID="smoke-doc-s197-$(date +%s)"
 
 # The create case needs a document that exists: `create_auto_collection` resolves
-# the document through get_or_404 to read its title and content_type, so a
+# the document through get_or_404 to read its title and kind, so a
 # fabricated id is a 404 by design and asking for 201 asked for the wrong thing.
 DOC_ID=$(curl -s "${BASE}/documents" | python3 -c "
 import json, sys

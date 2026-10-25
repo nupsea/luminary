@@ -24,7 +24,7 @@ FIXTURE_EOF
 echo "S86 smoke: uploading fixture document"
 UPLOAD=$(curl -sf -X POST "$BASE/documents/ingest" \
   -F "file=@$FIXTURE;type=text/plain" \
-  -F "content_type=book")
+  -F "kind=book")
 DOC_ID=$(echo "$UPLOAD" | python3 -c "import sys,json; print(json.load(sys.stdin)['document_id'])")
 echo "S86 smoke: document_id=$DOC_ID"
 

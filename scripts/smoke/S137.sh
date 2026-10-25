@@ -74,7 +74,7 @@ UPLOAD_TMPFILE=$(mktemp)
 HTTP_UPLOAD=$(curl -s -o "${UPLOAD_TMPFILE}" -w "%{http_code}" \
   -X POST "${BASE}/documents/ingest" \
   -F "file=@${DOC_TMPFILE};type=text/plain" \
-  -F "content_type=tech_book")
+  -F "kind=technical")
 
 rm -f "${DOC_TMPFILE}"
 

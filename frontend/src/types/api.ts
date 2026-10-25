@@ -1133,14 +1133,9 @@ export interface paths {
          * @description Ingest a file. Omit its kind to have the pipeline classify it.
          *
          *     A kind is the reader's choice, as from the card menu: its facets are laid over
-         *     the measured shape and kept by every later reprocess (#223). The legacy type
-         *     field is the older form of the same choice, accepted until that column goes.
-         *
-         *     Optional rather than required because a supplied content_type is final:
-         *     classify_node skips every heuristic when the caller names a type. A client
-         *     that guesses -- the upload dialog defaulted every non-media file to "book"
-         *     -- silently disables classification, which is not a behaviour a caller
-         *     should be able to trigger by accident.
+         *     the measured shape and kept by every later reprocess (#223). Optional because a
+         *     client that guesses -- the upload dialog once defaulted every file to "book" --
+         *     overrides the measurement, which no caller should do by accident.
          */
         post: operations["ingest_document_documents_ingest_post"];
         delete?: never;
@@ -1201,7 +1196,7 @@ export interface paths {
         };
         /**
          * Document Facets
-         * @description Counts per content type, kind and format, for deciding which filters to show.
+         * @description Counts per kind and format, for deciding which filters to show.
          *
          *     Declared above `/{document_id}` so the router does not read `facets` as an id.
          */
@@ -1730,7 +1725,7 @@ export interface paths {
          * Get Conversation Metadata
          * @description Return speaker roster and timeline for a conversation document.
          *
-         *     Returns 404 if not found, 400 if content_type != 'conversation'.
+         *     Returns 404 if not found, 400 if its kind is not `conversation`.
          */
         get: operations["get_conversation_metadata_documents__document_id__conversation_get"];
         put?: never;
@@ -7173,8 +7168,6 @@ export interface components {
         Body_ingest_document_documents_ingest_post: {
             /** File */
             file: string;
-            /** Content Type */
-            content_type?: ("book" | "conversation" | "notes" | "paper" | "audio" | "video" | "epub" | "kindle_clippings" | "tech_book" | "tech_article" | "technical") | null;
             /** Kind */
             kind?: ("book" | "technical" | "paper" | "conversation" | "notes") | null;
         };
@@ -7872,8 +7865,6 @@ export interface components {
             title: string;
             /** Format */
             format: string;
-            /** Content Type */
-            content_type: string;
             /**
              * Kind
              * @enum {string}
@@ -7975,19 +7966,10 @@ export interface components {
          * DocumentFacetsResponse
          * @description How many documents each filter would match, over the whole library.
          *
-         *     A filter offering zero results is not a filter, it is a dead end -- and the
-         *     library has carried several: `code` is not even a storable content type,
-         *     and `epub` is a format that no document carries as its type.
+         *     A filter offering zero results is not a filter, it is a dead end.
          */
         DocumentFacetsResponse: {
-            /** Content Types */
-            content_types: {
-                [key: string]: number;
-            };
-            /**
-             * Kinds
-             * @default {}
-             */
+            /** Kinds */
             kinds: {
                 [key: string]: number;
             };
@@ -8022,8 +8004,6 @@ export interface components {
             title: string;
             /** Format */
             format: string;
-            /** Content Type */
-            content_type: string;
             /**
              * Kind
              * @enum {string}
@@ -8109,8 +8089,6 @@ export interface components {
             title: string;
             /** Format */
             format: string;
-            /** Content Type */
-            content_type: string;
             /**
              * Kind
              * @enum {string}
@@ -10242,8 +10220,6 @@ export interface components {
             title?: string | null;
             /** Tags */
             tags?: string[] | null;
-            /** Content Type */
-            content_type?: ("book" | "conversation" | "notes" | "paper" | "audio" | "video" | "epub" | "kindle_clippings" | "tech_book" | "tech_article" | "technical") | null;
             /** Kind */
             kind?: ("book" | "technical" | "paper" | "conversation" | "notes") | null;
             /** Is Favorite */
@@ -14021,11 +13997,9 @@ export interface operations {
     list_documents_documents_get: {
         parameters: {
             query?: {
-                /** @description Comma-separated content types */
-                content_type?: string | null;
                 /** @description Comma-separated kinds, derived from the format and facets */
                 kind?: string | null;
-                /** @description Comma-separated file formats. Distinct from content_type: an EPUB is format `epub` and content_type `book`, which is why filtering for e-books by type never matched one. */
+                /** @description Comma-separated file formats. Distinct from kind: an EPUB is format `epub` and kind `book`. */
                 format?: string | null;
                 /** @description Filter by tag value */
                 tag?: string | null;
