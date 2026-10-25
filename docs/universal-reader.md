@@ -63,10 +63,10 @@ Neither field alone picks a layout, so both are stored:
 
 | Field | Source | Values | Answers |
 |---|---|---|---|
-| `documents.content_type` | `_classify` in `workflows/ingestion_nodes/_shared.py` | `book`, `paper`, `tech_book`, `tech_article`, `conversation`, `code`, `notes`, `audio`, `video`, `kindle_clippings`, `epub` | What the document is about. Chunking reads the measured `form` instead (`DocumentProfile.of`, `app/types.py`) |
+| `kind` | derived from `documents.format`, `form` and `domain` (`document_kind`, `app/types.py`); not stored | `book`, `technical`, `paper`, `conversation`, `notes`, `code`, `audio`, `video` | What the document is |
 | `documents.structure_type` | `UniversalParser` signature discovery and `BookParser`, persisted by `parse_node` | `book`, `paper`, `script`, `chat` | How it is laid out |
 
-`content_type` knows a transcript is technical; `structure_type` knows it is
+The kind knows a transcript is technical; `structure_type` knows it is
 dialogue. `structure_type` is null when the parser that ran discovers no
 structure (the PDF font heuristic, the paragraph-split fallback) or the document
 predates the column — it is a refinement, never a prerequisite.
@@ -83,16 +83,16 @@ the two axes onto a layout; `profileSpec()` returns what that layout does.
 
 | Profile | Selected by | Measure | Family | Headings | Dividers |
 |---|---|---|---|---|---|
-| `prose` | `book`, `epub` | 66ch | Serif | Opener | None |
-| `article` | `tech_article`, `notes`, unknown | 72ch | Sans | Hierarchy | None |
-| `paper` | `paper` | 72ch | Sans | Hierarchy | None |
-| `technical` | `tech_book`, `code` | 78ch | Sans | Hierarchy | None |
-| `dialogue` | `conversation`, `audio`, `video`, or `structure_type: chat` | 66ch | Sans | Speaker labels | Per section |
+| `prose` | kind `book` | 66ch | Serif | Opener | None |
+| `article` | kind `technical` with form `article`, or an unknown kind | 72ch | Sans | Hierarchy | None |
+| `paper` | kind `paper` | 72ch | Sans | Hierarchy | None |
+| `technical` | kind `technical` in any other form, or `code` | 78ch | Sans | Hierarchy | None |
+| `dialogue` | kind `conversation`, `audio`, `video`, or `structure_type: chat` | 66ch | Sans | Speaker labels | Per section |
 | `script` | `structure_type: script` | 66ch | Sans | Opener | None |
-| `reference` | `kindle_clippings` | 66ch | Sans | Hierarchy | Per section |
+| `reference` | kind `notes` | 66ch | Sans | Hierarchy | Per section |
 
-`structure_type` overrides `content_type` only for `chat` and `script` — the two
-layouts `content_type` cannot express. `book` and `paper` exist on both axes and
+`structure_type` overrides the kind only for `chat` and `script` — the two
+layouts the kind cannot express. `book` and `paper` exist on both axes and
 must not override, or a technical book laid out in numbered sections would lose
 its 78ch measure to the prose profile.
 

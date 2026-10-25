@@ -57,7 +57,7 @@ async def download_and_launch_ingestion(
                 await session.commit()
         return
     # run_ingestion records its own failures on the document.
-    await run_ingestion(doc_id, str(dest_path), "epub", "technical")
+    await run_ingestion(doc_id, str(dest_path), "epub")
 
 
 async def start_oreilly_ingestion(
@@ -125,7 +125,6 @@ async def start_oreilly_ingestion(
             id=doc_id,
             title=book_title,
             format="epub",
-            content_type="technical",
             word_count=0,
             page_count=0,
             file_path=str(dest_epub),

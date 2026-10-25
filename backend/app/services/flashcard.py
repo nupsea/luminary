@@ -30,7 +30,6 @@ from app.services.flashcard_parsers import (
 from app.services.flashcard_prompts import (
     _BOOK_CONTENT_GUIDELINE,
     _DIFFICULTY_GUIDELINES,
-    _TECH_TITLE_KEYWORDS,
     CLOZE_SYSTEM,
     CLOZE_USER_TMPL,
     FLASHCARD_SYSTEM,
@@ -75,7 +74,6 @@ __all__ = [
     "_BOOK_CONTENT_GUIDELINE",
     "_CLOZE_BLANK_RE",
     "_DIFFICULTY_GUIDELINES",
-    "_TECH_TITLE_KEYWORDS",
     "FlashcardSearchService",
     "FlashcardService",
     "_build_cloze_question",

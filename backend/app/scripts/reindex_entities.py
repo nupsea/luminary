@@ -87,7 +87,6 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
         if doc_row is None:
             logger.warning("reindex_entities: doc_id not found", extra={"doc_id": doc_id})
             return metrics
-        content_type = doc_row.content_type or "notes"
         profile = DocumentProfile.of(doc_row)
 
         chunk_rows = await docs.chunk_ner_inputs(doc_id)
@@ -172,7 +171,6 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
             {
                 "chunk_id": c["id"],
                 "document_id": doc_id,
-                "content_type": content_type,
                 "section_heading": "",
                 "page": 0,
                 "chunk_index": idx,

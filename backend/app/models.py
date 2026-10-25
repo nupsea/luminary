@@ -29,8 +29,6 @@ class DocumentModel(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     format: Mapped[str] = mapped_column(String, nullable=False)  # pdf|docx|txt|md|code
-    # book|paper|conversation|notes|code
-    content_type: Mapped[str] = mapped_column(String, nullable=False)
     word_count: Mapped[int] = mapped_column(Integer, default=0)
     page_count: Mapped[int] = mapped_column(Integer, default=0)
     file_path: Mapped[str] = mapped_column(String, nullable=False)
@@ -70,18 +68,11 @@ class DocumentModel(Base):
     # Approximate publication year parsed from document front matter (Copyright YYYY).
     # Nullable: most documents will not have explicit year information.
     publication_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Whether the content is technical, decided at classify time and persisted so
-    # reindexing reaches the same answer. content_type alone cannot carry this for
-    # media: "audio"/"video" drive timestamped chunking and the player, so a
-    # technical talk keeps its media type and sets this flag instead.
-    # Null = never classified (pre-existing rows).
-    is_technical: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    # Layout discovered while parsing: book|paper|script|chat. Combined with
-    # content_type to pick a reading profile. Null when undiscovered.
+    # Layout discovered while parsing: book|paper|script|chat. Null when undiscovered.
     structure_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    # Facets, written alongside content_type while it stays authoritative.
-    # Shape, subject, and whether it tells or explains. See DocumentProfile.
-    # Null = predates the facets, or nothing has classified this row.
+    # Facets: shape, subject, and whether it tells or explains. See DocumentProfile;
+    # the library's kind derives from these and `format` (#223).
+    # Null = nothing has classified this row, or a probe could not answer.
     form: Mapped[str | None] = mapped_column(String(20), nullable=True)
     domain: Mapped[str | None] = mapped_column(String(20), nullable=True)
     register: Mapped[str | None] = mapped_column(String(20), nullable=True)

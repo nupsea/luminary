@@ -41,6 +41,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+sys.path.insert(0, str(REPO_ROOT / "backend"))
+
+from app.types import document_kind  # noqa: E402
+
 GOLDEN_DIR = REPO_ROOT / "evals" / "golden"
 
 MIN_CHARS = 400
@@ -51,11 +55,13 @@ SEED = 20260815
 
 
 def _documents(con: sqlite3.Connection) -> list[tuple[str, str, str, str]]:  # noqa: D401
-    return con.execute(
-        "SELECT id, title, content_type, file_path FROM documents "
-        "WHERE stage = 'complete' AND content_type != 'audio' "
-        "ORDER BY id"
+    """(id, title, kind, file_path) for every complete document but audio."""
+    rows = con.execute(
+        "SELECT id, title, format, form, domain, file_path FROM documents "
+        "WHERE stage = 'complete' ORDER BY id"
     ).fetchall()
+    out = [(i, t, document_kind(fmt, form, domain), p) for i, t, fmt, form, domain, p in rows]
+    return [row for row in out if row[2] != "audio"]
 
 
 def _passages(con: sqlite3.Connection, doc_id: str) -> list[str]:
@@ -137,7 +143,7 @@ def main() -> int:
                 "question": f"Generate flashcards from a {kind} passage ({title})",
                 "chunk_id_or_text": text,
                 "expected_card_count": args.cards_per_passage,
-                "content_type": kind,
+                "kind": kind,
             }
             if corpus is not None:
                 # No id: the runner resolves the file in whichever library it is pointed at.
@@ -174,15 +180,15 @@ def main() -> int:
         },
         "rows": len(rows),
         "row_provenance": "sampled",
-        "by_content_type": {
-            kind: sum(1 for r in rows if r["content_type"] == kind)
-            for kind in sorted({r["content_type"] for r in rows})
+        "by_kind": {
+            kind: sum(1 for r in rows if r["kind"] == kind)
+            for kind in sorted({r["kind"] for r in rows})
         },
     }
     (out.parent / f"{out.stem}.meta.json").write_text(json.dumps(meta, indent=2) + "\n")
 
     print(f"{len(rows)} rows -> {out}")
-    for kind, n in meta["by_content_type"].items():
+    for kind, n in meta["by_kind"].items():
         print(f"  {kind:<16} {n}")
     return 0
 

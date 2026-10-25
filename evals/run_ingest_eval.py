@@ -33,6 +33,7 @@ if str(REPO_ROOT / "backend") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "backend"))
 
 from app.services.universal_parser import read_document_text  # noqa: E402
+from app.types import document_kind  # noqa: E402
 from evals.generate_golden import strip_gutenberg_boilerplate  # noqa: E402
 from evals.lib.environment import capture as capture_environment  # noqa: E402
 from evals.lib.manifest import load_manifest, lookup_document_by_filename  # noqa: E402
@@ -94,18 +95,18 @@ def main() -> None:
     con = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
     if args.all_documents:
         rows = con.execute(
-            "SELECT file_path, id, format, content_type FROM documents "
+            "SELECT file_path, id, format, form, domain FROM documents "
             "WHERE stage = 'complete' AND file_path IS NOT NULL"
         ).fetchall()
         sources = {r[0]: r[1] for r in rows}
         formats = {r[0]: (r[2] or "?") for r in rows}
         # Two axes, because they answer different questions. Format is the parse
-        # path -- a zip container fails differently from a text file. Content
-        # type is the chunker and prompt path the product chose. They are not
-        # the same partition: a play, a legal corpus and a novel all arrive as
-        # `book`, so any difference between them is emergent rather than by
-        # design, and that is only visible when both groupings are printed.
-        content_types = {r[0]: (r[3] or "?") for r in rows}
+        # path -- a zip container fails differently from a text file. The kind
+        # is the chunker and prompt path the product chose. They are not the
+        # same partition: a play, a legal corpus and a novel are all `book`, so
+        # any difference between them is emergent rather than by design, and
+        # that is only visible when both groupings are printed.
+        content_types = {r[0]: document_kind(r[2], r[3], r[4]) for r in rows}
     else:
         manifest = load_manifest()
         # The manifest is a per-database cache (#143); an id this database lacks

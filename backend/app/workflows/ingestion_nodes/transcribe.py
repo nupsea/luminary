@@ -247,12 +247,10 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
         # which a media document has text to judge. Decided once and persisted so
         # entity reindexing reaches the same answer.
         is_technical = await detect_technical_transcript(raw_text)
+        domain = None if is_technical is None else ("technical" if is_technical else "general")
         register = await detect_register(raw_text)
-        if is_technical is not None or register is not None:
-            # A technical talk keeps its media type for the player and carries its
-            # subject in `domain`.
-            legacy_type = "video" if fmt == "mp4" else "audio"
-            await _persist_classification(doc_id, legacy_type, is_technical, register)
+        # Turns, whatever the subject: the format keeps it media for the player.
+        await _persist_classification(doc_id, "dialogue", domain, register)
 
         logger.info(
             "transcribe_node: done",
@@ -261,14 +259,15 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
                 "segments": len(segments),
                 "duration": duration,
                 "transcript_source": transcript_source,
-                "is_technical": is_technical,
+                "domain": domain,
             },
         )
         return {
             **state,
             "parsed_document": parsed_document,
             "audio_duration_seconds": duration,
-            "is_technical": is_technical,
+            "form": "dialogue",
+            "domain": domain,
             "_audio_chunks": audio_chunks,
             "status": "chunking",
         }

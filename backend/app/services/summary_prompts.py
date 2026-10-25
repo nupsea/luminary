@@ -74,7 +74,7 @@ LIBRARY_SYSTEM_PROMPTS: dict[str, str] = {
 
 # What to say about each kind of document, appended to the mode instruction.
 # One instruction for all of them asked a conference talk for "character arcs"
-# and lost every tool it named (#105). Keyed on the facets, not content_type:
+# and lost every tool it named (#105). Keyed on the facets, not a type:
 # a manual and a novel are both "book".
 _FORM_GUIDANCE: dict[str, str] = {
     "prose": (

@@ -5,12 +5,9 @@ from langgraph.graph import END, START, StateGraph
 
 from app.telemetry import trace_chain
 from app.workflows.ingestion_nodes._shared import (
-    CHUNK_CONFIGS,  # noqa: F401  re-exported for back-compat
     ENTITY_TAIL_MAX,  # noqa: F401  re-exported for back-compat
-    ContentType,  # noqa: F401  re-exported for back-compat
     IngestionState,
     _background_tasks,  # noqa: F401  re-exported for tests/test_integration.py
-    _classify,  # noqa: F401  re-exported for back-compat (tests import from ingestion)
     _parser,  # noqa: F401  re-exported for back-compat
     _update_stage,
     build_entity_tail,  # noqa: F401  re-exported for back-compat
@@ -88,7 +85,6 @@ async def run_ingestion(
     document_id: str,
     file_path: str,
     format: str,
-    content_type: str | None = None,
     parsed_document: dict[str, Any] | None = None,
     kind: str | None = None,
 ) -> None:
@@ -97,7 +93,6 @@ async def run_ingestion(
         "file_path": file_path,
         "format": format,
         "parsed_document": parsed_document,
-        "content_type": content_type,
         "kind": kind,
         "chunks": None,
         "status": "parsing" if parsed_document is None else "classifying",
@@ -108,7 +103,7 @@ async def run_ingestion(
     }
     logger.info(
         "Ingestion task started",
-        extra={"document_id": document_id, "format": format, "content_type": content_type},
+        extra={"document_id": document_id, "format": format, "kind": kind},
     )
     if parsed_document is None:
         await _update_stage(document_id, "parsing")

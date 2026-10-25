@@ -6,7 +6,6 @@ by prompt boilerplate. Pure module: no I/O, no DB, no LLM calls.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 from app.services.prompt_spec import (
@@ -16,7 +15,7 @@ from app.services.prompt_spec import (
     render_for,
     step_decomposition,
 )
-from app.types import DocumentProfile
+from app.types import MEDIA_FORMATS, DocumentProfile
 
 if TYPE_CHECKING:
     from app.models import DocumentModel
@@ -431,14 +430,6 @@ CLOZE_USER_TMPL = (
 )
 
 
-_TECH_TITLE_KEYWORDS = re.compile(
-    r"\b(programming|systems|distributed|database|algorithm|machine learning"
-    r"|deep learning|neural|artificial intelligence|reinforcement learning"
-    r"|data science|data structures|statistics|mathematics"
-    r"|software|engineering|computer|kubernetes|docker|linux|network|security"
-    r"|operating system)\b",
-    re.IGNORECASE,
-)
 
 
 # What to ask of each kind of material. Distilled from the card-writing canon
@@ -474,57 +465,20 @@ _GENRE_STRATEGY = {
 def _infer_genre(doc: DocumentModel | None, *, has_speakers: bool | None = None) -> str:
     """What kind of card this document wants.
 
-    `DocumentProfile.card_genre` decides it for any measured document. The
-    `content_type` branches are the fallback for rows ingested before the
-    facets, and they are wrong two ways: a book is called technical from a
-    keyword in its *title*, and every video is called a meeting -- so a recorded
-    technical talk was asked who owns the action item instead of for the
-    technique. A profile that determines nothing falls through rather than
-    defaulting; that guess is how "The Odyssey" came to be non-fiction.
+    `DocumentProfile.card_genre` decides it whenever the facets do. What is left
+    falls through rather than guessing a genre; that guess is how "The Odyssey"
+    came to be non-fiction.
     """
-    if doc is None:
-        return "non-fiction"
     profile = DocumentProfile.from_row(doc)
     if profile and profile.card_genre:
         return profile.card_genre
-    content_type = (doc.content_type or "").lower()
-    # normalise underscores so slugged titles ("d2l_dive_into_deep_learning") match
-    title = (doc.title or "").lower().replace("_", " ")
-    if content_type in ("tech_book", "tech_article", "code"):
-        return "technical"
-    if content_type in ("paper", "pdf", "web", "article"):
-        return "academic"
-    if content_type == "book":
-        return "technical" if _TECH_TITLE_KEYWORDS.search(title) else "non-fiction"
-    # A transcript's value is the decision and its owner, which the non-fiction
-    # prompt does not ask for; it also holds the most volatile facts in a library.
-    if content_type in ("conversation", "transcript", "meeting"):
+    if doc is not None and doc.form == "dialogue":
+        # A recording is not automatically a meeting: speaker labels are the
+        # evidence of more than one participant, and a talk carries none.
+        # Without them it is expository -- weaker on a meeting, not wrong on a talk.
+        if doc.format in MEDIA_FORMATS:
+            return "conversation" if has_speakers else "non-fiction"
         return "conversation"
-    # A recording is not automatically a meeting: this is the defect the docstring
-    # above already names, and `audio` is how it reaches real documents. A
-    # conference talk in a user's library was ingested as `audio`, so its cards
-    # were written under "ask what was decided, who owns it" -- a question that
-    # material does not answer.
-    #
-    # NOT claimed: that this produced any particular bad card. The suspicion was
-    # a deck question reading "How did the requirement for TEAM OWNERSHIP in AI
-    # generation change...", and 12 fresh generations from that talk's opening
-    # under each strategy produced **0 ownership-framed questions either way**.
-    # The mis-mapping is real and worth fixing on the docstring's own evidence;
-    # its effect on question wording is unmeasured, and one draw of a card is not
-    # a measurement of a prompt.
-    #
-    # Speaker labels are the evidence that there was more than one participant.
-    # `conversation_chunker` writes them, and in a real library every chunk of
-    # every `conversation` document carries one while all 11 `audio` documents
-    # carry none -- so the signal separates exactly the two populations this
-    # branch confuses. Without labels a recording is treated as expository, which
-    # asks what was claimed and why: weaker than the meeting prompt on an actual
-    # meeting, and not wrong on a talk. That asymmetry is the reason for the
-    # default, since a caller that knows better passes `has_speakers`.
-    if content_type in ("audio", "video"):
-        return "conversation" if has_speakers else "non-fiction"
-    # notes / unknown: non-fiction recall prompt is safer than narrative
     return "non-fiction"
 
 

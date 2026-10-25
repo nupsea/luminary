@@ -126,18 +126,16 @@ from app.services.remote_source import (
 from app.services.summarizer import PREGENERATE_MODES
 from app.services.transcript_fix import fix_term
 from app.services.transcript_vocabulary import vocabulary_from_metadata
-from app.services.type_detection import detect_content_type
+from app.services.type_detection import detect_kind
 from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
 from app.storage import library_root
 from app.types import (
-    CONTENT_TYPE_OF_KIND,
     MEDIA_FORMATS,
     DocumentKind,
     DocumentProfile,
     EditableKind,
     document_kind,
-    kind_of_content_type,
 )
 from app.workflows import ingestion as _ingestion_module  # indirect: _run_pregenerate is patched
 from app.workflows.ingestion import (
@@ -221,9 +219,9 @@ __all__ = [
 def _facets(doc: DocumentModel) -> DocumentFacets:
     """The document's stored facets, plus the card strategy they imply.
 
-    Read from the row rather than re-derived from `content_type`: the row holds
-    what a classifier actually decided, and a derivation would paper over the
-    documents nothing has classified yet. A null `domain` reaches the client as
+    Read from the row rather than defaulted: the row holds what a classifier
+    actually decided, and a default would paper over the documents nothing has
+    classified yet. A null `domain` reaches the client as
     null so it can be shown as unclassified rather than as "general".
     """
     profile = DocumentProfile.from_row(doc)
@@ -491,12 +489,9 @@ async def detect_document_type(file: UploadFile = File(...)):
         tmp.write_bytes(content)
         # Detection is a convenience -- ingestion classifies again regardless --
         # so it is bounded and gives up rather than leaving the dialog waiting.
-        legacy = await detect_content_type(
-            tmp, fmt, file.filename or "", timeout=_DETECT_TIMEOUT_SECONDS
-        )
+        kind = await detect_kind(tmp, fmt, file.filename or "", timeout=_DETECT_TIMEOUT_SECONDS)
     finally:
         tmp.unlink(missing_ok=True)
-    kind = kind_of_content_type(legacy, fmt) if legacy else None
     return {"kind": kind, "detected": kind is not None}
 
 
@@ -529,10 +524,8 @@ async def ingest_document(
 
     _text_fmts = ("pdf", "docx", "txt", "md", "markdown", "mp3", "m4a", "wav", "mp4", "epub")
     fmt = ext if ext in _text_fmts else "txt"
-    content_type = None
     if kind is not None:
         _refuse_media_kind(fmt)
-        content_type = CONTENT_TYPE_OF_KIND[kind]
 
     async with get_session_factory()() as session:
         # Deduplication: look for an existing document with the same file hash.
@@ -567,15 +560,11 @@ async def ingest_document(
                 # Previous attempt failed — reset stage and retry ingestion on
                 # the same document record so no duplicate row is created.
                 existing.stage = "parsing"
-                if content_type:
-                    existing.content_type = content_type
                 # commit stage reset before the background job polls document.stage
                 await session.commit()
                 get_ingestion_jobs().launch(
                     existing.id,
-                    run_ingestion(
-                        existing.id, existing.file_path, existing.format, content_type, kind=kind
-                    ),
+                    run_ingestion(existing.id, existing.file_path, existing.format, kind=kind),
                 )
                 logger.info(
                     "Retrying failed ingestion on existing doc",
@@ -614,10 +603,6 @@ async def ingest_document(
             id=doc_id,
             title=Path(file.filename or "upload").stem,
             format=fmt,
-            # Provisional when the caller left it to us: classify_node persists
-            # the real type before chunk_node reads it, so nothing branches on
-            # this value. It exists only to satisfy the NOT NULL column.
-            content_type=content_type or "notes",
             word_count=0,
             page_count=0,
             file_path=str(dest),
@@ -630,7 +615,7 @@ async def ingest_document(
         await session.commit()
 
     get_ingestion_jobs().launch(
-        doc_id, run_ingestion(doc_id, str(dest), fmt, content_type, kind=kind)
+        doc_id, run_ingestion(doc_id, str(dest), fmt, kind=kind)
     )
     logger.info("Ingestion started", extra={"doc_id": doc_id})
     return {"document_id": doc_id, "status": "processing"}
@@ -644,7 +629,7 @@ async def ingest_kindle(
     """Ingest a Kindle My Clippings.txt file.
 
     Parses highlights grouped by book title and creates one document per book.
-    Each created document is tagged with 'kindle' and uses content_type='kindle_clippings'.
+    Each created document is tagged with 'kindle'.
     """
     filename = file.filename or "My Clippings.txt"
     if not re.search(r"clippings", filename, re.IGNORECASE):
@@ -684,7 +669,6 @@ async def ingest_kindle(
                 id=doc_id,
                 title=parsed_doc.title,
                 format="txt",
-                content_type="kindle_clippings",
                 word_count=parsed_doc.word_count,
                 page_count=0,
                 file_path=str(dest),
@@ -699,7 +683,7 @@ async def ingest_kindle(
             await session.commit()
 
         get_ingestion_jobs().launch(
-            doc_id, run_ingestion(doc_id, str(dest), "txt", "kindle_clippings")
+            doc_id, run_ingestion(doc_id, str(dest), "txt")
         )
         document_ids.append(doc_id)
         logger.info(
@@ -718,9 +702,7 @@ async def ingest_kindle(
 async def _ingest_remote_pdf(doc_id: str, remote: RemoteDocument, settings: Settings) -> dict:
     """Store a PDF fetched from a URL and put it through the upload pipeline.
 
-    Identical to an uploaded PDF from here on. content_type is 'technical'
-    because nothing yet knows whether it is a paper or a book; classify_node
-    reads the parsed text and resolves it.
+    Identical to an uploaded PDF from here on, its subject asked like any other's.
     """
     raw_dir = library_root(settings) / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -732,7 +714,6 @@ async def _ingest_remote_pdf(doc_id: str, remote: RemoteDocument, settings: Sett
             id=doc_id,
             title=remote.filename,
             format="pdf",
-            content_type="technical",
             word_count=0,
             page_count=0,
             file_path=str(dest),
@@ -744,7 +725,7 @@ async def _ingest_remote_pdf(doc_id: str, remote: RemoteDocument, settings: Sett
         session.add(doc)
         await session.commit()
 
-    get_ingestion_jobs().launch(doc_id, run_ingestion(doc_id, str(dest), "pdf", "technical"))
+    get_ingestion_jobs().launch(doc_id, run_ingestion(doc_id, str(dest), "pdf"))
     logger.info(
         "Linked PDF ingestion started",
         extra={"doc_id": doc_id, "url": remote.url, "size_bytes": len(remote.content)},
@@ -802,7 +783,6 @@ async def ingest_url(
                 id=doc_id,
                 title=parsed.title,
                 format="md",
-                content_type="tech_article",
                 word_count=parsed.word_count,
                 page_count=1,
                 file_path=str(dest),
@@ -832,7 +812,6 @@ async def ingest_url(
                 doc_id,
                 str(dest),
                 "md",
-                "tech_article",
                 parsed_document={
                     "title": parsed.title,
                     "format": "md",
@@ -935,7 +914,6 @@ async def ingest_url(
             id=doc_id,
             title=video_title,
             format=_yt_module.AUDIO_SUFFIX.lstrip("."),
-            content_type="audio",
             word_count=0,
             page_count=0,
             file_path=str(dest),
@@ -1741,12 +1719,7 @@ async def reparse_document(document_id: str, body: ReparseRequest) -> ReparseRes
                 ),
             )
         anchored = await svc.count_anchored_rows(session, document_id)
-        source_url, file_path, fmt, content_type = (
-            doc.source_url,
-            doc.file_path,
-            doc.format,
-            doc.content_type,
-        )
+        source_url, file_path, fmt = doc.source_url, doc.file_path, doc.format
 
     if not body.confirm:
         return ReparseResponse(
@@ -1803,7 +1776,7 @@ async def reparse_document(document_id: str, body: ReparseRequest) -> ReparseRes
 
     get_ingestion_jobs().launch(
         document_id,
-        run_ingestion(document_id, file_path, fmt, content_type, parsed_document=parsed_document),
+        run_ingestion(document_id, file_path, fmt, parsed_document=parsed_document),
     )
     logger.info("Re-parse started", extra={"document_id": document_id, "source": source})
     return ReparseResponse(

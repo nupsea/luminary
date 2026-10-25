@@ -69,7 +69,7 @@ def _fetch_chunks(backend: str, limit: int) -> tuple[list[dict], bool]:
                 )
                 if len(collected) >= limit:
                     break
-            technical = technical or bool(doc.get("is_technical"))
+            technical = technical or (doc.get("facets") or {}).get("domain") == "technical"
     return collected, technical
 
 
@@ -98,7 +98,7 @@ def _measure_in_process(
     rss_loaded = proc.memory_info().rss
 
     t1 = time.monotonic()
-    entities = extractor.extract(chunks, "book", is_technical=is_technical)
+    entities = extractor.extract(chunks, is_technical=is_technical)
     extract_s = time.monotonic() - t1
 
     return {
