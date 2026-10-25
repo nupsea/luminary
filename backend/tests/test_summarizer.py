@@ -41,7 +41,7 @@ async def _insert_doc_and_chunks(
         session.add(
             make_document(
                 id=doc_id,
-                content_type="notes",
+                form="entries",
                 word_count=sum(token_counts),
                 page_count=1,
                 file_path=str(tmp_path / "doc.txt"),

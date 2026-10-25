@@ -24,15 +24,15 @@ async def test_an_old_transcript_gets_one_section_per_window_and_a_replay_adds_n
     try:
         await init_database(engine)
         async with engine.begin() as conn:
-            for doc, ct in (("talk", "audio"), ("book", "book")):
+            for doc, fmt, form in (("talk", "mp3", "dialogue"), ("book", "txt", "prose")):
                 await conn.execute(
                     text(
-                        "INSERT INTO documents (id, title, format, content_type, word_count, "
+                        "INSERT INTO documents (id, title, format, form, word_count, "
                         "page_count, file_path, stage, tags, created_at, last_accessed_at) "
-                        "VALUES (:d, :d, 'mp3', :ct, 9, 0, 'x', 'complete', '[]', "
+                        "VALUES (:d, :d, :fmt, :form, 9, 0, 'x', 'complete', '[]', "
                         "'2026-03-31', '2026-03-31')"
                     ),
-                    {"d": doc, "ct": ct},
+                    {"d": doc, "fmt": fmt, "form": form},
                 )
                 for i, words in enumerate(("Hey everyone.", "It is calculus.", "Three ideas.")):
                     await conn.execute(

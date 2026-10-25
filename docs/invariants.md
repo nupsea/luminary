@@ -39,6 +39,12 @@ the next yield. `tests/test_streaming.py` fails CI otherwise.
 `drop_table()` for real user tables. `tests/test_schema_drift.py` builds its database by running the
 migrations: built from `models.py`, it agreed with itself and passed with a revision deleted.
 
+**I-69. A column leaves a table that others reference by `ALTER TABLE … DROP COLUMN`, never batch mode.**
+Batch mode copies the table, drops the original and renames the copy. The app's connection has
+foreign keys on, so that drop is a delete: on a copy of the dev library, rebuilding `documents`
+took 2,296 of 2,587 cards with it. SQLite drops an unindexed, unkeyed column in place since 3.35.
+`tests/test_drop_content_type_migration.py` fails CI if an upgrade loses a card.
+
 ## Answers, citations and headings
 
 **I-33. A citation excerpt is a quote the grounding contains. Nothing invents one.**

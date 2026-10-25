@@ -27,7 +27,8 @@ def _make_doc(doc_id: str, suffix: str = "") -> DocumentModel:
     return make_document(
         id=doc_id,
         title=f"Test Book{suffix}",
-        content_type="tech_book",
+        form="reference",
+        domain="technical",
         page_count=10,
         file_path=f"/tmp/t{suffix}.pdf",
     )

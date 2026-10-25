@@ -8,18 +8,18 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from app.services.content_classifier import classify_content
 from app.services.parser import DocumentParser
-from app.workflows.ingestion import _classify
 from tests.factories import make_chunk, make_document, make_section
 
 # Shared DB fixture
 
 
-# _classify() pure function tests
+# classify_content() pure function tests
 
 
 def test_classify_epub_by_extension():
-    assert _classify("any text", [], 1000, "epub") == "book"
+    assert classify_content("any text", [], 1000, "epub") == "book"
 
 
 def test_classify_kindle_clippings_by_content():
@@ -30,17 +30,17 @@ def test_classify_kindle_clippings_by_content():
         "A great passage from the book.\n"
         "=========="
     )
-    result = _classify(sample_text, [], 100, "txt")
+    result = classify_content(sample_text, [], 100, "txt")
     assert result == "kindle_clippings"
 
 
 def test_classify_kindle_clippings_by_filename():
-    result = _classify("plain text content", [], 100, "txt", filename="My Clippings.txt")
+    result = classify_content("plain text content", [], 100, "txt", filename="My Clippings.txt")
     assert result == "kindle_clippings"
 
 
 def test_classify_epub_takes_priority_over_kindle_content():
-    result = _classify("==========\nbookmark content\n==========", [], 50, "epub")
+    result = classify_content("==========\nbookmark content\n==========", [], 50, "epub")
     assert result == "book"
 
 
@@ -194,7 +194,7 @@ async def test_flashcard_generation_works_on_kindle_doc(test_db):
         doc = make_document(
             id=doc_id,
             title="The Great Gatsby",
-            content_type="kindle_clippings",
+            form="entries",
             word_count=200,
             file_path="/tmp/test.txt",
             file_hash=None,

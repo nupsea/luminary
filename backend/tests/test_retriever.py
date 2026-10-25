@@ -20,7 +20,7 @@ async def _insert_doc_and_chunk(factory, tmp_path, doc_id: str, chunk_id: str, t
         session.add(
             make_document(
                 id=doc_id,
-                content_type="notes",
+                form="entries",
                 word_count=10,
                 page_count=1,
                 file_path=str(tmp_path / "doc.txt"),
@@ -202,7 +202,7 @@ async def test_keyword_index_node_populates_fts5(test_db):
         "file_path": str(tmp_path / "doc.txt"),
         "format": "txt",
         "parsed_document": None,
-        "content_type": "notes",
+        "form": "entries",
         "chunks": [{"id": chunk_id, "text": "deep learning research", "index": 0}],
         "status": "indexing",
         "error": None,

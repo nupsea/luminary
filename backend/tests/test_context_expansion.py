@@ -2,7 +2,7 @@
 
 (a) test_expand_adds_neighbors: neighbors at index±1 appear with score=original*0.75
 (b) test_expand_dedup_keeps_higher_score: chunk in both retrieval and expansion → keep higher score
-(c) test_expand_skipped_for_code: content_type='code' → no expansion
+(c) test_expand_skipped_for_code: source code → no expansion
 (d) test_expand_capped_at_k_times_2
 """
 
@@ -23,10 +23,8 @@ def test_db(memory_db):
     return memory_db.engine, memory_db.factory
 
 
-def _make_doc(doc_id: str, content_type: str = "book") -> DocumentModel:
-    return make_document(
-        id=doc_id, content_type=content_type, word_count=100, file_path="/tmp/test.txt"
-    )
+def _make_doc(doc_id: str, form: str = "prose") -> DocumentModel:
+    return make_document(id=doc_id, form=form, word_count=100, file_path="/tmp/test.txt")
 
 
 def _make_chunk(doc_id: str, idx: int, text: str, chunk_id: str | None = None) -> ChunkModel:
@@ -71,7 +69,7 @@ async def test_expand_adds_neighbors(test_db):
 
     chunk_ids = [str(uuid.uuid4()) for _ in range(5)]
     async with factory() as session:
-        session.add(_make_doc(doc_id, "book"))
+        session.add(_make_doc(doc_id, "prose"))
         for i, cid in enumerate(chunk_ids):
             session.add(_make_chunk(doc_id, i, f"text chunk {i}", cid))
         await session.commit()
@@ -100,7 +98,7 @@ async def test_expand_dedup_keeps_higher_score(test_db):
 
     chunk_ids = [str(uuid.uuid4()) for _ in range(3)]
     async with factory() as session:
-        session.add(_make_doc(doc_id, "book"))
+        session.add(_make_doc(doc_id, "prose"))
         for i, cid in enumerate(chunk_ids):
             session.add(_make_chunk(doc_id, i, f"text {i}", cid))
         await session.commit()
@@ -125,13 +123,13 @@ async def test_expand_dedup_keeps_higher_score(test_db):
 
 @pytest.mark.anyio
 async def test_expand_skipped_for_code(test_db):
-    """No expansion for content_type='code'."""
+    """No expansion for source code."""
     _, factory = test_db
     doc_id = str(uuid.uuid4())
 
     chunk_ids = [str(uuid.uuid4()) for _ in range(3)]
     async with factory() as session:
-        session.add(_make_doc(doc_id, "code"))
+        session.add(_make_doc(doc_id, "source_code"))
         for i, cid in enumerate(chunk_ids):
             session.add(_make_chunk(doc_id, i, f"def func_{i}(): pass", cid))
         await session.commit()
@@ -154,7 +152,7 @@ async def test_expand_capped_at_k_times_2(test_db):
     # Create many chunks so expansion adds many neighbors
     chunk_ids = [str(uuid.uuid4()) for _ in range(20)]
     async with factory() as session:
-        session.add(_make_doc(doc_id, "book"))
+        session.add(_make_doc(doc_id, "prose"))
         for i, cid in enumerate(chunk_ids):
             session.add(_make_chunk(doc_id, i, f"chunk text {i}", cid))
         await session.commit()

@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Re-indexing a document's entities dropped its book and chapter names from keyword search.** The re-index writes the same rows ingestion does.
 
 ### Changed
+- **Upgrading removes the stored document type.** A document's kind already came from its measured shape and subject; on a 70-document test library none changed, and every card, note and section was kept. A linked PDF or an O'Reilly book now has its subject read rather than assumed technical (#223).
 - **People and places no longer become tags on technical documents**, which turned speakers' roles and mis-heard words into tags ("boss", "web", "claude" as a person). Narrative, historical and other non-technical documents keep them, now decided by the document's measured subject rather than its upload type (#223).
 - **A PDF or EPUB opens where reading stopped, not on its bookmark.** The bookmark is one click away in the toolbar.
 - **A document's type in the library now comes from what was measured about it** (its format, shape and subject), not from the type chosen at upload. Cards, the filter chips and the reader show it; 9 of 69 documents in a test library changed label. Changing a document's type from its card sets that shape and subject, and a reprocess keeps the choice instead of measuring it again (#223).

@@ -172,7 +172,7 @@ async def test_fts5_skips_concat_when_entities_text_null(fts_db):
             make_document(
                 id=doc_id,
                 title="No entities",
-                content_type="notes",
+                form="entries",
                 file_path="/tmp/none.txt",
                 stage="parsing",
             )

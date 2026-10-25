@@ -136,9 +136,7 @@ async def test_detect_type_kills_the_parse_it_gives_up_on(monkeypatch, tmp_path)
     )
     monkeypatch.setattr(type_detection.asyncio, "create_subprocess_exec", recording_exec)
     started = time.monotonic()
-    result = await type_detection.detect_content_type(
-        tmp_path / "x.pdf", "pdf", "x.pdf", timeout=1.0
-    )
+    result = await type_detection.detect_kind(tmp_path / "x.pdf", "pdf", "x.pdf", timeout=1.0)
     assert result is None
     assert time.monotonic() - started < 10
     # An exit code means the child was killed and reaped, not left running.

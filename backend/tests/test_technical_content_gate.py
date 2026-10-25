@@ -1,28 +1,15 @@
-"""A technical talk must get technical entity types despite content_type "audio".
+"""A technical talk must get technical entity types although it is media.
 
-content_type cannot carry technicality for media: "audio"/"video" drive
-timestamp-preserving chunking and the player, so the classifier persists a
-separate is_technical flag and the NER gate reads that.
+The format keeps a talk media for the player and timestamped chunking; its
+subject is the measured `domain`, which the NER gate reads.
 """
 
 from unittest.mock import patch
 
 import pytest
 
-from app.types import TECHNICAL_CONTENT_TYPES, DocumentProfile, is_technical_content
+from app.types import DocumentProfile
 from app.workflows.ingestion_nodes._shared import detect_technical_transcript, measure_domain
-
-
-def test_flag_wins_over_content_type():
-    assert is_technical_content("audio", True) is True
-    assert is_technical_content("tech_book", False) is False
-
-
-def test_falls_back_to_content_type_when_flag_unset():
-    for ct in TECHNICAL_CONTENT_TYPES:
-        assert is_technical_content(ct, None) is True
-    assert is_technical_content("audio", None) is False
-    assert is_technical_content("book", None) is False
 
 
 class _FakeLLM:
@@ -84,11 +71,11 @@ def test_ner_extract_honours_the_flag():
 
     with patch.object(EntityExtractor, "_load_model", return_value=_FakeModel()):
         extractor.extract(
-            chunks, is_technical=DocumentProfile.from_legacy("audio", True).is_technical
+            chunks, is_technical=DocumentProfile("dialogue", "technical").is_technical
         )
         tech_labels = set(captured[0])
         captured.clear()
-        extractor.extract(chunks, is_technical=DocumentProfile.from_legacy("audio").is_technical)
+        extractor.extract(chunks, is_technical=DocumentProfile("dialogue").is_technical)
         prose_labels = set(captured[0])
 
     assert "TECHNOLOGY" in tech_labels

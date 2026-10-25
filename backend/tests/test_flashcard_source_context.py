@@ -20,7 +20,7 @@ def _make_doc(doc_id: str | None = None, title: str = "Test Doc") -> DocumentMod
     return make_document(
         id=doc_id,
         title=title,
-        content_type="notes",
+        form="entries",
         word_count=100,
         page_count=1,
         file_path="/tmp/test.txt",

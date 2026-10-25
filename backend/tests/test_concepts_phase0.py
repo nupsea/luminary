@@ -39,7 +39,6 @@ async def test_create_concept_spans_three_stores_and_resolves(test_db):
             {
                 "chunk_id": _CH1,
                 "document_id": _D1,
-                "content_type": "text",
                 "section_heading": "",
                 "page": 0,
                 "chunk_index": 0,

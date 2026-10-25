@@ -56,7 +56,7 @@ def _make_state(doc_id: str, sections: list[dict]) -> IngestionState:
             "sections": sections,
             "raw_text": " ".join(s["text"] for s in sections),
         },
-        content_type="book",
+        form="prose",
         chunks=None,
         status="chunking",
         error=None,
@@ -188,7 +188,7 @@ async def test_book_without_headings_gets_single_section(test_db):
             "sections": [],  # No sections detected by parser
             "raw_text": flat_text,
         },
-        content_type="book",
+        form="prose",
         chunks=None,
         status="chunking",
         error=None,

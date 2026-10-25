@@ -84,7 +84,7 @@ async def test_deleting_a_document_clears_it_from_chat_session_scopes(memory_db)
                 make_document(
                     id=doc_id,
                     title=doc_id,
-                    content_type="notes",
+                    form="entries",
                     word_count=1,
                     page_count=1,
                     file_path=f"/nonexistent/{doc_id}.txt",

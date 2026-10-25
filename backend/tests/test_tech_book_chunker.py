@@ -1,8 +1,7 @@
 """Tests for S131 — code-aware chunking.
 
 Covers:
-- AC1: tech_book and tech_article in ContentType (import check)
-- AC2: _classify() identifies tech_book from fenced code blocks
+- AC2: classify_content() identifies tech_book from fenced code blocks
 - AC3: chunk_mixed_content preserves a 50-line Python function intact
 - AC4: _parse_ast_signature valid and malformed cases
 - AC5: CodeSnippetModel table exists after create_all_tables
@@ -19,11 +18,12 @@ from sqlalchemy import select
 import app.database as db_module
 from app.main import app
 from app.models import ChunkModel, CodeSnippetModel, DocumentModel
+from app.services.content_classifier import classify_content
 from app.services.tech_book_chunker import (
     _parse_ast_signature,
     chunk_mixed_content,
 )
-from app.workflows.ingestion import ContentType, _chunk_tech_book, _classify
+from app.workflows.ingestion import _chunk_tech_book
 from tests.factories import make_chunk, make_document, make_section
 
 # Shared fixtures
@@ -73,31 +73,20 @@ def test_db(memory_db):
     return memory_db.tmp_path
 
 
-def _make_doc(doc_id: str, content_type: str = "tech_book") -> DocumentModel:
+def _make_doc(doc_id: str) -> DocumentModel:
     return make_document(
         id=doc_id,
         title="Test Tech Book",
         format="md",
-        content_type=content_type,
+        form="reference",
+        domain="technical",
         word_count=300,
         file_path="/tmp/test.md",
         stage="chunking",
     )
 
 
-# AC1: ContentType includes tech_book and tech_article
-
-
-def test_content_type_includes_tech_types():
-    """tech_book and tech_article must be valid values of ContentType literal."""
-    import typing
-
-    args = typing.get_args(ContentType)
-    assert "tech_book" in args
-    assert "tech_article" in args
-
-
-# AC2: _classify() detects tech_book from >= 3 fenced code blocks
+# AC2: classify_content() detects tech_book from >= 3 fenced code blocks
 
 
 def test_classify_tech_book_from_code_fences():
@@ -111,7 +100,7 @@ def test_classify_tech_book_from_code_fences():
         "```bash\necho hello\n```\n\n"
         "Closing remarks."
     )
-    result = _classify(raw_text, [], word_count=100, file_ext="md")
+    result = classify_content(raw_text, [], word_count=100, file_ext="md")
     assert result == "tech_book", f"Expected 'tech_book', got '{result}'"
 
 
@@ -123,7 +112,7 @@ def test_classify_regular_book_not_overridden():
         {"heading": "Chapter 3", "level": 1, "text": ""},
     ]
     raw_text = "word " * 50000
-    result = _classify(raw_text, headings, word_count=50000, file_ext="txt")
+    result = classify_content(raw_text, headings, word_count=50000, file_ext="txt")
     assert result == "book"
 
 
@@ -219,7 +208,8 @@ async def test_chunk_model_has_code_columns(test_db):
                 id=doc_id,
                 title="ColTest",
                 format="md",
-                content_type="tech_book",
+                form="reference",
+                domain="technical",
                 file_path="/tmp/col.md",
             )
         )
@@ -280,7 +270,8 @@ async def test_chunk_tech_book_creates_code_snippets(test_db):
             ],
             "raw_text": TECH_DOC_WITH_CODE,
         },
-        content_type="tech_book",
+        form="reference",
+        domain="technical",
         chunks=None,
         status="chunking",
         error=None,

@@ -579,24 +579,24 @@ async def test_prune_sweeps_failing_llm_tag(test_db, monkeypatch):
     [
         # A technical talk: its people were roles and mis-heard names ("doug-db").
         (
-            {"content_type": "audio", "format": "wav", "form": "dialogue", "domain": "technical"},
+            {"format": "wav", "form": "dialogue", "domain": "technical"},
             {"CONCEPT"},
         ),
         # The Federalist Papers stored as a tech_book: Hamilton and New York are its topics.
         (
-            {"content_type": "tech_book", "form": "prose", "domain": "general"},
+            {"form": "prose", "domain": "general"},
             {"PERSON", "PLACE", "CONCEPT"},
         ),
         # A meeting whose participants are what a reader looks it up by.
         (
-            {"content_type": "conversation", "form": "dialogue", "domain": "general"},
+            {"form": "dialogue", "domain": "general"},
             {"PERSON", "PLACE", "CONCEPT"},
         ),
         (
-            {"content_type": "book", "form": "prose", "domain": "general"},
+            {"form": "prose", "domain": "general"},
             {"PERSON", "PLACE", "CONCEPT"},
         ),
-        ({"content_type": "tech_book", "form": "reference", "domain": "technical"}, {"CONCEPT"}),
+        ({"form": "reference", "domain": "technical"}, {"CONCEPT"}),
     ],
 )
 async def test_entity_tag_types_follow_the_measured_subject(test_db, monkeypatch, facets, allowed):

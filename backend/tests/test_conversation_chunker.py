@@ -76,7 +76,6 @@ def _make_conv_doc(doc_id: str) -> DocumentModel:
     return make_document(
         id=doc_id,
         title="Test Conversation",
-        content_type="conversation",
         form="dialogue",
         word_count=200,
         file_path="/tmp/conv.txt",
@@ -97,7 +96,7 @@ def _make_conv_state(doc_id: str, raw_text: str) -> IngestionState:
             "sections": [],
             "raw_text": raw_text,
         },
-        content_type="conversation",
+        form="dialogue",
         chunks=None,
         status="chunking",
         error=None,

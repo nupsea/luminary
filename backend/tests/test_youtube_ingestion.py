@@ -187,7 +187,6 @@ async def test_ingest_url_success_creates_document(test_db, monkeypatch):
     assert doc is not None
     assert doc.source_url == "https://www.youtube.com/watch?v=abc123"
     assert doc.video_title == "Test YouTube Video"
-    assert doc.content_type == "audio"
     assert doc.format == "flac"
 
 
@@ -201,7 +200,7 @@ async def test_document_list_includes_source_url(test_db):
                 id=doc_id,
                 title="My YouTube Talk",
                 format="wav",
-                content_type="audio",
+                form="dialogue",
                 word_count=500,
                 file_path="/tmp/test.wav",
                 source_url="https://www.youtube.com/watch?v=test123",
@@ -231,7 +230,7 @@ def test_document_model_has_youtube_url_and_channel_name():
         id="test-id",
         title="Test",
         format="wav",
-        content_type="audio",
+        form="dialogue",
         file_path="/tmp/test.wav",
         source_url="https://www.youtube.com/watch?v=abc",
         video_title="Test",
@@ -245,7 +244,7 @@ def test_document_model_has_youtube_url_and_channel_name():
         id="test-id-2",
         title="Test2",
         format="wav",
-        content_type="audio",
+        form="dialogue",
         file_path="/tmp/test2.wav",
     )
     assert doc2.channel_name is None
@@ -263,7 +262,7 @@ async def test_get_document_chunks_returns_youtube_chunks(test_db):
                 id=doc_id,
                 title="YouTube Lecture",
                 format="wav",
-                content_type="audio",
+                form="dialogue",
                 word_count=300,
                 file_path="/tmp/lecture.wav",
                 source_url="https://www.youtube.com/watch?v=xyz",
@@ -316,7 +315,7 @@ async def test_get_document_chunks_returns_empty_for_no_chunks(test_db):
                 id=doc_id,
                 title="Processing Video",
                 format="wav",
-                content_type="audio",
+                form="dialogue",
                 file_path="/tmp/processing.wav",
                 stage="parsing",
                 source_url="https://www.youtube.com/watch?v=new",
@@ -508,7 +507,7 @@ async def test_ingest_url_returns_before_the_download_finishes(test_db, monkeypa
     async with factory() as session:
         doc = await session.get(DocumentModel, doc_id)
     ingested.assert_awaited_once()
-    assert ingested.call_args.args[:4] == (doc_id, doc.file_path, "flac", "audio")
+    assert ingested.call_args.args[:3] == (doc_id, doc.file_path, "flac")
     assert after["stage_pct"] is None
 
 

@@ -46,7 +46,7 @@ async def _insert_doc(factory, tmp_path: Path, doc_id: str, title: str = "Test D
             make_document(
                 id=doc_id,
                 title=title,
-                content_type="notes",
+                form="entries",
                 word_count=100,
                 page_count=2,
                 file_path=str(tmp_path / "doc.txt"),

@@ -156,7 +156,7 @@ async def test_generate_falls_back_to_next_passage_when_first_yields_nothing(fac
             id="doc-1",
             title="AI Pacing",
             format="pdf",
-            content_type="article",
+            form="article",
             file_path="/tmp/doc.pdf",
         )
         session.add(doc)

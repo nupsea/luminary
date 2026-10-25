@@ -121,7 +121,7 @@ async def test_delete_cancels_in_flight_ingestion(test_db):
             make_document(
                 id=doc_id,
                 title="In-progress doc",
-                content_type="notes",
+                form="entries",
                 file_path=str(file_path),
                 stage="embedding",
             )
@@ -164,7 +164,7 @@ async def test_delete_cancels_card_generation_for_uncovered_sections(test_db):
     async with factory() as session:
         session.add(
             make_document(
-                id=doc_id, title="Doc", content_type="notes", file_path=str(tmp_path / "doc.txt")
+                id=doc_id, title="Doc", form="entries", file_path=str(tmp_path / "doc.txt")
             )
         )
         session.add(make_section(id="sec", document_id=doc_id, heading="One"))
@@ -218,7 +218,7 @@ async def test_delete_without_running_ingestion_still_succeeds(test_db):
             make_document(
                 id=doc_id,
                 title="Idle doc",
-                content_type="notes",
+                form="entries",
                 word_count=10,
                 page_count=1,
                 file_path=str(file_path),

@@ -21,7 +21,7 @@ def client():
         yield c
 
 
-def _create_document(client, title="Test Book", content_type="book", **facets) -> str:
+def _create_document(client, title="Test Book", form="prose", **facets) -> str:
     """Create a minimal document and return its id."""
     doc_id = str(uuid.uuid4())
     import asyncio  # noqa: PLC0415
@@ -33,7 +33,7 @@ def _create_document(client, title="Test Book", content_type="book", **facets) -
             doc = make_document(
                 id=doc_id,
                 title=title,
-                content_type=content_type,
+                form=form,
                 word_count=1000,
                 page_count=10,
                 file_path="/tmp/fake.txt",
@@ -76,7 +76,7 @@ def test_by_document_returns_auto_collection(client):
 
 def test_create_auto_collection(client):
     """POST /collections/auto creates auto-collection with correct name and color."""
-    doc_id = _create_document(client, title="The Odyssey", content_type="book")
+    doc_id = _create_document(client, title="The Odyssey", form="prose")
     resp = client.post(f"/collections/auto/{doc_id}")
     assert resp.status_code == 201
     data = resp.json()
@@ -87,9 +87,7 @@ def test_create_auto_collection(client):
 
 def test_an_auto_collection_is_named_for_the_kind_the_library_shows(client):
     """A technical book stored as `tech_book` was suffixed "Tech_book"; it follows the kind now."""
-    doc_id = _create_document(
-        client, title="Kubernetes", content_type="tech_book", form="reference", domain="technical"
-    )
+    doc_id = _create_document(client, title="Kubernetes", form="reference", domain="technical")
     data = client.post(f"/collections/auto/{doc_id}").json()
     assert data["name"] == "KUBERNETES-TECHNICAL"
 

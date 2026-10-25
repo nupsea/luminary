@@ -21,7 +21,8 @@ def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
         **{
             "id": doc_id,
             "title": "Python Programming Guide",
-            "content_type": "tech_book",
+            "form": "reference",
+            "domain": "technical",
             "word_count": 500,
             "page_count": 10,
             "file_path": "/tmp/tech.txt",

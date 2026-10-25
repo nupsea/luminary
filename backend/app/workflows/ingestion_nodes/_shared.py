@@ -295,8 +295,9 @@ async def _persist_classification(
             # A kind the reader chose outranks a measurement (#223).
             for key in ("form", "domain"):
                 values.pop(key)
-        await repo.update_fields(document_id, **values)
-        await session.commit()
+        if values:
+            await repo.update_fields(document_id, **values)
+            await session.commit()
 
 
 async def reader_facets(repo: DocumentRepo, document_id: str) -> tuple[str, str | None] | None:

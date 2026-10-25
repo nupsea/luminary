@@ -33,7 +33,7 @@ def _make_card(doc_id: str, question: str = "Q?", answer: str = "A.") -> Flashca
 
 def _make_doc(doc_id: str) -> DocumentModel:
     return make_document(
-        id=doc_id, content_type="notes", word_count=100, page_count=1, file_path="/tmp/test.txt"
+        id=doc_id, form="entries", word_count=100, page_count=1, file_path="/tmp/test.txt"
     )
 
 

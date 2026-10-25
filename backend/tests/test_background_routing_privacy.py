@@ -28,7 +28,7 @@ LOCAL_ONLY_CALL_SITES = [
     # Automatic
     ("app/services/note_description_generator.py", "complete"),
     ("app/services/document_tagger.py", "complete"),
-    ("app/workflows/ingestion_nodes/parse.py", "generate"),
+    ("app/workflows/ingestion_nodes/_shared.py", "generate"),
     ("app/workflows/concept_nodes/score_concepts.py", "complete"),
     ("app/services/image_enricher.py", "complete"),
     # User-triggered, but operating on the user's own notes / documents

@@ -155,7 +155,7 @@ async def _audio_doc(factory, **fields) -> str:
                     "id": doc_id,
                     "title": "Talk",
                     "format": "wav",
-                    "content_type": "audio",
+                    "form": "dialogue",
                     "file_path": "/x.wav",
                     "audio_duration_seconds": 60.0,
                     **fields,
@@ -285,7 +285,6 @@ def test_replacing_chunk_text_keeps_every_other_field(tmp_path):
     row = {
         "chunk_id": str(uuid.uuid4()),
         "document_id": str(uuid.uuid4()),
-        "content_type": "audio",
         "section_heading": "",
         "page": 0,
         "chunk_index": 7,
@@ -299,8 +298,8 @@ def test_replacing_chunk_text_keeps_every_other_field(tmp_path):
 
     (stored,) = svc._get_table().search().where(f"chunk_id = '{row['chunk_id']}'").to_list()
     assert stored["text"] == "stores it in LanceDB" and list(stored["vector"]) == [1.0] * 384
-    assert {k: stored[k] for k in ("document_id", "content_type", "chunk_index")} == {
-        k: row[k] for k in ("document_id", "content_type", "chunk_index")
+    assert {k: stored[k] for k in ("document_id", "chunk_index")} == {
+        k: row[k] for k in ("document_id", "chunk_index")
     }
 
 
@@ -316,7 +315,7 @@ async def test_a_fix_that_matches_nothing_changes_nothing(test_db):
 async def test_only_a_settled_transcript_can_be_fixed(test_db):
     _, factory, _ = test_db
     importing = await _audio_doc(factory, stage="transcribing")
-    book = await _audio_doc(factory, content_type="book", audio_duration_seconds=None)
+    book = await _audio_doc(factory, form="prose", audio_duration_seconds=None)
     assert (await _fix(importing, heard="a", term="b"))[0].status_code == 409
     assert (await _fix(book, heard="a", term="b"))[0].status_code == 422
     assert (await _fix(str(uuid.uuid4()), heard="a", term="b"))[0].status_code == 404

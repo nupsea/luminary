@@ -55,7 +55,12 @@ which is the diff you actually want.
 - **Do not add to `db_init.py`.** `create_all_tables()` is a frozen one-time bridge that lifts
   pre-Alembic databases to the baseline. It is not where schema changes go, and adding to it
   splits the source of truth in two.
-- **Do not hand-edit an applied revision.** Write a new one.
+- **Do not hand-edit an applied revision.** Write a new one. The one exception: when a later
+  revision drops a column an earlier data revision reads, guard the earlier one on the column,
+  so a replay against a schema built from the current models skips what it cannot read.
+- **Do not drop a column with batch mode** from a table other tables reference, `documents`
+  above all. The rebuild drops the original table, and with foreign keys on that cascades into
+  every child row (I-69). Use `op.execute("ALTER TABLE t DROP COLUMN c")`.
 - **Do not touch the FTS5 virtual tables here.** They are raw SQL in `db_init.py` and Alembic is
   configured to ignore them by name. Their column order is a positional contract (`c0`, `c1`,
   `c2`) that SQLite will silently misread rather than error on — see I-4.

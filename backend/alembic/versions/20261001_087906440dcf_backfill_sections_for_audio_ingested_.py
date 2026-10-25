@@ -35,10 +35,18 @@ _PREVIEW_CHARS = 10000
 
 def upgrade() -> None:
     bind = op.get_bind()
+    # The media test once read the type column, which 6066079ed434 dropped; a schema
+    # built from the current models (a replay from a rewound version) has only the format.
+    columns = {c["name"] for c in sa.inspect(bind).get_columns("documents")}
+    media = (
+        "d.content_type IN ('audio', 'video')"
+        if "content_type" in columns
+        else "d.format IN ('mp3', 'm4a', 'wav', 'flac', 'mp4')"
+    )
     documents = bind.execute(
         sa.text(
             "SELECT d.id FROM documents d "
-            "WHERE d.content_type IN ('audio', 'video') "
+            f"WHERE {media} "
             "  AND NOT EXISTS (SELECT 1 FROM sections s WHERE s.document_id = d.id) "
             "  AND EXISTS (SELECT 1 FROM chunks c WHERE c.document_id = d.id)"
         )
