@@ -398,6 +398,26 @@ class TestFormIsStructuralOnly:
         ]
         assert classify_form(text, parts, 30000, "txt") == "prose"
 
+    def test_numbered_or_sparse_sub_sections_are_not_depth(self) -> None:
+        """Sherlock Holmes numbers each story's parts I, II, III, and an essay titles
+        a few sub-sections across many pages; both were re-measured as references (#385)."""
+        text = "The detective considered the matter in silence. " * 1500
+        stories = [
+            {"heading": heading, "level": level}
+            for s in range(12)
+            for heading, level in ((f"Adventure {s}", 1), *((n, 2) for n in ("I", "II", "III.")))
+        ]
+        assert classify_form(text, stories, 9400, "txt") == "prose"
+
+        # Industrial Policy carries 0.58 titled sub-sections per 1,000 words, DDIA 0.97.
+        def essay(topics: int) -> list[dict]:
+            return [{"heading": "Part one", "level": 1}, {"heading": "Part two", "level": 1}] + [
+                {"heading": f"On the question of {t}", "level": 2} for t in range(topics)
+            ]
+
+        assert classify_form(text, essay(3), 5200, "md") == "prose"
+        assert classify_form(text, essay(5), 5200, "md") == "reference"
+
     def test_a_very_long_manual_is_still_a_reference(self) -> None:
         """Density stops describing the document and starts describing its
         length. `ibm-sdm-vol-2` carries 1,391 section markers across 2.9 million
