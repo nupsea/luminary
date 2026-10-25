@@ -390,6 +390,7 @@ async def test_classify_node_reports_classifying_while_its_probes_wait(test_db, 
     the stage must say what ingestion is waiting on: left at "parsing", an 11 KB
     file reported parsing for three minutes (#142)."""
     from app.workflows.ingestion import classify_node
+    from app.workflows.ingestion_nodes import _shared as shared_module
     from app.workflows.ingestion_nodes import parse as parse_module
 
     _engine, factory, _tmp = test_db
@@ -412,7 +413,7 @@ async def test_classify_node_reports_classifying_while_its_probes_wait(test_db, 
         async with factory() as session:
             seen.append((await session.get(DocumentModel, doc_id)).stage)
 
-    monkeypatch.setattr(parse_module, "detect_technical_content", _probe)
+    monkeypatch.setattr(shared_module, "detect_technical_content", _probe)
     monkeypatch.setattr(parse_module, "detect_register", _probe)
 
     state: IngestionState = {
@@ -434,6 +435,53 @@ async def test_classify_node_reports_classifying_while_its_probes_wait(test_db, 
     }
     await classify_node(state)
     assert seen and set(seen) == {"classifying"}
+
+
+async def test_classify_node_asks_the_domain_of_a_tech_book(test_db, monkeypatch):
+    """A legacy `tech_book` type does not settle the domain: the Federalist Papers
+    uploaded as one stayed technical while it did."""
+    from app.workflows.ingestion import classify_node
+    from app.workflows.ingestion_nodes import _shared as shared_module
+
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            make_document(
+                id=doc_id,
+                title="Federalist",
+                content_type="tech_book",
+                file_path="/tmp/federalist.txt",
+                stage="parsing",
+            )
+        )
+        await session.commit()
+
+    async def _general(_text: str) -> bool:
+        return False
+
+    monkeypatch.setattr(shared_module, "detect_technical_content", _general)
+    state: IngestionState = {
+        "document_id": doc_id,
+        "file_path": "/tmp/federalist.txt",
+        "format": "txt",
+        "parsed_document": {
+            "title": "Federalist",
+            "format": "txt",
+            "pages": 1,
+            "word_count": 14,
+            "sections": [],
+            "raw_text": "To the People of the State of New York: the subject speaks for itself.",
+        },
+        "content_type": "tech_book",
+        "chunks": None,
+        "status": "classifying",
+        "error": None,
+    }
+    result = await classify_node(state)
+    assert result["is_technical"] is False
+    async with factory() as session:
+        assert (await session.get(DocumentModel, doc_id)).is_technical is False
 
 
 async def test_classify_node_technical_without_structure_is_article(test_db):

@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from app.types import TECHNICAL_CONTENT_TYPES, DocumentProfile, is_technical_content
-from app.workflows.ingestion_nodes._shared import detect_technical_transcript
+from app.workflows.ingestion_nodes._shared import detect_technical_transcript, measure_domain
 
 
 def test_flag_wins_over_content_type():
@@ -96,3 +96,22 @@ def test_ner_extract_honours_the_flag():
     assert "TECHNOLOGY" not in prose_labels
     assert not (_TECH_ENTITY_TYPES & prose_labels)
     assert tech_labels <= set(ENTITY_TYPES)
+
+
+@pytest.mark.asyncio
+async def test_source_code_is_technical_unasked():
+    class _Unreachable:
+        async def generate(self, *args, **kwargs):
+            raise AssertionError("source code's domain is settled by its shape")
+
+    with patch("app.services.llm.get_llm_service", return_value=_Unreachable()):
+        assert await measure_domain("source_code", "def add(a, b):\n    return a + b") is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form", ["reference", "article", "prose"])
+async def test_every_other_form_is_asked(form):
+    # A reference-shaped work is not technical by shape: the Federalist Papers
+    # uploaded as a tech book stayed technical while the type answered for it.
+    with patch("app.services.llm.get_llm_service", return_value=_FakeLLM("general")):
+        assert await measure_domain(form, "No. 10: The Same Subject Continued") is False

@@ -9,8 +9,10 @@ Two populations need this:
   (70 entities extracted, 0 technical) and `d2l_dive_into_deep_learning`
   (165, 0).
 - Rows whose probe returned nothing. The call failed or the model did not
-  answer yes/no, and nothing retried. Those carry a null and stay null until
-  this runs.
+  answer with a label, and nothing retried. Those carry a null and stay null
+  until this runs.
+- Rows whose legacy type settled the domain unasked (`tech_book`, `tech_article`,
+  `code`), before ingestion asked every document.
 
 Only fills what it can establish. A probe that fails again leaves the row null,
 because an unanswered question is not a finding.
@@ -34,11 +36,8 @@ from app.database import get_session_factory
 from app.models import DocumentModel
 from app.repos.document_repo import DocumentRepo
 from app.services.content_classifier import classify_form
-from app.types import FACETS_FROM_READER, TECHNICAL_CONTENT_TYPES, DocumentProfile
-from app.workflows.ingestion_nodes._shared import (
-    detect_register,
-    detect_technical_content,
-)
+from app.types import FACETS_FROM_READER, DocumentProfile
+from app.workflows.ingestion_nodes._shared import detect_register, measure_domain
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("remeasure_domain")
@@ -97,12 +96,7 @@ async def main(apply: bool) -> int:
                 else doc.form
             )
 
-            # A type that names the subject needs no probe; the register never
-            # follows from the type, so it is always read.
-            if doc.content_type in TECHNICAL_CONTENT_TYPES:
-                measured: bool | None = True
-            else:
-                measured = await detect_technical_content(text) if has_text else None
+            measured = await measure_domain(form, text)
             register = doc.register or (await detect_register(text) if has_text else None)
 
             after = DocumentProfile.from_legacy(doc.content_type, measured).domain

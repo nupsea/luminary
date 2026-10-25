@@ -98,7 +98,7 @@
     "app/routers/documents.py": 19,
     "app/routers/images.py": 1,
     "app/scripts/reindex_entities.py": 4,
-    "app/scripts/remeasure_domain.py": 6,
+    "app/scripts/remeasure_domain.py": 5,
     "app/services/content_classifier.py": 1,
     "app/services/flashcard_prompts.py": 8,
     "app/services/summary_prompts.py": 1,
@@ -108,7 +108,7 @@
     "app/workflows/ingestion.py": 5,
     "app/workflows/ingestion_nodes/_shared.py": 7,
     "app/workflows/ingestion_nodes/embed.py": 4,
-    "app/workflows/ingestion_nodes/parse.py": 29,
+    "app/workflows/ingestion_nodes/parse.py": 24,
     "app/workflows/oreilly_ingestion.py": 1
   }
 }

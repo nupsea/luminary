@@ -260,6 +260,17 @@ async def detect_technical_content(raw_text: str) -> bool | None:
     return None
 
 
+async def measure_domain(form: str | None, raw_text: str) -> bool | None:
+    """Whether a document's subject is technical: settled by source code, otherwise asked.
+
+    Never from the legacy type. `tech_book` once settled it unasked, and the
+    Federalist Papers uploaded as one stayed technical.
+    """
+    if form == "source_code":
+        return True
+    return await detect_technical_content(raw_text) if raw_text.strip() else None
+
+
 # Kept: transcribe_node imported this name before the probe was generalised.
 detect_technical_transcript = detect_technical_content
 
