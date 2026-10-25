@@ -22,11 +22,12 @@ EMBEDDING_DIM = 384
 
 TABLE_NAME = "chunk_vectors_v3"
 
+# A table created before 0.17.0 also carries the retired type column, unread; rows written
+# without it store a null, so it waits for the re-embed rail to rewrite the table (#223).
 SCHEMA = pa.schema(
     [
         pa.field("chunk_id", pa.string()),
         pa.field("document_id", pa.string()),
-        pa.field("content_type", pa.string()),
         pa.field("section_heading", pa.string()),
         pa.field("page", pa.int32()),
         pa.field("chunk_index", pa.int32()),

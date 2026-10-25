@@ -58,4 +58,4 @@ async def download_and_ingest(
             _remove_partial_files(dest_stem)
     # run_ingestion records its own failures on the document.
     fmt = _yt.AUDIO_SUFFIX.lstrip(".")
-    await run_ingestion(doc_id, str(dest), fmt, "audio", parsed_document=None)
+    await run_ingestion(doc_id, str(dest), fmt, parsed_document=None)

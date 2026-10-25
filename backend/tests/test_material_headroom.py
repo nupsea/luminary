@@ -35,7 +35,7 @@ async def _library(factory, *, chunks: int, used: list[int], section_split: int 
             make_document(
                 id=doc_id,
                 title="Linear Programming",
-                content_type="notes",
+                form="entries",
                 created_at=NOW,
                 file_path=f"/tmp/{doc_id}.txt",
                 stage="parsing",

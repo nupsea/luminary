@@ -14,7 +14,8 @@ from sqlalchemy import select
 
 from app.main import app  # noqa: F401 (used via ASGITransport)
 from app.models import ChunkModel
-from app.workflows.ingestion import IngestionState, _classify, transcribe_node
+from app.services.content_classifier import classify_content
+from app.workflows.ingestion import IngestionState, transcribe_node
 from app.workflows.ingestion_nodes.chunk import chunk_node
 from tests.factories import make_document
 
@@ -25,16 +26,16 @@ from tests.factories import make_document
 
 
 def test_classify_returns_video_for_mp4():
-    assert _classify("", [], 0, "mp4") == "video"
+    assert classify_content("", [], 0, "mp4") == "video"
 
 
 def test_classify_returns_audio_for_mp3_unchanged():
     """Existing audio classification still works after video extension added."""
-    assert _classify("", [], 0, "mp3") == "audio"
+    assert classify_content("", [], 0, "mp3") == "audio"
 
 
 def test_classify_returns_audio_for_wav_unchanged():
-    assert _classify("", [], 0, "wav") == "audio"
+    assert classify_content("", [], 0, "wav") == "audio"
 
 
 # transcribe_node tests
@@ -53,7 +54,7 @@ async def test_transcribe_node_video_no_ffmpeg(test_db, tmp_path):
                 id=doc_id,
                 title="Test",
                 format="mp4",
-                content_type="video",
+                form="dialogue",
                 file_path=str(video_file),
                 stage="parsing",
             )
@@ -65,7 +66,7 @@ async def test_transcribe_node_video_no_ffmpeg(test_db, tmp_path):
         "file_path": str(video_file),
         "format": "mp4",
         "parsed_document": None,
-        "content_type": "video",
+        "form": "dialogue",
         "chunks": None,
         "status": "classifying",
         "error": None,
@@ -95,7 +96,7 @@ async def test_transcribe_node_video_with_ffmpeg(test_db, tmp_path):
                 id=doc_id,
                 title="Test",
                 format="mp4",
-                content_type="video",
+                form="dialogue",
                 file_path=str(video_file),
                 stage="parsing",
             )
@@ -107,7 +108,7 @@ async def test_transcribe_node_video_with_ffmpeg(test_db, tmp_path):
         "file_path": str(video_file),
         "format": "mp4",
         "parsed_document": None,
-        "content_type": "video",
+        "form": "dialogue",
         "chunks": None,
         "status": "classifying",
         "error": None,
@@ -179,7 +180,7 @@ async def test_transcribe_node_passthrough_for_non_video(test_db, tmp_path):
             "word_count": 2,
             "format": "txt",
         },
-        "content_type": "book",
+        "form": "prose",
         "chunks": None,
         "status": "classifying",
         "error": None,
@@ -190,7 +191,7 @@ async def test_transcribe_node_passthrough_for_non_video(test_db, tmp_path):
 
     result = await transcribe_node(state)
     # Should return state unchanged
-    assert result["content_type"] == "book"
+    assert result["form"] == "prose"
     assert result["status"] == "classifying"
 
 
@@ -209,7 +210,6 @@ async def test_mp4_allowed_extension_in_ingest_endpoint(test_db, monkeypatch):
         resp = await client.post(
             "/documents/ingest",
             files={"file": ("lecture.mp4", io.BytesIO(b"\x00" * 100), "video/mp4")},
-            data={"content_type": "video"},
         )
     assert resp.status_code == 200, resp.text
     assert "document_id" in resp.json()
@@ -232,7 +232,7 @@ async def test_status_endpoint_returns_ffmpeg_error_message(test_db):
                 id=doc_id,
                 title="Video",
                 format="mp4",
-                content_type="video",
+                form="dialogue",
                 file_path="/tmp/lecture.mp4",
                 stage="error",
                 error_message="ffmpeg is not installed. Install it with: brew install ffmpeg",
@@ -260,7 +260,7 @@ async def test_video_endpoint_returns_400_for_non_video_doc(test_db, tmp_path, m
     async with factory() as session:
         session.add(
             make_document(
-                id=doc_id, title="Test", content_type="notes", word_count=1, file_path=str(txt_file)
+                id=doc_id, title="Test", form="entries", word_count=1, file_path=str(txt_file)
             )
         )
         await session.commit()
@@ -286,7 +286,7 @@ async def test_transcript_chunks_keep_the_moment_they_came_from(test_db):
                 id=doc_id,
                 title="Lecture",
                 format="mp3",
-                content_type="audio",
+                form="dialogue",
                 file_path="/tmp/lecture.mp3",
                 stage="chunking",
             )
@@ -298,7 +298,7 @@ async def test_transcript_chunks_keep_the_moment_they_came_from(test_db):
         "file_path": "/tmp/lecture.mp3",
         "format": "mp3",
         "parsed_document": None,
-        "content_type": "audio",
+        "form": "dialogue",
         "chunks": None,
         "status": "chunking",
         "error": None,

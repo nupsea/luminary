@@ -4,10 +4,9 @@ parse_node turns the raw file at `state['file_path']` into a structured
 `parsed_document` dict via `DocumentParser`. Audio/video files skip
 parsing here; transcribe_node handles them downstream.
 
-classify_node assigns a `content_type` (book/conversation/notes/code/
-tech_book/tech_article/...). It uses `classify_content` plus
-optional LLM reclassification for ambiguous large documents. If the
-caller pre-supplied content_type, both heuristics and LLM are skipped.
+classify_node measures the facets -- form from structure, domain and register
+from the text -- and lays a kind the reader chose over them (#223). Media is
+measured from its transcript, in transcribe_node.
 """
 
 import asyncio
@@ -17,10 +16,9 @@ from pathlib import Path
 from app.database import get_session_factory
 from app.repos.document_kind_repo import DocumentKindRepo
 from app.repos.document_repo import DocumentRepo
-from app.services.content_classifier import classify_content, classify_form
-from app.services.llm_admission import awaited
+from app.services.content_classifier import classify_form
 from app.telemetry import trace_ingestion_node
-from app.types import AUDIO_EXTENSIONS, register_for_form
+from app.types import MEDIA_FORMATS, register_for_form
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _parser,
@@ -28,10 +26,10 @@ from app.workflows.ingestion_nodes._shared import (
     _persist_extraction_report,
     _persist_structure_type,
     _update_stage,
+    as_domain,
     detect_register,
     measure_domain,
     reader_facets,
-    resolve_technical_variant,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,7 +39,7 @@ async def parse_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "parse", "doc_id": state["document_id"]})
     # Audio/video files: DocumentParser cannot handle them; transcribe_node takes over.
     # EPUB and other text-based formats are handled by DocumentParser below.
-    if Path(state["file_path"]).suffix.lstrip(".").lower() in (*AUDIO_EXTENSIONS, "mp4"):
+    if Path(state["file_path"]).suffix.lstrip(".").lower() in MEDIA_FORMATS:
         return {**state, "parsed_document": None, "status": "classifying"}
     with trace_ingestion_node("parse", state):
         try:
@@ -64,8 +62,7 @@ async def parse_node(state: IngestionState) -> IngestionState:
                 }
                 for s in parsed.sections
             ]
-            # Persisted here, not in classify_node, which returns early
-            # whenever content_type was user-supplied.
+            # Persisted here, beside the parse that discovers them.
             if parsed.structure_type:
                 await _persist_structure_type(state["document_id"], parsed.structure_type)
             if parsed.extraction_report is not None:
@@ -91,10 +88,8 @@ async def parse_node(state: IngestionState) -> IngestionState:
             return {**state, "status": "error", "error": str(exc)}
 
 
-def _measure_form(state: IngestionState) -> str | None:
-    pd = state.get("parsed_document")
-    if not pd:
-        return None
+def _measure_form(state: IngestionState) -> str:
+    pd = state["parsed_document"]
     fp = Path(state["file_path"])
     return classify_form(
         pd["raw_text"], pd["sections"], pd["word_count"], fp.suffix.lstrip("."), fp.name
@@ -113,16 +108,16 @@ async def _measure_register(form: str | None, pd: dict | None) -> str | None:
     return await detect_register(raw_text) if raw_text.strip() else None
 
 
-async def _measure_facets(form: str | None, pd: dict | None) -> tuple[bool | None, str | None]:
+async def _measure_facets(form: str, pd: dict) -> tuple[str | None, str | None]:
     """Read the domain and the register from the document, in one pass.
 
-    Both are asked of the text rather than derived from the type, because the
-    type carries neither: `book` covers a novel and a deep-learning textbook,
-    and nothing about a content type says whether a work tells or explains.
-    None when a probe cannot answer, never False; `remeasure_domain` retries.
+    Both are asked of the text, because the shape carries neither: a novel and a
+    deep-learning textbook are both prose, and nothing about a shape says whether
+    a work tells or explains. None when a probe cannot answer, never "general";
+    `remeasure_domain` retries.
     """
-    is_technical = await measure_domain(form, (pd or {}).get("raw_text") or "")
-    return is_technical, await _measure_register(form, pd)
+    domain = as_domain(await measure_domain(form, pd.get("raw_text") or ""))
+    return domain, await _measure_register(form, pd)
 
 
 async def classify_node(state: IngestionState) -> IngestionState:
@@ -138,145 +133,31 @@ async def classify_node(state: IngestionState) -> IngestionState:
         return result
     # Chunking follows the kind the reader chose, which persistence kept on the row.
     form, domain = chosen
-    return {**result, "form": form, "is_technical": domain == "technical"}
+    return {**result, "form": form, "domain": domain}
 
 
 async def _measure_classification(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "classify", "doc_id": state["document_id"]})
-    # Fast-path: content_type was provided by the user — skip all heuristics and LLM.
-    # Classification only runs for legacy paths where content_type is unknown.
-    provided = state.get("content_type")
-    if provided not in ("audio", "video"):
-        # Before the classify probes, which queue behind other LLM work (#142).
-        await _update_stage(state["document_id"], "classifying")
-    if provided is not None:
-        if provided == "technical":
-            pd = state.get("parsed_document")
-            resolved = (
-                resolve_technical_variant(pd["raw_text"], pd["word_count"])
-                if pd
-                else "tech_article"
-            )
-            # The user asserted the domain; the shape is still measured.
-            form = _measure_form(state)
-            register = await _measure_register(form, pd)
-            await _persist_classification(state["document_id"], resolved, True, register, form)
-            logger.info(
-                "classify_node: resolved user-provided 'technical'",
-                extra={"doc_id": state["document_id"], "content_type": resolved},
-            )
-            return {
-                **state,
-                "content_type": resolved,
-                "is_technical": True,
-                "form": form,
-                "status": "chunking",
-            }
-        if provided in ("audio", "video"):
-            # Decided from the transcript in transcribe_node.
-            logger.info(
-                "classify_node: skipping (user-provided content_type)",
-                extra={"doc_id": state["document_id"], "content_type": provided},
-            )
-            return {**state, "status": "chunking"}
-        form = _measure_form(state)
-        is_technical, register = await _measure_facets(form, state.get("parsed_document"))
-        await _persist_classification(state["document_id"], provided, is_technical, register, form)
-        logger.info(
-            "classify_node: skipping (user-provided content_type)",
-            extra={"doc_id": state["document_id"], "content_type": provided},
-        )
-        return {**state, "is_technical": is_technical, "form": form, "status": "chunking"}
+    pd = state.get("parsed_document")
+    if pd is None:
+        # Media: no text until transcribe_node, which measures it from the transcript.
+        return {**state, "status": "chunking"}
+    # Before the classify probes, which queue behind other LLM work (#142).
+    await _update_stage(state["document_id"], "classifying")
     with trace_ingestion_node("classify", state):
         try:
-            pd = state["parsed_document"]
-            fp_obj = Path(state["file_path"])
-            file_ext = fp_obj.suffix.lstrip(".")
-            filename = fp_obj.name
-            if pd is None:
-                # Media has no text until transcribe_node, which runs only for
-                # audio/video: labelled `notes`, a file completed with no chunks.
-                media = classify_content("", [], 0, file_ext.lower(), filename)
-                return {**state, "content_type": media, "status": "chunking"}
-            content_type = classify_content(
-                pd["raw_text"], pd["sections"], pd["word_count"], file_ext, filename
-            )
-
-            # LLM reclassification, for the one case the rules stay uncertain on:
-            # a long document that scored as a conversation. Epics and plays carry
-            # speaker turns, so length is the tell.
-            #
-            # The old 'notes on a >5000-word doc' arm is gone because it became
-            # unreachable: classify_content only returns notes below 2000 words.
-            needs_llm = content_type == "conversation" and pd["word_count"] > 20000
-            if needs_llm:
-                try:
-                    from app.services.llm import get_llm_service  # noqa: PLC0415
-
-                    snippet = pd["raw_text"][:2000]
-                    prompt = (
-                        "Classify this document as exactly one of: "
-                        "paper, book, conversation, notes, code, tech_book, tech_article.\n"
-                        f"Document snippet (first 2000 chars):\n{snippet}\n\n"
-                        "Reply with exactly one word from the list above."
-                    )
-                    with awaited():
-                        llm_result = await get_llm_service().generate(prompt, background=True)
-                    llm_type = str(llm_result).strip().lower().split()[0]
-                    _valid_types = {
-                        "paper",
-                        "book",
-                        "conversation",
-                        "notes",
-                        "code",
-                        "tech_book",
-                        "tech_article",
-                    }
-                    if llm_type in _valid_types:
-                        content_type = llm_type
-                        logger.info(
-                            "LLM reclassified document",
-                            extra={
-                                "doc_id": state["document_id"],
-                                "content_type": content_type,
-                            },
-                        )
-                except Exception as exc:
-                    # Expected when Ollama is offline — log the one-line cause only,
-                    # not the full traceback (ConnectionRefusedError is not a bug).
-                    logger.warning(
-                        "LLM reclassification failed, keeping heuristic result: %s",
-                        type(exc).__name__,
-                    )
-
-            # Media documents are decided in transcribe_node instead — their text
-            # does not exist yet at this point.
-            # Measured from structure, not derived from content_type: the
-            # legacy map reaches `reference` only through `tech_book`, so a
-            # non-technical manual could never be one.
+            # Measured from structure, never from a type: the old type map reached
+            # `reference` only through `tech_book`, so a non-technical manual never could.
             form = _measure_form(state)
-            is_technical, register = await _measure_facets(form, pd)
+            domain, register = await _measure_facets(form, pd)
             # The classified facets reach the row, not just the state: the library,
             # filters and every later read come from the row.
-            await _persist_classification(
-                state["document_id"], content_type, is_technical, register, form
-            )
-
+            await _persist_classification(state["document_id"], form, domain, register)
             logger.info(
                 "Classified document",
-                extra={
-                    "doc_id": state["document_id"],
-                    "content_type": content_type,
-                    "is_technical": is_technical,
-                },
+                extra={"doc_id": state["document_id"], "form": form, "domain": domain},
             )
-            return {
-                **state,
-                "content_type": content_type,
-                "is_technical": is_technical,
-                "form": form,
-                "status": "chunking",
-            }
+            return {**state, "form": form, "domain": domain, "status": "chunking"}
         except Exception as exc:
             logger.exception("classify_node failed", exc_info=exc)
             return {**state, "status": "error", "error": str(exc)}

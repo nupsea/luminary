@@ -42,7 +42,8 @@ async def _insert_document(factory, doc_id: str) -> None:
         doc = make_document(
             id=doc_id,
             title="Test Document",
-            content_type="tech_book",
+            form="reference",
+            domain="technical",
             word_count=5000,
             page_count=10,
             file_path="/tmp/test.txt",

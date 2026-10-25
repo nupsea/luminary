@@ -214,7 +214,7 @@ async def test_document_and_collection_names_are_removed(
                 id="d1",
                 title="Merger Terms Draft",
                 format="pdf",
-                content_type="notes",
+                form="entries",
                 file_path="/x/project-falcon-v2.pdf",
             )
         )

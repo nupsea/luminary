@@ -5,7 +5,8 @@ from sqlalchemy import select
 
 from app.main import app
 from app.models import ChunkModel, DocumentModel
-from app.workflows.ingestion import IngestionState, _classify, chunk_node
+from app.services.content_classifier import classify_content
+from app.workflows.ingestion import IngestionState, chunk_node
 from tests.factories import make_document
 
 # Classification heuristic unit tests (pure functions, no DB)
@@ -13,17 +14,17 @@ from tests.factories import make_document
 
 def test_classify_conversation_by_speaker_pattern():
     text = "Alice: Good morning.\nBob: Hello Alice, how are you today?"
-    assert _classify(text, [], 50, "txt") == "conversation"
+    assert classify_content(text, [], 50, "txt") == "conversation"
 
 
 def test_classify_conversation_by_keyword():
     text = "interviewer: What brings you here?\nguest: I wanted to discuss the topic."
-    assert _classify(text, [], 50, "txt") == "conversation"
+    assert classify_content(text, [], 50, "txt") == "conversation"
 
 
 def test_classify_paper_by_abstract():
     text = "abstract\n\nThis paper presents a new methodology for testing software."
-    assert _classify(text, [], 500, "txt") == "paper"
+    assert classify_content(text, [], 500, "txt") == "paper"
 
 
 def test_classify_book_by_chapters_and_length():
@@ -32,15 +33,15 @@ def test_classify_book_by_chapters_and_length():
         {"heading": "Chapter 2 Background", "level": 1},
     ]
     text = "word " * 41000
-    assert _classify(text, headings, 41000, "txt") == "book"
+    assert classify_content(text, headings, 41000, "txt") == "book"
 
 
 def test_classify_code_by_extension():
-    assert _classify("def foo(): pass", [], 5, "py") == "code"
+    assert classify_content("def foo(): pass", [], 5, "py") == "code"
 
 
 def test_classify_defaults_to_notes():
-    assert _classify("some random text about everyday life", [], 100, "txt") == "notes"
+    assert classify_content("some random text about everyday life", [], 100, "txt") == "notes"
 
 
 # Test DB fixture — isolates each test with an in-memory SQLite database
@@ -58,7 +59,7 @@ async def test_chunk_node_writes_to_db(test_db):
         session.add(
             make_document(
                 id=doc_id,
-                content_type="notes",
+                form="entries",
                 word_count=20,
                 page_count=1,
                 file_path=str(tmp_path / "test.txt"),
@@ -87,7 +88,7 @@ async def test_chunk_node_writes_to_db(test_db):
             ],
             "raw_text": "This is a test document. It contains sentences to ensure chunking works.",
         },
-        "content_type": "notes",
+        "form": "entries",
         "chunks": None,
         "status": "chunking",
         "error": None,
@@ -121,7 +122,6 @@ async def test_ingest_endpoint_returns_processing(test_db, tmp_path):
             response = await client.post(
                 "/documents/ingest",
                 files={"file": ("sample.txt", fh, "text/plain")},
-                data={"content_type": "notes"},
             )
 
     assert response.status_code == 200
@@ -140,7 +140,7 @@ async def test_status_endpoint_returns_stage(test_db):
             make_document(
                 id=doc_id,
                 title="Test",
-                content_type="notes",
+                form="entries",
                 file_path="/tmp/test.txt",
                 stage="chunking",
             )
@@ -164,9 +164,7 @@ async def test_status_endpoint_done_when_complete(test_db):
 
     async with factory() as session:
         session.add(
-            make_document(
-                id=doc_id, title="Done Doc", content_type="notes", file_path="/tmp/done.txt"
-            )
+            make_document(id=doc_id, title="Done Doc", form="entries", file_path="/tmp/done.txt")
         )
         await session.commit()
 
@@ -188,8 +186,8 @@ async def test_status_endpoint_404_for_unknown(test_db):
     assert response.status_code == 404
 
 
-async def test_classify_node_mocked_llm_returns_valid_type(test_db, monkeypatch):
-    """classify_node should return LLM-reclassified type when LLM is available."""
+async def test_classify_node_stores_the_measured_subject(test_db, monkeypatch):
+    """The subject is the model's answer; the shape is measured without one."""
     from unittest.mock import AsyncMock, MagicMock
 
     import litellm
@@ -199,7 +197,7 @@ async def test_classify_node_mocked_llm_returns_valid_type(test_db, monkeypatch)
 
     mock_response = MagicMock()
     mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "paper"
+    mock_response.choices[0].message.content = "technical"
     mock_response.usage = None
     monkeypatch.setattr(litellm, "acompletion", AsyncMock(return_value=mock_response))
     llm_module._llm_service = None  # force re-creation against mock
@@ -212,11 +210,10 @@ async def test_classify_node_mocked_llm_returns_valid_type(test_db, monkeypatch)
             "title": "Large Notes",
             "format": "txt",
             "pages": 1,
-            "word_count": 6000,  # > 5000 → triggers LLM reclassification
+            "word_count": 6000,
             "sections": [],
             "raw_text": "word " * 6000,
         },
-        "content_type": None,
         "chunks": None,
         "status": "classifying",
         "error": None,
@@ -225,12 +222,13 @@ async def test_classify_node_mocked_llm_returns_valid_type(test_db, monkeypatch)
     result = await classify_node(state)
 
     assert result["status"] == "chunking"
-    assert result["content_type"] in ("paper", "book", "conversation", "notes", "code")
+    assert result["domain"] == "technical"
+    assert result["form"] == "prose"
     assert result["error"] is None
 
 
-async def test_classify_node_llm_unavailable_falls_back_to_heuristic(test_db, monkeypatch):
-    """classify_node must not crash when Ollama is unreachable; falls back to heuristic."""
+async def test_classify_node_advances_when_the_model_is_down(test_db, monkeypatch):
+    """classify_node must not crash when Ollama is unreachable."""
     from unittest.mock import AsyncMock
 
     import litellm
@@ -253,14 +251,10 @@ async def test_classify_node_llm_unavailable_falls_back_to_heuristic(test_db, mo
             "title": "Large Generic Document",
             "format": "txt",
             "pages": 1,
-            # Long enough to look misclassified: the rules score speaker turns
-            # as a conversation, and past 20k words that is more likely an epic
-            # or a play, so classify_node asks the LLM -- which is down here.
             "word_count": 30000,
             "sections": [],
             "raw_text": "Alice: what did you see\nBob: the whole valley\n" * 3000,
         },
-        "content_type": None,
         "chunks": None,
         "status": "classifying",
         "error": None,
@@ -268,11 +262,11 @@ async def test_classify_node_llm_unavailable_falls_back_to_heuristic(test_db, mo
 
     result = await classify_node(state)
 
-    # Heuristic fallback: generic text with no special markers → "notes"
+    # Not raising, and still advancing the pipeline, is the point. The shape is
+    # measured without a model; the subject stays unanswered rather than "general".
     assert result["status"] == "chunking"
-    # The heuristic answer stands when the LLM cannot be reached. The value is
-    # not the point -- not raising, and still advancing the pipeline, is.
-    assert result["content_type"] == "conversation"
+    assert result["form"] == "dialogue"
+    assert result["domain"] is None
     assert result["error"] is None
 
 
@@ -286,7 +280,6 @@ async def test_ingest_small_txt_classified_as_notes(test_db, tmp_path):
             response = await client.post(
                 "/documents/ingest",
                 files={"file": ("notes.txt", fh, "text/plain")},
-                data={"content_type": "notes"},
             )
 
     assert response.status_code == 200
@@ -299,90 +292,6 @@ async def test_ingest_small_txt_classified_as_notes(test_db, tmp_path):
         doc = await session.get(DocumentModel, doc_id)
     assert doc is not None
     assert doc.format == "txt"
-
-
-def test_resolve_technical_variant():
-    """Length decides the sizing; structure only overrides it for short manuals.
-
-    The previous rule counted decimals in the first 5,000 characters, which on a
-    book is the title page: it filed a 120,000-word IAEA manual as an article and
-    a 3,764-word paper as a book. Two numbered headings in an eight-word snippet
-    no longer make a book, because that was never evidence of length.
-    """
-    from app.workflows.ingestion_nodes._shared import resolve_technical_variant
-
-    short_but_numbered = "1.1 Storage engines\nprose here\n2.3 Indexes\nmore prose"
-    assert resolve_technical_variant(short_but_numbered) == "tech_article"
-
-    # Length alone, with no structural signal at all.
-    assert resolve_technical_variant("word " * 5000) == "tech_book"
-    assert resolve_technical_variant("word " * 400) == "tech_article"
-
-    # An explicit word_count wins over counting the text, because the parser's
-    # count is the one the rest of the pipeline uses.
-    assert resolve_technical_variant("short text", word_count=60000) == "tech_book"
-
-    # Structure overrides length: three code blocks, or a real section skeleton.
-    fenced = "intro\n" + "```\nprint(1)\n```\n" * 3
-    assert resolve_technical_variant(fenced) == "tech_book"
-    skeleton = "".join(f"{n}.1\nSection {n}\nprose\n" for n in range(1, 10))
-    assert resolve_technical_variant(skeleton) == "tech_book"
-
-    # Six sections is the measured near-miss: radiology_chexnet_cxr at 3,764
-    # words has exactly that many and is a paper, not a manual.
-    near_miss = "".join(f"{n}.1\nSection {n}\nprose\n" for n in range(1, 7))
-    assert resolve_technical_variant(near_miss) == "tech_article"
-
-    assert resolve_technical_variant("a short post about developer tooling") == "tech_article"
-
-
-async def test_classify_node_resolves_merged_technical_choice(test_db):
-    """A user-provided 'technical' type resolves to a concrete tech_* variant
-    and the resolved value is persisted on the document row."""
-    from app.workflows.ingestion import classify_node
-
-    _engine, factory, _tmp = test_db
-    doc_id = str(uuid.uuid4())
-    async with factory() as session:
-        session.add(
-            make_document(
-                id=doc_id,
-                title="Tech Upload",
-                format="md",
-                content_type="technical",
-                file_path="/tmp/tech.md",
-                stage="classifying",
-            )
-        )
-        await session.commit()
-
-    state: IngestionState = {
-        "document_id": doc_id,
-        "file_path": "/tmp/tech.md",
-        "format": "md",
-        "parsed_document": {
-            "title": "Tech Upload",
-            "format": "md",
-            "pages": 1,
-            # Past the 5,000-word gate, so this resolves on length rather than
-            # on a structural signal a fixture this small cannot honestly carry.
-            "word_count": 6000,
-            "sections": [],
-            "raw_text": "1.1 Overview\ntext\n2.4 Internals\ntext",
-        },
-        "content_type": "technical",
-        "chunks": None,
-        "status": "classifying",
-        "error": None,
-    }
-
-    result = await classify_node(state)
-    assert result["status"] == "chunking"
-    assert result["content_type"] == "tech_book"
-
-    async with factory() as session:
-        row = await session.get(DocumentModel, doc_id)
-        assert row.content_type == "tech_book"
 
 
 async def test_classify_node_reports_classifying_while_its_probes_wait(test_db, monkeypatch):
@@ -400,7 +309,7 @@ async def test_classify_node_reports_classifying_while_its_probes_wait(test_db, 
             make_document(
                 id=doc_id,
                 title="Chapter",
-                content_type="notes",
+                form="entries",
                 file_path="/tmp/chapter.txt",
                 stage="parsing",
             )
@@ -428,7 +337,7 @@ async def test_classify_node_reports_classifying_while_its_probes_wait(test_db, 
             "sections": [],
             "raw_text": "A chapter of prose long enough to be probed for its subject.",
         },
-        "content_type": "notes",
+        "form": "entries",
         "chunks": None,
         "status": "classifying",
         "error": None,
@@ -437,9 +346,9 @@ async def test_classify_node_reports_classifying_while_its_probes_wait(test_db, 
     assert seen and set(seen) == {"classifying"}
 
 
-async def test_classify_node_asks_the_domain_of_a_tech_book(test_db, monkeypatch):
-    """A legacy `tech_book` type does not settle the domain: the Federalist Papers
-    uploaded as one stayed technical while it did."""
+async def test_classify_node_asks_the_domain_of_a_reprocessed_document(test_db, monkeypatch):
+    """A stored domain does not settle a reprocess: the Federalist Papers stored as a
+    technical book stayed technical while the type answered for it (#384)."""
     from app.workflows.ingestion import classify_node
     from app.workflows.ingestion_nodes import _shared as shared_module
 
@@ -450,7 +359,8 @@ async def test_classify_node_asks_the_domain_of_a_tech_book(test_db, monkeypatch
             make_document(
                 id=doc_id,
                 title="Federalist",
-                content_type="tech_book",
+                form="reference",
+                domain="technical",
                 file_path="/tmp/federalist.txt",
                 stage="parsing",
             )
@@ -473,37 +383,11 @@ async def test_classify_node_asks_the_domain_of_a_tech_book(test_db, monkeypatch
             "sections": [],
             "raw_text": "To the People of the State of New York: the subject speaks for itself.",
         },
-        "content_type": "tech_book",
         "chunks": None,
         "status": "classifying",
         "error": None,
     }
     result = await classify_node(state)
-    assert result["is_technical"] is False
+    assert result["domain"] == "general"
     async with factory() as session:
-        assert (await session.get(DocumentModel, doc_id)).is_technical is False
-
-
-async def test_classify_node_technical_without_structure_is_article(test_db):
-    from app.workflows.ingestion import classify_node
-
-    _engine, factory, _tmp = test_db
-    state: IngestionState = {
-        "document_id": "no-row-needed",
-        "file_path": "/tmp/post.md",
-        "format": "md",
-        "parsed_document": {
-            "title": "Post",
-            "format": "md",
-            "pages": 1,
-            "word_count": 120,
-            "sections": [],
-            "raw_text": "a plain technical blog post with no numbered sections",
-        },
-        "content_type": "technical",
-        "chunks": None,
-        "status": "classifying",
-        "error": None,
-    }
-    result = await classify_node(state)
-    assert result["content_type"] == "tech_article"
+        assert (await session.get(DocumentModel, doc_id)).domain == "general"

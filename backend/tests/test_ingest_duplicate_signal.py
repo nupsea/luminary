@@ -36,7 +36,7 @@ async def _seed_existing(factory, *, stage: str) -> str:
             make_document(
                 id=doc_id,
                 title="already here",
-                content_type="notes",
+                form="entries",
                 word_count=5,
                 page_count=1,
                 file_path="/tmp/already-here.txt",

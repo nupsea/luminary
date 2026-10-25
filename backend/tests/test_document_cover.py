@@ -74,7 +74,8 @@ async def test_get_document_cover_from_image_model(test_db):
         doc = make_document(
             id=doc_id,
             title="Article with Diagram",
-            content_type="tech_article",
+            form="article",
+            domain="technical",
             word_count=500,
             page_count=1,
             file_path="",
@@ -159,7 +160,7 @@ async def test_get_document_cover_204_when_document_has_no_image(test_db):
             make_document(
                 id=doc_id,
                 title="Plain notes",
-                content_type="notes",
+                form="entries",
                 word_count=10,
                 page_count=1,
                 file_path="",

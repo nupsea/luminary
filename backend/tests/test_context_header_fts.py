@@ -61,7 +61,7 @@ async def test_context_header_indexed_in_fts_but_not_in_chunk_text(fts_db):
         )
         await session.commit()
 
-    await keyword_index_node({"document_id": doc_id, "content_type": "book"})
+    await keyword_index_node({"document_id": doc_id, "form": "prose"})
 
     # body term matches
     assert await _fts_match(factory, "Traveller") == [chunk_id]

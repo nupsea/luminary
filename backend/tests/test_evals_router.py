@@ -383,7 +383,8 @@ async def test_environment_counts_the_corpus_it_measures(test_db):
             make_document(
                 id="d1",
                 title="t",
-                content_type="technical",
+                form="article",
+                domain="technical",
                 word_count=1,
                 page_count=1,
                 file_path="/tmp/x.txt",

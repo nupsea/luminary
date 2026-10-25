@@ -37,7 +37,6 @@ async def embed_node(state: IngestionState) -> IngestionState:
             from app.services.embedder import get_embedding_service
             from app.services.vector_store import get_lancedb_service
 
-            content_type = state.get("content_type") or "notes"
             embedder = get_embedding_service()
 
             # Update stage BEFORE encoding so UI reflects current work immediately
@@ -80,7 +79,6 @@ async def embed_node(state: IngestionState) -> IngestionState:
                         {
                             "chunk_id": c["id"],
                             "document_id": doc_id,
-                            "content_type": content_type,
                             "section_heading": "",
                             "page": 0,
                             "chunk_index": c.get("index", 0),

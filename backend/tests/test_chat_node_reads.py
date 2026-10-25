@@ -36,7 +36,7 @@ async def session(memory_db):
                 make_document(
                     id="d2",
                     title="Frankenstein",
-                    content_type="notes",
+                    form="entries",
                     file_path="/y",
                     stage="chunking",
                 ),

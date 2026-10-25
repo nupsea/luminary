@@ -237,8 +237,8 @@ def trace_ingestion_node(
         span.set_attribute("ingestion.node_name", node_name)
         if state:
             span.set_attribute("ingestion.document_id", state.get("document_id", ""))
-            if state.get("content_type"):
-                span.set_attribute("ingestion.content_type", state["content_type"])
+            if state.get("form"):
+                span.set_attribute("ingestion.form", state["form"])
         t0 = time.perf_counter()
         try:
             yield span

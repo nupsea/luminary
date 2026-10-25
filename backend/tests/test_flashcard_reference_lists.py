@@ -35,7 +35,7 @@ async def _document(factory, chunks: list[tuple[str, str | None]]) -> None:
                 id="d1",
                 title="Attention",
                 format="pdf",
-                content_type="paper",
+                form="paper",
                 word_count=100,
                 page_count=1,
                 file_path="/tmp/a.pdf",

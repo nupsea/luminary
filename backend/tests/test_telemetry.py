@@ -119,7 +119,7 @@ def test_trace_retrieval_records_latency(in_memory_tracer):
 
 def test_trace_ingestion_node_creates_span_with_node_name(in_memory_tracer):
     """trace_ingestion_node creates a span with ingestion.node_name."""
-    state = {"document_id": "doc-123", "content_type": "notes", "file_path": "/tmp/x.pdf"}
+    state = {"document_id": "doc-123", "form": "entries", "file_path": "/tmp/x.pdf"}
     with trace_ingestion_node("parse", state):
         pass
 
@@ -129,7 +129,7 @@ def test_trace_ingestion_node_creates_span_with_node_name(in_memory_tracer):
     assert span.name == "ingestion.parse"
     assert span.attributes.get("ingestion.node_name") == "parse"
     assert span.attributes.get("ingestion.document_id") == "doc-123"
-    assert span.attributes.get("ingestion.content_type") == "notes"
+    assert span.attributes.get("ingestion.form") == "entries"
 
 
 def test_trace_ingestion_node_no_state(in_memory_tracer):

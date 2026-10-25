@@ -14,11 +14,11 @@ from evals import build_flashcard_golden as builder  # noqa: E402
 
 def _library(path: Path) -> None:
     con = sqlite3.connect(path)
-    con.execute("CREATE TABLE documents (id, title, content_type, file_path, stage)")
+    con.execute("CREATE TABLE documents (id, title, format, form, domain, file_path, stage)")
     con.execute("CREATE TABLE chunks (document_id, chunk_index, text)")
     for doc_id, title in (("d-hamlet", "hamlet"), ("d-other", "my_notes")):
         con.execute(
-            "INSERT INTO documents VALUES (?, ?, 'book', ?, 'complete')",
+            "INSERT INTO documents VALUES (?, ?, 'txt', 'prose', NULL, ?, 'complete')",
             (doc_id, title, f"/lib/raw/{doc_id}.txt"),
         )
         for i in range(20):

@@ -19,10 +19,10 @@ from tests.factories import make_document
 # Shared fixture
 
 
-def _make_doc(doc_id: str, content_type: str = "book") -> DocumentModel:
+def _make_doc(doc_id: str, form: str = "prose") -> DocumentModel:
     return make_document(
         id=doc_id,
-        content_type=content_type,
+        form=form,
         word_count=300,
         page_count=3,
         file_path="/tmp/test.txt",
@@ -53,7 +53,7 @@ def _make_book_state(doc_id: str) -> IngestionState:
             "sections": sections,
             "raw_text": " ".join(s["text"] for s in sections),
         },
-        content_type="book",
+        form="prose",
         chunks=None,
         status="chunking",
         error=None,
@@ -89,7 +89,7 @@ def _make_conv_state(doc_id: str) -> IngestionState:
             "sections": [],
             "raw_text": PLAIN_CONV,
         },
-        content_type="conversation",
+        form="dialogue",
         chunks=None,
         status="chunking",
         error=None,
@@ -105,7 +105,7 @@ async def test_sections_endpoint_returns_ordered_list(test_db):
     engine, factory, _ = test_db
     doc_id = str(uuid.uuid4())
     async with factory() as session:
-        session.add(_make_doc(doc_id, "book"))
+        session.add(_make_doc(doc_id))
         await session.commit()
 
     state = _make_book_state(doc_id)
@@ -134,7 +134,7 @@ async def test_sections_endpoint_chunk_count_matches_db(test_db):
     engine, factory, _ = test_db
     doc_id = str(uuid.uuid4())
     async with factory() as session:
-        session.add(_make_doc(doc_id, "book"))
+        session.add(_make_doc(doc_id))
         await session.commit()
 
     state = _make_book_state(doc_id)
@@ -185,7 +185,6 @@ async def test_conversation_metadata_endpoint_returns_roster(test_db):
     conv_doc = make_document(
         id=doc_id,
         title="Test Conversation",
-        content_type="conversation",
         form="dialogue",
         word_count=100,
         file_path="/tmp/conv.txt",

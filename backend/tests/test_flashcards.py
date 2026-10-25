@@ -26,7 +26,7 @@ def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
     return make_document(
         **{
             "id": doc_id,
-            "content_type": "notes",
+            "form": "entries",
             "word_count": 100,
             "page_count": 1,
             "file_path": "/tmp/test.txt",
@@ -256,7 +256,7 @@ async def test_service_prompt_includes_book_guidelines(test_db):
     doc_id = str(uuid.uuid4())
 
     async with factory() as session:
-        session.add(_make_doc(doc_id, content_type="book"))
+        session.add(_make_doc(doc_id, form="prose"))
         # Add 20 chunks so the 5% skip doesn't empty the list
         for i in range(20):
             session.add(_make_chunk(doc_id=doc_id, chunk_index=i))
@@ -288,7 +288,7 @@ async def test_service_skips_preface(test_db):
     doc_id = str(uuid.uuid4())
 
     async with factory() as session:
-        session.add(_make_doc(doc_id, content_type="book"))
+        session.add(_make_doc(doc_id, form="prose"))
         # Section 1: Preface
         s1_id = str(uuid.uuid4())
         session.add(
@@ -851,7 +851,7 @@ async def test_a_technical_book_s_preface_is_skipped_and_its_indexing_chapter_ke
         ("Index", "B-tree, 12; hash index, 14"),
     ]
     async with factory() as session:
-        session.add(_make_doc(doc_id, content_type="tech_book"))
+        session.add(_make_doc(doc_id, form="reference", domain="technical"))
         for order, (heading, body) in enumerate(sections):
             sid = str(uuid.uuid4())
             session.add(

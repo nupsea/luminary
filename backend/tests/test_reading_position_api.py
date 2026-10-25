@@ -19,9 +19,7 @@ async def _create_document(doc_id: str) -> None:
     factory = db_module._session_factory
     async with factory() as session:
         session.add(
-            make_document(
-                id=doc_id, title="Test Book", content_type="notes", file_path="/tmp/noop.txt"
-            )
+            make_document(id=doc_id, title="Test Book", form="entries", file_path="/tmp/noop.txt")
         )
         await session.commit()
 

@@ -32,7 +32,8 @@ async def _seed_two_books_one_concept(factory):
                     id=did,
                     title=title,
                     format="pdf",
-                    content_type="tech_book",
+                    form="reference",
+                    domain="technical",
                     file_path=f"/tmp/{did}.pdf",
                     stage="parsing",
                 )
@@ -119,7 +120,8 @@ async def test_falls_back_to_whole_doc_when_no_evidence_chunks(test_db, monkeypa
                 id="bookA",
                 title="Relational DBs",
                 format="pdf",
-                content_type="tech_book",
+                form="reference",
+                domain="technical",
                 file_path="/tmp/a.pdf",
                 stage="parsing",
             )

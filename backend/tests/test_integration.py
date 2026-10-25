@@ -181,7 +181,7 @@ async def _ingest_fixture(
             make_document(
                 id=doc_id,
                 title=src.stem.replace("_", " ").title(),
-                content_type="notes",
+                form="entries",
                 file_path=str(dest),
                 stage="parsing",
             )

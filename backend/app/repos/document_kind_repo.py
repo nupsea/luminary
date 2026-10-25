@@ -31,7 +31,6 @@ def apply_kind(doc: DocumentModel, kind: EditableKind) -> None:
     doc.form = facets["form"]
     if "domain" in facets:
         doc.domain = facets["domain"]
-        doc.is_technical = facets["domain"] == "technical"
     doc.facets_source = FACETS_FROM_READER
 
 

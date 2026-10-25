@@ -15,10 +15,10 @@ from app.main import app
 
 @pytest.mark.anyio
 async def test_ingest_without_a_kind_classifies(test_db, monkeypatch):
-    """Omitting the kind is accepted, and passes no type so classify_node runs.
+    """Omitting the kind is accepted, and passes none, so nothing overrides the measurement.
 
-    None specifically, not a placeholder: classify_node treats any type it is
-    given as the caller's decision and skips every heuristic.
+    None specifically, not a placeholder: classify_node lays any kind it is given
+    over the measured facets as the reader's choice.
     """
     called: list[str | None] = []
 
@@ -28,8 +28,8 @@ async def test_ingest_without_a_kind_classifies(test_db, monkeypatch):
     # Recorded at call time, not inside the coroutine body: the job never runs
     # here, so a mock that appends when awaited would record nothing and the
     # assertion below would pass on an empty list.
-    def _mock_run_ingestion(document_id, file_path, format, content_type=None, **_):
-        called.append(content_type)
+    def _mock_run_ingestion(document_id, file_path, format, parsed_document=None, kind=None):
+        called.append(kind)
         return _noop()
 
     import app.routers.documents as documents_module

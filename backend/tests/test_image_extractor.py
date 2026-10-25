@@ -364,7 +364,7 @@ async def _seed_doc_and_job(factory, doc_id: str, job_id: str, file_path: Path):
                 title="Broken PDF",
                 file_path=str(file_path),
                 format="pdf",
-                content_type="paper",
+                form="paper",
                 stage="enriching",
             )
         )

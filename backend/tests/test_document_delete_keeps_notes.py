@@ -43,7 +43,8 @@ async def _seed(memory_db, lancedb) -> tuple[str, str, str]:
                 id=doc_id,
                 title="No Lock-In",
                 format="pdf",
-                content_type="tech_book",
+                form="reference",
+                domain="technical",
                 file_path=f"/nonexistent/{doc_id}.pdf",
             )
         )

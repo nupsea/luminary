@@ -49,7 +49,7 @@ async def _add_doc(factory, doc_id: str, summary: str | None = None) -> None:
             make_document(
                 id=doc_id,
                 title=f"Doc {doc_id[:4]}",
-                content_type="notes",
+                form="entries",
                 word_count=100,
                 page_count=1,
                 file_path=f"/nonexistent/{doc_id}.txt",

@@ -24,7 +24,7 @@ def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
     return make_document(
         **{
             "id": doc_id,
-            "content_type": "notes",
+            "form": "entries",
             "word_count": 100,
             "page_count": 1,
             "file_path": "/tmp/test.txt",
@@ -530,7 +530,7 @@ async def test_objectives_returns_empty_for_fiction(test_db):
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
     async with factory() as session:
-        session.add(_make_doc(doc_id, content_type="book"))
+        session.add(_make_doc(doc_id, form="prose"))
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -560,7 +560,7 @@ async def test_objectives_returns_populated_list(test_db):
     obj_id = str(uuid.uuid4())
 
     async with factory() as session:
-        session.add(_make_doc(doc_id, content_type="tech_book"))
+        session.add(_make_doc(doc_id, form="reference", domain="technical"))
         session.add(
             LearningObjectiveModel(
                 id=obj_id,
@@ -597,7 +597,7 @@ async def test_patch_objective_toggles_covered(test_db):
     obj_id = str(uuid.uuid4())
 
     async with factory() as session:
-        session.add(_make_doc(doc_id, content_type="tech_book"))
+        session.add(_make_doc(doc_id, form="reference", domain="technical"))
         session.add(
             LearningObjectiveModel(
                 id=obj_id,
@@ -638,8 +638,8 @@ async def test_patch_objective_404_for_wrong_document(test_db):
     obj_id = str(uuid.uuid4())
 
     async with factory() as session:
-        session.add(_make_doc(doc_a, content_type="tech_book"))
-        session.add(_make_doc(doc_b, content_type="tech_book"))
+        session.add(_make_doc(doc_a, form="reference", domain="technical"))
+        session.add(_make_doc(doc_b, form="reference", domain="technical"))
         session.add(
             LearningObjectiveModel(
                 id=obj_id,

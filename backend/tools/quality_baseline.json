@@ -34,7 +34,6 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book",
     "app/workflows/ingestion_nodes/chunk.py::chunk_node",
     "app/workflows/ingestion_nodes/finalize.py::enrichment_enqueue_node",
-    "app/workflows/ingestion_nodes/parse.py::_measure_classification",
     "app/workflows/ingestion_nodes/transcribe.py::transcribe_node"
   ],
   "complex_functions": [
@@ -83,7 +82,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 208,
+  "complexity_over_10": 205,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
@@ -93,22 +92,7 @@
   "sql_outside_repos": {},
   "unstable_tests": {},
   "content_type_refs": {
-    "app/models.py": 4,
     "app/routers/audio.py": 1,
-    "app/routers/documents.py": 19,
-    "app/routers/images.py": 1,
-    "app/scripts/reindex_entities.py": 4,
-    "app/scripts/remeasure_domain.py": 5,
-    "app/services/content_classifier.py": 1,
-    "app/services/flashcard_prompts.py": 8,
-    "app/services/summary_prompts.py": 1,
-    "app/services/vector_store.py": 1,
-    "app/telemetry.py": 3,
-    "app/types.py": 10,
-    "app/workflows/ingestion.py": 5,
-    "app/workflows/ingestion_nodes/_shared.py": 7,
-    "app/workflows/ingestion_nodes/embed.py": 4,
-    "app/workflows/ingestion_nodes/parse.py": 24,
-    "app/workflows/oreilly_ingestion.py": 1
+    "app/routers/images.py": 1
   }
 }

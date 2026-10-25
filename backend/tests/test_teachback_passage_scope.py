@@ -208,30 +208,29 @@ def test_an_unlocatable_new_card_keeps_the_whole_batch(label, excerpt):
 
 
 class _Doc:
-    form = None
+    form = "dialogue"
     domain = None
     register = None
     title = "Practical Tips for Vibe Coding & Agent Workflows"
 
-    def __init__(self, content_type: str) -> None:
-        self.content_type = content_type
+    def __init__(self, format: str) -> None:
+        self.format = format
 
 
 @pytest.mark.parametrize(
-    ("label", "content_type", "has_speakers", "expected"),
+    ("label", "format", "has_speakers", "expected"),
     [
-        # A conference talk ingested as `audio`, which this branch called a
-        # meeting -- the defect `_infer_genre`'s own docstring names.
-        ("a talk", "audio", False, "non-fiction"),
-        ("a talk, nothing measured", "audio", None, "non-fiction"),
-        ("a recording with participants", "audio", True, "conversation"),
-        ("a video", "video", False, "non-fiction"),
-        # Named as a conversation by ingestion: still a meeting.
-        ("a meeting", "meeting", None, "conversation"),
-        ("a transcript", "transcript", None, "conversation"),
+        # A conference talk, which the old type branch called a meeting --
+        # the defect `_infer_genre`'s own docstring named.
+        ("a talk", "mp3", False, "non-fiction"),
+        ("a talk, nothing measured", "mp3", None, "non-fiction"),
+        ("a recording with participants", "mp3", True, "conversation"),
+        ("a video", "mp4", False, "non-fiction"),
+        # A transcript uploaded as text: still a meeting.
+        ("a meeting transcript", "txt", None, "conversation"),
     ],
 )
-def test_a_recording_is_not_automatically_a_meeting(label, content_type, has_speakers, expected):
+def test_a_recording_is_not_automatically_a_meeting(label, format, has_speakers, expected):
     from app.services.flashcard_prompts import _infer_genre
 
-    assert _infer_genre(_Doc(content_type), has_speakers=has_speakers) == expected, label
+    assert _infer_genre(_Doc(format), has_speakers=has_speakers) == expected, label

@@ -166,7 +166,9 @@ def main() -> None:
                 judge=lambda card, chunk: judge_flashcard(card, chunk, args.judge_model),
             )
         per_row.append(scored)
-        per_kind.setdefault(row.get("content_type") or "?", []).append(scored)
+        # Goldens built before 0.17.0 name the kind by its retired content type.
+        kind = row.get("kind") or row.get("content_type") or "?"
+        per_kind.setdefault(kind, []).append(scored)
     if saved:
         saved.close()
         print(f"Cards saved to {args.save_cards}")

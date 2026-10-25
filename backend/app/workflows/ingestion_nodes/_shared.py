@@ -2,11 +2,8 @@
 
 Holds the cross-node infrastructure that several nodes import:
 - `IngestionState` TypedDict (the StateGraph state shape)
-- `ContentType` literal
-- `CHUNK_CONFIGS` per-content-type chunker settings
 - `ENTITY_TAIL_MAX` + `build_entity_tail`
 - `STAGE_PROGRESS` map
-- `_classify` heuristic that picks the content type
 - `_update_stage` async helper that writes the document's stage column
 - `_parser` shared `DocumentParser` instance
 - `_background_tasks` set for fire-and-forget tasks
@@ -23,11 +20,7 @@ from app.repos.document_repo import DocumentRepo
 from app.services.background import task_registry
 from app.services.llm_admission import awaited
 from app.services.parser import DocumentParser
-from app.types import (
-    FACETS_FROM_READER,
-    ContentType,  # noqa: F401  re-exported via app.workflows.ingestion
-    DocumentProfile,
-)
+from app.types import FACETS_FROM_READER, MEDIA_FORMATS, UNCLASSIFIED_FORM, DocumentProfile
 
 # Module-level set holding fire-and-forget background tasks (objective
 # extraction, pregenerate, etc.). All ingestion nodes share this so the
@@ -41,27 +34,6 @@ logger = logging.getLogger(__name__)
 
 
 _parser = DocumentParser()
-
-# No longer read by the chunkers -- `DocumentProfile.chunk_config` decides
-# sizing now. Kept as the pinned record of what each content type used to get,
-# and `tests/test_document_profile.py` asserts the profile still reproduces it.
-# Deleting this as dead code would silently void that comparison. It goes with
-# the legacy type column (#223, step d).
-CHUNK_CONFIGS: dict[str, dict[str, int]] = {
-    # Papers are the densest content type and previously had the smallest budget,
-    # tight enough that splits fell past word boundaries into mid-word cuts. The
-    # chunk embedder (bge-small-en-v1.5) carries 512 tokens (~2000 chars), so this
-    # still leaves headroom.
-    "paper": {"chunk_size": 900, "chunk_overlap": 150},
-    "book": {"chunk_size": 600, "chunk_overlap": 120},
-    "conversation": {"chunk_size": 450, "chunk_overlap": 90},
-    "notes": {"chunk_size": 300, "chunk_overlap": 75},
-    "code": {"chunk_size": 300, "chunk_overlap": 75},
-    "tech_book": {"chunk_size": 500, "chunk_overlap": 80},
-    "tech_article": {"chunk_size": 350, "chunk_overlap": 60},
-    "epub": {"chunk_size": 600, "chunk_overlap": 120},
-    "kindle_clippings": {"chunk_size": 300, "chunk_overlap": 75},
-}
 
 # cap on canonical entities included in a chunk's entity tail.
 # Bounds embedding distortion and BM25 dilution from very entity-dense chunks.
@@ -132,7 +104,6 @@ class IngestionState(TypedDict):
     file_path: str
     format: str
     parsed_document: dict[str, Any] | None
-    content_type: str | None
     # The kind chosen at upload; classify_node lays its facets over the measured shape.
     kind: str | None
     chunks: list[dict[str, Any]] | None
@@ -140,65 +111,22 @@ class IngestionState(TypedDict):
     error: str | None
     section_summary_count: int | None
     audio_duration_seconds: float | None
-    is_technical: bool | None
     form: str | None
+    domain: str | None
     structure_type: str | None
     defer_section_summaries: bool | None
     _audio_chunks: list[dict[str, Any]] | None
 
 
 def profile_of_state(state: IngestionState) -> DocumentProfile:
-    """`DocumentProfile.of` mid-ingest: the measured form is in the state, not yet the row."""
-    legacy = DocumentProfile.from_legacy(state.get("content_type"), state.get("is_technical"))
-    return legacy.with_measured_form(state.get("form"))
+    """`DocumentProfile.of` mid-ingest: the measured facets are in the state, not yet the row.
 
-
-def resolve_technical_variant(raw_text: str, word_count: int | None = None) -> str:
-    """Resolve the merged 'technical' upload choice into the sizing variant
-    the chunker expects. The two variants share every other pipeline branch.
-
-    Length decides it -- the choice is a chunk size and nothing else -- and
-    structure overrides only for a short document that is plainly a manual.
-    Each threshold is bracketed by the two documents either side:
-
-    - 5,000 words: `luminary_conceptual_foundations` at 5,312 is a book,
-      `radiology_chexnet_cxr` at 3,764 is a paper.
-    - 8 sections: `radiology_chexnet_cxr` has 6 and must stay an article, so 3
-      would misfile it.
-    - 6 fence lines: `retrieval-and-memory-tutorial` at 26 is a book,
-      `Introducing Contextual Retrieval` at 4 is not.
-
-    The previous rule read the first 5,000 characters -- on a book, the title
-    page -- and never looked at length, filing a 120,000-word IAEA manual as an
-    article and a 3,764-word paper as a book.
+    Media is turns until its transcript says otherwise; classify_node measures nothing for it.
     """
-    from app.services.content_classifier import (  # noqa: PLC0415
-        _CODE_FENCE,
-        count_numbered_sections,
-        strip_boilerplate,
-    )
-
-    body = strip_boilerplate(raw_text)
-    words = word_count if word_count is not None else len(body.split())
-    if words >= 5000 or len(_CODE_FENCE.findall(body)) >= 6 or count_numbered_sections(body) >= 8:
-        return "tech_book"
-    return "tech_article"
-
-
-def _classify(
-    raw_text: str, sections: list[dict], word_count: int, file_ext: str, filename: str = ""
-) -> str:
-    """Deprecated alias for `classify_content`, kept for existing importers.
-
-    The rules that used to live here scored 4 of 13 on the repo's own corpus:
-    they read the first 5,000 characters (a Gutenberg licence, not the book),
-    matched single words anywhere, and returned on the first hit so ordering
-    decided the answer. `app.services.content_classifier` replaces them and
-    scores 13 of 13 against `tests/fixtures/content_type_labels.json`.
-    """
-    from app.services.content_classifier import classify_content  # noqa: PLC0415
-
-    return classify_content(raw_text, sections, word_count, file_ext, filename)
+    form = state.get("form")
+    if form is None:
+        form = "dialogue" if state.get("format") in MEDIA_FORMATS else UNCLASSIFIED_FORM
+    return DocumentProfile(form=form, domain=state.get("domain"))
 
 
 async def _update_stage(document_id: str, stage: str) -> None:
@@ -269,6 +197,13 @@ async def measure_domain(form: str | None, raw_text: str) -> bool | None:
     if form == "source_code":
         return True
     return await detect_technical_content(raw_text) if raw_text.strip() else None
+
+
+def as_domain(is_technical: bool | None) -> str | None:
+    """The stored domain for a technical-or-not answer; None stays unanswered, never "general"."""
+    if is_technical is None:
+        return None
+    return "technical" if is_technical else "general"
 
 
 # Kept: transcribe_node imported this name before the probe was generalised.
@@ -350,40 +285,26 @@ async def _persist_structure_type(document_id: str, structure_type: str) -> None
 
 
 async def _persist_classification(
-    document_id: str,
-    content_type: str,
-    is_technical: bool | None,
-    register: str | None = None,
-    form: str | None = None,
+    document_id: str, form: str, domain: str | None, register: str | None = None
 ) -> None:
-    """Write the content type, the technical flag and the facets they imply.
+    """Write the measured facets in one statement.
 
-    One statement: the facets are a function of the other columns, so writing
-    them separately leaves a window where the row disagrees with itself.
-    `register` and `form` are only written when supplied, so a pass that
-    measures one cannot wipe the other.
+    A null domain is written as measured: an unanswered question is not "general".
+    `register` is only written when supplied, so a pass that cannot measure it
+    does not wipe one measured before.
     """
-    from app.types import DocumentProfile  # noqa: PLC0415
-
-    profile = DocumentProfile.from_legacy(content_type, is_technical)
-    # The content_type mapping is a fallback only: it puts `reference` behind
-    # `tech_book`, the bias `classify_form` exists to remove.
-    values: dict[str, object] = {
-        "content_type": content_type,
-        "is_technical": is_technical,
-        "form": form or profile.form,
-        "domain": profile.domain,
-    }
+    values: dict[str, object] = {"form": form, "domain": domain}
     if register is not None:
         values["register"] = register
     async with get_session_factory()() as session:
         repo = DocumentRepo(session)
         if await reader_facets(repo, document_id) is not None:
             # A kind the reader chose outranks a measurement (#223).
-            for key in ("form", "domain", "is_technical"):
+            for key in ("form", "domain"):
                 values.pop(key)
-        await repo.update_fields(document_id, **values)
-        await session.commit()
+        if values:
+            await repo.update_fields(document_id, **values)
+            await session.commit()
 
 
 async def reader_facets(repo: DocumentRepo, document_id: str) -> tuple[str, str | None] | None:

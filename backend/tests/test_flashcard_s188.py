@@ -25,11 +25,11 @@ SEC_ID = "sec-chapter12"
 PARENT_SEC_ID = "sec-book12"
 
 
-def _make_doc(content_type: str = "book") -> DocumentModel:
+def _make_doc(form: str = "prose") -> DocumentModel:
     return make_document(
         id=DOC_ID,
         title="The Odyssey",
-        content_type=content_type,
+        form=form,
         word_count=50000,
         page_count=200,
         file_path="/tmp/odyssey.txt",
@@ -168,7 +168,7 @@ async def test_generate_book_produces_bloom_l3_cards(test_db):
     _engine, factory, _tmp = test_db
 
     async with factory() as session:
-        doc = _make_doc(content_type="book")
+        doc = _make_doc(form="prose")
         session.add(doc)
         session.add(_make_parent_section())
         session.add(_make_section())
@@ -221,7 +221,7 @@ async def test_generate_populates_section_heading(test_db):
     _engine, factory, _tmp = test_db
 
     async with factory() as session:
-        doc = _make_doc(content_type="book")
+        doc = _make_doc(form="prose")
         session.add(doc)
         session.add(_make_parent_section())
         session.add(_make_section())

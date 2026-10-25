@@ -1,6 +1,6 @@
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal, TypedDict, TypeGuard, get_args, overload
+from typing import Any, Literal, TypedDict, overload
 
 # A card written ahead for a chapter, outside the review schedule until the chapter is practised.
 CARD_HELD = "held"
@@ -8,27 +8,9 @@ CARD_HELD = "held"
 # A section's `preview` is a bounded snippet; reading text lives in `body`, uncapped (I-29).
 PREVIEW_CHARS = 10000
 
-ContentType = Literal[
-    "book",
-    "conversation",
-    "notes",
-    "paper",
-    "audio",
-    "video",
-    "epub",
-    "kindle_clippings",
-    "tech_book",
-    "tech_article",
-    # Merged upload choice; classify_node resolves it to tech_book or
-    # tech_article from the parsed text and persists the resolved value.
-    "technical",
-]
-
-
-# Document facets. `ContentType` above answers four questions with one value --
-# container, shape, subject, size -- so it enumerates eleven cells of a cross
-# product. These separate the questions; `format` carries the container.
-# Policy reads these; content_type stays on the wire until the API moves (#223).
+# Document facets. The retired content type answered four questions with one value --
+# container, shape, subject, size -- and so enumerated eleven cells of a cross
+# product. These separate the questions; `format` carries the container (#223).
 
 Form = Literal[
     "prose",  # continuous long-form read start to finish
@@ -41,9 +23,9 @@ Form = Literal[
     "source_code",  # a program file
 ]
 
-# Null is not "general". Only a measurement or a content type that names the
-# subject outright establishes a domain; a failed probe leaves null, and calling
-# that "general" would show the reader a decision nobody made.
+# Null is not "general". Only a measurement or a reader's choice establishes a
+# domain; a failed probe leaves null, and calling that "general" would show the
+# reader a decision nobody made.
 Domain = Literal["general", "technical"]
 
 # Whether the text tells a story or explains a subject.
@@ -51,25 +33,7 @@ Register = Literal["narrative", "expository"]
 
 CardGenre = Literal["narrative", "non-fiction", "technical", "academic", "conversation"]
 
-_FORM_BY_CONTENT_TYPE: dict[str, Form] = {
-    "book": "prose",
-    "epub": "prose",
-    "paper": "paper",
-    "tech_book": "reference",
-    "tech_article": "article",
-    "conversation": "dialogue",
-    "audio": "dialogue",
-    "video": "dialogue",
-    "notes": "entries",
-    "kindle_clippings": "entries",
-    "code": "source_code",
-    # Transient upload choice. classify_node resolves it to a tech_* variant
-    # before persisting, so this only covers a row read mid-ingest.
-    "technical": "article",
-}
-
-# The values CHUNK_CONFIGS carried for the content type each form replaces, so
-# sizing does not move. tests/test_document_profile.py asserts they still match.
+# Chunk sizes, carried over from the content type each form replaced, so sizing did not move.
 _CHUNK_BY_FORM: dict[Form, tuple[int, int]] = {
     "paper": (900, 150),
     "prose": (600, 120),
@@ -97,11 +61,7 @@ _REGISTER_BY_FORM: dict[str, Register] = {
 }
 
 
-_FORMS: frozenset[str] = frozenset(get_args(Form))
-
-
-def is_form(value: object) -> TypeGuard[Form]:
-    return value in _FORMS
+UNCLASSIFIED_FORM: Form = "entries"
 
 
 def register_for_form(form: Form) -> "Register | None":
@@ -120,9 +80,9 @@ def chunk_config_for_form(form: Form) -> dict[str, int]:
 class DocumentProfile:
     """What a document is, and every policy derived from it.
 
-    One definition per policy. Consumers ask this object rather than testing
-    `content_type`: five sites did that for "is this technical" and disagreed,
-    two of them by matching the document title against a keyword list.
+    One definition per policy. Consumers ask this object rather than testing a
+    type: five sites once did that for "is this technical" and disagreed, two of
+    them by matching the document title against a keyword list.
     """
 
     form: Form
@@ -131,11 +91,7 @@ class DocumentProfile:
 
     @property
     def is_technical(self) -> bool:
-        """Whether technical NER types and relation extraction apply.
-
-        An unknown domain is not technical, matching `is_technical_content`, so
-        nothing downstream moved when null became distinguishable from general.
-        """
+        """Whether technical NER types and relation extraction apply; an unknown domain is not."""
         return self.domain == "technical"
 
     @property
@@ -200,48 +156,16 @@ class DocumentProfile:
         return cls(form=row.form, domain=row.domain, register=row.register)
 
     @classmethod
-    def from_legacy(
-        cls,
-        content_type: str | None,
-        is_technical: bool | None = None,
-        register: Register | None = None,
-    ) -> "DocumentProfile":
-        """Build a profile from the columns that predate the facets.
-
-        `is_technical` resolves exactly as `is_technical_content` does, so NER
-        sees the answer it saw before.
-        """
-        # `entries` for an unmapped type: smallest chunk size, and what the
-        # generic chunker fell back to.
-        form = _FORM_BY_CONTENT_TYPE.get(content_type or "", "entries")
-        domain: Domain | None
-        if is_technical is not None:
-            domain = "technical" if is_technical else "general"
-        elif content_type in TECHNICAL_CONTENT_TYPES:
-            domain = "technical"
-        else:
-            # A plain `book` may be a novel or a deep-learning textbook.
-            domain = None
-        return cls(form=form, domain=domain, register=register)
-
-    @classmethod
     def of(cls, doc: Any) -> "DocumentProfile":
-        """The profile policy reads for a stored document (None: nothing known).
+        """The profile policy reads for a stored document.
 
-        What classification measured wins; the legacy columns answer only where
-        it measured nothing -- a row from before the facets, or a failed probe.
+        An unclassified one -- mid-ingest, or a parse that failed -- reads as
+        `entries`: the smallest chunks, and what the generic chunker falls back to.
         """
-        if doc is None:
-            return cls.from_legacy(None)
-        legacy = cls.from_legacy(doc.content_type, doc.is_technical)
         measured = cls.from_row(doc)
-        if measured is None:
-            return legacy
-        return replace(measured, domain=measured.domain or legacy.domain)
-
-    def with_measured_form(self, form: str | None) -> "DocumentProfile":
-        """This profile shaped by a measured form, when it is one the policies know."""
-        return replace(self, form=form) if is_form(form) else self
+        if measured is not None:
+            return measured
+        return cls(form=UNCLASSIFIED_FORM, domain=getattr(doc, "domain", None))
 
 
 @dataclass
@@ -601,42 +525,6 @@ def facets_for_kind(kind: EditableKind, form: str | None) -> dict[str, str]:
     if not form or form in _KIND_FORMS:
         form = "prose" if kind == "book" else "reference"
     return {"form": form, "domain": "general" if kind == "book" else "technical"}
-
-
-# The legacy type column an upload's kind writes until that column is dropped (#223, step d).
-# `technical` is the transient value classify_node resolves to a tech_* variant.
-CONTENT_TYPE_OF_KIND: dict[str, str] = {
-    "book": "book",
-    "technical": "technical",
-    "paper": "paper",
-    "conversation": "conversation",
-    "notes": "notes",
-}
-
-
-def kind_of_content_type(legacy: str | None, format: str | None) -> DocumentKind:
-    """The kind a legacy content type names, for a classifier that still answers in them."""
-    profile = DocumentProfile.from_legacy(legacy)
-    return document_kind(format, profile.form, profile.domain)
-
-
-# Technical-content gate
-
-
-TECHNICAL_CONTENT_TYPES = ("code", "tech_book", "tech_article")
-
-
-def is_technical_content(content_type: str | None, is_technical: bool | None) -> bool:
-    """Whether to apply technical NER types and technical relation extraction.
-
-    The persisted flag wins when set. Rows predating it fall back to content_type,
-    which is why media documents were never treated as technical: a conference talk
-    is content_type "audio", so the tech entity types (TECHNOLOGY and the six
-    tech-specific ones) were filtered out of its graph.
-    """
-    if is_technical is not None:
-        return is_technical
-    return content_type in TECHNICAL_CONTENT_TYPES
 
 
 @dataclass(frozen=True)

@@ -339,7 +339,7 @@ async def test_reextract_queues_an_image_extract_job(test_db):
                 id=doc_id,
                 title="Paper",
                 format="pdf",
-                content_type="paper",
+                form="paper",
                 word_count=100,
                 page_count=15,
                 file_path="/fake.pdf",

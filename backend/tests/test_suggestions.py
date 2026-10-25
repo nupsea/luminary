@@ -39,11 +39,11 @@ async def db_session(memory_db):
         yield session
 
 
-def _make_doc(doc_id: str, title: str, content_type: str) -> DocumentModel:
+def _make_doc(doc_id: str, title: str, **facets) -> DocumentModel:
     return make_document(
         id=doc_id,
         title=title,
-        content_type=content_type,
+        **facets,
         word_count=1000,
         page_count=10,
         file_path=f"/tmp/{doc_id}.txt",
@@ -61,7 +61,7 @@ def _make_section(doc_id: str, heading: str, order: int) -> SectionModel:
 @pytest.mark.asyncio
 async def test_suggestions_book_document(db_session):
     """Book doc with PERSON and CONCEPT entities returns character/theme suggestions."""
-    doc = _make_doc("doc-book-1", "The Odyssey", "book")
+    doc = _make_doc("doc-book-1", "The Odyssey", form="prose")
     db_session.add(doc)
     db_session.add(_make_section("doc-book-1", "The Journey Home", 1))
     db_session.add(_make_section("doc-book-1", "The Sirens", 2))
@@ -110,7 +110,7 @@ async def test_suggestions_null_document_id(db_session):
 @pytest.mark.asyncio
 async def test_suggestions_technical_document(db_session):
     """Tech doc with CONCEPT and TECHNOLOGY entities returns tradeoff suggestions."""
-    doc = _make_doc("doc-tech-1", "System Design Guide", "tech_book")
+    doc = _make_doc("doc-tech-1", "System Design Guide", form="reference", domain="technical")
     db_session.add(doc)
     db_session.add(_make_section("doc-tech-1", "Caching Strategies", 1))
     await db_session.commit()
@@ -138,7 +138,7 @@ async def test_suggestions_technical_document(db_session):
 @pytest.mark.asyncio
 async def test_suggestions_video_document(db_session):
     """Video doc with CONCEPT and PERSON entities returns argument suggestions."""
-    doc = _make_doc("doc-video-1", "AI Lecture", "video")
+    doc = _make_doc("doc-video-1", "AI Lecture", form="dialogue", format="mp4")
     db_session.add(doc)
     await db_session.commit()
 
@@ -194,7 +194,7 @@ async def test_suggestions_missing_document_returns_no_pills(db_session):
 async def test_suggestions_populated_library_no_shared_entities(db_session):
     """A library WITH documents but no cross-document entity overlap must get real,
     answerable questions -- never the onboarding "upload a document" chips."""
-    doc = _make_doc("doc-ready-1", "Some Book", "book")
+    doc = _make_doc("doc-ready-1", "Some Book", form="prose")
     doc.stage = "complete"
     db_session.add(doc)
     await db_session.commit()
@@ -218,7 +218,7 @@ async def test_suggestions_populated_library_no_shared_entities(db_session):
 @pytest.mark.asyncio
 async def test_suggestions_returns_four(db_session):
     """Even with minimal entity data, suggestions list has exactly 4 items."""
-    doc = _make_doc("doc-sparse-1", "Sparse Doc", "notes")
+    doc = _make_doc("doc-sparse-1", "Sparse Doc", form="entries")
     db_session.add(doc)
     await db_session.commit()
 
@@ -239,7 +239,7 @@ async def test_suggestions_returns_four(db_session):
 async def test_fewer_generated_than_four(db_session, document_id):
     """Across documents, templates top 1-3 generated questions up to 4. For one document the
     generated questions stand alone: a template there is unchecked against the text."""
-    db_session.add(_make_doc("doc-short-1", "Short Doc", "notes"))
+    db_session.add(_make_doc("doc-short-1", "Short Doc", form="entries"))
     db_session.add(_make_section("doc-short-1", "Intro", 1))
     await db_session.commit()
     generated = [
@@ -273,7 +273,7 @@ async def test_fewer_generated_than_four(db_session, document_id):
 @pytest.mark.asyncio
 async def test_suggestions_not_in_history(db_session):
     """Returned LLM suggestions must not overlap with recent history texts."""
-    doc = _make_doc("doc-hist-1", "History Doc", "book")
+    doc = _make_doc("doc-hist-1", "History Doc", form="prose")
     db_session.add(doc)
     # Need executive summary for LLM path to activate
     db_session.add(
@@ -410,7 +410,7 @@ async def test_fallback_on_llm_unavailable(db_session):
     """When LLM raises ServiceUnavailableError, fallback to S187 templates."""
     import litellm as litellm_mod
 
-    doc = _make_doc("doc-fallback-1", "Fallback Book", "book")
+    doc = _make_doc("doc-fallback-1", "Fallback Book", form="prose")
     db_session.add(doc)
     db_session.add(_make_section("doc-fallback-1", "Chapter One", 1))
     # Seed executive summary so the LLM path is entered
@@ -490,24 +490,24 @@ def test_jaccard_filter():
     ("fields", "entities", "family"),
     [
         # A textbook stored as `book`: its domain decides, not a title keyword.
-        ({"content_type": "book", "form": "article", "domain": "technical"}, {}, "technical"),
-        ({"content_type": "book", "form": "prose", "domain": "general"}, {}, "book"),
+        ({"form": "article", "domain": "technical"}, {}, "technical"),
+        ({"form": "prose", "domain": "general"}, {}, "book"),
         # A journal is not a story.
-        ({"content_type": "book", "form": "entries", "domain": "general"}, {}, "generic"),
-        ({"content_type": "paper", "form": "paper", "domain": "technical"}, {}, "technical"),
+        ({"form": "entries", "domain": "general"}, {}, "generic"),
+        ({"form": "paper", "domain": "technical"}, {}, "technical"),
         # A recording follows its format, technical talk or not.
         (
-            {"content_type": "audio", "format": "flac", "form": "dialogue", "domain": "technical"},
+            {"format": "flac", "form": "dialogue", "domain": "technical"},
             {},
             "video",
         ),
         # No measured domain: the entity mix decides between textbook and story.
         (
-            {"content_type": "book"},
+            {"form": "prose"},
             {"CONCEPT": ["gradient descent", "dropout", "attention"], "PERSON": ["users"]},
             "technical",
         ),
-        ({"content_type": "book"}, {"PERSON": ["Ulysses"], "PLACE": ["Ithaca"]}, "book"),
+        ({"form": "prose"}, {"PERSON": ["Ulysses"], "PLACE": ["Ithaca"]}, "book"),
     ],
 )
 def test_templates_follow_the_measured_profile(fields, entities, family):
@@ -712,9 +712,7 @@ async def test_cross_document_context_is_one_latest_summary_per_live_document(db
 
     t0 = datetime(2026, 1, 1, tzinfo=UTC)
     db_session.add(
-        make_document(
-            id="doc-live", title="Live", content_type="notes", file_path="/x", stage="parsing"
-        )
+        make_document(id="doc-live", title="Live", form="entries", file_path="/x", stage="parsing")
     )
     for i, (doc_id, content) in enumerate(
         [("doc-live", "old live"), ("doc-gone", "deleted book"), ("doc-live", "new live")]

@@ -462,7 +462,7 @@ def classify_form(
 ) -> str:
     """The document's shape, from structure alone.
 
-    **No vocabulary signal takes part.** Deriving `form` from `content_type` put
+    **No vocabulary signal takes part.** Deriving `form` from the old content type put
     `reference` behind `tech_book`, which needs technical vocabulary, so a
     non-technical manual could not be one -- held out, The Elements of Style,
     the US Constitution and a cookbook all read as prose.

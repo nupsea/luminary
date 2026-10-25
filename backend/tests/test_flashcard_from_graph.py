@@ -26,7 +26,7 @@ def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
     return make_document(
         **{
             "id": doc_id,
-            "content_type": "notes",
+            "form": "entries",
             "word_count": 100,
             "page_count": 1,
             "file_path": "/tmp/test.txt",

@@ -35,7 +35,7 @@ def _configure(**kwargs) -> None:
     context.configure(
         target_metadata=target_metadata,
         include_name=alembic_include_name,
-        # SQLite cannot ALTER/DROP a column in place; batch mode rebuilds the table.
+        # Batch mode rebuilds the table: never for one that others reference (I-69).
         render_as_batch=True,
         **kwargs,
     )

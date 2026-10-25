@@ -33,7 +33,7 @@ def make_document(**fields) -> DocumentModel:
             "id": doc_id,
             "title": "Test Doc",
             "format": "txt",
-            "content_type": "book",
+            "form": "prose",
             "file_path": f"/tmp/{doc_id}.txt",
             "stage": "complete",
             "tags": [],

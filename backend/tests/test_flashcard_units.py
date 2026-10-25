@@ -405,7 +405,7 @@ async def test_generate_takes_the_unit_path_when_it_is_on(test_db, unit_first):
             make_document(
                 id="d1",
                 title="The Odyssey",
-                content_type="notes",
+                form="entries",
                 word_count=40,
                 page_count=1,
                 file_path="/tmp/o.txt",

@@ -21,7 +21,7 @@ async def _insert_document(factory, doc_id: str, tmp_path: Path) -> None:
                 id=doc_id,
                 title="A Research Paper",
                 format="pdf",
-                content_type="paper",
+                form="paper",
                 word_count=500,
                 page_count=10,
                 file_path=str(tmp_path / "paper.pdf"),
@@ -36,7 +36,7 @@ def _state(doc_id: str, sections: list[dict], tmp_path: Path) -> dict:
         "document_id": doc_id,
         "file_path": str(tmp_path / "paper.pdf"),
         "format": "pdf",
-        "content_type": "paper",
+        "form": "paper",
         "parsed_document": {
             "title": "A Research Paper",
             "format": "pdf",

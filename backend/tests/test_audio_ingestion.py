@@ -13,7 +13,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.workflows.ingestion import IngestionState, _chunk_audio, _classify
+from app.services.content_classifier import classify_content
+from app.workflows.ingestion import IngestionState, _chunk_audio
 from tests.factories import make_document
 
 # Shared DB fixture
@@ -23,15 +24,15 @@ from tests.factories import make_document
 
 
 def test_classify_returns_audio_for_mp3():
-    assert _classify("", [], 0, "mp3") == "audio"
+    assert classify_content("", [], 0, "mp3") == "audio"
 
 
 def test_classify_returns_audio_for_m4a():
-    assert _classify("", [], 0, "m4a") == "audio"
+    assert classify_content("", [], 0, "m4a") == "audio"
 
 
 def test_classify_returns_audio_for_wav():
-    assert _classify("", [], 0, "wav") == "audio"
+    assert classify_content("", [], 0, "wav") == "audio"
 
 
 def test_chunk_audio_produces_start_end_metadata():
@@ -81,7 +82,6 @@ async def test_audio_allowed_extension_in_ingest_endpoint(test_db, monkeypatch):
         resp = await client.post(
             "/documents/ingest",
             files={"file": ("lecture.mp3", io.BytesIO(b"\x00" * 10), "audio/mpeg")},
-            data={"content_type": "audio"},
         )
     assert resp.status_code == 200, resp.text
     assert "document_id" in resp.json()
@@ -117,7 +117,7 @@ async def test_transcribe_node_populates_parsed_document(test_db, tmp_path):
                 id=doc_id,
                 title="Test",
                 format="mp3",
-                content_type="audio",
+                form="dialogue",
                 file_path=str(audio_file),
                 stage="parsing",
             )
@@ -129,7 +129,7 @@ async def test_transcribe_node_populates_parsed_document(test_db, tmp_path):
         "file_path": str(audio_file),
         "format": "mp3",
         "parsed_document": None,
-        "content_type": "audio",
+        "form": "dialogue",
         "chunks": None,
         "status": "classifying",
         "error": None,
@@ -178,7 +178,7 @@ async def test_a_transcript_gets_sections_so_the_reader_can_show_it(test_db, mon
         "document_id": doc_id,
         "file_path": "/tmp/talk.wav",
         "format": "wav",
-        "content_type": "audio",
+        "form": "dialogue",
         "parsed_document": None,
         "chunks": None,
         "status": "chunking",
@@ -219,30 +219,31 @@ async def test_a_transcript_gets_sections_so_the_reader_can_show_it(test_db, mon
     assert {c.section_id for c in chunks} == {s.id for s in sections}
 
 
-@pytest.mark.parametrize(
-    ("ext", "expected"), [("wav", "audio"), ("mp3", "audio"), ("mp4", "video")]
-)
-async def test_media_without_a_content_type_reaches_transcription(test_db, ext, expected):
-    """An upload that leaves content_type to the pipeline must still be transcribed.
+@pytest.mark.parametrize("ext", ["wav", "mp3", "mp4"])
+async def test_media_reaches_transcription_as_turns(test_db, ext):
+    """A media upload must still be transcribed, and chunked as turns.
 
-    classify_node labelled every media file `notes` (there is no text before
-    transcription), transcribe_node passed `notes` through, and the file completed
-    with zero chunks. The UI hid it by sending detect-type's answer; the API did not.
+    classify_node once labelled every media file `notes` (there is no text before
+    transcription), and the file completed with zero chunks. It measures nothing
+    for media now; the format routes it to transcription, and the profile reads
+    it as dialogue until the transcript is measured.
     """
+    from app.workflows.ingestion_nodes._shared import profile_of_state
     from app.workflows.ingestion_nodes.parse import classify_node
 
     state = {
         "document_id": f"media-{ext}",
         "file_path": f"/tmp/talk.{ext}",
         "format": ext,
-        "content_type": None,
         "parsed_document": None,
         "chunks": None,
         "status": "classifying",
         "error": None,
     }
     result = await classify_node(state)
-    assert result["content_type"] == expected
+    assert result["status"] == "chunking"
+    assert result.get("form") is None, "nothing to measure before the transcript"
+    assert profile_of_state(result).form == "dialogue"
 
 
 def _flac_header(rate: int, channels: int, depth: int, samples: int) -> bytes:

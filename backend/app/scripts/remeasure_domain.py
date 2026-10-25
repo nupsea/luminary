@@ -1,18 +1,16 @@
 """Measure `domain` and `register` for documents that were never read for them.
 
-Two populations need this:
+Three populations need this:
 
-- Rows written before the domain was measured at all. `classify_node` used to
-  set `is_technical = content_type in TECHNICAL_CONTENT_TYPES`, which answered
-  for every type and so wrote a hard False for every paper and book. That is
-  what stripped the technical entity types from "Attention Is All You Need"
-  (70 entities extracted, 0 technical) and `d2l_dive_into_deep_learning`
-  (165, 0).
+- Rows written before the domain was measured at all, which a type list
+  answered for: it wrote a hard "not technical" for every paper and book and
+  stripped the technical entity types from "Attention Is All You Need" (70
+  entities extracted, 0 technical) and `d2l_dive_into_deep_learning` (165, 0).
+- Rows whose legacy type settled the domain unasked (`tech_book`,
+  `tech_article`, `code`), before ingestion asked every document.
 - Rows whose probe returned nothing. The call failed or the model did not
   answer with a label, and nothing retried. Those carry a null and stay null
   until this runs.
-- Rows whose legacy type settled the domain unasked (`tech_book`, `tech_article`,
-  `code`), before ingestion asked every document.
 
 Only fills what it can establish. A probe that fails again leaves the row null,
 because an unanswered question is not a finding.
@@ -36,15 +34,11 @@ from app.database import get_session_factory
 from app.models import DocumentModel
 from app.repos.document_repo import DocumentRepo
 from app.services.content_classifier import classify_form
-from app.types import FACETS_FROM_READER, DocumentProfile
-from app.workflows.ingestion_nodes._shared import detect_register, measure_domain
+from app.types import FACETS_FROM_READER, MEDIA_FORMATS
+from app.workflows.ingestion_nodes._shared import as_domain, detect_register, measure_domain
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("remeasure_domain")
-
-# Media text lives in chunks, not in the file: the transcript is produced during
-# ingestion and the .wav on disk cannot be read back as text.
-_MEDIA = ("audio", "video")
 
 
 async def _read(doc: DocumentModel, session) -> tuple[str, list[dict], int, str]:
@@ -54,7 +48,7 @@ async def _read(doc: DocumentModel, session) -> tuple[str, list[dict], int, str]
     the .wav on disk cannot be read back as text. Everything else is parsed the
     way ingestion parses it, because `classify_form` reads the section headings.
     """
-    if doc.content_type in _MEDIA:
+    if doc.format in MEDIA_FORMATS:
         text = " ".join(await DocumentRepo(session).opening_chunk_texts(doc.id, 200))
         return text, [], len(text.split()), Path(doc.file_path).suffix.lstrip(".")
     try:
@@ -83,13 +77,12 @@ async def main(apply: bool) -> int:
         for doc in docs:
             if doc.facets_source == FACETS_FROM_READER:
                 continue  # a kind the reader chose is not re-measured (#223)
-            before = DocumentProfile.from_legacy(doc.content_type, doc.is_technical).domain
+            before = doc.domain
             text, sections, word_count, ext = await _read(doc, session)
             has_text = bool(text.strip())
 
-            # Measured from structure, never mapped from content_type: the map
-            # reaches `reference` only through `tech_book`, so a non-technical
-            # manual could not be one.
+            # Measured from structure, never from a type: the old type map reached
+            # `reference` only through `tech_book`, so a non-technical manual never could.
             form = (
                 classify_form(text, sections, word_count, ext, Path(doc.file_path).name)
                 if has_text
@@ -99,7 +92,8 @@ async def main(apply: bool) -> int:
             measured = await measure_domain(form, text)
             register = doc.register or (await detect_register(text) if has_text else None)
 
-            after = DocumentProfile.from_legacy(doc.content_type, measured).domain
+            # A question that goes unanswered again keeps what was known.
+            after = as_domain(measured) or before
             if after == before and register == doc.register and form == doc.form:
                 if after is None or register is None:
                     undecided.append(doc.title)
@@ -117,7 +111,7 @@ async def main(apply: bool) -> int:
                 register or "null",
             )
             if apply:
-                values: dict[str, object] = {"is_technical": measured, "domain": after}
+                values: dict[str, object] = {"domain": after}
                 if register is not None:
                     values["register"] = register
                 if form is not None:

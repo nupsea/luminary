@@ -48,6 +48,10 @@ _FORM_BY_CONTENT_TYPE = {
 def upgrade() -> None:
     """Fill facets for rows that predate them."""
     bind = op.get_bind()
+    # Guarded since 6066079ed434 dropped the column: a schema built from the
+    # current models (the legacy bridge, a replay from a rewound version) has none.
+    if not any(c["name"] == "content_type" for c in sa.inspect(bind).get_columns("documents")):
+        return
 
     for content_type, form in _FORM_BY_CONTENT_TYPE.items():
         bind.execute(

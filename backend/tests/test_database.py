@@ -23,7 +23,7 @@ async def test_insert_and_retrieve_document(db_session: AsyncSession):
         id=doc_id,
         title="Test Document",
         format="pdf",
-        content_type="paper",
+        form="paper",
         word_count=1000,
         page_count=10,
         file_path="/tmp/test.pdf",
@@ -37,7 +37,7 @@ async def test_insert_and_retrieve_document(db_session: AsyncSession):
     assert retrieved is not None
     assert retrieved.title == "Test Document"
     assert retrieved.format == "pdf"
-    assert retrieved.content_type == "paper"
+    assert retrieved.form == "paper"
     assert retrieved.word_count == 1000
     assert retrieved.stage == "complete"
 

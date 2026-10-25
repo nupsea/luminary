@@ -38,12 +38,13 @@ class _FakeSummary:
 # Shared fixture
 
 
-async def _insert_document(factory, doc_id: str, content_type: str = "tech_book") -> None:
+async def _insert_document(factory, doc_id: str) -> None:
     async with factory() as session:
         doc = make_document(
             id=doc_id,
             title="Python Programming",
-            content_type=content_type,
+            form="reference",
+            domain="technical",
             word_count=5000,
             page_count=10,
             file_path="/tmp/test.txt",

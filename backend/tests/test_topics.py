@@ -26,7 +26,6 @@ async def _doc(factory, doc_id, headings):
             make_document(
                 id=doc_id,
                 format="pdf",
-                content_type="application/pdf",
                 file_path="/x",
                 stage="parsing",
             )
@@ -144,11 +143,7 @@ async def test_sections_search_returns_subsections(test_db):
 async def test_due_cards_filter_by_section(test_db):
     past = datetime.now(UTC) - timedelta(days=1)
     async with test_db() as s:
-        s.add(
-            make_document(
-                id="d", title="D", format="pdf", content_type="x", file_path="/x", stage="parsing"
-            )
-        )
+        s.add(make_document(id="d", title="D", format="pdf", file_path="/x", stage="parsing"))
         for sec, ch in [("s1", "c1"), ("s2", "c2")]:
             s.add(make_section(id=sec, document_id="d", heading=sec))
             s.add(make_chunk(id=ch, document_id="d", section_id=sec))

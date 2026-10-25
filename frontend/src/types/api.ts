@@ -1158,7 +1158,7 @@ export interface paths {
          * @description Ingest a Kindle My Clippings.txt file.
          *
          *     Parses highlights grouped by book title and creates one document per book.
-         *     Each created document is tagged with 'kindle' and uses content_type='kindle_clippings'.
+         *     Each created document is tagged with 'kindle'.
          */
         post: operations["ingest_kindle_documents_ingest_kindle_post"];
         delete?: never;

@@ -69,9 +69,7 @@ async def test_get_audio_non_audio_document_returns_400(test_db):
     factory = db_module._session_factory
     async with factory() as session:
         session.add(
-            make_document(
-                id=doc_id, title="A text doc", content_type="notes", file_path="/tmp/noop.txt"
-            )
+            make_document(id=doc_id, title="A text doc", form="entries", file_path="/tmp/noop.txt")
         )
         await session.commit()
 
@@ -95,7 +93,7 @@ async def test_get_audio_missing_file_returns_404(test_db):
                 id=doc_id,
                 title="Phantom audio",
                 format="mp3",
-                content_type="audio",
+                form="dialogue",
                 file_path="/nonexistent/path/phantom.mp3",
             )
         )
@@ -143,7 +141,6 @@ async def test_ingest_unsupported_extension_returns_400(test_db):
         r = await c.post(
             "/documents/ingest",
             files={"file": ("image.png", b"\x89PNG\r\n\x1a\n", "image/png")},
-            data={"content_type": "notes"},
         )
     assert r.status_code == 400
     body = r.json()
@@ -157,7 +154,6 @@ async def test_ingest_unsupported_binary_returns_400(test_db):
         r = await c.post(
             "/documents/ingest",
             files={"file": ("program.exe", b"MZ\x90\x00", "application/octet-stream")},
-            data={"content_type": "notes"},
         )
     assert r.status_code == 400
     _assert_detail_str(r.json())

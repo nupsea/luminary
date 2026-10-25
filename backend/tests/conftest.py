@@ -547,7 +547,7 @@ def card_documents():
         doc_ids -= {o.id for o in new if isinstance(o, DocumentModel)}
         if doc_ids:
             rows = [
-                {"id": d, "title": d, "format": "txt", "content_type": "notes", "file_path": "/x"}
+                {"id": d, "title": d, "format": "txt", "form": "entries", "file_path": "/x"}
                 for d in sorted(doc_ids)
             ]
             session.connection().execute(insert(DocumentModel).on_conflict_do_nothing(), rows)

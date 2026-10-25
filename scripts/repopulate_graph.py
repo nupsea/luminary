@@ -32,7 +32,7 @@ async def repopulate():
             
             # For code documents, we need to restore function_name metadata for the call graph
             code_snippets = {}
-            if doc.content_type == "code":
+            if doc.form == "source_code":
                 snippet_stmt = select(CodeSnippetModel).where(CodeSnippetModel.document_id == doc.id)
                 snippet_result = await session.execute(snippet_stmt)
                 for s in snippet_result.scalars().all():
@@ -60,7 +60,8 @@ async def repopulate():
                 "file_path": doc.file_path,
                 "format": doc.format,
                 "parsed_document": None,
-                "content_type": doc.content_type,
+                "form": doc.form,
+                "domain": doc.domain,
                 "chunks": chunk_dicts,
                 "status": "entity_extract"
             }

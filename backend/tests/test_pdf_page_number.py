@@ -48,7 +48,7 @@ def _make_state(doc_id: str, sections: list[dict], format: str = "pdf") -> Inges
             "sections": sections,
             "raw_text": " ".join(s["text"] for s in sections),
         },
-        content_type="book",
+        form="prose",
         chunks=None,
         status="chunking",
         error=None,

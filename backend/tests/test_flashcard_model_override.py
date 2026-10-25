@@ -24,14 +24,14 @@ def test_db(memory_db):
     return memory_db.factory
 
 
-async def _seed_document(factory, content_type: str = "book") -> str:
+async def _seed_document(factory, **facets) -> str:
     doc_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
             make_document(
                 id=doc_id,
                 title="the_odyssey",
-                content_type=content_type,
+                **{"form": "prose", **facets},
                 word_count=500,
                 page_count=1,
                 file_path="/tmp/the_odyssey.txt",
@@ -164,7 +164,7 @@ async def test_a_malformed_model_id_is_refused_rather_than_ignored(test_db):
 
 @pytest.mark.asyncio
 async def test_technical_generation_takes_the_override_too(test_db):
-    doc_id = await _seed_document(test_db, content_type="tech_book")
+    doc_id = await _seed_document(test_db, form="reference", domain="technical")
     llm = AsyncMock()
     llm.generate = AsyncMock(
         return_value=(

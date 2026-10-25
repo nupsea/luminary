@@ -69,7 +69,8 @@ async def test_get_mastery_heatmap_with_data(test_db):
             make_document(
                 id=doc_id,
                 title="Tech Book",
-                content_type="tech_book",
+                form="reference",
+                domain="technical",
                 page_count=5,
                 file_path="/tmp/x.pdf",
             )

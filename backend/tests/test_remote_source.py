@@ -266,7 +266,6 @@ async def test_ingest_url_stores_a_linked_pdf_as_a_pdf(test_db, serve, monkeypat
         ).scalar_one()
 
     assert doc.format == "pdf", "a PDF stored as markdown is the bug this closes"
-    assert doc.content_type == "technical"
     assert doc.source_url == "https://raw.githubusercontent.com/owner/repo/main/except.pdf"
     assert (tmp_path / "raw" / f"{doc_id}.pdf").read_bytes() == MINIMAL_PDF
 
@@ -356,7 +355,6 @@ async def test_ingest_url_still_creates_an_article_for_a_web_page(test_db, serve
             )
         ).scalar_one()
     assert doc.format == "md"
-    assert doc.content_type == "tech_article"
     assert doc.title == "A Real Article"
 
 

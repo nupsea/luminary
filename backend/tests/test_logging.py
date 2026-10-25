@@ -63,7 +63,6 @@ def test_patch_document_emits_info_log(client, caplog):
     resp = client.post(
         "/documents/ingest",
         files={"file": ("test.txt", io.BytesIO(b"hello world"), "text/plain")},
-        data={"content_type": "notes"},
     )
     assert resp.status_code == 200
     doc_id = resp.json()["document_id"]
@@ -82,7 +81,6 @@ def test_bulk_delete_emits_info_log(client, caplog):
     resp = client.post(
         "/documents/ingest",
         files={"file": ("bulk.txt", io.BytesIO(b"bulk content"), "text/plain")},
-        data={"content_type": "notes"},
     )
     doc_id = resp.json()["document_id"]
 
@@ -130,7 +128,6 @@ def test_ingest_file_received_emits_info_log(client, caplog):
     resp = client.post(
         "/documents/ingest",
         files={"file": ("receipt.txt", io.BytesIO(b"file receipt log test"), "text/plain")},
-        data={"content_type": "notes"},
     )
     assert resp.status_code == 200
     msgs = [r.message for r in caplog.records if r.name == "app.routers.documents"]
@@ -144,7 +141,6 @@ def test_patch_document_tags_emits_info_log(client, caplog):
     resp = client.post(
         "/documents/ingest",
         files={"file": ("tags.txt", io.BytesIO(b"tagged content"), "text/plain")},
-        data={"content_type": "notes"},
     )
     assert resp.status_code == 200
     doc_id = resp.json()["document_id"]

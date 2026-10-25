@@ -33,7 +33,6 @@ async def _add_document(factory, doc_id: str, title: str, stage: str) -> None:
                 id=doc_id,
                 title=title,
                 format="pdf",
-                content_type="general",
                 word_count=10,
                 page_count=1,
                 file_path=f"/tmp/{title}",
