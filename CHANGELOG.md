@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An EPUB reopens at the paragraph where reading stopped, and can hold one bookmark,** as a PDF does. Chapters run to 20,000 words, so the place saved is the block on screen, not the chapter.
 
 ### Fixed
+- **A novel, scripture or political essay could be measured as technical.** With the default local model, The Adventures of Sherlock Holmes, the Federalist Papers and the Gita were, and Moby-Dick was judged from its contents page. On 58 documents held out from tuning, 54 were measured right before and all 58 after. Documents already stored keep their subject until reprocessed (#381).
 - **On Linux, an NVIDIA card could sit unused after installing the .deb** where the driver shipped without a Vulkan loader. The package now recommends `libvulkan1`, which apt installs with it (#355).
 - **A web import dropped half an article whose sections sat in a container named for a sidebar**, and reported the import complete: andymatuschak.org/prompts kept 5,929 of 13,065 words. A furniture-named element that holds section headings and a quarter or more of the article's prose, mostly not links, is kept (#354).
 - **A numbered poem inside a story became the story's chapters**: *The Fall of the House of Usher* was stored as six sections named after stanzas of "The Haunted Palace". Numerals a few lines apart in a small share of the text are stanzas, not chapters (#357). Existing documents pick this up when reprocessed.
@@ -31,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Re-indexing a document's entities dropped its book and chapter names from keyword search.** The re-index writes the same rows ingestion does.
 
 ### Changed
+- **People and places no longer become tags on technical documents**, which turned speakers' roles and mis-heard words into tags ("boss", "web", "claude" as a person). Narrative, historical and other non-technical documents keep them, now decided by the document's measured subject rather than its upload type (#223).
 - **A PDF or EPUB opens where reading stopped, not on its bookmark.** The bookmark is one click away in the toolbar.
 - **A document's type in the library now comes from what was measured about it** (its format, shape and subject), not from the type chosen at upload. Cards, the filter chips and the reader show it; 9 of 69 documents in a test library changed label. Changing a document's type from its card sets that shape and subject, and a reprocess keeps the choice instead of measuring it again (#223).
 - **Search and chat filter by the same type the library shows** ("my notes", "the meeting"), and the word "article" no longer narrows a search: it had reached every technical book and read "Article 4 of the treaty" as a type (#223).

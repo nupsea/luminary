@@ -227,15 +227,6 @@ class DocumentRepo:
         )
         return {(row.document_id, row.chunk_index): row.text for row in result}
 
-    async def titles_and_types(self, document_ids: Sequence[str]) -> dict[str, tuple[str, str]]:
-        """{id: (title, type)}, with the defaults search has always shown."""
-        result = await self.session.execute(
-            select(DocumentModel.id, DocumentModel.title, DocumentModel.content_type).where(
-                DocumentModel.id.in_(document_ids)
-            )
-        )
-        return {i: (t or "Untitled", ct or "notes") for i, t, ct in result.all()}
-
     async def find_by_file_hash(self, file_hash: str) -> DocumentModel | None:
         result = await self.session.execute(
             select(DocumentModel).where(DocumentModel.file_hash == file_hash)

@@ -16,6 +16,7 @@ from functools import lru_cache
 
 from app.config import get_settings
 from app.database import get_session_factory
+from app.models import DocumentModel
 from app.repos.document_repo import DocumentRepo
 from app.repos.summary_repo import SummaryRepo
 from app.repos.tag_repo import TagRepo
@@ -24,6 +25,7 @@ from app.services.llm_json import parse_llm_json_array
 from app.services.naming import normalize_tag_slug
 from app.services.notes_service import sync_document_tag_index
 from app.services.prompt_spec import render_for, tag_spec
+from app.types import DocumentProfile
 
 logger = logging.getLogger(__name__)
 
@@ -48,22 +50,15 @@ async def _count_chunks(doc_id: str) -> int:
         return await DocumentRepo(session).chunk_count(doc_id)
 
 
-# Content-type aware entity-type selection. Tech writing rarely benefits from
-# PERSON / PLACE entities surfacing as tags (they're author cites, example
-# characters, stack locations); narrative content benefits from exactly those
-# (characters and settings ARE the topics). Mention-frequency threshold +
-# stoplist still apply in both buckets.
-_TECH_CONTENT_TYPES: frozenset[str] = frozenset(
-    {"tech_book", "tech_article", "paper", "code", "conversation"}
-)
+def _allowed_entity_types_for(doc: DocumentModel | None) -> tuple[str, ...]:
+    """The entity types a document's tags may come from, by its measured subject.
 
-
-def _allowed_entity_types_for(content_type: str | None) -> tuple[str, ...]:
-    """Return the entity-type tuple to pass to the graph query for this doc."""
-    if (content_type or "").lower() in _TECH_CONTENT_TYPES:
+    A technical work's people and places are mostly roles and transcription errors
+    ("boss", "claude" as a person; 32 of the 42 the dev library dropped); in narrative
+    and history they are the topics.
+    """
+    if DocumentProfile.of(doc).domain == "technical":
         return ("CONCEPT",)
-    # Narrative-leaning content (book, epub, kindle_clippings, audio, notes,
-    # plus anything unknown) gets characters and settings too.
     return ("PERSON", "PLACE", "CONCEPT")
 
 
@@ -331,13 +326,8 @@ async def enrich_document_tags(doc_id: str) -> int:
 
         llm_raw = await get_document_tagger().suggest_tags(title, summary, excerpt)
 
-        # Look up the doc's content_type so the entity query knows whether to
-        # include PERSON/PLACE. Cheaper than threading it through _fetch_doc_excerpt.
-        async with get_session_factory()() as ct_session:
-            titled = await DocumentRepo(ct_session).titles_and_types([doc_id])
-            content_type = titled[doc_id][1] if doc_id in titled else None
-
-        allowed_types = _allowed_entity_types_for(content_type)
+        async with get_session_factory()() as doc_session:
+            allowed_types = _allowed_entity_types_for(await DocumentRepo(doc_session).get(doc_id))
         budget = _entity_tag_budget(await _count_chunks(doc_id), settings.AUTO_TAG_ENTITY_CAP_MAX)
         entity_raw: list[str] = (
             await _fetch_entity_tags(
@@ -462,9 +452,7 @@ async def prune_auto_entity_tags() -> dict[str, int]:
         docs_with_entity_rows: set[str] = {
             d for d, _t in idx_rows if (d, _t) not in manual_keys
         } & all_doc_ids
-        # Fetch content_type per doc to choose allowed entity types.
-        titled = await doc_repo.titles_and_types(list(docs_with_entity_rows))
-        content_type_by_doc = {d: ct for d, (_title, ct) in titled.items()}
+        docs_by_id = {d.id: d for d in await doc_repo.by_ids(list(docs_with_entity_rows))}
 
         # Chunk counts per doc so the fresh set uses the SAME budget as
         # enrich_document_tags -- otherwise prune would flag the newly-allowed
@@ -475,7 +463,7 @@ async def prune_auto_entity_tags() -> dict[str, int]:
         # entity-1 index row for a slug NOT in this set is now stale.
         fresh_entity_by_doc: dict[str, set[str]] = {}
         for d in docs_with_entity_rows:
-            allowed_types = _allowed_entity_types_for(content_type_by_doc.get(d))
+            allowed_types = _allowed_entity_types_for(docs_by_id.get(d))
             budget = _entity_tag_budget(
                 chunk_count_by_doc.get(d, 0), settings.AUTO_TAG_ENTITY_CAP_MAX
             )

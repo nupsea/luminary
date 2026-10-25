@@ -168,7 +168,8 @@ def body_windows(raw_text: str, fractions: tuple[float, ...], window: int) -> li
     return [body[int(len(body) * f) : int(len(body) * f) + window].strip() for f in fractions]
 
 
-_CONTENTS_MARKER = re.compile(r"table of contents|^\s*contents\s*$", re.I | re.M)
+# Markdown quote and heading marks allowed: Moby-Dick's EPUB opens on "> CONTENTS" (#381).
+_CONTENTS_MARKER = re.compile(r"table of contents|^[\s>#*]*contents[\s*]*$", re.I | re.M)
 _DOTTED_LEADER = re.compile(r"\.{4,}")
 _NUMERIC_LINE = re.compile(r"^\s*[\d.]+\s*$", re.M)
 

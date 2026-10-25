@@ -572,14 +572,40 @@ async def test_prune_sweeps_failing_llm_tag(test_db, monkeypatch):
         assert "dream" not in doc.tags
 
 
+# Each case is a dev-library document the content_type rule got wrong (#223).
 @pytest.mark.anyio
-async def test_tech_book_excludes_person_and_place(test_db, monkeypatch):
-    """A tech_book content_type triggers CONCEPT-only entity selection."""
+@pytest.mark.parametrize(
+    ("facets", "allowed"),
+    [
+        # A technical talk: its people were roles and mis-heard names ("doug-db").
+        (
+            {"content_type": "audio", "format": "wav", "form": "dialogue", "domain": "technical"},
+            {"CONCEPT"},
+        ),
+        # The Federalist Papers stored as a tech_book: Hamilton and New York are its topics.
+        (
+            {"content_type": "tech_book", "form": "prose", "domain": "general"},
+            {"PERSON", "PLACE", "CONCEPT"},
+        ),
+        # A meeting whose participants are what a reader looks it up by.
+        (
+            {"content_type": "conversation", "form": "dialogue", "domain": "general"},
+            {"PERSON", "PLACE", "CONCEPT"},
+        ),
+        (
+            {"content_type": "book", "form": "prose", "domain": "general"},
+            {"PERSON", "PLACE", "CONCEPT"},
+        ),
+        ({"content_type": "tech_book", "form": "reference", "domain": "technical"}, {"CONCEPT"}),
+    ],
+)
+async def test_entity_tag_types_follow_the_measured_subject(test_db, monkeypatch, facets, allowed):
     _, factory = test_db
     doc_id = str(uuid.uuid4())
     async with factory() as s:
         doc = _make_doc(doc_id)
-        doc.content_type = "tech_book"
+        for column, value in facets.items():
+            setattr(doc, column, value)
         s.add(doc)
         await s.commit()
 
@@ -595,45 +621,19 @@ async def test_tech_book_excludes_person_and_place(test_db, monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         await c.post(f"/documents/{doc_id}/retag")
 
-    assert captured["allowed_types"] == ("CONCEPT",)
-
-
-@pytest.mark.anyio
-async def test_narrative_book_includes_person_and_place(test_db, monkeypatch):
-    """A plain book content_type opens the gate to PERSON and PLACE entities."""
-    _, factory = test_db
-    doc_id = str(uuid.uuid4())
-    async with factory() as s:
-        doc = _make_doc(doc_id)
-        doc.content_type = "book"  # narrative-leaning default
-        s.add(doc)
-        await s.commit()
-
-    monkeypatch.setattr(_doc_tagger_module, "get_document_tagger", lambda: _FakeTagger([[]]))
-    captured: dict = {}
-
-    async def _spy(doc_id, min_mentions, allowed_types=("CONCEPT",), limit=None):
-        captured["allowed_types"] = allowed_types
-        return []
-
-    monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", _spy)
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        await c.post(f"/documents/{doc_id}/retag")
-
-    assert set(captured["allowed_types"]) == {"PERSON", "PLACE", "CONCEPT"}
+    assert set(captured["allowed_types"]) == allowed
 
 
 @pytest.mark.anyio
 async def test_prune_drops_entity_tags_no_longer_in_graph(test_db, monkeypatch):
     """An entity-1 row whose entity wouldn't be returned by the current graph
-    query (e.g. PERSON for a tech_book after the rules tightened) is pruned.
+    query (e.g. PERSON for a technical document after the rules tightened) is pruned.
     """
     _, factory = test_db
     doc_id = str(uuid.uuid4())
     async with factory() as s:
         doc = _make_doc(doc_id)
-        doc.content_type = "tech_book"
+        doc.form, doc.domain = "reference", "technical"
         doc.tags = ["data-lakehouse", "raghu-ramakrishnan"]
         s.add(doc)
         # Seed both as entity-1 (the legacy state where PERSON was allowed).
@@ -660,9 +660,9 @@ async def test_prune_drops_entity_tags_no_longer_in_graph(test_db, monkeypatch):
         await s.commit()
 
     # Today's graph rules would only return 'data-lakehouse' (CONCEPT) for a
-    # tech_book; 'raghu-ramakrishnan' (PERSON) is now excluded.
+    # technical document; 'raghu-ramakrishnan' (PERSON) is now excluded.
     async def _fresh_graph(doc_id, min_mentions, allowed_types=("CONCEPT",), limit=None):
-        # The prune passes allowed_types based on content_type; honour it.
+        # The prune passes allowed_types by the document's domain; honour it.
         if allowed_types == ("CONCEPT",):
             return ["data-lakehouse"]
         return ["data-lakehouse", "Raghu Ramakrishnan"]

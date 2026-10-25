@@ -228,6 +228,13 @@ class TestFrontMatter:
         column = "Introduction\n1\nBackground\n7\nMethod\n12\nResults\n19\nDiscussion\n24\n"
         assert looks_like_front_matter(column) is True
 
+    def test_a_quoted_contents_heading_is_front_matter(self) -> None:
+        """Moby-Dick's EPUB opens on "> CONTENTS" with unnumbered chapter lines (#381)."""
+        epub = "> CONTENTS\n\n ETYMOLOGY.\n\n CHAPTER 1. Loomings.\n\n CHAPTER 2. The Carpet-Bag.\n"
+        assert looks_like_front_matter(epub) is True
+        assert looks_like_front_matter("## Contents\nOne\nTwo\n") is True
+        assert looks_like_front_matter("The contents of the box were cold.\n") is False
+
     def test_ordinary_prose_is_not_front_matter(self) -> None:
         prose = (
             "Those who do not understand Unix are condemned to reinvent it, poorly. "

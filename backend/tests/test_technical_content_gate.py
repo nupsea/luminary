@@ -36,7 +36,14 @@ class _FakeLLM:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("reply", "expected"),
-    [("yes", True), ("Yes.", True), ("no", False), ("No", False), ("maybe", None)],
+    [
+        ("technical", True),
+        ("Technical.", True),
+        ("`general`", False),
+        ("General", False),
+        ("yes", None),
+        ("maybe", None),
+    ],
 )
 async def test_detect_technical_transcript_parses_reply(reply, expected):
     with patch("app.services.llm.get_llm_service", return_value=_FakeLLM(reply)):
