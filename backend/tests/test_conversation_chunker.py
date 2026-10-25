@@ -77,6 +77,7 @@ def _make_conv_doc(doc_id: str) -> DocumentModel:
         id=doc_id,
         title="Test Conversation",
         content_type="conversation",
+        form="dialogue",
         word_count=200,
         file_path="/tmp/conv.txt",
         stage="chunking",

@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from app.schemas.membership import CollectionRef
-from app.types import ContentType, DocumentKind, EditableKind
+from app.types import DocumentKind, EditableKind
 
 
 class DocumentFacets(BaseModel):
@@ -35,7 +35,6 @@ class DocumentListItem(BaseModel):
     id: str
     title: str
     format: str
-    content_type: str
     # Derived from the format and facets; what the card shows and filters on (#223).
     kind: DocumentKind
     facets: DocumentFacets | None = None
@@ -68,13 +67,10 @@ class DocumentListItem(BaseModel):
 class DocumentFacetsResponse(BaseModel):
     """How many documents each filter would match, over the whole library.
 
-    A filter offering zero results is not a filter, it is a dead end -- and the
-    library has carried several: `code` is not even a storable content type,
-    and `epub` is a format that no document carries as its type.
+    A filter offering zero results is not a filter, it is a dead end.
     """
 
-    content_types: dict[str, int]
-    kinds: dict[str, int] = {}
+    kinds: dict[str, int]
     formats: dict[str, int]
     total: int
     favorite_count: int = 0
@@ -100,7 +96,6 @@ class PatchTagsRequest(BaseModel):
 class PatchDocumentRequest(BaseModel):
     title: str | None = None
     tags: list[str] | None = None
-    content_type: ContentType | None = None
     # Sets the facets that derive this kind; ingestion keeps them from then on.
     kind: EditableKind | None = None
     is_favorite: bool | None = None
@@ -144,7 +139,6 @@ class DocumentDetail(BaseModel):
     id: str
     title: str
     format: str
-    content_type: str
     kind: DocumentKind
     facets: DocumentFacets | None = None
     is_favorite: bool = False
@@ -356,7 +350,6 @@ class DocumentOverviewResponse(BaseModel):
     id: str
     title: str
     format: str
-    content_type: str
     kind: DocumentKind
     tags: list[str]
     reading_progress_pct: float

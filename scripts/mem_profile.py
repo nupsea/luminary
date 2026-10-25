@@ -338,7 +338,7 @@ async def _ingest(client: httpx.AsyncClient, backend: str, path: Path) -> tuple[
         resp = await client.post(
             f"{backend}/documents/ingest",
             files={"file": (path.name, fh, "application/octet-stream")},
-            data={"content_type": "technical"},
+            data={"kind": "technical"},
             timeout=600.0,
         )
     resp.raise_for_status()

@@ -29,7 +29,7 @@ subject to the Archive Foundation agreement.
 EOF
 INGEST_RESP=$(curl -sf -X POST "$BASE/documents/ingest" \
   -F "file=@$SMOKE_TMP/smoke_s82.txt;filename=smoke_s82.txt;type=text/plain" \
-  -F "content_type=book")
+  -F "kind=book")
 
 DOC_ID=$(echo "$INGEST_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['document_id'])")
 

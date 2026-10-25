@@ -65,7 +65,7 @@ echo "This is a test document for S182 smoke test. It has some content." > "$UPL
 
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" \
   -F "file=@$UPLOAD_TMPFILE;type=text/plain" \
-  -F "content_type=notes" \
+  -F "kind=notes" \
   "$BASE/documents/ingest")
 BODY=$(cat "$TMPFILE")
 check "POST /documents/ingest returns 200" "$STATUS" "200" "$BODY" ""

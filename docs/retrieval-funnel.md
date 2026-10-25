@@ -58,9 +58,9 @@ document.
   collapses an exact-match BM25 query to the wrong document. `QUERY_SPELL_CORRECT`
   (default on); per-request `spell_correct=`.
 - **Query filters** (`query_understanding.py::parse_query_filters`). Extracts a
-  content-type set and a date window from natural language via keyword/regex
-  rules (`content_types`, `date_from`, `date_to`). A journal-style request
-  resolves to a content type (narrow to those documents) and a month window
+  kind set and a date window from natural language via keyword/regex
+  rules (`kinds`, `date_from`, `date_to`). A journal-style request
+  resolves to a kind (narrow to those documents) and a month window
   (keep only chunks written in it) instead of running semantic search over the
   raw phrase.
 - **Content dates** (`content_dates.py`). At ingest each chunk gets an
