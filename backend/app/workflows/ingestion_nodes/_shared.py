@@ -221,10 +221,9 @@ async def detect_technical_content(raw_text: str) -> bool | None:
     None on failure, never False -- an unanswered probe is not a finding.
     `scripts/remeasure_domain.py` retries those.
 
-    Four framings were measured against hand labels; this one scored 22/23
-    against 18/19 for a closed list of fields, 17/19 for a bare contrast, and
-    14/22 for naming what the flag gates. **Do not tune it on the library** --
-    ~20 documents is a sample. The one miss is `art_of_unix`.
+    Two named labels, not yes/no: on qwen3.5:4b the yes/no form called Sherlock
+    Holmes, the Federalist Papers and the Gita technical (#381). Tuned on 5
+    documents, one per kind; 58/58 on the 58 held out, against 54/58 before.
     """
     from app.services.content_classifier import subject_excerpt  # noqa: PLC0415
     from app.services.llm import get_llm_service  # noqa: PLC0415
@@ -236,15 +235,16 @@ async def detect_technical_content(raw_text: str) -> bool | None:
     snippet = subject_excerpt(raw_text)
     if not snippet:
         return None
-    # Examples, not a closed list: a closed list decides against every
-    # discipline it omits, invisibly, until a document from one arrives.
+    # Examples, not a closed list, on the technical side: a closed list decides
+    # against every discipline it omits, invisibly, until a document from one arrives.
     prompt = (
-        "Is this text's subject matter technical or scientific in nature — for "
-        "example software, engineering, mathematics, medicine, or any other "
-        "technical or scientific discipline — rather than literary, historical, "
-        "philosophical, or general interest?\n\n"
+        "What is the subject matter of this text? Answer `technical` if it is about "
+        "software, engineering, mathematics, medicine, or another technical or "
+        "scientific discipline. Answer `general` if it is literature, fiction, poetry, "
+        "drama, history, politics, philosophy, religion, personal writing, or general "
+        "interest.\n\n"
         f"Excerpt:\n{snippet}\n\n"
-        "Reply with exactly one word: yes or no."
+        "Reply with exactly one word: technical or general."
     )
     try:
         with awaited():
@@ -252,10 +252,10 @@ async def detect_technical_content(raw_text: str) -> bool | None:
     except Exception as exc:
         logger.warning("domain detection failed (non-fatal): %s", exc)
         return None
-    answer = str(raw).strip().lower()
-    if answer.startswith("yes"):
+    answer = str(raw).strip().strip("`*.").lower()
+    if answer.startswith("technical"):
         return True
-    if answer.startswith("no"):
+    if answer.startswith("general"):
         return False
     return None
 
