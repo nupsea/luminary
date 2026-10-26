@@ -5,7 +5,8 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.database import Base
+from app.database import Base, get_engine
+from app.library import use_library
 from app.models import (  # noqa: F401 — imported to register ORM models with Base.metadata
     AnnotationModel,
     CanonicalTagModel,
@@ -52,6 +53,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     WebReferenceModel,
 )
 from app.paths import alembic_ini
+from app.storage import library_root
 
 logger = logging.getLogger(__name__)
 
@@ -1020,3 +1022,14 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 )
 
     logger.info("Database tables and FTS5 index initialized")
+
+
+async def open_library(library: str) -> None:
+    """Create a library's root if it is new and bring its database to head (#388).
+
+    The root is private to the user: it holds their documents, notes and, without a
+    keyring, their API keys.
+    """
+    with use_library(library):
+        library_root().mkdir(mode=0o700, parents=True, exist_ok=True)
+        await init_database(get_engine())

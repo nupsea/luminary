@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.library import current_library
 from app.repos.tag_repo import TagRepo
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,12 @@ class TagGraphOut:
 
 _CACHE_TTL = 60.0  # seconds
 
-_cache: dict = {}  # keys: "graph" -> TagGraphOut, "ts" -> float (monotonic)
+# Per library: keys "graph" -> TagGraphOut, "ts" -> float (monotonic).
+_caches: dict[str, dict] = {}
+
+
+def _cache() -> dict:
+    return _caches.setdefault(current_library(), {})
 
 
 def invalidate_tag_graph_cache() -> None:
@@ -59,20 +65,20 @@ def invalidate_tag_graph_cache() -> None:
     Called by _sync_tag_index whenever tag index data changes so that the
     next GET /tags/graph request rebuilds from fresh data.
     """
-    _cache.clear()
+    _cache().clear()
     logger.debug("Tag graph cache invalidated")
 
 
 def _is_cache_fresh() -> bool:
-    if "graph" not in _cache:
+    if "graph" not in _cache():
         return False
-    return time.monotonic() - _cache.get("ts", 0.0) < _CACHE_TTL
+    return time.monotonic() - _cache().get("ts", 0.0) < _CACHE_TTL
 
 
 def get_cached_graph() -> TagGraphOut | None:
     """Return cached graph if still fresh, else None."""
     if _is_cache_fresh():
-        return _cache.get("graph")
+        return _cache().get("graph")
     return None
 
 
@@ -108,8 +114,8 @@ async def build_tag_graph(session: AsyncSession) -> TagGraphOut:
 
     if not node_set:
         result = TagGraphOut(nodes=[], edges=[], generated_at=time.time())
-        _cache["graph"] = result
-        _cache["ts"] = time.monotonic()
+        _cache()["graph"] = result
+        _cache()["ts"] = time.monotonic()
         return result
 
     # 2. Co-occurrence edges via self-join on note_tag_index
@@ -124,8 +130,8 @@ async def build_tag_graph(session: AsyncSession) -> TagGraphOut:
     ]
 
     result = TagGraphOut(nodes=nodes, edges=edges, generated_at=time.time())
-    _cache["graph"] = result
-    _cache["ts"] = time.monotonic()
+    _cache()["graph"] = result
+    _cache()["ts"] = time.monotonic()
 
     logger.info(
         "Tag graph built: %d nodes, %d edges (after node-set filter)",
