@@ -28,6 +28,9 @@ FALSE_PREMISE_MODEL ?= ollama/qwen3.5:4b
 
 LUMINARY_PORT ?= 7820
 
+# The verify-* targets install this --no-save; pinned so a fresh publish is never pulled unreviewed.
+PLAYWRIGHT_CORE := playwright-core@1.64.0
+
 models:  ## what the current model configuration costs on this machine
 	@cd backend && uv run python -c "\
 from app.services.model_router import residency_report, warn_if_configuration_exceeds_host; \
@@ -455,7 +458,7 @@ smoke:
 # so it is a manual check rather than a CI gate.
 verify-citation:
 	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
-		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
+		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save $(PLAYWRIGHT_CORE)))
 	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} node scripts/verify-citation.mjs
 
 # The docked assistant in a real browser: asking about a passage must not leave
@@ -464,28 +467,28 @@ verify-citation:
 # Needs a live model, so it is a manual check rather than a CI gate.
 verify-dock:
 	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
-		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
+		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save $(PLAYWRIGHT_CORE)))
 	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} node scripts/verify-dock.mjs
 
 # An EPUB reopens on the block where reading stopped, keeps its bookmark marked
 # while scrolling, and follows links into other chapters. Needs an ingested EPUB.
 verify-epub-place:
 	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
-		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
+		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save $(PLAYWRIGHT_CORE)))
 	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} node scripts/verify-epub-place.mjs
 
 # Moving between documents starts the next one's panel clean: no draft and no
 # note carried over from the last. Needs two ingested documents, no model.
 verify-reader-switch:
 	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
-		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
+		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save $(PLAYWRIGHT_CORE)))
 	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} node scripts/verify-reader-switch.mjs
 
 # A note open in the docked panel leads back to the list and on to the next note,
 # saving first, and opening one keeps its sources. Needs two ingested documents, no model.
 verify-note-nav:
 	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
-		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
+		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save $(PLAYWRIGHT_CORE)))
 	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} node scripts/verify-note-nav.mjs
 
 measure-ttft:
@@ -908,5 +911,5 @@ regen-api-types:
 # kept out of package.json so CI never pulls a browser.
 verify-router:
 	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
-		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
+		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save $(PLAYWRIGHT_CORE)))
 	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} LUMINARY_API=$${LUMINARY_API:-http://localhost:$(LUMINARY_PORT)} node scripts/verify-router.mjs
