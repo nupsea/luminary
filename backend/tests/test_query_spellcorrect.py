@@ -1,11 +1,12 @@
 """Corpus-vocab spell correction: corrects out-of-vocab domain terms only."""
 
+from app.library import DEFAULT_LIBRARY
 from app.services import query_spellcorrect as sc
 
 
 def _with_vocab(monkeypatch, vocab: dict[str, int]):
-    monkeypatch.setattr(sc, "_vocab", vocab)
-    monkeypatch.setattr(sc, "_built_at", 1e18)  # never expires during the test
+    # Built "in the future", so it never expires during the test.
+    monkeypatch.setattr(sc, "_vocabs", {DEFAULT_LIBRARY: (vocab, 1e18)})
 
 
 def test_corrects_typoed_proper_noun(monkeypatch):

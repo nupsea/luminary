@@ -7,6 +7,7 @@ from typing import Any
 import pyarrow as pa
 
 from app.config import get_settings
+from app.library import DEFAULT_LIBRARY, current_library
 from app.storage import library_root
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,9 @@ def eq_predicate(column: str, value: str, *, context: str) -> str | None:
 
 
 class LanceDBService:
-    def __init__(self) -> None:
+    def __init__(self, library: str | None = None) -> None:
+        # Fixed at creation: a lazy connect must not follow whichever library calls first.
+        self._library = library or current_library()
         self._db: Any = None
         self._create_lock = threading.Lock()
 
@@ -131,7 +134,7 @@ class LanceDBService:
         import lancedb
 
         settings = get_settings()
-        vectors_dir = library_root(settings) / "vectors"
+        vectors_dir = library_root(settings, self._library) / "vectors"
         vectors_dir.mkdir(parents=True, exist_ok=True)
         self._db = lancedb.connect(str(vectors_dir))
         logger.info("LanceDB connected at %s", vectors_dir)
@@ -495,11 +498,19 @@ class LanceDBService:
             return []
 
 
+# The default library's service; tests swap it. Any other library's in _library_services.
 _lancedb_service: LanceDBService | None = None
+_library_services: dict[str, LanceDBService] = {}
 
 
 def get_lancedb_service() -> LanceDBService:
+    """The current library's vector store."""
     global _lancedb_service
+    library = current_library()
+    if library != DEFAULT_LIBRARY:
+        if library not in _library_services:
+            _library_services[library] = LanceDBService(library)
+        return _library_services[library]
     if _lancedb_service is None:
-        _lancedb_service = LanceDBService()
+        _lancedb_service = LanceDBService(DEFAULT_LIBRARY)
     return _lancedb_service

@@ -19,6 +19,7 @@ import sqlite3
 import threading
 import time
 
+from app.library import current_library
 from app.storage import library_root
 
 _WORD = re.compile(r"[a-z]{2,}")
@@ -27,8 +28,8 @@ _LETTERS = "abcdefghijklmnopqrstuvwxyz"
 _MIN_LEN = 4  # shorter tokens are common words / too ambiguous to correct
 _TTL_SECONDS = 600.0
 
-_vocab: dict[str, int] | None = None
-_built_at = 0.0
+# Per library, as (vocab, built at): one library's words must not correct another's queries.
+_vocabs: dict[str, tuple[dict[str, int], float]] = {}
 _lock = threading.Lock()
 
 
@@ -48,15 +49,24 @@ def _build_vocab() -> dict[str, int]:
     return vocab
 
 
+def _fresh(library: str) -> dict[str, int] | None:
+    cached = _vocabs.get(library)
+    if cached is not None and time.monotonic() - cached[1] < _TTL_SECONDS:
+        return cached[0]
+    return None
+
+
 def _get_vocab() -> dict[str, int]:
-    global _vocab, _built_at
-    if _vocab is not None and time.monotonic() - _built_at < _TTL_SECONDS:
-        return _vocab
+    library = current_library()
+    vocab = _fresh(library)
+    if vocab is not None:
+        return vocab
     with _lock:
-        if _vocab is None or time.monotonic() - _built_at >= _TTL_SECONDS:
-            _vocab = _build_vocab()
-            _built_at = time.monotonic()
-    return _vocab
+        vocab = _fresh(library)
+        if vocab is None:
+            vocab = _build_vocab()
+            _vocabs[library] = (vocab, time.monotonic())
+    return vocab
 
 
 def _edits1(w: str) -> set[str]:
@@ -90,6 +100,5 @@ def correct_query(query: str) -> str:
 
 
 def invalidate() -> None:
-    """Drop the cached vocab (e.g. after a large ingestion). Rebuilds on next use."""
-    global _vocab
-    _vocab = None
+    """Drop the current library's cached vocab (e.g. after a large ingestion)."""
+    _vocabs.pop(current_library(), None)

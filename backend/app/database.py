@@ -13,6 +13,7 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import StaticPool
 
 from app.config import get_settings
+from app.library import DEFAULT_LIBRARY, current_library
 from app.storage import library_root
 
 logger = logging.getLogger(__name__)
@@ -156,22 +157,47 @@ def make_engine(db_url: str | None = None):
     return engine
 
 
+# The default library's handles; tests swap these. Any other library's open in _libraries,
+# each over the luminary.db in its own root (#388).
 _engine = None
 _session_factory = None
+_libraries: dict[str, tuple[AsyncEngine, async_sessionmaker]] = {}
+
+
+def _library_handles(library: str) -> tuple[AsyncEngine, async_sessionmaker]:
+    if library not in _libraries:
+        engine = make_engine()
+        _libraries[library] = (engine, async_sessionmaker(engine, expire_on_commit=False))
+    return _libraries[library]
 
 
 def get_engine():
+    """The current library's engine."""
     global _engine
+    library = current_library()
+    if library != DEFAULT_LIBRARY:
+        return _library_handles(library)[0]
     if _engine is None:
         _engine = make_engine()
     return _engine
 
 
 def get_session_factory():
+    """The current library's session factory."""
     global _session_factory
+    library = current_library()
+    if library != DEFAULT_LIBRARY:
+        return _library_handles(library)[1]
     if _session_factory is None:
         _session_factory = async_sessionmaker(get_engine(), expire_on_commit=False)
     return _session_factory
+
+
+async def close_library(library: str) -> None:
+    """Dispose a non-default library's engine; the next use reopens it."""
+    handles = _libraries.pop(library, None)
+    if handles is not None:
+        await handles[0].dispose()
 
 
 async def get_db() -> AsyncSession:  # type: ignore[return]
