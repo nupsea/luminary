@@ -123,3 +123,6 @@ async def test_a_stale_read_snapshot_is_refused_at_once_and_named(tmp_path, capl
     assert refused_after < 1.0
     [refusal] = _refusals(caplog)
     assert refusal.startswith("SQLITE_BUSY_SNAPSHOT ")
+    assert "Refused after 0.0" in refusal
+    assert "in a transaction: True" in refusal
+    assert refusal.endswith("BEGIN | SELECT count(*) FROM t")
