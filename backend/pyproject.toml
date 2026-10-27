@@ -16,7 +16,7 @@ dependencies = [
     "fastapi>=0.133.0",
     "fsrs>=6.3.0",
     "genanki>=0.13.1",
-    "gliner>=0.2.25",
+    "gliner>=0.2.28",
     "httpx>=0.28.1",
     "keyring>=25.7.0",
     # TODO(1.0.0-rc): only the graph import reads Kuzu; remove with graph_import*.py and graph_connection.py.
@@ -44,7 +44,7 @@ dependencies = [
     "python-docx>=1.2.0",
     "python-json-logger>=4.0.0",
     "python-multipart>=0.0.31",
-    "sentence-transformers>=5.2.3",
+    "sentence-transformers>=5.6.0",
     "trafilatura>=2.0.0",
     # Unlicense, so no distribution constraint -- and youtube_ingest is a
     # `public` surface. Withholding it only moved the user to a second wall
@@ -63,7 +63,7 @@ dependencies = [
     # while Linux and Windows took the CPU index's 2.14.0, which is a dependency
     # upgrade smuggled in as a size fix. Raise both halves together, and read the
     # index listing before raising the floor.
-    "torch>=2.10.0,<2.11.0",
+    "torch>=2.13.0,<2.14.0",
     # Direct, though they arrived transitively: clustering imports scipy/sklearn
     # lazily, and the Linux engine runner download is a .tar.zst.
     "scipy>=1.17.1",
