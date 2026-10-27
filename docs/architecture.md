@@ -28,6 +28,11 @@ an unlisted one resolves to `None`, which the checker skips as unclassified, so
 a missing entry silently exempts a whole layer rather than failing loudly.
 `KNOWN_VIOLATIONS` is empty and must stay so.
 
+The same linter holds the library seam (#388): an engine, a session factory or a LanceDB,
+SQLite or Kuzu connection is opened only by the module that resolves the current library
+(`STORE_OPENERS`); everything else asks `get_session_factory()`, `get_engine()` or
+`get_lancedb_service()`.
+
 ## Tech Stack
 
 | Layer | Technology |

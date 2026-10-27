@@ -784,7 +784,7 @@ database takes a library through snapshot and restore rather than a column backf
 | One path resolver | Direct `DATA_DIR` joins go through a resolver that takes the library, so each tenant gets its own root, or later an object store | Built: `app/storage.py`, held by `tests/test_storage_roots.py`; `library_root` does not take a library yet |
 | Per-library settings | `get_settings()` splits into process configuration and per-library or per-user preferences (`llm_mode`, keys, model picks). API keys move to storage scoped to the principal | Not started; 56 files in `app/` call `get_settings()` |
 | Shared-resource audit | Model residency, `MODEL_LOAD_LOCK`, the write-lock watchdog and the background queues, checked for anything that assumes one user. Fairness waits for the hosted work; correctness does not | Not started |
-| A layer-linter rule | `layer_linter.py` fails when a store handle is opened below the API without a library. Without it the seam decays | Not started |
+| A layer-linter rule | `layer_linter.py` fails when a store handle is opened below the API without a library. Without it the seam decays | Built: an engine, a session factory, a LanceDB, SQLite or Kuzu connection opens only in the module that resolves the library (`STORE_OPENERS`), held by `tests/test_store_handle_rule.py` |
 
 **Order of work.** Each batch is a few PRs and ends in a manual test pass on the app (Code quality
 to 1.0). Chapter card quality and the Ask fixes are not on this rung: they run beside it and land by
