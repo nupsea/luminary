@@ -29,25 +29,20 @@ MODEL_LOAD_LOCK = threading.RLock()
 # connection loses entity extraction while every byte it needs is already
 # cached. These variables bind the whole stack, including loaders we do not
 # call ourselves.
-# Setting the variables is necessary and not sufficient: both libraries copy
-# them into module constants at import time, and the app has long since
-# imported both by the time a model loads. Each flag below was found by
-# following an actual offline failure, so do not drop one as redundant:
+# Setting the variables is necessary and not sufficient: huggingface_hub copies
+# them into a module constant at import time, and the app has long since
+# imported it by the time a model loads. The flag below was found by following
+# an actual offline failure:
 #
 #   huggingface_hub.constants.HF_HUB_OFFLINE
-#       Read per request in `utils/_http.send`. With it set, a hub call raises
-#       OfflineModeIsEnabled instead of hanging on DNS.
-#   transformers.utils.hub._is_offline_mode
-#       A copy of the above, taken at import. It is what `is_offline_mode()`
-#       returns, and in `_patch_mistral_regex` that return value short-circuits
-#       a `model_info` call the tokenizer would otherwise make -- the call that
-#       breaks a cold start with no network, since it is not gated by
-#       `local_files_only` and its exception is not caught upstream.
+#       Read per request in `utils/_http.send`, so a hub call raises
+#       OfflineModeIsEnabled instead of hanging on DNS. It is also what
+#       `is_offline_mode()` returns -- transformers 5 calls the hub's own -- and
+#       in `_patch_mistral_regex` that short-circuits a `model_info` call the
+#       tokenizer would otherwise make, one not gated by `local_files_only`
+#       whose exception is not caught upstream.
 _OFFLINE_VARS = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")
-_OFFLINE_FLAGS = (
-    ("huggingface_hub.constants", "HF_HUB_OFFLINE"),
-    ("transformers.utils.hub", "_is_offline_mode"),
-)
+_OFFLINE_FLAGS = (("huggingface_hub.constants", "HF_HUB_OFFLINE"),)
 
 
 @contextlib.contextmanager

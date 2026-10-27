@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - **Images inside imported documents are decoded by Pillow 13.0.0**, past decoder memory-safety advisories in 12.1.1 that a crafted image in a PDF, EPUB or web page could reach. Extraction from six library documents gave the same images, pixel for pixel.
 - **The backend's TLS roots, web server and upload parser are past their open advisories**: certifi drops the compromised emSign intermediates, and starlette 1.3.1 (with FastAPI 0.133.0) and python-multipart 0.0.31 fix request-handling bugs.
+- **The local models load through transformers 5.10.2, torch 2.13.0 and sentence-transformers 5.6.0**, past model-loading advisories that include a `trust_remote_code` bypass. Embeddings, reranker scores, entities and transcripts are bit-identical to before on library text.
 
 ## [0.16.2] - 2026-10-19
 
