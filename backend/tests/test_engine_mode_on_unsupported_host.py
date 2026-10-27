@@ -6,9 +6,7 @@ document without summaries, tags or titles while it read as complete, and the
 routing table reported that work as running on this machine.
 """
 
-import re
 import uuid
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -192,12 +190,10 @@ async def test_a_refusal_raised_inside_a_handler_is_a_skip_not_a_failure(test_db
 
 def test_every_registered_job_declares_its_model():
     """A new job type must say which model it calls, or a refusing host fails it silently."""
+    from app.runtime.library_work import JOB_HANDLERS
     from app.services.enrichment_worker import JOB_MODEL_ROLE, JOBS_WITHOUT_A_MODEL
 
-    main_source = (Path(__file__).parent.parent / "app" / "main.py").read_text(encoding="utf-8")
-    registered = set(re.findall(r'_worker\.register\("([a-z_]+)"', main_source))
-    assert registered, "no registrations found; the pattern no longer matches main.py"
-    assert registered == set(JOB_MODEL_ROLE) | JOBS_WITHOUT_A_MODEL
+    assert set(JOB_HANDLERS) == set(JOB_MODEL_ROLE) | JOBS_WITHOUT_A_MODEL
 
 
 async def test_ingest_does_not_attempt_summaries_the_host_refuses(mode):

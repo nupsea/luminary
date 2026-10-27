@@ -244,10 +244,10 @@ async def upload_db(tmp_path, monkeypatch, _schema_template):
     # prior tests — same pattern as integration_db in test_integration.py.
     orig_section_summarizer = section_summarizer_module._service
     orig_summarizer = summarizer_module._summarization_service
-    orig_enrichment_worker = enrichment_worker_module._worker
+    orig_enrichment_workers = dict(enrichment_worker_module._workers)
     section_summarizer_module._service = None
     summarizer_module._summarization_service = None
-    enrichment_worker_module._worker = None
+    enrichment_worker_module._workers.clear()
     ingestion_module._background_tasks.clear()
 
     (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
@@ -256,8 +256,7 @@ async def upload_db(tmp_path, monkeypatch, _schema_template):
 
     # Stop the enrichment worker created during this test so its
     # background tasks release DB connections before engine.dispose().
-    _test_worker = enrichment_worker_module._worker
-    if _test_worker is not None:
+    for _test_worker in enrichment_worker_module._workers.values():
         await _test_worker.stop()
 
     # Cancel ingestion background tasks before disposing the engine.
@@ -273,7 +272,8 @@ async def upload_db(tmp_path, monkeypatch, _schema_template):
     retriever_module._retriever = orig_retriever
     section_summarizer_module._service = orig_section_summarizer
     summarizer_module._summarization_service = orig_summarizer
-    enrichment_worker_module._worker = orig_enrichment_worker
+    enrichment_worker_module._workers.clear()
+    enrichment_worker_module._workers.update(orig_enrichment_workers)
     get_settings.cache_clear()
     await dispose_engine(engine)
 
@@ -398,3 +398,59 @@ async def test_http_corrupt_upload_terminates(upload_db):
         assert final["done"] or final["stage"] == "error", (
             f"Expected done=True or stage='error'; got: {final}"
         )
+
+
+@pytest.mark.integration_http
+async def test_http_upload_from_a_device_builds_only_its_library(upload_db):
+    """The pipeline a device starts writes chunks, vectors and graph rows to its library (#388)."""
+    from sqlalchemy import func, select
+
+    import app.services.devices as devices
+    from app.library import use_library
+    from app.models import ChunkModel, DocumentModel, GraphEntityModel
+    from tests.test_library_binding import _pair_into
+    from tests.test_library_context import _close
+
+    async def stored(doc_id: str) -> dict[str, int]:
+        async with db_module.get_session_factory()() as session:
+            counts = {
+                m.__tablename__: (
+                    await session.execute(select(func.count()).select_from(m))
+                ).scalar_one()
+                for m in (DocumentModel, ChunkModel, GraphEntityModel)
+            }
+        counts["vectors"] = vs_module.get_lancedb_service().count_for_document(doc_id)
+        return counts
+
+    devices._active_code = None
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://127.0.0.1:7820"
+        ) as client:
+            device = await _pair_into(client, "second")
+            with (FIXTURES_DIR / "art_of_unix_ch1.txt").open("rb") as fh:
+                resp = await client.post(
+                    "/documents/ingest",
+                    files={"file": ("art_of_unix_ch1.txt", fh, "text/plain")},
+                    headers=device,
+                )
+            assert resp.status_code == 200, resp.text
+            doc_id = resp.json()["document_id"]
+            for _ in range(1000):
+                await asyncio.sleep(0.05)
+                final = (await client.get(f"/documents/{doc_id}/status", headers=device)).json()
+                if final["done"]:
+                    break
+            assert final["stage"] == "complete", final
+            assert (await client.get(f"/documents/{doc_id}")).status_code == 404
+
+        with use_library("second"):
+            theirs = await stored(doc_id)
+        ours = await stored(doc_id)
+    finally:
+        devices._active_code = None
+        await _close("second")
+
+    assert theirs["documents"] == 1
+    assert min(theirs["chunks"], theirs["graph_entities"], theirs["vectors"]) > 0
+    assert ours == {"documents": 0, "chunks": 0, "graph_entities": 0, "vectors": 0}

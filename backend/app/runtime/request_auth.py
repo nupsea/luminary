@@ -20,9 +20,9 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.database import get_session_factory
-from app.db_init import ensure_library
 from app.library import use_library
 from app.repos.device_repo import DeviceRepo
+from app.runtime.library_work import serve_library
 from app.services.devices import resolve_token
 from app.types import DEFAULT_LIBRARY, LOCAL_PRINCIPAL, Principal
 
@@ -79,7 +79,8 @@ class RequestAuthMiddleware:
             principal = LOCAL_PRINCIPAL
 
         library = principal.library if principal is not None else DEFAULT_LIBRARY
-        await ensure_library(library)
+        if library != DEFAULT_LIBRARY:  # startup serves the default
+            await serve_library(library)
         scope.setdefault("state", {})["principal"] = principal
         with use_library(library):
             await self.app(scope, receive, send)

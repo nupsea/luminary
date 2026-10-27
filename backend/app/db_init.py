@@ -1,14 +1,12 @@
-import asyncio
 import contextlib
 import logging
-from pathlib import Path
 
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.database import Base, get_engine
-from app.library import DEFAULT_LIBRARY, use_library
+from app.library import use_library
 from app.models import (  # noqa: F401 — imported to register ORM models with Base.metadata
     AnnotationModel,
     CanonicalTagModel,
@@ -1035,21 +1033,3 @@ async def open_library(library: str) -> None:
     with use_library(library):
         library_root().mkdir(mode=0o700, parents=True, exist_ok=True)
         await init_database(get_engine())
-
-
-# Keyed by root rather than id: the same id under another `DATA_DIR` is another library.
-_opened: set[Path] = set()
-_opening = asyncio.Lock()
-
-
-async def ensure_library(library: str) -> None:
-    """Open *library* the first time this process serves it; startup opens the default."""
-    if library == DEFAULT_LIBRARY:
-        return
-    root = library_root(library=library)
-    if root in _opened:
-        return
-    async with _opening:
-        if root not in _opened:
-            await open_library(library)
-            _opened.add(root)

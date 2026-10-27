@@ -98,10 +98,10 @@ async def integration_db(memory_db, tmp_path, monkeypatch):
     # _update_stage("complete") from running and leave doc.stage at "indexing".
     orig_section_summarizer = section_summarizer_module._service
     orig_summarizer = summarizer_module._summarization_service
-    orig_enrichment_worker = enrichment_worker_module._worker
+    orig_enrichment_workers = dict(enrichment_worker_module._workers)
     section_summarizer_module._service = None
     summarizer_module._summarization_service = None
-    enrichment_worker_module._worker = None
+    enrichment_worker_module._workers.clear()
 
     # Drain stale background tasks from prior tests.
     # Tasks that survived their event loop cannot be awaited here (their loop is closed),
@@ -119,8 +119,7 @@ async def integration_db(memory_db, tmp_path, monkeypatch):
 
     # Stop the enrichment worker created during this test so its
     # background tasks release DB connections before engine.dispose().
-    _test_worker = enrichment_worker_module._worker
-    if _test_worker is not None:
+    for _test_worker in enrichment_worker_module._workers.values():
         await _test_worker.stop()
 
     # Cancel then await background tasks so aiosqlite threads close their
@@ -138,7 +137,8 @@ async def integration_db(memory_db, tmp_path, monkeypatch):
     retriever_module._retriever = orig_retriever
     section_summarizer_module._service = orig_section_summarizer
     summarizer_module._summarization_service = orig_summarizer
-    enrichment_worker_module._worker = orig_enrichment_worker
+    enrichment_worker_module._workers.clear()
+    enrichment_worker_module._workers.update(orig_enrichment_workers)
     get_settings.cache_clear()
     await dispose_engine(engine)
 
