@@ -109,6 +109,7 @@ from app.services.epub_service import (
     get_epub_service,
     get_toc_async,
 )
+from app.services.image_extractor import DOCUMENT_IMAGE_FORMATS
 from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.library_summary import get_library_summary_service
 from app.services.llm_admission import paused_for_interaction
@@ -1264,7 +1265,7 @@ def _extract_epub_cover_sync(fp: str, target: str) -> bool:
             # promoting whichever figure happens to be first in the archive.
             if candidate_name:
                 raw_bytes = zf.read(candidate_name)
-                img = Image.open(BytesIO(raw_bytes))
+                img = Image.open(BytesIO(raw_bytes), formats=DOCUMENT_IMAGE_FORMATS)
                 if img.mode in ("RGBA", "P"):
                     img = img.convert("RGB")
                 if img.height > 600:

@@ -1,5 +1,6 @@
 """Unit tests for image_extractor.py -- S133."""
 
+import ast
 import hashlib
 from io import BytesIO
 from pathlib import Path
@@ -18,6 +19,7 @@ from app.services.image_extractor import (
     _MIN_WIDTH,
     ExtractionOutcome,
     _is_prose_block,
+    extract_images_md,
     extract_images_pdf,
     image_extract_handler,
 )
@@ -673,3 +675,60 @@ def test_blank_render_is_not_stored(tmp_path):
     results = extract_images_pdf(pdf, tmp_path / "out", "blank-doc")
 
     assert results == [], "A flat render carries no analyzable content"
+
+
+def _image_bytes(fmt: str) -> bytes:
+    buf = BytesIO()
+    PILImage.new("RGB", (200, 200), (120, 80, 40)).save(buf, format=fmt)
+    return buf.getvalue()
+
+
+def test_a_pdf_image_outside_the_format_list_is_skipped(tmp_path):
+    """Pillow sniffs the bytes, so a TIFF or BMP stream would reach its decoder unless refused."""
+    streams = [_image_bytes(f) for f in ("TIFF", "BMP", "JPEG", "JPEG2000")]
+    outcome = ExtractionOutcome()
+
+    with patch("fitz.open", return_value=_mock_fitz_doc([streams])):
+        results = extract_images_pdf(Path("/fake/doc.pdf"), tmp_path, "fmt-doc", False, outcome)
+
+    assert len(results) == 2, "JPEG and the JPEG 2000 a PDF can embed are kept"
+    assert outcome.skipped == 2
+
+
+def test_an_article_image_is_judged_by_its_bytes_not_its_name(tmp_path):
+    out_dir = tmp_path / "md-doc"
+    out_dir.mkdir()
+    (out_dir / "real.png").write_bytes(_image_bytes("PNG"))
+    (out_dir / "disguised.png").write_bytes(_image_bytes("TIFF"))
+    outcome = ExtractionOutcome()
+
+    results = extract_images_md(tmp_path, "md-doc", outcome)
+
+    assert [r.abs_path.name for r in results] == ["real.png"]
+    assert outcome.skipped == 1
+
+
+def test_every_pillow_open_in_the_app_names_its_formats():
+    """A call site without `formats=` reopens every Pillow decoder to document bytes."""
+    app_dir = Path(__file__).resolve().parents[1] / "app"
+    missing = []
+    for path in app_dir.rglob("*.py"):
+        tree = ast.parse(path.read_text())
+        aliases = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "PIL"
+            for alias in node.names
+            if alias.name == "Image"
+        }
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "open"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in aliases
+                and not any(k.arg == "formats" for k in node.keywords)
+            ):
+                missing.append(f"{path.relative_to(app_dir)}:{node.lineno}")
+    assert not missing, f"Image.open without formats=: {missing}"

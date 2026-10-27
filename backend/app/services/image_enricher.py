@@ -31,6 +31,7 @@ from app.services import embedder as _embedder_module  # indirect: get_embedding
 from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
+from app.services.image_extractor import DOCUMENT_IMAGE_FORMATS
 from app.services.llm import (
     LLMTimeoutError,
     LLMUnavailableError,
@@ -240,7 +241,7 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
 
     # Resize large images to reduce inference time and avoid timeouts.
 
-    img = _PILImage.open(image_path)
+    img = _PILImage.open(image_path, formats=DOCUMENT_IMAGE_FORMATS)
     if max(img.size) > 1024:
         img.thumbnail((1024, 1024))
     buf = BytesIO()
@@ -378,7 +379,7 @@ class ImageEnricherService:
 
             async with _get_enrich_sem():
                 try:
-                    pil_img = _PILImage.open(str(abs_path))
+                    pil_img = _PILImage.open(str(abs_path), formats=DOCUMENT_IMAGE_FORMATS)
 
                     if _is_decorative(pil_img):
                         image_type = "decorative"
