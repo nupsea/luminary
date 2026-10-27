@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from app.exceptions import Forbidden, InvalidInput
+from app.library import current_library
 from app.models import DeviceModel
 from app.repos.device_repo import DeviceRepo
 from app.types import Principal
@@ -35,6 +36,8 @@ _TOUCH_INTERVAL = timedelta(seconds=60)
 class _PairingCode:
     code_hash: str
     expires_at: float
+    # The library whose app showed the code is the one the device pairs into.
+    library: str
     failed_attempts: int = 0
 
 
@@ -54,13 +57,15 @@ def _normalise_code(code: str) -> str:
 def issue_pairing_code() -> tuple[str, datetime]:
     global _active_code
     code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_LENGTH))
-    _active_code = _PairingCode(hash_secret(code), time.monotonic() + _CODE_TTL_S)
+    _active_code = _PairingCode(
+        hash_secret(code), time.monotonic() + _CODE_TTL_S, current_library()
+    )
     expires_at = datetime.now(UTC) + timedelta(seconds=_CODE_TTL_S)
     return f"{code[:4]}-{code[4:]}", expires_at
 
 
-def _consume_code(code: str) -> None:
-    """Spend the active code, or count a failure against it.
+def _consume_code(code: str) -> str:
+    """Spend the active code and return its library, or count a failure against it.
 
     One message for wrong, expired, used and absent: the caller is unpaired, and which
     of those it was would only help it guess.
@@ -77,15 +82,16 @@ def _consume_code(code: str) -> None:
             _active_code = None
         raise refused
     _active_code = None
+    return active.library
 
 
 async def pair(repo: DeviceRepo, code: str, name: str) -> tuple[DeviceModel, str]:
     name = name.strip()
     if not name:
         raise InvalidInput("A device needs a name, so it can be told apart when revoking.")
-    _consume_code(code)
+    library = _consume_code(code)
     token = _TOKEN_PREFIX + secrets.token_urlsafe(32)
-    device = await repo.create(name=name, token_hash=hash_secret(token))
+    device = await repo.create(name=name, token_hash=hash_secret(token), library=library)
     return device, token
 
 
@@ -100,7 +106,7 @@ async def resolve_token(repo: DeviceRepo, token: str) -> Principal | None:
         seen = seen.replace(tzinfo=UTC)
     if seen is None or now - seen > _TOUCH_INTERVAL:
         await repo.touch(device, now)
-    return Principal(kind="device", device_id=device.id)
+    return Principal(kind="device", device_id=device.id, library=device.library)
 
 
 async def list_devices(repo: DeviceRepo) -> Sequence[DeviceModel]:

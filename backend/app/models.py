@@ -19,6 +19,7 @@ from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from app.types import DEFAULT_LIBRARY
 
 logger = logging.getLogger(__name__)
 
@@ -1125,7 +1126,6 @@ class GraphConceptEdgeModel(Base):
     # proposed | confirmed
     status: Mapped[str | None] = mapped_column(String, nullable=True)
     # 0.17.0's library scope; unread until then.
-    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class GraphConceptDocumentModel(Base):
@@ -1140,7 +1140,6 @@ class GraphConceptDocumentModel(Base):
     document_id: Mapped[str] = mapped_column(
         String, ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
     )
-    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class GraphEntityModel(Base):
@@ -1163,7 +1162,6 @@ class GraphEntityModel(Base):
     frequency: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     mention_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     aliases: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class GraphEntityEdgeModel(Base):
@@ -1195,7 +1193,6 @@ class GraphEntityEdgeModel(Base):
     source_section_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # Optional relation text; only legacy RELATED_TO rows from the Kuzu import carry one.
     label: Mapped[str | None] = mapped_column(String, nullable=True)
-    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class GraphEntityLinkModel(Base):
@@ -1221,7 +1218,6 @@ class GraphEntityLinkModel(Base):
     contradiction_note: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # "a" | "b" | ""
     prefer_source: Mapped[str] = mapped_column(String, nullable=False, default="")
-    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class GraphDiagramNodeModel(Base):
@@ -1238,7 +1234,6 @@ class GraphDiagramNodeModel(Base):
     node_type: Mapped[str] = mapped_column(String, nullable=False)
     source_image_id: Mapped[str] = mapped_column(String, nullable=False, default="")
     frequency: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class GraphDiagramEdgeModel(Base):
@@ -1263,7 +1258,6 @@ class GraphDiagramEdgeModel(Base):
         String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
     label: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class GraphDiagramDepictionModel(Base):
@@ -1281,7 +1275,6 @@ class GraphDiagramDepictionModel(Base):
     document_id: Mapped[str] = mapped_column(
         String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
-    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class GraphNoteEntityModel(Base):
@@ -1302,7 +1295,6 @@ class GraphNoteEntityModel(Base):
     kind: Mapped[str] = mapped_column(String, primary_key=True)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     tag: Mapped[str | None] = mapped_column(String, nullable=True)
-    library_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class GraphImportStateModel(Base):
@@ -1610,13 +1602,17 @@ class ContentActivityModel(Base):
 class DeviceModel(Base):
     """A paired device. Only the token's SHA-256 is stored; the token is shown once.
 
-    Revoking keeps the row, so the list says which device was cut off and when.
+    Revoking keeps the row, so the list says which device was cut off and when. The default
+    library's table is the registry: a device's requests run in its `library` (#388).
     """
 
     __tablename__ = "devices"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String(80), nullable=False)
+    library: Mapped[str] = mapped_column(
+        String(63), nullable=False, default=DEFAULT_LIBRARY, server_default=DEFAULT_LIBRARY
+    )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)

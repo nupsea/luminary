@@ -15,7 +15,7 @@ import contextvars
 import re
 from collections.abc import Iterator
 
-DEFAULT_LIBRARY = "default"
+from app.types import DEFAULT_LIBRARY
 
 # Lower-case, path-safe, and never `.` or `..`: the id names a directory under the machine root.
 _LIBRARY_ID = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
