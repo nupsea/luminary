@@ -19,9 +19,13 @@ class DeviceRepo:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def create(self, *, name: str, token_hash: str) -> DeviceModel:
+    async def create(self, *, name: str, token_hash: str, library: str) -> DeviceModel:
         device = DeviceModel(
-            id=str(uuid.uuid4()), name=name, token_hash=token_hash, created_at=datetime.now(UTC)
+            id=str(uuid.uuid4()),
+            name=name,
+            token_hash=token_hash,
+            library=library,
+            created_at=datetime.now(UTC),
         )
         self.session.add(device)
         await self.session.commit()

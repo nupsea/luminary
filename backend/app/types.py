@@ -527,13 +527,18 @@ def facets_for_kind(kind: EditableKind, form: str | None) -> dict[str, str]:
     return {"form": form, "domain": "general" if kind == "book" else "technical"}
 
 
+# The library a desktop install has always had, rooted at `DATA_DIR` (`app/library.py`).
+DEFAULT_LIBRARY = "default"
+
+
 @dataclass(frozen=True)
 class Principal:
-    """Who a request acts for. `local` is the app's own origin on loopback;
-    `device` carries a paired device's token. 0.17.0 hangs the library off this."""
+    """Who a request acts for, and the library its work runs in. `local` is the app's own
+    origin on loopback; `device` carries a paired device's token."""
 
     kind: Literal["local", "device"]
     device_id: str | None = None
+    library: str = DEFAULT_LIBRARY
 
 
 LOCAL_PRINCIPAL = Principal(kind="local")

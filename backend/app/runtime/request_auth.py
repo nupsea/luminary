@@ -7,6 +7,9 @@ origin needs a paired device's bearer token (`services/devices.py`). A request w
 `Origin` is either a same-origin read or not from a browser at all (the shell, smoke,
 evals); a browser marks the cross-site kind with `Sec-Fetch-Site`, and that one is refused.
 
+The request then runs in its principal's library (#388). Devices are looked up in the
+default library's database, the registry, whatever library they belong to.
+
 Pure ASGI, like `RequestLogMiddleware`, so SSE responses are not wrapped.
 """
 
@@ -17,9 +20,11 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.database import get_session_factory
+from app.db_init import ensure_library
+from app.library import use_library
 from app.repos.device_repo import DeviceRepo
 from app.services.devices import resolve_token
-from app.types import LOCAL_PRINCIPAL, Principal
+from app.types import DEFAULT_LIBRARY, LOCAL_PRINCIPAL, Principal
 
 # Vite's dev server, and the port it falls back to when 5173 is taken (`make clean`).
 DEV_APP_ORIGINS = frozenset(
@@ -73,8 +78,11 @@ class RequestAuthMiddleware:
         else:
             principal = LOCAL_PRINCIPAL
 
+        library = principal.library if principal is not None else DEFAULT_LIBRARY
+        await ensure_library(library)
         scope.setdefault("state", {})["principal"] = principal
-        await self.app(scope, receive, send)
+        with use_library(library):
+            await self.app(scope, receive, send)
 
     def _guards(self, path: str) -> bool:
         # In public mode only the API is guarded: the SPA's files are public, and the
@@ -86,8 +94,9 @@ class RequestAuthMiddleware:
         scheme, _, token = authorization.partition(" ")
         if scheme.lower() != "bearer" or not token.strip():
             return None
-        async with get_session_factory()() as session:
-            return await resolve_token(DeviceRepo(session), token.strip())
+        with use_library(DEFAULT_LIBRARY):
+            async with get_session_factory()() as session:
+                return await resolve_token(DeviceRepo(session), token.strip())
 
     @staticmethod
     async def _refuse(scope: Scope, receive: Receive, send: Send, detail: str) -> None:
