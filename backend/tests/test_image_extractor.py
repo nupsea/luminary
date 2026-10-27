@@ -713,7 +713,7 @@ def test_every_pillow_open_in_the_app_names_its_formats():
     app_dir = Path(__file__).resolve().parents[1] / "app"
     missing = []
     for path in app_dir.rglob("*.py"):
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         aliases = {
             alias.asname or alias.name
             for node in ast.walk(tree)
