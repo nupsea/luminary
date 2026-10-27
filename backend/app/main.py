@@ -60,27 +60,20 @@ from app.routers.setup import router as setup_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
+from app.runtime.library_work import serve_library, serving, stop_serving
 from app.runtime.request_auth import DEV_APP_ORIGINS, RequestAuthMiddleware
 from app.services.background import all_pending, clear_registries, task_registry
 from app.services.background_prefs import load_background_prefs
 from app.services.chapter_backfill import ChapterBackfill
-from app.services.chapter_cards import chapter_cards_handler
 from app.services.components import (
     install_ollama_model,
     resolve_tool,
     running_in_container,
 )
-from app.services.concept_linker import concept_link_handler
-from app.services.diagram_extractor import diagram_extract_handler
-from app.services.enrichment_worker import get_enrichment_worker
 from app.services.executors import shutdown_model_executor
 from app.services.graph_import import run_graph_import
-from app.services.image_enricher import image_analyze_handler
-from app.services.image_extractor import image_extract_handler
-from app.services.ingestion_jobs import get_ingestion_jobs
-from app.services.llm_admission import unattended
+from app.services.ingestion_jobs import cancel_all_ingestions
 from app.services.python_extras import activate_extras
-from app.services.reference_enricher import web_refs_handler
 from app.services.settings_service import _cache as _llm_cache
 from app.services.settings_service import load_llm_settings
 from app.services.startup_status import get_startup_status
@@ -89,6 +82,7 @@ from app.storage import library_root, machine_root
 from app.streaming import StreamingResponse
 from app.surface_manifest import enabled_routers
 from app.telemetry import setup_tracing
+from app.types import DEFAULT_LIBRARY
 
 
 def configure_logging(log_level: str = "INFO") -> None:
@@ -103,7 +97,7 @@ def configure_logging(log_level: str = "INFO") -> None:
 
 
 logger = logging.getLogger(__name__)
-_chapter_backfill = ChapterBackfill()
+_chapter_backfill = ChapterBackfill(serving)
 
 
 _APP_VERSION = app_version()
@@ -221,17 +215,8 @@ async def lifespan(app: FastAPI):
 
     _background_tasks.add(asyncio.create_task(reap_idle_models()))
 
-    # Register enrichment handlers and start the background worker
-    # Must be done before yielding so jobs enqueued during first request are dispatched.
-
-    _worker = get_enrichment_worker()
-    _worker.register("image_extract", image_extract_handler)
-    _worker.register("image_analyze", image_analyze_handler)
-    _worker.register("diagram_extract", diagram_extract_handler)
-    _worker.register("web_refs", web_refs_handler)
-    _worker.register("concept_link", concept_link_handler)
-    _worker.register("chapter_cards", chapter_cards_handler)
-    await _worker.start()
+    # Before yielding, so jobs enqueued during the first request are dispatched.
+    await serve_library(DEFAULT_LIBRARY)
     _chapter_backfill.start()
 
     # Load persisted LLM settings into cache so cloud mode is active from first request,
@@ -262,26 +247,6 @@ async def lifespan(app: FastAPI):
         # as long as the check existed, so the advisory never ran and nothing said so.
         logger.warning("model residency check failed", exc_info=True)
 
-    # An ingestion that was running when the process died cannot resume: its task
-    # is gone and nothing owns the document any more. It used to keep its last
-    # stage for ever, so the UI showed a progress card that would never finish --
-    # seen twice on 2026-08-17, when a code reload under `uvicorn --reload` killed
-    # a 52,331-chunk embed at 70%. An interrupted ingest is now marked failed at
-    # startup, which is a state the user can act on (I-10).
-    try:
-        from app.repos.document_repo import DocumentRepo  # noqa: PLC0415
-
-        async with get_session_factory()() as _session:
-            failed = await DocumentRepo(_session).fail_unfinished(
-                "Ingestion was interrupted before it finished. "
-                "Delete this document and upload it again."
-            )
-            await _session.commit()
-        if failed:
-            logger.warning("marked %d interrupted ingestion(s) as failed at startup", failed)
-    except Exception:
-        logger.warning("could not reconcile interrupted ingestions", exc_info=True)
-
     # Model-lab comparisons take hours; without this they exist only for the
     # life of the process, and `uvicorn --reload` restarts on every edit.
     try:
@@ -306,80 +271,6 @@ async def lifespan(app: FastAPI):
 
         _background_tasks.add(asyncio.create_task(_warmup_then_keep_warm()))
 
-        # One-time-ish backfill: summarise notes created before card descriptions
-        # existed. Runs after a short delay so it doesn't compete with model
-        # warmup; no-ops once every note has a description.
-        async def backfill_descriptions():
-            try:
-                await asyncio.sleep(20)
-                from app.services.notes_service import backfill_missing_descriptions
-
-                await backfill_missing_descriptions()
-            except Exception as exc:
-                logger.warning("Description backfill failed (non-fatal): %s", exc)
-
-        with unattended():
-            _background_tasks.add(asyncio.create_task(backfill_descriptions()))
-
-        # Note vectors, for libraries that predate the dimension fix. The note
-        # table declared 1024 while the embedder produces 384 (I-9), so every
-        # `upsert_note_vector` raised and was logged non-fatal: a 61-note library
-        # held zero vectors and semantic note search returned nothing, which is
-        # indistinguishable from having no matching notes.
-        #
-        # Correcting the constant does not repair an existing library. The guard
-        # drops and recreates the table on first write, so only notes saved after
-        # the upgrade get vectors -- and the one manual trigger,
-        # POST /admin/notes/reindex, is 403 unless ADMIN_KEY is set, which the
-        # desktop app does not set. Without this, the fix reached new notes only.
-        #
-        # `reindex_notes` embeds only what LanceDB is missing, so this is a cheap
-        # presence check per note once a library is caught up.
-        async def backfill_note_vectors():
-            try:
-                await asyncio.sleep(30)
-                from app.services.reindex_service import get_reindex_service
-
-                async with get_session_factory()() as _reindex_db:
-                    report = await get_reindex_service().reindex_notes(_reindex_db)
-                if report["reindexed"] or report["failed"]:
-                    logger.info(
-                        "Note vector backfill: %d embedded, %d failed, %d total",
-                        report["reindexed"],
-                        report["failed"],
-                        report["total"],
-                    )
-            except Exception as exc:
-                logger.warning("Note vector backfill failed (non-fatal): %s", exc)
-
-        _background_tasks.add(asyncio.create_task(backfill_note_vectors()))
-
-        async def backfill_section_summaries():
-            """Finish section summaries an earlier run did not get to.
-
-            Deferred summarisation is fire-and-forget: the task is cancelled at
-            shutdown and nothing records that it was owed. That was survivable
-            while deferral only happened above 40 sections; it is now the path
-            every local-model ingest takes, so a laptop closed mid-ingest would
-            leave a document permanently without summaries and nothing would
-            ever notice. Runs after the note backfill so the two do not compete
-            for the one model slot.
-            """
-            try:
-                await asyncio.sleep(90)
-                from app.services.section_summarizer import (
-                    resummarize_documents_missing_summaries,
-                )
-
-                repaired = await resummarize_documents_missing_summaries()
-                if repaired:
-                    logger.info("Section summary backfill: repaired %d document(s)", repaired)
-            except Exception as exc:
-                logger.warning("Section summary backfill failed (non-fatal): %s", exc)
-
-        with unattended():
-            _background_tasks.add(asyncio.create_task(backfill_section_summaries()))
-
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")
@@ -387,8 +278,8 @@ async def lifespan(app: FastAPI):
     # Every step here is bounded. A desktop app that takes minutes to quit reads
     # as a hang, and a supervisor that gives up SIGKILLs whatever is mid-write.
     await _chapter_backfill.stop()
-    await get_enrichment_worker().stop()
-    await get_ingestion_jobs().cancel_all()
+    await stop_serving()
+    await cancel_all_ingestions()
 
     # Every registry, not a list maintained here. Naming them one at a time is how
     # this came to drain two of ten: post-ingest work -- deferred section

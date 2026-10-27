@@ -12,6 +12,8 @@ the ones ingestion writes, so a library of unopened books costs nothing.
 Either way the model must already be loaded or fit with headroom to spare. Nothing here adds
 a model or a serving slot: on the 16GB floor the one resident model and its one slot are all
 there is (I-31), and one chapter at a time is the unit of work, so pausing costs nothing.
+
+That slot is the machine's, not a library's, so one loop serves every open library (#388).
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -27,6 +30,7 @@ import psutil
 
 from app.config import get_settings
 from app.database import get_session_factory
+from app.library import current_library, use_library
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
 from app.services.background_prefs import chapter_backfill
@@ -144,20 +148,33 @@ def _battery_reason(ahead: bool) -> str | None:
     return "battery low" if battery.percent < LOW_BATTERY_PERCENT else None
 
 
-async def _idle_reason() -> str | None:
+async def _in_any(
+    libraries: Sequence[str], query: Callable[[DocumentRepo], Awaitable[bool]]
+) -> bool:
+    for library in libraries:
+        with use_library(library):
+            async with get_session_factory()() as session:
+                if await query(DocumentRepo(session)):
+                    return True
+    return False
+
+
+async def _idle_reason(libraries: Sequence[str]) -> str | None:
     """Why later chapters must wait, or None when the machine is idle."""
     if not _learner_quiet():
         return "in use"
-    async with get_session_factory()() as session:
-        since = datetime.now(UTC) - timedelta(days=1)
-        if await DocumentRepo(session).enrichment_in_progress(since):
-            return "a document is being enriched"
+    since = datetime.now(UTC) - timedelta(days=1)
+    if await _in_any(libraries, lambda repo: repo.enrichment_in_progress(since)):
+        return "a document is being enriched"
     cpu = await asyncio.to_thread(psutil.cpu_percent, 1.0)
     return "processor busy" if cpu >= BUSY_CPU_PERCENT else None
 
 
-async def not_now(pick: Pick) -> str | None:
-    """Why *pick* must wait, or None when it may be written now."""
+async def not_now(pick: Pick, libraries: Sequence[str] | None = None) -> str | None:
+    """Why *pick* must wait, or None when it may be written now.
+
+    *libraries* are those whose queues it yields to; the current one when not given.
+    """
     from app.services.llm_routing import refusal  # noqa: PLC0415
 
     if not chapter_backfill():
@@ -165,15 +182,15 @@ async def not_now(pick: Pick) -> str | None:
     # Two writers share the one model slot, so a second chapter only delays the one in hand.
     if writing_any():
         return "a chapter is being written"
+    libraries = libraries or [current_library()]
     # A book just added is read from its start, so its first chapters outrank any backfill.
-    async with get_session_factory()() as session:
-        since = datetime.now(UTC) - timedelta(days=1)
-        if await DocumentRepo(session).first_chapters_queued(since):
-            return "a new document's first chapters come first"
+    since = datetime.now(UTC) - timedelta(days=1)
+    if await _in_any(libraries, lambda repo: repo.first_chapters_queued(since)):
+        return "a new document's first chapters come first"
 
     reason = refusal("background") or _battery_reason(pick.ahead)
     if reason is None and not pick.ahead:
-        reason = await _idle_reason()
+        reason = await _idle_reason(libraries)
     return reason or await _model_fits()
 
 
@@ -191,31 +208,50 @@ def _learner_quiet() -> bool:
     return time.monotonic() - state.last_interactive_end >= QUIET_SECONDS
 
 
-async def run_once() -> tuple[bool, str | None]:
+async def _nearest(libraries: Sequence[str]) -> tuple[str, Pick] | None:
+    """The library and chapter to write next: any library's ahead chapters before later ones."""
+    later = None
+    for library in libraries:
+        with use_library(library):
+            pick = await next_chapter()
+        if pick is None:
+            continue
+        if pick.ahead:
+            return library, pick
+        later = later or (library, pick)
+    return later
+
+
+async def run_once(libraries: Sequence[str] | None = None) -> tuple[bool, str | None]:
     """Write one chapter if one is waiting and the machine can spare it.
 
     Returns whether it wrote, and the model it had to load to do so (None if already loaded).
     """
-    pick = await next_chapter()
-    if pick is None:
+    libraries = libraries or [current_library()]
+    nearest = await _nearest(libraries)
+    if nearest is None:
         return False, None
-    reason = await not_now(pick)
+    library, pick = nearest
+    reason = await not_now(pick, libraries)
     if reason is not None:
         logger.debug("chapter backfill waits (%s): %s", reason, pick.chapter.title[:60])
         return False, None
     choice = _local_model()
     name = choice.model.removeprefix("ollama/") if choice else None
     loaded = name if name and not await _resident(name) else None
-    async with get_session_factory()() as session:
-        book = await book_for(pick.document_id, session)
-        cards = await write_chapter(pick.document_id, book, pick.chapter, session)
+    with use_library(library):
+        async with get_session_factory()() as session:
+            book = await book_for(pick.document_id, session)
+            cards = await write_chapter(pick.document_id, book, pick.chapter, session)
     return cards is not None, loaded
 
 
 class ChapterBackfill:
     """One chapter at a time, checking the machine again before each."""
 
-    def __init__(self) -> None:
+    def __init__(self, libraries: Callable[[], Sequence[str]] | None = None) -> None:
+        # The open libraries, asked again each tick: one opened later joins the loop.
+        self._libraries = libraries or (lambda: [current_library()])
         self._task: asyncio.Task | None = None
         # The model this loop loaded, unloaded when it runs out of work.
         self._loaded: str | None = None
@@ -233,7 +269,7 @@ class ChapterBackfill:
 
     async def _step(self) -> bool:
         try:
-            wrote, loaded = await run_once()
+            wrote, loaded = await run_once(self._libraries())
         except Exception:
             logger.exception("chapter backfill failed; retrying next tick")
             return False

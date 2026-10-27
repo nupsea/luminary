@@ -34,9 +34,11 @@ def two_libraries(tmp_path, monkeypatch):
 
 async def _close(*libraries: str) -> None:
     from app.database import close_library
+    from app.runtime.library_work import stop_library
     from app.services import vector_store
 
     for library in libraries:
+        await stop_library(library)
         await close_library(library)
         # The tmp root goes with the test; a later test must not reuse a handle into it.
         vector_store._library_services.pop(library, None)

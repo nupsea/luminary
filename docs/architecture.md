@@ -64,7 +64,9 @@ another library's is `<DATA_DIR>/libraries/<id>`. The current library rides in a
 `get_session_factory()` and `get_lancedb_service()` resolve it, so code opens a store without
 naming the library. `RequestAuthMiddleware` runs each request in its principal's library: the
 app's own origin is the default library, and a paired device is the library recorded beside it in
-the default library's `devices` table. Models, the engine and downloads are shared (`machine_root()`).
+the default library's `devices` table. A library's background work (its enrichment queue and
+startup backfills) starts in that library the first time the process serves it
+(`runtime/library_work.py`). Models, the engine and downloads are shared (`machine_root()`).
 
 - **SQLite** (`~/.luminary/luminary.db`): all structured metadata -- documents, chunks, sections, summaries, flashcards, notes, Q&A history, and **concepts** (hot learning state: mastery, FSRS stability, origin, status, evidence refs). Schema is Alembic-versioned and migrated to head on boot (I-23)
 - **LanceDB**: dense embeddings for chunks and notes (both bge-small, 384-dim, one shared space) and **concepts** (384-dim centroid of evidence chunks, in the same space -- derived, for similarity/linking/dedup, never retrieval-primary)
