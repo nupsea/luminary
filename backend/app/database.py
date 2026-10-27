@@ -1,6 +1,7 @@
 import logging
 import sqlite3
 import time
+from collections import deque
 from pathlib import Path
 
 from sqlalchemy import event
@@ -87,6 +88,18 @@ def _note_write(conn, cursor, statement, parameters, context, executemany):  # n
         _write_holds.setdefault(id(conn), (time.monotonic(), " ".join(statement.split())[:90]))
 
 
+def _note_start(conn, cursor, statement, parameters, context, executemany):  # noqa: ARG001, PLR0913
+    """Time each statement and keep the connection's last few.
+
+    A refusal in milliseconds means the victim already held a read when it began to
+    write, so what that connection ran before is the lead (#211). `info` lives as long
+    as the DBAPI connection does, across checkouts.
+    """
+    if context is not None:
+        context._busy_clock = time.monotonic()
+    conn.info.setdefault("recent", deque(maxlen=4)).append(" ".join(statement.split())[:60])
+
+
 def _clear_write_hold(conn):
     _write_holds.pop(id(conn), None)
 
@@ -107,6 +120,16 @@ def _report_write_hold(conn, outcome: str) -> None:
         )
 
 
+def _history(conn) -> tuple[object, str]:
+    """The victim's transaction state and the statements it ran before the refused one."""
+    if conn is None:
+        return "?", "nothing"
+    dbapi = conn.connection.dbapi_connection
+    raw = getattr(getattr(dbapi, "driver_connection", None), "_conn", None)
+    earlier = list(conn.info.get("recent", ()))[:-1]
+    return getattr(raw, "in_transaction", "?"), " | ".join(earlier) or "nothing"
+
+
 def _report_busy(context) -> None:
     """Name why a statement was refused with "database is locked" (#211).
 
@@ -124,12 +147,18 @@ def _report_busy(context) -> None:
         for conn_id, (started, first_write) in _write_holds.items()
         if conn_id != victim
     ]
+    started = getattr(context.execution_context, "_busy_clock", None)
+    in_transaction, earlier = _history(context.connection)
     logger.warning(
-        "%s (SQLite %s) on: %s. Write holders on other connections: %s",
+        "%s (SQLite %s) on: %s. Write holders on other connections: %s. Refused after "
+        "%s; in a transaction: %s; this connection ran before it: %s",
         name,
         sqlite3.sqlite_version,
         " ".join((context.statement or "").split())[:90],
         "; ".join(holders) or "none",
+        f"{now - started:.2f}s" if started is not None else "?",
+        in_transaction,
+        earlier,
     )
 
 
@@ -151,6 +180,7 @@ def make_engine(db_url: str | None = None):
     )
     event.listen(engine.sync_engine, "connect", _enable_sqlite_pragmas)
     event.listen(engine.sync_engine, "begin", _clear_write_hold)
+    event.listen(engine.sync_engine, "before_cursor_execute", _note_start)
     event.listen(engine.sync_engine, "after_cursor_execute", _note_write)
     event.listen(engine.sync_engine, "commit", lambda c: _report_write_hold(c, "commit"))
     event.listen(engine.sync_engine, "rollback", lambda c: _report_write_hold(c, "rollback"))
