@@ -36,12 +36,13 @@ async def _close(*libraries: str) -> None:
     from app.database import close_library
     from app.runtime.library_work import stop_library
     from app.services import vector_store
+    from app.storage import library_root
 
     for library in libraries:
         await stop_library(library)
         await close_library(library)
         # The tmp root goes with the test; a later test must not reuse a handle into it.
-        vector_store._library_services.pop(library, None)
+        vector_store._library_services.pop(library_root(library=library), None)
 
 
 def test_the_default_library_is_the_data_dir_and_others_live_beside_it(two_libraries):
@@ -124,3 +125,29 @@ async def test_a_second_library_sees_none_of_the_first(two_libraries):
     assert second_root != library_root(library="first")
     assert (library_root(library="first") / "luminary.db").exists()
     assert (second_root / "luminary.db").exists()
+
+
+async def test_a_library_id_under_another_root_gets_that_roots_stores(tmp_path, monkeypatch):
+    """A handle left open under one `DATA_DIR` is never handed to the same id under another."""
+    from app.config import get_settings
+    from app.database import get_engine
+    from app.services.vector_store import get_lancedb_service
+
+    roots = (tmp_path / "a", tmp_path / "b")
+    seen = []
+    try:
+        for data_dir in roots:
+            monkeypatch.setenv("DATA_DIR", str(data_dir))
+            get_settings.cache_clear()
+            with use_library("second"):
+                seen.append((get_engine().url.database, get_lancedb_service()))
+    finally:
+        for data_dir in roots:
+            monkeypatch.setenv("DATA_DIR", str(data_dir))
+            get_settings.cache_clear()
+            await _close("second")
+        get_settings.cache_clear()
+
+    (db_a, vectors_a), (db_b, vectors_b) = seen
+    assert db_a.startswith(str(tmp_path / "a")) and db_b.startswith(str(tmp_path / "b"))
+    assert vectors_a is not vectors_b
