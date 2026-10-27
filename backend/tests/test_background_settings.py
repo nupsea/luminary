@@ -14,6 +14,16 @@ def fresh_prefs(monkeypatch):
     monkeypatch.setattr(background_prefs, "_cache", {})
 
 
+@pytest.fixture(autouse=True)
+def no_runtime_scan(monkeypatch):
+    # The gate's runtime check walks every process once per 15s per process; on Windows
+    # that took a second and landed inside a timed call (1.03s against a 0.1s bound).
+    async def unchanged() -> bool:
+        return False
+
+    monkeypatch.setattr(llm_admission, "trim_if_ballooned", unchanged)
+
+
 async def test_both_default_on(memory_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/settings/background")
