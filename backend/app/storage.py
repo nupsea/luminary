@@ -30,6 +30,11 @@ def library_root(settings: Settings | None = None, library: str | None = None) -
     return machine_root(settings) / "libraries" / library
 
 
+# A library root's folders of files, beside its `luminary.db` and `vectors/`. A snapshot
+# carries exactly these; `tests/test_library_snapshot.py` fails on a folder joined elsewhere.
+LIBRARY_FILE_DIRS = ("raw", "images", "covers", "notes", "audio", "corpus", "concepts")
+
+
 def machine_root(settings: Settings | None = None) -> Path:
     """What every library on this machine shares: models, the engine, downloads, reports."""
     return _data_dir(settings)

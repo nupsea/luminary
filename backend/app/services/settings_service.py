@@ -44,7 +44,7 @@ _LLM_SETTING_KEYS = (
     "google_api_key",
 )
 
-_API_KEY_FIELDS = frozenset({"openai_api_key", "anthropic_api_key", "google_api_key"})
+API_KEY_FIELDS = frozenset({"openai_api_key", "anthropic_api_key", "google_api_key"})
 
 _DEFAULTS: dict[str, str] = {
     "llm_mode": "private",
@@ -182,7 +182,7 @@ async def load_llm_settings(db: AsyncSession) -> None:
 
         raw_value = str(row.value)
 
-        if key not in _API_KEY_FIELDS:
+        if key not in API_KEY_FIELDS:
             _cache[key] = raw_value
             continue
 

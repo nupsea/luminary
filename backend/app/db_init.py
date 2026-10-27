@@ -158,6 +158,18 @@ def _alembic_config(connection):
     return cfg
 
 
+def known_revision(revision: str) -> bool:
+    """Whether this build's migrations include *revision*; a newer build's are unknown."""
+    from alembic.script import ScriptDirectory  # noqa: PLC0415
+
+    from alembic import util  # noqa: PLC0415
+
+    try:
+        return ScriptDirectory.from_config(_alembic_config(None)).get_revision(revision) is not None
+    except util.CommandError:
+        return False
+
+
 def _upgrade_head(connection) -> None:
     from alembic.migration import MigrationContext  # noqa: PLC0415
     from alembic.script import ScriptDirectory  # noqa: PLC0415

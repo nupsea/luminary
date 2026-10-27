@@ -61,8 +61,10 @@ STORE_OPENERS: dict[str, frozenset[str]] = {
     **{name: frozenset({"database.py"}) for name in _ENGINE},
     "lancedb.connect": frozenset({"services/vector_store.py"}),
     "LanceDBService": frozenset({"services/vector_store.py"}),
-    # Reads `library_root()`'s database for the query vocabulary.
-    "sqlite3.connect": frozenset({"services/query_spellcorrect.py"}),
+    # Read `library_root()`'s database: the query vocabulary, and a snapshot's backup copy.
+    "sqlite3.connect": frozenset(
+        {"services/query_spellcorrect.py", "services/library_snapshot.py"}
+    ),
     "aiosqlite.connect": frozenset(),
     # The pre-0.15.0 graph, read once at startup; removed with graph_import.py.
     "kuzu.Database": frozenset({"services/graph_connection.py"}),

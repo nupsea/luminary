@@ -640,6 +640,15 @@ class DocumentRepo:
         )
         return result.scalars().all()
 
+    async def ingesting_count(self) -> int:
+        """Documents still in the ingestion pipeline; enrichment, which follows it, is not."""
+        result = await self.session.execute(
+            select(func.count()).where(
+                DocumentModel.stage.notin_(("complete", "enriching", "error"))
+            )
+        )
+        return result.scalar_one()
+
     async def fail_unfinished(self, message: str) -> int:
         """Mark every document not complete or failed as failed; the number marked."""
         result = await self.session.execute(
