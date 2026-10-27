@@ -120,6 +120,16 @@ def _report_write_hold(conn, outcome: str) -> None:
         )
 
 
+def _history(conn) -> tuple[object, str]:
+    """The victim's transaction state and the statements it ran before the refused one."""
+    if conn is None:
+        return "?", "nothing"
+    dbapi = conn.connection.dbapi_connection
+    raw = getattr(getattr(dbapi, "driver_connection", None), "_conn", None)
+    earlier = list(conn.info.get("recent", ()))[:-1]
+    return getattr(raw, "in_transaction", "?"), " | ".join(earlier) or "nothing"
+
+
 def _report_busy(context) -> None:
     """Name why a statement was refused with "database is locked" (#211).
 
@@ -138,10 +148,7 @@ def _report_busy(context) -> None:
         if conn_id != victim
     ]
     started = getattr(context.execution_context, "_busy_clock", None)
-    conn = context.connection
-    earlier = list(conn.info.get("recent", ()))[:-1] if conn is not None else []
-    dbapi = conn.connection.dbapi_connection if conn is not None else None
-    raw = getattr(getattr(dbapi, "driver_connection", None), "_conn", None)
+    in_transaction, earlier = _history(context.connection)
     logger.warning(
         "%s (SQLite %s) on: %s. Write holders on other connections: %s. Refused after "
         "%s; in a transaction: %s; this connection ran before it: %s",
@@ -150,8 +157,8 @@ def _report_busy(context) -> None:
         " ".join((context.statement or "").split())[:90],
         "; ".join(holders) or "none",
         f"{now - started:.2f}s" if started is not None else "?",
-        getattr(raw, "in_transaction", "?"),
-        " | ".join(earlier) or "nothing",
+        in_transaction,
+        earlier,
     )
 
 
