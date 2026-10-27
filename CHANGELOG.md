@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The documents API no longer carries `content_type`.** Responses, the list filter, `/documents/facets`, `PATCH` and the upload form use `kind` alone, which the app already did; a client still sending `content_type` on upload now has it ignored, so the document is classified (#223).
 - **No SQL runs outside `repos/` any more**: the retriever, the chat runtime, the ingestion and concept workflows, the maintenance scripts and startup followed the routers and services (79 statements to 0). Retrieval scores are unchanged on one library.
 
+### Security
+- **Diagrams are sanitized by DOMPurify 3.4.17**, past one critical and four lower advisories in the 3.4.13 that mermaid pulled in. Mermaid's string-mode calls did not appear to reach them.
+
 ## [0.16.2] - 2026-10-19
 
 ### Added
