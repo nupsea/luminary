@@ -498,6 +498,27 @@ class LanceDBService:
             logger.warning("search_concepts failed: %s", exc)
             return []
 
+    def table_versions(self) -> dict[str, int]:
+        """Each table's current version: what a snapshot of the files must be read at."""
+        self._connect()
+        return {name: self._db.open_table(name).version for name in self._db.list_tables().tables}
+
+    def pin_versions(self, versions: dict[str, int]) -> None:
+        """Make each table's latest version the one recorded; drop a table created after it.
+
+        Only for a restored copy. A snapshot copies the table files while writes may land,
+        so the copy can hold versions newer than the one recorded; LanceDB never rewrites
+        an older version, so the recorded one is intact.
+        """
+        self._connect()
+        for name in self._db.list_tables().tables:
+            if name not in versions:
+                self._db.drop_table(name)
+                continue
+            table = self._db.open_table(name)
+            if table.version != versions[name]:
+                table.restore(versions[name])
+
 
 # The default library's service; tests swap it. Any other library's in _library_services,
 # keyed by root as the database's handles are.

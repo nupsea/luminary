@@ -64,6 +64,9 @@ another library's is `<DATA_DIR>/libraries/<id>`. The current library rides in a
 `get_session_factory()` and `get_lancedb_service()` resolve it, so code opens a store without
 naming the library. `RequestAuthMiddleware` runs each request in its principal's library: the
 app's own origin is the default library, and a paired device is the library recorded beside it in
+the default library's `devices` table. Models, the engine and downloads are shared (`machine_root()`).
+A library's snapshot is one archive of its root (`services/library_snapshot.py`, #390); a
+folder joined onto `library_root()` must be listed in `storage.LIBRARY_FILE_DIRS` to be carried.
 the default library's `devices` table. A library's background work (its enrichment queue and
 startup backfills) starts in that library the first time the process serves it
 (`runtime/library_work.py`). Models, the engine and downloads are shared (`machine_root()`).
