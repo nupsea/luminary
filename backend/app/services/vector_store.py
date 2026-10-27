@@ -2,6 +2,7 @@ import logging
 import re
 import threading
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
@@ -519,9 +520,10 @@ class LanceDBService:
                 table.restore(versions[name])
 
 
-# The default library's service; tests swap it. Any other library's in _library_services.
+# The default library's service; tests swap it. Any other library's in _library_services,
+# keyed by root as the database's handles are.
 _lancedb_service: LanceDBService | None = None
-_library_services: dict[str, LanceDBService] = {}
+_library_services: dict[Path, LanceDBService] = {}
 
 
 def get_lancedb_service() -> LanceDBService:
@@ -529,9 +531,10 @@ def get_lancedb_service() -> LanceDBService:
     global _lancedb_service
     library = current_library()
     if library != DEFAULT_LIBRARY:
-        if library not in _library_services:
-            _library_services[library] = LanceDBService(library)
-        return _library_services[library]
+        root = library_root(library=library)
+        if root not in _library_services:
+            _library_services[root] = LanceDBService(library)
+        return _library_services[root]
     if _lancedb_service is None:
         _lancedb_service = LanceDBService(DEFAULT_LIBRARY)
     return _lancedb_service

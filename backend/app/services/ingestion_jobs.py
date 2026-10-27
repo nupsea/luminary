@@ -7,9 +7,9 @@ in :mod:`app.workflows.ingestion`.
 
 Design notes:
 
-- Single in-process registry. The app runs as a single FastAPI worker on the
-  user's machine, so we don't need a distributed scheduler -- just enough
-  bookkeeping to find a running task by document id.
+- In-process registries, one per library. The app runs as a single FastAPI
+  worker on the user's machine, so we don't need a distributed scheduler --
+  just enough bookkeeping to find a running task by document id.
 - Strong references in ``_tasks`` prevent asyncio's weak-only tracking from
   collecting tasks mid-run.
 - :meth:`cancel` injects ``CancelledError`` into the task and awaits its
@@ -29,6 +29,8 @@ import asyncio
 import logging
 from collections.abc import Coroutine
 from typing import Any
+
+from app.library import current_library
 
 logger = logging.getLogger(__name__)
 
@@ -174,12 +176,19 @@ async def _swallow_cancel(task: asyncio.Task[Any]) -> None:
         pass
 
 
-_registry: IngestionJobRegistry | None = None
+# One registry per library: a request cancels only its own library's ingestions (#388).
+_registries: dict[str, IngestionJobRegistry] = {}
 
 
 def get_ingestion_jobs() -> IngestionJobRegistry:
-    """Return the process-wide :class:`IngestionJobRegistry` singleton."""
-    global _registry
-    if _registry is None:
-        _registry = IngestionJobRegistry()
-    return _registry
+    """The current library's :class:`IngestionJobRegistry`."""
+    library = current_library()
+    if library not in _registries:
+        _registries[library] = IngestionJobRegistry()
+    return _registries[library]
+
+
+async def cancel_all_ingestions() -> None:
+    """Cancel every library's in-flight ingestions, at shutdown."""
+    for registry in list(_registries.values()):
+        await registry.cancel_all()

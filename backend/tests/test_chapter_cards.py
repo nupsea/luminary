@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from sqlalchemy import func, select
 
+from app.library import DEFAULT_LIBRARY
 from app.models import (
     ChunkModel,
     DocumentModel,
@@ -390,9 +391,9 @@ async def test_later_chapters_wait_while_the_learner_is_asking(monkeypatch, memo
     from app.services import llm_admission
 
     async with llm_admission.interactive_call():
-        assert await chapter_backfill._idle_reason() == "in use"
+        assert await chapter_backfill._idle_reason([DEFAULT_LIBRARY]) == "in use"
     # The quiet period after the question still counts as in use.
-    assert await chapter_backfill._idle_reason() == "in use"
+    assert await chapter_backfill._idle_reason([DEFAULT_LIBRARY]) == "in use"
 
 
 async def test_a_chapter_that_yields_no_card_is_not_written_again(long_book, fakes, monkeypatch):
@@ -401,7 +402,7 @@ async def test_a_chapter_that_yields_no_card_is_not_written_again(long_book, fak
 
     monkeypatch.setattr(chapter_cards, "write_chapter_cards", no_cards)
 
-    async def now(_pick):
+    async def now(_pick, _libraries):
         return None
 
     monkeypatch.setattr(chapter_backfill, "not_now", now)
@@ -508,7 +509,7 @@ async def test_a_model_the_backfill_loaded_is_unloaded_when_work_runs_out(monkey
     unloaded: list[str] = []
     steps = iter([(True, "qwen3.5:4b"), (True, None), (False, None)])
 
-    async def run_once():
+    async def run_once(_libraries):
         return next(steps)
 
     async def unload(model):
@@ -524,7 +525,7 @@ async def test_a_model_the_backfill_loaded_is_unloaded_when_work_runs_out(monkey
 async def test_a_model_already_loaded_is_left_for_the_learner(monkeypatch):
     unloaded: list[str] = []
 
-    async def run_once():
+    async def run_once(_libraries):
         return False, None
 
     async def unload(model):

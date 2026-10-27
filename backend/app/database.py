@@ -1,6 +1,7 @@
 import logging
 import sqlite3
 import time
+from pathlib import Path
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
@@ -158,17 +159,19 @@ def make_engine(db_url: str | None = None):
 
 
 # The default library's handles; tests swap these. Any other library's open in _libraries,
-# each over the luminary.db in its own root (#388).
+# each over the luminary.db in its own root (#388). Keyed by root: the same id under another
+# `DATA_DIR` is another library, and must never be handed this one's engine.
 _engine = None
 _session_factory = None
-_libraries: dict[str, tuple[AsyncEngine, async_sessionmaker]] = {}
+_libraries: dict[Path, tuple[AsyncEngine, async_sessionmaker]] = {}
 
 
 def _library_handles(library: str) -> tuple[AsyncEngine, async_sessionmaker]:
-    if library not in _libraries:
+    root = library_root(library=library)
+    if root not in _libraries:
         engine = make_engine()
-        _libraries[library] = (engine, async_sessionmaker(engine, expire_on_commit=False))
-    return _libraries[library]
+        _libraries[root] = (engine, async_sessionmaker(engine, expire_on_commit=False))
+    return _libraries[root]
 
 
 def get_engine():
@@ -195,7 +198,7 @@ def get_session_factory():
 
 async def close_library(library: str) -> None:
     """Dispose a non-default library's engine; the next use reopens it."""
-    handles = _libraries.pop(library, None)
+    handles = _libraries.pop(library_root(library=library), None)
     if handles is not None:
         await handles[0].dispose()
 

@@ -67,6 +67,9 @@ app's own origin is the default library, and a paired device is the library reco
 the default library's `devices` table. Models, the engine and downloads are shared (`machine_root()`).
 A library's snapshot is one archive of its root (`services/library_snapshot.py`, #390); a
 folder joined onto `library_root()` must be listed in `storage.LIBRARY_FILE_DIRS` to be carried.
+the default library's `devices` table. A library's background work (its enrichment queue and
+startup backfills) starts in that library the first time the process serves it
+(`runtime/library_work.py`). Models, the engine and downloads are shared (`machine_root()`).
 
 - **SQLite** (`~/.luminary/luminary.db`): all structured metadata -- documents, chunks, sections, summaries, flashcards, notes, Q&A history, and **concepts** (hot learning state: mastery, FSRS stability, origin, status, evidence refs). Schema is Alembic-versioned and migrated to head on boot (I-23)
 - **LanceDB**: dense embeddings for chunks and notes (both bge-small, 384-dim, one shared space) and **concepts** (384-dim centroid of evidence chunks, in the same space -- derived, for similarity/linking/dedup, never retrieval-primary)

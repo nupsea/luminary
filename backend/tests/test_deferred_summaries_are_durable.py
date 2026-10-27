@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
 
-from app import main as main_module
 from app.models import SectionSummaryModel
+from app.runtime import library_work
 from app.services import section_summarizer
 from tests.test_document_summary_fast_path import (
     _insert_document,
@@ -59,7 +59,7 @@ def test_the_repair_is_bounded_per_boot():
 
 
 def test_startup_schedules_the_repair():
-    assert "backfill_section_summaries" in inspect.getsource(main_module.lifespan)
+    assert "backfill_section_summaries" in inspect.getsource(library_work._start_backfills)
 
 
 async def _section_summary_rows(factory, doc_id: str) -> list[SectionSummaryModel]:

@@ -14,6 +14,7 @@ from typing import Any
 
 from app.database import get_session_factory
 from app.exceptions import LocalInferenceRefused
+from app.library import current_library, use_library
 from app.models import EnrichmentJobModel
 from app.repos.document_repo import DocumentRepo
 from app.repos.enrichment_repo import EnrichmentRepo
@@ -343,25 +344,35 @@ class EnrichmentQueueWorker:
 
 
 async def requeue_skipped_jobs() -> int:
-    """Re-queue work that was skipped for want of a component. Returns the count.
+    """Re-queue work that was skipped for want of a component, in every library. Returns the count.
 
     Called when a component finishes installing: without it, documents already
     in the library wait for a restart, which reads as the install having failed.
     """
-    async with get_session_factory()() as session:
-        requeued = await EnrichmentRepo(session).requeue_skipped()
-        if requeued:
-            await session.commit()
-            logger.info("EnrichmentQueueWorker: re-queued %d skipped jobs", len(requeued))
-    return len(requeued)
+    total = 0
+    for library in list(_workers) or [current_library()]:
+        with use_library(library):
+            async with get_session_factory()() as session:
+                requeued = await EnrichmentRepo(session).requeue_skipped()
+                if requeued:
+                    await session.commit()
+                    logger.info("EnrichmentQueueWorker: re-queued %d skipped jobs", len(requeued))
+        total += len(requeued)
+    return total
 
 
-# Singleton worker instance (started in lifespan)
-_worker: EnrichmentQueueWorker | None = None
+# One worker per library, each polling its own library's queue (#388).
+_workers: dict[str, EnrichmentQueueWorker] = {}
 
 
 def get_enrichment_worker() -> EnrichmentQueueWorker:
-    global _worker  # noqa: PLW0603
-    if _worker is None:
-        _worker = EnrichmentQueueWorker()
-    return _worker
+    """The current library's worker."""
+    library = current_library()
+    if library not in _workers:
+        _workers[library] = EnrichmentQueueWorker()
+    return _workers[library]
+
+
+def drop_enrichment_worker() -> None:
+    """Forget the current library's worker once it is stopped."""
+    _workers.pop(current_library(), None)

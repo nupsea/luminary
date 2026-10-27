@@ -18,6 +18,7 @@ from app.database import get_session_factory
 from app.library import use_library
 from app.main import app
 from app.models import DeviceModel, GraphEntityModel
+from app.runtime.library_work import serving
 from app.storage import library_root
 from tests.test_library_context import _close
 
@@ -127,6 +128,8 @@ async def test_a_device_sees_only_the_library_it_paired_into(client, memory_db):
         "entities": ["Hector"],
     }
     assert (await client.get(f"/documents/{own}", headers=device)).status_code == 404
+    # The device's first request started its library's background work.
+    assert OTHER in serving()
     uploads = {p.name for p in (library_root(library=OTHER) / "raw").iterdir()}
     assert uploads == {f"{other}.txt"}
     assert not (Path(memory_db.tmp_path) / "raw" / f"{other}.txt").exists()
