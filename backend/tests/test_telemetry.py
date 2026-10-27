@@ -1,5 +1,8 @@
 """Tests for OTel instrumentation — verify span attributes without a live Phoenix."""
 
+import sys
+import types
+
 import pytest
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -149,3 +152,28 @@ def test_trace_ingestion_node_records_latency(in_memory_tracer):
 
     spans = in_memory_tracer.get_finished_spans()
     assert spans[0].attributes.get("ingestion.latency_ms") is not None
+
+
+def test_phoenix_ui_binds_to_loopback(monkeypatch, tmp_path):
+    """Phoenix defaults to 0.0.0.0, which would serve every trace to the local network."""
+    from app import telemetry
+
+    launches = []
+    # Stand-ins: importing Phoenix itself costs about a minute.
+    phoenix = types.ModuleType("phoenix")
+    phoenix.launch_app = lambda **kwargs: launches.append(kwargs)
+    phoenix_otel = types.ModuleType("phoenix.otel")
+    phoenix_otel.register = lambda **kwargs: TracerProvider()
+    instrumentor = types.ModuleType("openinference.instrumentation.litellm")
+    instrumentor.LiteLLMInstrumentor = lambda: types.SimpleNamespace(instrument=lambda **kw: None)
+    monkeypatch.setitem(sys.modules, "phoenix", phoenix)
+    monkeypatch.setitem(sys.modules, "phoenix.otel", phoenix_otel)
+    monkeypatch.setitem(sys.modules, "openinference.instrumentation.litellm", instrumentor)
+    monkeypatch.setattr(telemetry, "_wait_for_phoenix", lambda timeout=15.0: False)
+    monkeypatch.setattr(telemetry, "_initialized", False)
+    monkeypatch.setenv("PHOENIX_WORKING_DIR", str(tmp_path))
+    monkeypatch.setenv("PHOENIX_GRPC_PORT", "4317")
+
+    telemetry.setup_tracing(True, data_dir=str(tmp_path))
+
+    assert [call.get("host") for call in launches] == ["127.0.0.1"]

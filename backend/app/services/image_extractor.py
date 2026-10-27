@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 
 _RE_EXTERNAL_SRC = re.compile(r"^(?:data:|https?://)", re.IGNORECASE)
 
+# Pillow picks a decoder by sniffing the bytes, not the name, so without a list a
+# document image named ".png" that holds TIFF, PSD or MSP data reaches that decoder.
+# These are what each source legitimately carries: EPUB's core image types, and for
+# PDFs the JPEG 2000 streams PyMuPDF passes through raw.
+DOCUMENT_IMAGE_FORMATS = ("PNG", "JPEG", "GIF", "WEBP")
+PDF_IMAGE_FORMATS = ("PNG", "JPEG", "JPEG2000")
+
 
 def _epub_item_filename(item_name: str) -> str | None:
     """The name to store this EPUB-internal image under, or None.
@@ -421,7 +428,7 @@ def _extract_vector_figures_page(
         )
         try:
             raw_bytes = page.get_pixmap(clip=clip, dpi=_VECTOR_RENDER_DPI).tobytes("png")
-            img_pil = PILImage.open(BytesIO(raw_bytes))
+            img_pil = PILImage.open(BytesIO(raw_bytes), formats=("PNG",))
             img_pil.load()
         except Exception as exc:
             logger.warning(
@@ -497,7 +504,7 @@ def extract_images_pdf(
 
             raw_bytes = img_data["image"]
             try:
-                img_pil = PILImage.open(BytesIO(raw_bytes))
+                img_pil = PILImage.open(BytesIO(raw_bytes), formats=PDF_IMAGE_FORMATS)
             except Exception:
                 logger.debug("undecodable embedded image, skipped", exc_info=True)
                 outcome.skipped += 1
@@ -577,7 +584,7 @@ def extract_images_epub(
     for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
         raw_bytes = item.get_content()
         try:
-            img_pil = PILImage.open(BytesIO(raw_bytes))
+            img_pil = PILImage.open(BytesIO(raw_bytes), formats=DOCUMENT_IMAGE_FORMATS)
         except Exception:
             logger.debug("undecodable EPUB image, skipped", exc_info=True)
             outcome.skipped += 1
@@ -636,7 +643,7 @@ def extract_images_md(
             continue
 
         try:
-            with PILImage.open(img_path) as img_pil:
+            with PILImage.open(img_path, formats=DOCUMENT_IMAGE_FORMATS) as img_pil:
                 w, h = img_pil.size
 
             # Use file content hash if possible, otherwise filename

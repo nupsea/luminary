@@ -42,8 +42,11 @@ _KIND_CHAIN = OpenInferenceSpanKindValues.CHAIN.value
 _KIND_RETRIEVER = OpenInferenceSpanKindValues.RETRIEVER.value
 
 _initialized = False
+# Phoenix binds 0.0.0.0 by default, which serves every trace -- prompts and document
+# text -- to the local network. Its OTLP gRPC receiver binds all interfaces regardless.
+_PHOENIX_HOST = "127.0.0.1"
 _PHOENIX_PORT = 6006
-_PHOENIX_OTLP_ENDPOINT = f"http://127.0.0.1:{_PHOENIX_PORT}/v1/traces"
+_PHOENIX_OTLP_ENDPOINT = f"http://{_PHOENIX_HOST}:{_PHOENIX_PORT}/v1/traces"
 
 
 def _wait_for_phoenix(timeout: float = 15.0, interval: float = 0.5) -> bool:
@@ -51,7 +54,7 @@ def _wait_for_phoenix(timeout: float = 15.0, interval: float = 0.5) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            with socket.create_connection(("127.0.0.1", _PHOENIX_PORT), timeout=1):
+            with socket.create_connection((_PHOENIX_HOST, _PHOENIX_PORT), timeout=1):
                 return True
         except OSError:
             time.sleep(interval)
@@ -112,7 +115,7 @@ def setup_tracing(phoenix_enabled: bool, data_dir: str = "~/.luminary") -> None:
             # launch_app() starts Phoenix's own internal server thread and
             # returns quickly.  We do NOT wrap this in another thread — the
             # double-threading was the source of the race condition.
-            px.launch_app(use_temp_dir=False)
+            px.launch_app(host=_PHOENIX_HOST, use_temp_dir=False)
 
             # Wait for Phoenix to actually bind to the port before we register
             # the OTLP exporter.  Without this wait the first span batches are
