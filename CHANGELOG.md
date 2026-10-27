@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **No SQL runs outside `repos/` any more**: the retriever, the chat runtime, the ingestion and concept workflows, the maintenance scripts and startup followed the routers and services (79 statements to 0). Retrieval scores are unchanged on one library.
 
 ### Security
+- **Images inside imported documents are decoded by Pillow 13.0.0**, past decoder memory-safety advisories in 12.1.1 that a crafted image in a PDF, EPUB or web page could reach. Extraction from six library documents gave the same images, pixel for pixel.
+- **The backend's TLS roots, web server and upload parser are past their open advisories**: certifi drops the compromised emSign intermediates, and starlette 1.3.1 (with FastAPI 0.133.0) and python-multipart 0.0.31 fix request-handling bugs.
 - **Diagrams are sanitized by DOMPurify 3.4.17**, past one critical and four lower advisories in the 3.4.13 that mermaid pulled in. Mermaid's string-mode calls did not appear to reach them.
 
 ## [0.16.2] - 2026-10-19
