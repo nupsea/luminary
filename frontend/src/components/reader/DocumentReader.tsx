@@ -56,6 +56,7 @@ import { useReaderHistory, type ReaderPlace } from "./hooks/useReaderHistory"
 import { useReaderKeyboardShortcuts } from "./hooks/useReaderKeyboardShortcuts"
 import { useReaderTabs } from "./hooks/useReaderTabs"
 import { useReadingPlace } from "./hooks/useReadingPlace"
+import { createPracticeReturn } from "./hooks/practiceReturn"
 import { useReadingProgress } from "./hooks/useReadingProgress"
 import { useSectionListCollapse } from "./hooks/useSectionListCollapse"
 import { useSelectionWorkflow } from "./hooks/useSelectionWorkflow"
@@ -899,9 +900,12 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   useReadingProgress(documentId, doc?.sections.length ?? 0, readerContainerRef)
   const chapterEnd = useChapterEndOffer(documentId)
   const { reach: reachPlace } = chapterEnd
+  // The section the reader's own scrolling last reached; a revealed source never moves it.
+  const readingSectionRef = useRef<string | null>(null)
   const onReadSection = useCallback(
     (sectionId: string) => {
       if (leftTab !== "read") return
+      readingSectionRef.current = sectionId
       reachPlace({ sectionId })
       readSection(sectionId)
     },
@@ -1011,6 +1015,22 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     }
     setReadSectionId(sid)
   }, [leftTab, readSectionId, pushHistory, setLeftTab, setReadSectionId, closeReaderSearch])
+
+  // A chapter run ends where the reader was reading, not at the last card's source (#231).
+  const [chapterReturn] = useState(createPracticeReturn)
+  const revealChapterCardSource = useCallback((sid: string) => {
+    chapterReturn.hold({
+      tab: leftTab,
+      sectionId: readingSectionRef.current ?? readSectionId ?? doc?.sections[0]?.id ?? null,
+    })
+    revealCardSource(sid)
+  }, [chapterReturn, leftTab, readSectionId, doc?.sections, revealCardSource])
+  const closeChapterPractice = useCallback(() => {
+    setPracticeChapter(null)
+    const spot = chapterReturn.release()
+    if (spot?.tab === "read" && spot.sectionId) revealCardSource(spot.sectionId)
+    else if (spot && spot.tab !== leftTab) setLeftTab(spot.tab)
+  }, [chapterReturn, leftTab, revealCardSource, setLeftTab])
 
   // A citation clicked in the docked conversation is answered beside it rather
   // than by routing, so the marked passage is state and not only the arrival
@@ -1984,8 +2004,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 key={practiceChapter.id}
                 documentId={documentId}
                 chapter={practiceChapter}
-                onJumpToSource={revealCardSource}
-                onClose={() => setPracticeChapter(null)}
+                onJumpToSource={revealChapterCardSource}
+                onClose={closeChapterPractice}
               />
             ) : (
               <PracticePanel
