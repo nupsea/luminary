@@ -35,7 +35,7 @@ if [ ! -d "$REPO_ROOT/frontend/node_modules" ] \
     || [ "$REPO_ROOT/frontend/package-lock.json" -nt "$REPO_ROOT/frontend/node_modules/.package-lock.json" ] \
     || [ "$REPO_ROOT/frontend/package.json" -nt "$REPO_ROOT/frontend/node_modules/.package-lock.json" ]; then
     _info "Installing frontend dependencies..."
-    (cd "$REPO_ROOT/frontend" && npm install)
+    (cd "$REPO_ROOT/frontend" && npm ci)
 fi
 
 # On Intel Mac, several core packages (lancedb, onnxruntime, kuzu) have no
