@@ -106,7 +106,7 @@ CI if an offered provider resolves outside its own family.
 
 **I-9. Notes, chunks and concepts share one embedding space, whose dimension is a stored property of the corpus, not a setting.**
 Every schema declares `EMBEDDING_DIM` (384, `bge-small-en-v1.5`); replacing the embedder is a full
-re-embed behind a migration. The check is against the embedder, never a declaration: a wrong
+re-embed (`app.scripts.reembed`). The check is against the embedder, never a declaration: a wrong
 constant made every note upsert fail while its guard compared against the same constant.
 `tests/test_vector_space_dimension.py` guards it; `ReindexService.reindex_notes` backfills.
 

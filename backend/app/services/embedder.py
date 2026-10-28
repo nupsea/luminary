@@ -77,5 +77,10 @@ def get_embedding_service() -> EmbeddingService:
     return _embedding_service
 
 
+def chunk_embedding_text(text: str, entities_text: str | None) -> str:
+    """What a chunk's vector embeds: its text, then its entity tail, so canonical names match."""
+    return text + ("\n" + entities_text if entities_text else "")
+
+
 def embed_query(query: str) -> list[float]:
     return get_embedding_service().encode([QUERY_INSTRUCTION + query])[0]
