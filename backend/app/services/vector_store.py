@@ -447,7 +447,15 @@ class LanceDBService:
             table = self._get_table()
             # search() with no query vector is a plain filtered scan; limit must be
             # explicit (default is 10) so we don't truncate the evidence set.
-            rows = table.search().where(pred).select(["vector"]).limit(len(chunk_ids)).to_list()
+            rows = (
+                table.search()
+                .where(pred)
+                .select(["chunk_id", "vector"])
+                .limit(len(chunk_ids))
+                .to_list()
+            )
+            # Summed in id order: scan order follows write order, and a float mean depends on it.
+            rows.sort(key=lambda r: r["chunk_id"])
             vectors = [r["vector"] for r in rows if r.get("vector") is not None]
             if not vectors:
                 return None
