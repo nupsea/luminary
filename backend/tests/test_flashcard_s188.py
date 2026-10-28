@@ -13,6 +13,7 @@ from app.services.flashcard import (
     _get_section_context_for_chunks,
     _resolve_section_heading,
 )
+from app.services.vector_store import EMBEDDING_DIM
 from tests.factories import make_card, make_chunk, make_document, make_section
 
 # Isolated test DB fixture
@@ -182,7 +183,7 @@ async def test_generate_book_produces_bloom_l3_cards(test_db):
 
     # Mock embedder to skip dedup
     mock_embedder = AsyncMock()
-    mock_embedder.encode = lambda texts: [[0.0] * 1024 for _ in texts]
+    mock_embedder.encode = lambda texts: [[0.0] * EMBEDDING_DIM for _ in texts]
 
     # Mock entity lookup (non-fatal, returns names)
     mock_graph_svc = AsyncMock()
@@ -233,7 +234,7 @@ async def test_generate_populates_section_heading(test_db):
     mock_llm.generate = AsyncMock(return_value=_make_bloom_l3_response(3))
 
     mock_embedder = AsyncMock()
-    mock_embedder.encode = lambda texts: [[0.0] * 1024 for _ in texts]
+    mock_embedder.encode = lambda texts: [[0.0] * EMBEDDING_DIM for _ in texts]
 
     mock_graph_svc = AsyncMock()
     mock_graph_svc.get_entities_by_type_for_document = lambda _: {}
