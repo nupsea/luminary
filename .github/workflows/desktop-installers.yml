@@ -15,6 +15,9 @@ on:
       - "scripts/desktop/**"
       - "scripts/get-luminary.*"
       - "src-tauri/**"
+      # The staged interpreter is built from these: a dependency bump changes the bundle.
+      - "backend/pyproject.toml"
+      - "backend/uv.lock"
       - ".github/workflows/desktop-installers.yml"
 
 concurrency:
