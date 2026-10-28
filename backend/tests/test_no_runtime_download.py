@@ -128,6 +128,27 @@ def test_a_load_during_setup_waits_for_that_download(monkeypatch, tmp_path, down
             model_prefetch.require_snapshot(tmp_path, "org/model")
 
 
+def test_a_load_waits_for_a_download_that_has_written_only_its_small_files(monkeypatch, tmp_path):
+    """The hub writes config and tokenizer before the weights: a non-empty snapshot
+    mid-download is not one a load can read."""
+    import threading
+
+    _snapshot(tmp_path, "org/model", {"config.json": "{}"})
+    done = threading.Event()
+    monkeypatch.setitem(model_prefetch._in_flight, "org/model", done)
+    weights = []
+
+    def finish():
+        snap = tmp_path / "models--org--model" / "snapshots" / "rev"
+        (snap / "model.safetensors").write_text("w")
+        weights.append(True)
+        done.set()
+
+    threading.Timer(0.1, finish).start()
+    model_prefetch.require_snapshot(tmp_path, "org/model")
+    assert weights, "the load went ahead before the weights were written"
+
+
 def test_gliner_is_not_cached_without_its_tokenizer_base(tmp_path):
     """GLiNER builds its tokenizer from the encoder named in its config, so a
     cached checkpoint alone fails a cache-only load."""

@@ -6,7 +6,7 @@ assert the pipeline produces usable output in the database.
 
 Heavy ML services are mocked:
   - LiteLLM: classification LLM call returns a fixed content type
-  - EmbeddingService: returns deterministic 1024-dim dummy vectors (no model download)
+  - EmbeddingService: returns deterministic dummy vectors (no model download)
   - EntityExtractor: returns one synthetic entity per document (no GLiNER download)
 
 Real services used:
@@ -53,10 +53,10 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 class _MockEmbeddingService:
-    """Returns a deterministic 1024-dim dummy vector for any input text."""
+    """Returns a deterministic dummy vector for any input text."""
 
     def encode(self, texts: list[str]) -> list[list[float]]:
-        return [[0.1] * 1024 for _ in texts]
+        return [[0.1] * vs_module.EMBEDDING_DIM for _ in texts]
 
 
 # Test DB + service fixture

@@ -69,7 +69,7 @@ def _build_graph():
     builder.add_conditional_edges("transcribe", _route_on_status("chunk"))
     builder.add_conditional_edges("chunk", _route_on_status("entity_extract"))
     builder.add_edge("entity_extract", "embed")
-    builder.add_edge("embed", "keyword_index")
+    builder.add_conditional_edges("embed", _route_on_status("keyword_index"))
     builder.add_edge("keyword_index", "section_summarize")
     builder.add_edge("section_summarize", "summarize")
     builder.add_edge("summarize", "enrichment_enqueue")

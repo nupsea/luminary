@@ -43,7 +43,7 @@ _FIXTURE_TEXTS = [
 
 class _MockEmbeddingService:
     def encode(self, texts: list[str]) -> list[list[float]]:
-        return [[0.1] * 1024 for _ in texts]
+        return [[0.1] * vs_module.EMBEDDING_DIM for _ in texts]
 
 
 # Fixture

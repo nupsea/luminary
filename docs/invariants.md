@@ -114,7 +114,10 @@ constant made every note upsert fail while its guard compared against the same c
 Loaders are cache-only and raise `ModelNotDownloaded`; weights come from setup (`model_prefetch`) or a
 component install. `local_files_only=True` is not cache-only for GLiNER, whose tokenizer calls the hub
 unless forced offline (`offline_model_load`), and its tokenizer comes from the repo named in
-`gliner_config.json`, which setup must fetch. `tests/test_no_runtime_download.py` guards it.
+`gliner_config.json`, which setup must fetch. A load during setup's download of that model waits for
+it even when the snapshot folder is not empty: the hub writes config and tokenizer before the
+weights, so a first ingest once read a folder with no weights. `tests/test_no_runtime_download.py`
+guards it.
 
 **I-58. A running app contacts a third party only for something the user asked for, or with web access enabled.**
 Link checks go through `reference_validator.link_checks_enabled()`, off while `WEB_SEARCH_PROVIDER`

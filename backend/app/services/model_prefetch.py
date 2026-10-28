@@ -185,8 +185,8 @@ def require_snapshot(root: Path, repo_id: str) -> None:
     Waits for an in-flight setup download of this model. Call it outside
     MODEL_LOAD_LOCK, or every other model's load stalls behind the download.
     """
-    if snapshot_present(root, repo_id):
-        return
+    # In-flight first: the hub writes config and tokenizer before the weights, so a
+    # snapshot mid-download is non-empty and not loadable (I-57).
     with _in_flight_lock:
         pending = _in_flight.get(repo_id)
     if pending is not None:

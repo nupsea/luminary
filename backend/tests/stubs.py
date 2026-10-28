@@ -6,12 +6,14 @@ Reserve MagicMock for true external boundaries (LiteLLM, httpx, SQLAlchemy).
 
 import uuid
 
+from app.services.vector_store import EMBEDDING_DIM
+
 
 class MockEmbeddingService:
-    """Returns a deterministic 1024-dim vector for any input text."""
+    """Returns a deterministic vector of the store's dimension for any input text."""
 
     def encode(self, texts: list[str]) -> list[list[float]]:
-        return [[0.1] * 1024 for _ in texts]
+        return [[0.1] * EMBEDDING_DIM for _ in texts]
 
 
 class MockLLMService:
