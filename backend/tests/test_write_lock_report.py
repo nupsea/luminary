@@ -126,3 +126,30 @@ async def test_a_stale_read_snapshot_is_refused_at_once_and_named(tmp_path, capl
     assert "Refused after 0.0" in refusal
     assert "in a transaction: True" in refusal
     assert refusal.endswith("BEGIN | SELECT count(*) FROM t")
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_names_only_holders_of_its_own_database(tmp_path, caplog):
+    """Each library is its own SQLite file: another library's writer cannot hold this lock."""
+    engine = await _engine(tmp_path)
+    (tmp_path / "other").mkdir()
+    other = await _engine(tmp_path / "other")
+    caplog.set_level(logging.WARNING, logger="app.database")
+    async with (
+        other.connect() as elsewhere,
+        engine.connect() as holder,
+        engine.connect() as victim,
+    ):
+        await elsewhere.execute(text("INSERT INTO t VALUES (9)"))
+        await holder.execute(text("INSERT INTO t VALUES (1)"))
+        await victim.exec_driver_sql("PRAGMA busy_timeout=0")
+        with pytest.raises(Exception, match="database is locked"):
+            await victim.execute(text("INSERT INTO t VALUES (2)"))
+        await holder.commit()
+        await elsewhere.commit()
+    await engine.dispose()
+    await other.dispose()
+
+    [refusal] = _refusals(caplog)
+    assert "s INSERT INTO t VALUES (1)" in refusal
+    assert "VALUES (9)" not in refusal

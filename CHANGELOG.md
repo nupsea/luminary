@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An EPUB reopens at the paragraph where reading stopped, and can hold one bookmark,** as a PDF does. Chapters run to 20,000 words, so the place saved is the block on screen, not the chapter.
 
 ### Fixed
+- **A second library shared the first one's engine settings.** Engine mode, model picks and background pacing are now each library's own; API keys stay in the keychain and the default library, whichever library saves them (#389).
+- **The "database is locked" report could name a writer in another library** as the lock holder. It now names only writers on the refused write's own database.
 - **Finishing a chapter's practice left the reader at the last card's source** rather than where you were reading. It now returns to the section you had read to, or to the view you practised from (#231).
 - **A story collection, a treatise or a long essay with a few titled sub-sections could be stored as a reference manual**, and chunked as one: re-measuring a test library made The Adventures of Sherlock Holmes, Hegel's Philosophy of Mind and a 5,200-word policy essay references. Bare numerals no longer count as titles, and sub-sections make a reference only when they come every page or two (#385).
 - **A novel, scripture or political essay could be measured as technical.** With the default local model, The Adventures of Sherlock Holmes, the Federalist Papers and the Gita were, and Moby-Dick was judged from its contents page. On 58 documents held out from tuning, 54 were measured right before and all 58 after. Documents already stored keep their subject until reprocessed (#381).
