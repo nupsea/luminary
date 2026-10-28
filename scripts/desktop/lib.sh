@@ -158,6 +158,9 @@ prune_dependencies() {
     # Build-time tools needing a Visual C++ runtime not shipped beside them
     # (verify_dll_imports.ps1). pip writes script wrappers with distlib's own launchers.
     rm -f "$site/torch/bin"/protoc* "$site/setuptools"/cli*.exe "$site/setuptools"/gui*.exe
+    # torch's C++ tests: linuxdeploy cannot resolve their libtorch.so and fails the AppImage.
+    # NOT torch_shm_manager, which shared-memory multiprocessing runs.
+    rm -f "$site/torch/bin"/test_* "$site/torch/bin"/*Test "$site/torch/bin"/*Test.exe
     # pip stays: it installs post-install components.
     rm -rf "$site/onnxruntime"/{transformers,quantization,tools}      # export/training helpers
     # NOT litellm/proxy: plain `import litellm` reaches litellm.proxy._types.
