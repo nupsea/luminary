@@ -250,6 +250,15 @@ _SOURCE_REFERENCE = (
     # "according to [Debugging]": the section label the passage builder puts on each chunk.
     # Fired on 2 of 158 graded tech cards, both bad, and on none of 1,217 library cards.
     re.compile(r"(?<![\w`])\[[A-Z][^\],]{1,60}\]"),
+    # "according to Chapter V", "in Book IX": the label's number, which a learner never sees
+    # on the card. Fired on 6 of 8 Gita cards (all bad) and none of 3,329 library cards;
+    # "Section 230 of the Act" names a subject and stays.
+    re.compile(
+        r"\b(?:chapter|section|part|book|canto|volume|act|scene|lecture|lesson|unit|module)s?\s+"
+        r"(?:(?-i:[IVXLC]+)|\d+(?:\.\d+)*|one|two|three|four|five|six|seven|eight|nine|ten)\b"
+        + _TOPICAL,
+        re.I,
+    ),
 )
 
 # An answer that concedes the source has none, or a bracketed placeholder for one. Fired on 477

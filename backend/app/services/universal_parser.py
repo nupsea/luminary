@@ -15,7 +15,7 @@ from itertools import pairwise
 from pathlib import Path
 
 from app.services.source_text import is_nav_line as _is_nav_line
-from app.services.source_text import read_source_text
+from app.services.source_text import is_speaker_label, read_source_text
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
@@ -598,9 +598,11 @@ class UniversalParser:
                             w[0].isupper() or w.lower() in skip_words for w in words if w
                         )
 
+                        following = lines[li + 1] if li + 1 < len(lines) else ""
                         if (
                             len(stripped) < 80
                             and stripped[-1] not in "."
+                            and not is_speaker_label(stripped, following)
                             and not sig.pattern.match(line)
                             and len(words) <= 12
                             and (is_title_case or stripped.isupper())

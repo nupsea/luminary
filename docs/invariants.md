@@ -171,12 +171,15 @@ tolerates whitespace, elision, one trailing punctuation mark, and formatting a r
 `POST /flashcards/grounding/audit` recomputes without a model. `tests/test_flashcard_grounding.py` and `tests/test_flashcard_audit.py`
 guard it.
 
-**I-35. A card's passage is what was in its prompt, and it is judged by neither the model that wrote it nor one that agrees with everything.**
-`source_chunk_ids` records the chunks that reached the prompt (ids, `NULL` and `[]` are distinct);
-`chunk_id` is only the scope's first chunk. Small judges said yes to 53 of 59 cards, so
-`FLASHCARD_FACTUALITY_MODEL` has no default and an unnamed checker leaves cards `unchecked`.
-Self-judging is refused against `effective_generation_model()`. `scripts/smoke/S237.sh`,
-`tests/test_flashcard_factuality.py` and `tests/test_flashcard_passage.py` guard it.
+**I-35. A card's passage is what was in its prompt, its section is where its quote is, and it is judged by neither the model that wrote it nor one that agrees with everything.**
+`source_chunk_ids` records the chunks that reached the prompt (ids, `NULL` and `[]` are distinct).
+`chunk_id` files the card under a section, so it is the chunk holding the quote (`home_chunk`),
+never the call's first chunk: one call reads windows from across a book, and that put 26% of one
+library's locatable cards in another chapter. `refile_cards` moves stored ones. Small judges said
+yes to 53 of 59 cards, so `FLASHCARD_FACTUALITY_MODEL` has no default and an unnamed checker leaves
+cards `unchecked`. Self-judging is refused against `effective_generation_model()`.
+`scripts/smoke/S237.sh`, `tests/test_flashcard_factuality.py`, `tests/test_flashcard_passage.py`
+and `tests/test_flashcard_section_filing.py` guard it.
 
 **I-36. Generating more reads material the deck was not written from; a regeneration replaces exactly one source, and the deck stays until its replacement exists.**
 `_passage_not_yet_used` takes the next unread run, sized like the replaced passage. Notes have no
@@ -220,6 +223,13 @@ directions.
 `review_events` are the learner record. `purge_runs_without_live_cards` deletes a session only when
 nothing it planned survives, inside the request that deletes the cards.
 `test_regenerate_session_purge.py` and `test_card_delete_session_purge.py` guard it.
+
+**I-70. A section scope that names no section of the document is an error, never the whole document.**
+Displays tidy headings (`_clean_title` drops a trailing colon) and two sections can share one, so
+a lookup by heading misses or finds the wrong section; a miss that falls back to the book still
+returns cards and looks like working generation. Scopes travel as `section_id`, and
+`_fetch_section_chunks` raises `NotFound`. `tests/test_flashcard_section_filing.py` fails CI
+otherwise; `scripts/smoke/S260.sh` checks the wire.
 
 ## Knowledge layer
 

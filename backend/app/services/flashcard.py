@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import NotFound
 from app.models import (
     ChunkModel,
     FlashcardModel,
@@ -267,6 +268,7 @@ async def _fetch_chunks(
     scope: Literal["full", "section"],
     section_heading: str | None,
     session: AsyncSession,
+    section_id: str | None = None,
 ) -> list[ChunkModel]:
     """Return ordered chunks for the document, filtered by section when scope='section'.
 
@@ -274,25 +276,34 @@ async def _fetch_chunks(
     asking who sent in typo reports or where a cited paper appeared tests nothing the
     document teaches. A section the reader chose is read as is.
     """
-    chunks = await _fetch_document_chunks(document_id, scope, section_heading, session)
-    return await _drop_reference_lists(chunks, session) if scope == "full" else chunks
+    if scope == "section":
+        return await _fetch_section_chunks(document_id, section_id, section_heading, session)
+    chunks = await _fetch_document_chunks(document_id, session)
+    return await _drop_reference_lists(chunks, session)
 
 
-async def _fetch_document_chunks(
-    document_id: str,
-    scope: Literal["full", "section"],
-    section_heading: str | None,
-    session: AsyncSession,
+async def _fetch_section_chunks(
+    document_id: str, section_id: str | None, section_heading: str | None, session: AsyncSession
 ) -> list[ChunkModel]:
+    """The chosen section's chunks; a section that cannot be found is an error (I-70)."""
     repo = DocumentRepo(session)
-    if scope == "section" and section_heading:
+    section = None
+    if section_id:
+        section = await repo.section(section_id)
+    elif section_heading:
         section = await repo.first_section_headed(document_id, section_heading)
-        if section:
-            return await repo.chunks_in_section(section.id, document_id)
+    if section is None or section.document_id != document_id:
+        raise NotFound(
+            f"No section {section_id or section_heading!r} in document {document_id}",
+            section_id=section_id,
+            section_heading=section_heading,
+        )
+    return list(await repo.chunks_in_section(section.id, document_id))
 
+
+async def _fetch_document_chunks(document_id: str, session: AsyncSession) -> list[ChunkModel]:
+    repo = DocumentRepo(session)
     all_chunks = list(await repo.chunks_for_document(document_id))
-    if scope != "full":
-        return all_chunks
 
     from app.services.chapters import document_extents, matter_section_ids  # noqa: PLC0415
 
@@ -656,6 +667,7 @@ class FlashcardService(FlashcardSearchService):
         context: str | None = None,
         model: str | None = None,
         exclude_chunk_ids: set[str] | None = None,
+        section_id: str | None = None,
     ) -> list[FlashcardModel]:
         from app.services.flashcard_generators import generate as _gen  # noqa: PLC0415
 
@@ -669,6 +681,7 @@ class FlashcardService(FlashcardSearchService):
             context,
             model,
             exclude_chunk_ids=exclude_chunk_ids,
+            section_id=section_id,
         )
 
     async def material_headroom(
@@ -789,8 +802,9 @@ class FlashcardService(FlashcardSearchService):
             }
             cards = await self.generate(
                 document_id=document_id,
-                scope="section" if section_heading else "full",
+                scope="section" if section_id or section_heading else "full",
                 section_heading=section_heading,
+                section_id=section_id,
                 count=requested,
                 session=session,
                 difficulty=difficulty,

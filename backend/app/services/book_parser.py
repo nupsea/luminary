@@ -35,7 +35,7 @@ from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
 from app.services import pdf_furniture, pdf_hyphens
-from app.services.source_text import read_source_text
+from app.services.source_text import is_speaker_label, read_source_text
 from app.services.universal_parser import _drop_bodyless, _is_nav_line, is_stanza_run
 from app.types import ParsedDocument, Section
 
@@ -709,7 +709,12 @@ class BookParser:
             for li, line in enumerate(lines[:3]):
                 stripped = line.strip()
                 if stripped:
-                    if _is_subtitle(stripped) and not _is_nav_line(stripped):
+                    following = lines[li + 1] if li + 1 < len(lines) else ""
+                    if (
+                        _is_subtitle(stripped)
+                        and not _is_nav_line(stripped)
+                        and not is_speaker_label(stripped, following)
+                    ):
                         subtitle = stripped
                         body_offset = li + 1
                     break

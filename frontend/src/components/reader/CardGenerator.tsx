@@ -98,7 +98,8 @@ export function CardGenerator({
     try {
       const cards = await apiPost<Flashcard[]>("/flashcards/generate", {
         document_id: documentId,
-        scope: sectionHeading ? "section" : "full",
+        scope: sectionId || sectionHeading ? "section" : "full",
+        section_id: sectionId ?? null,
         section_heading: sectionHeading ?? null,
         count,
         difficulty: "medium",

@@ -101,7 +101,11 @@ function SourceContextPanel({ context, onDismiss, onOpenInReader }: SourceContex
 
       {expanded && (
         <div className="flex flex-col gap-3 px-4 pb-4">
-          {context.section_preview ? (
+          {context.quote ? (
+            <blockquote className="border-l-2 border-border pl-3 text-xs text-muted-foreground italic">
+              {context.quote}
+            </blockquote>
+          ) : context.section_preview ? (
             <blockquote className="border-l-2 border-border pl-3 text-xs text-muted-foreground italic">
               {context.section_preview.length >= 400
                 ? `${context.section_preview}...`

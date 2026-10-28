@@ -84,7 +84,7 @@ def _make_bloom_l3_response(count: int = 5) -> str:
         bloom = 3 + (i % 4)  # cycles through 3, 4, 5, 6
         cards.append(
             {
-                "question": f"Why does Ulysses choose to resist the Sirens in Book XII (card {i})?",
+                "question": f"Why does Ulysses choose to resist the Sirens (card {i})?",
                 "answer": f"It was a test of Ulysses' wisdom and self-control (card {i}).",
                 # A verbatim span of the chunk text above: cards must quote their source.
                 "source_excerpt": "Ulysses ordered his men to plug their ears with wax",

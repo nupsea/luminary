@@ -84,7 +84,12 @@ from app.services.flashcard import (
     get_flashcard_service,
 )
 from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
-from app.services.flashcard_grounding import audit_factuality, audit_grounding
+from app.services.flashcard_grounding import (
+    audit_factuality,
+    audit_grounding,
+    card_home_chunk,
+    card_quote,
+)
 from app.services.flashcard_repair import repair_flashcard_tables
 from app.services.flashcards_router_service import (
     cards_to_csv as _cards_to_csv,
@@ -282,6 +287,7 @@ async def generate_flashcards(
             document_id=req.document_id,
             scope=req.scope,
             section_heading=req.section_heading,
+            section_id=req.section_id,
             count=req.count,
             difficulty=req.difficulty,
             session=session,
@@ -958,22 +964,19 @@ async def get_source_context(
 ) -> SourceContextResponse:
     """Return source passage for a flashcard (for SourceContextPanel on Again/Hard).
 
-    Join chain: FlashcardModel.chunk_id -> ChunkModel.section_id -> SectionModel -> DocumentModel.
-    Returns 404 when:
+    Join chain: the chunk holding the card's quote (`card_home_chunk`) -> SectionModel ->
+    DocumentModel. Returns 404 when:
       - flashcard not found
-      - flashcard.chunk_id is null
-      - ChunkModel.section_id is null (chunk not section-assigned)
-      - SectionModel row not found for that section_id
+      - the card names no chunk
+      - that chunk has no section, or the section row is gone
     """
     card = await repo.get_or_404(card_id)
-    if card.chunk_id is None:
+    chunk = await card_home_chunk(card, session)
+    if chunk is None:
         raise HTTPException(status_code=404, detail="Flashcard has no source chunk")
 
-    # Hop-by-hop join chain with 404 at each step: chunk → section → document.
-    # Sequential reads are intentional -- each result gates whether the next query runs.
     docs = DocumentRepo(session)
-    chunk = await docs.chunk(card.chunk_id)
-    if chunk is None or chunk.section_id is None:
+    if chunk.section_id is None:
         raise HTTPException(status_code=404, detail="No section found for this flashcard")
 
     section = await docs.section(chunk.section_id)
@@ -989,6 +992,7 @@ async def get_source_context(
     return SourceContextResponse(
         section_heading=section.heading,
         section_preview=preview,
+        quote=card_quote(card),
         document_title=document_title,
         pdf_page_number=chunk.pdf_page_number,
         section_id=chunk.section_id,

@@ -444,3 +444,32 @@ def test_a_question_must_name_its_subject(question):
 )
 def test_a_named_or_self_referring_question_stands(question):
     assert card_rejection_reason(question, "A real answer of sufficient length.") is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "How does the embodied sage sit at every act according to Chapter V?",
+        "According to Arjuna in Chapter III, what is wrong with those who live for themselves?",
+        "What glories roll from Arjuna's eyes in the vision described in Chapter XI?",
+        "Which trade-off does section 4.2 describe for leaderless replication?",
+        "Who blinds the Cyclops in Book IX?",
+    ],
+)
+def test_a_numbered_locator_is_a_source_reference(question: str) -> None:
+    """The card is shown alone: a chapter number names a label the learner never sees."""
+    reason = card_rejection_reason(question, "An answer long enough to pass the other rules.")
+    assert reason is not None
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What does Section 230 of the Communications Decency Act protect?",
+        "Which part is replaced first when a disk fails in a RAID array?",
+        "Why does the act of naming a variable matter for readability?",
+        "In which book does Penelope test Odysseus with the bed?",
+    ],
+)
+def test_a_subject_named_by_number_or_a_plain_noun_stays(question: str) -> None:
+    assert card_rejection_reason(question, "An answer long enough to pass the other rules.") is None
