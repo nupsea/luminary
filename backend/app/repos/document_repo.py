@@ -624,6 +624,24 @@ class DocumentRepo:
         )
         return [tuple(row) for row in result.all()]
 
+    async def chunks_after(
+        self, after: str, limit: int
+    ) -> list[tuple[str, str, str, str | None, int]]:
+        """(id, document id, text, entities_text, index) of the next *limit* chunks by id."""
+        result = await self.session.execute(
+            select(
+                ChunkModel.id,
+                ChunkModel.document_id,
+                ChunkModel.text,
+                ChunkModel.entities_text,
+                ChunkModel.chunk_index,
+            )
+            .where(ChunkModel.id > after)
+            .order_by(ChunkModel.id)
+            .limit(limit)
+        )
+        return [tuple(row) for row in result.all()]
+
     async def all_ids(self) -> list[str]:
         result = await self.session.execute(select(DocumentModel.id))
         return [row[0] for row in result.all()]

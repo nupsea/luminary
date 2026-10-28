@@ -70,9 +70,9 @@ def _enable_sqlite_pragmas(dbapi_connection, connection_record):  # noqa: ARG001
 # milliseconds (measured: 0.960ms per commit at synchronous=FULL, 400 commits).
 _WRITE_HOLD_WARN_S = 2.0
 
-# id(connection) -> (monotonic start, first write statement). Entries are removed
-# on commit/rollback and reset on begin, so the map is bounded by the pool.
-_write_holds: dict[int, tuple[float, str]] = {}
+# id(connection) -> (monotonic start, first write statement, database file). Entries are
+# removed on commit/rollback and reset on begin, so the map is bounded by the pools.
+_write_holds: dict[int, tuple[float, str, str | None]] = {}
 
 
 def _note_write(conn, cursor, statement, parameters, context, executemany):  # noqa: ARG001, PLR0913
@@ -85,7 +85,10 @@ def _note_write(conn, cursor, statement, parameters, context, executemany):  # n
     """
     head = statement.lstrip()[:7].upper()
     if head.startswith(("INSERT", "UPDATE", "DELETE", "REPLACE")):
-        _write_holds.setdefault(id(conn), (time.monotonic(), " ".join(statement.split())[:90]))
+        _write_holds.setdefault(
+            id(conn),
+            (time.monotonic(), " ".join(statement.split())[:90], conn.engine.url.database),
+        )
 
 
 def _note_start(conn, cursor, statement, parameters, context, executemany):  # noqa: ARG001, PLR0913
@@ -108,7 +111,7 @@ def _report_write_hold(conn, outcome: str) -> None:
     record = _write_holds.pop(id(conn), None)
     if record is None:
         return
-    started, first_write = record
+    started, first_write, _ = record
     held = time.monotonic() - started
     if held >= _WRITE_HOLD_WARN_S:
         logger.warning(
@@ -141,11 +144,13 @@ def _report_busy(context) -> None:
     if not name.startswith("SQLITE_BUSY"):
         return
     victim = id(context.connection) if context.connection is not None else None
+    # Only a writer on the same file holds this lock: each library is its own database.
+    database = context.connection.engine.url.database if context.connection is not None else None
     now = time.monotonic()
     holders = [
         f"{now - started:.2f}s {first_write}"
-        for conn_id, (started, first_write) in _write_holds.items()
-        if conn_id != victim
+        for conn_id, (started, first_write, held_on) in _write_holds.items()
+        if conn_id != victim and held_on == database
     ]
     started = getattr(context.execution_context, "_busy_clock", None)
     in_transaction, earlier = _history(context.connection)

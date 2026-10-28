@@ -834,6 +834,11 @@ luminary:
 concepts:
 	cd backend && DATA_DIR="$(CURDIR)/.luminary" uv run python -m app.scripts.regenerate_concepts
 
+# Rebuild the library's vectors from its database (#390). Run with the server STOPPED; a killed
+# run resumes. The replaced vectors stay in .luminary/vectors.previous until removed.
+reembed:
+	cd backend && DATA_DIR="$(CURDIR)/.luminary" uv run python -m app.scripts.reembed
+
 # Inspect-only: run the concept pipeline nodes (no persist) and dump the diagnostics
 # report (entities kept/dropped by type, clusters, proposed themes). Server STOPPED.
 concepts-dryrun:
