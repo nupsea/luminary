@@ -60,8 +60,13 @@ rather than restating it: two wordings about what leaves the machine are two thi
   litellm's bundled cost map (I-18), so a model newer than the pinned litellm shows no price rather
   than a typed one.
 - Where a key lands is read from the machine: `keyring_available` says whether it goes to the OS
-  keychain or falls back to a plaintext row in the library database (Docker, headless Linux). The
-  key panel's sentence follows it, and README states the split per install path.
+  keychain or falls back to a plaintext row in the default library's database (Docker, headless
+  Linux). The key panel's sentence follows it, and README states the split per install path.
+- **The engine choice belongs to a library; a key belongs to the machine's user** (#389). The mode,
+  provider, model picks and background pacing are read from the request's library. A key saved
+  from any library goes to the keychain and the default library's rows, never into another
+  library's database, which a snapshot or a second user could carry away.
+  `tests/test_library_preferences.py` holds both.
 
 ## Latency: what the cloud buys
 

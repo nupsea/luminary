@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config import Settings, get_settings
-from app.database import get_db, get_engine, get_session_factory, optimize_database
+from app.database import get_db, get_engine, optimize_database
 from app.db_init import init_database
 from app.exceptions import LuminaryError
 from app.parent_watch import watch_parent
@@ -63,7 +63,6 @@ from app.routers.tags import router as tags_router
 from app.runtime.library_work import serve_library, serving, stop_serving
 from app.runtime.request_auth import DEV_APP_ORIGINS, RequestAuthMiddleware
 from app.services.background import all_pending, clear_registries, task_registry
-from app.services.background_prefs import load_background_prefs
 from app.services.chapter_backfill import ChapterBackfill
 from app.services.components import (
     install_ollama_model,
@@ -75,7 +74,6 @@ from app.services.graph_import import run_graph_import
 from app.services.ingestion_jobs import cancel_all_ingestions
 from app.services.python_extras import activate_extras
 from app.services.settings_service import _cache as _llm_cache
-from app.services.settings_service import load_llm_settings
 from app.services.startup_status import get_startup_status
 from app.services.warmup import run_warmup
 from app.storage import library_root, machine_root
@@ -215,19 +213,10 @@ async def lifespan(app: FastAPI):
 
     _background_tasks.add(asyncio.create_task(reap_idle_models()))
 
-    # Before yielding, so jobs enqueued during the first request are dispatched.
+    # Before yielding, so jobs enqueued during the first request are dispatched. It loads the
+    # library's settings too, so cloud mode is active from the first request.
     await serve_library(DEFAULT_LIBRARY)
     _chapter_backfill.start()
-
-    # Load persisted LLM settings into cache so cloud mode is active from first request,
-    # not only after the frontend hits GET /settings/llm.
-    try:
-        async with get_session_factory()() as _settings_db:
-            await load_llm_settings(_settings_db)
-            await load_background_prefs(_settings_db)
-        logger.info("LLM settings loaded from DB")
-    except Exception:
-        logger.warning("Failed to load LLM settings at startup; using defaults", exc_info=True)
 
     # Say it out loud at boot, not only at GET /settings/models. An oversized
     # configuration's first symptom was a crash during ingestion, which is the
