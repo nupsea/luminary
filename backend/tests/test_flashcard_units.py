@@ -305,7 +305,7 @@ async def test_unit_cards_quote_the_supporting_sentence_not_the_models_number():
             }
         ]
     )
-    cards = await _unit_cards(llm, text, 2, set(), None, "doc")
+    cards = await _unit_cards(llm, text, 2, set(), None, "doc", text)
     assert cards[0]["source_excerpt"].startswith("The swineherd filled")
 
 
@@ -326,7 +326,7 @@ async def test_unit_cards_drop_a_pasted_sentence_and_an_unsupported_answer():
             },
         ]
     )
-    assert await _unit_cards(llm, text, 1, set(), None, "doc") == []
+    assert await _unit_cards(llm, text, 1, set(), None, "doc", text) == []
     after = llm_output_stats.snapshot()["counts"]
     moved = {k: after[k] - before.get(k, 0) for k in after}
     assert moved["card_reject_not_a_question"] == 1
@@ -349,7 +349,7 @@ async def test_unit_cards_drop_a_question_naming_someone_the_passage_does_not():
             },
         ]
     )
-    cards = await _unit_cards(llm, text, 1, set(), None, "doc")
+    cards = await _unit_cards(llm, text, 1, set(), None, "doc", text)
     assert [c["question"] for c in cards] == ["Who told the suitors she was undoing her work?"]
 
 
@@ -363,7 +363,7 @@ async def test_a_speech_is_listed_with_its_speaker_and_quoted_verbatim():
             }
         ]
     )
-    cards = await _unit_cards(llm, PLAY, 1, set(), None, "doc")
+    cards = await _unit_cards(llm, PLAY, 1, set(), None, "doc", PLAY)
     assert "1. Laertes says: For nature crescent" in llm.generate.call_args.args[0]
     assert cards[0]["source_excerpt"].startswith("For nature crescent")
 
@@ -375,8 +375,8 @@ async def test_a_later_batch_asks_about_sentences_not_yet_used():
     )
     asked: set[str] = set()
     llm = _llm([])
-    await _unit_cards(llm, text, 1, asked, None, "doc")
-    await _unit_cards(llm, text, 1, asked, None, "doc")
+    await _unit_cards(llm, text, 1, asked, None, "doc", text)
+    await _unit_cards(llm, text, 1, asked, None, "doc", text)
     listed = [
         c.args[0].split("Sentences:\n")[1].split("\n")[0] for c in llm.generate.call_args_list
     ]

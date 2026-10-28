@@ -635,3 +635,40 @@ def test_a_numbered_poem_inside_a_story_is_not_its_chapters(tmp_path, indent):
 
     assert {s.heading for s in sections} == {""}
     assert "In the greenest of our valleys" in "\n".join(s.text for s in sections)
+
+
+def test_speaker_label_is_not_a_subtitle(tmp_path):
+    """A dialogue's first speaker name runs straight into the speech; a subtitle is set apart.
+
+    The Gita was headed "CHAPTER V — Arjuna." for a chapter Krishna speaks, and cards
+    credited Krishna's words to Arjuna.
+    """
+    speech = "Yet, Krishna! at the one time thou dost laud\nSurcease of works, and service too."
+    text = "\n\n".join(
+        f"CHAPTER {n}\n\n  {speaker}\n  {speech}"
+        for n, speaker in (("I", "Dhritirashtra:"), ("II", "Arjuna."), ("III", "Krishna.[FN#l6]"))
+    )
+    f = tmp_path / "dialogue.txt"
+    f.write_text(text)
+
+    result = bp.parse(f, "txt")
+    assert result is not None
+    assert [s.heading for s in result.sections] == ["CHAPTER I", "CHAPTER II", "CHAPTER III"]
+    assert result.sections[1].text.startswith("Arjuna.")
+
+
+def test_full_stop_subtitle_set_apart_survives(tmp_path):
+    text = "\n\n".join(
+        f"CHAPTER {n}\n\n{title}\n\nCall me Ishmael, and some years ago I went to sea."
+        for n, title in (("1", "Loomings."), ("2", "The Carpet-Bag."), ("3", "The Spouter-Inn."))
+    )
+    f = tmp_path / "subtitled.txt"
+    f.write_text(text)
+
+    result = bp.parse(f, "txt")
+    assert result is not None
+    assert [s.heading for s in result.sections] == [
+        "CHAPTER 1 — Loomings.",
+        "CHAPTER 2 — The Carpet-Bag.",
+        "CHAPTER 3 — The Spouter-Inn.",
+    ]

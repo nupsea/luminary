@@ -156,21 +156,12 @@ class DeckHealthService:
         total_created = 0
 
         for section_id in section_ids:
-            # Fetch section heading
-            section = await DocumentRepo(db).section(section_id)
-            heading = section.heading if section else None
-            if heading is None:
-                logger.warning(
-                    "generate_for_uncovered: section %s not found, skipping",
-                    section_id,
-                )
-                continue
-
             try:
                 cards = await svc.generate(
                     document_id=document_id,
                     scope="section",
-                    section_heading=heading,
+                    section_heading=None,
+                    section_id=section_id,
                     count=3,
                     session=db,
                 )

@@ -2,6 +2,7 @@ import logging
 import re
 import threading
 from collections.abc import Sequence
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,8 +25,8 @@ EMBEDDING_DIM = 384
 
 TABLE_NAME = "chunk_vectors_v3"
 
-# A table created before 0.17.0 also carries the retired type column, unread; rows written
-# without it store a null, so it waits for the re-embed rail to rewrite the table (#223).
+# A table created before 0.17.0 also carries the retired type column, unread, until a re-embed
+# (`services/reembed.py`) writes the table without it (#223).
 SCHEMA = pa.schema(
     [
         pa.field("chunk_id", pa.string()),
@@ -90,6 +91,15 @@ CONCEPT_SCHEMA = pa.schema(
 )
 
 
+# Each table's key column and schema: what a re-embed rebuilds (#390).
+TABLES: dict[str, tuple[str, pa.Schema]] = {
+    TABLE_NAME: ("chunk_id", SCHEMA),
+    NOTE_TABLE_NAME: ("note_id", NOTE_SCHEMA),
+    IMAGE_TABLE_NAME: ("image_id", IMAGE_SCHEMA),
+    CONCEPT_TABLE_NAME: ("concept_id", CONCEPT_SCHEMA),
+}
+
+
 def safe_id(value: str) -> str | None:
     """*value* if it is an id this process generates, else None."""
     return value if value and _SAFE_ID_RE.fullmatch(value) else None
@@ -123,9 +133,10 @@ def eq_predicate(column: str, value: str, *, context: str) -> str | None:
 
 
 class LanceDBService:
-    def __init__(self, library: str | None = None) -> None:
+    def __init__(self, library: str | None = None, *, directory: Path | None = None) -> None:
         # Fixed at creation: a lazy connect must not follow whichever library calls first.
         self._library = library or current_library()
+        self._directory = directory
         self._db: Any = None
         self._create_lock = threading.Lock()
 
@@ -134,8 +145,7 @@ class LanceDBService:
             return
         import lancedb
 
-        settings = get_settings()
-        vectors_dir = library_root(settings, self._library) / "vectors"
+        vectors_dir = self._directory or library_root(get_settings(), self._library) / "vectors"
         vectors_dir.mkdir(parents=True, exist_ok=True)
         self._db = lancedb.connect(str(vectors_dir))
         logger.info("LanceDB connected at %s", vectors_dir)
@@ -498,6 +508,40 @@ class LanceDBService:
             logger.warning("search_concepts failed: %s", exc)
             return []
 
+    # --- Whole-table access, for a re-embed (#390) ---
+
+    def keys(self, name: str) -> set[str]:
+        """Every key in table *name*."""
+        key, schema = TABLES[name]
+        table = self._open_or_create(name, schema)
+        n = table.count_rows()
+        if not n:
+            return set()
+        return {r[key] for r in table.search().select([key]).limit(n).to_list()}
+
+    def upsert_rows(self, name: str, rows: list[dict[str, Any]]) -> None:
+        """Upsert *rows* into table *name* on its key, in one commit."""
+        key, schema = TABLES[name]
+        table = self._open_or_create(name, schema)
+        table.merge_insert(key).when_matched_update_all().when_not_matched_insert_all().execute(
+            rows
+        )
+
+    def delete_keys(self, name: str, keys: Sequence[str]) -> None:
+        key, schema = TABLES[name]
+        table = self._open_or_create(name, schema)
+        ids = list(keys)
+        for i in range(0, len(ids), 800):
+            pred = id_predicate(key, ids[i : i + 800], context="delete_keys")
+            if pred is not None:
+                table.delete(pred)
+
+    def compact(self) -> None:
+        """Fold every table's fragments into few and drop its older versions."""
+        self._connect()
+        for name in self._db.list_tables().tables:
+            self._db.open_table(name).optimize(cleanup_older_than=timedelta(0))
+
     def table_versions(self) -> dict[str, int]:
         """Each table's current version: what a snapshot of the files must be read at."""
         self._connect()
@@ -538,3 +582,8 @@ def get_lancedb_service() -> LanceDBService:
     if _lancedb_service is None:
         _lancedb_service = LanceDBService(DEFAULT_LIBRARY)
     return _lancedb_service
+
+
+def lancedb_service_beside(folder: str) -> LanceDBService:
+    """A store over *folder* in the current library's root, beside its live `vectors/`."""
+    return LanceDBService(current_library(), directory=library_root() / folder)

@@ -94,6 +94,15 @@ class ImageRepo:
         )
         return result.scalar_one_or_none() is not None
 
+    async def all_descriptions(self) -> list[tuple[str, str, str]]:
+        """(id, document id, description) of every described image, by id."""
+        result = await self.session.execute(
+            select(ImageModel.id, ImageModel.document_id, ImageModel.description)
+            .where(ImageModel.description.is_not(None))
+            .order_by(ImageModel.id)
+        )
+        return [tuple(row) for row in result.all()]
+
     async def described_by_ids(self, image_ids: Sequence[str]) -> list[ImageModel]:
         """The given images that carry a description and are not decorative."""
         result = await self.session.execute(

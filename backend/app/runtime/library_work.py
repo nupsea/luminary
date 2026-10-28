@@ -18,6 +18,7 @@ from app.db_init import open_library
 from app.library import use_library
 from app.repos.document_repo import DocumentRepo
 from app.services.background import task_registry
+from app.services.background_prefs import load_background_prefs
 from app.services.chapter_cards import chapter_cards_handler
 from app.services.concept_linker import concept_link_handler
 from app.services.diagram_extractor import diagram_extract_handler
@@ -26,6 +27,7 @@ from app.services.image_enricher import image_analyze_handler
 from app.services.image_extractor import image_extract_handler
 from app.services.llm_admission import unattended
 from app.services.reference_enricher import web_refs_handler
+from app.services.settings_service import load_llm_settings
 from app.storage import library_root
 from app.types import DEFAULT_LIBRARY
 
@@ -84,6 +86,7 @@ async def stop_serving() -> None:
 
 
 async def _start() -> None:
+    await _load_preferences()
     worker = get_enrichment_worker()
     for job_type, handler in JOB_HANDLERS.items():
         worker.register(job_type, handler)
@@ -91,6 +94,16 @@ async def _start() -> None:
     await _fail_interrupted_ingestions()
     if "pytest" not in sys.modules:
         _start_backfills()
+
+
+async def _load_preferences() -> None:
+    # Before the queue starts: background work reads the library's engine mode and pacing.
+    try:
+        async with get_session_factory()() as session:
+            await load_llm_settings(session)
+            await load_background_prefs(session)
+    except Exception:
+        logger.warning("could not load the library's settings; using defaults", exc_info=True)
 
 
 async def _fail_interrupted_ingestions() -> None:
@@ -106,6 +119,19 @@ async def _fail_interrupted_ingestions() -> None:
             logger.warning("marked %d interrupted ingestion(s) as failed at startup", failed)
     except Exception:
         logger.warning("could not reconcile interrupted ingestions", exc_info=True)
+
+
+async def _refile_flashcards() -> None:
+    # Cards written before I-35 sit under their generation call's first chapter.
+    try:
+        await asyncio.sleep(15)
+        from app.services.flashcard_repair import refile_cards
+
+        async with get_session_factory()() as session:
+            await refile_cards(session)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("Flashcard refile failed (non-fatal): %s", exc)
 
 
 def _start_backfills() -> None:
@@ -152,6 +178,7 @@ def _start_backfills() -> None:
         except Exception as exc:
             logger.warning("Section summary backfill failed (non-fatal): %s", exc)
 
+    _background_tasks.add(asyncio.create_task(_refile_flashcards()))
     with unattended():
         _background_tasks.add(asyncio.create_task(backfill_descriptions()))
     _background_tasks.add(asyncio.create_task(backfill_note_vectors()))

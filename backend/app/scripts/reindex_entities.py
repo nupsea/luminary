@@ -64,7 +64,7 @@ async def _list_document_ids() -> list[str]:
 
 async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str, int]:
     """Reindex one document's chunk entity tails. Returns metrics dict."""
-    from app.services.embedder import get_embedding_service
+    from app.services.embedder import chunk_embedding_text, get_embedding_service
     from app.services.entity_disambiguator import canonicalize_batch
     from app.services.graph import get_graph_service
     from app.services.ner import get_entity_extractor
@@ -163,8 +163,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
         # Re-embed using concatenated text; upsert to LanceDB (per I-2 in thread).
         embedder = get_embedding_service()
         texts_for_embedding = [
-            c["text"] + ("\n" + c["entities_text"] if c.get("entities_text") else "")
-            for c in chunk_dicts
+            chunk_embedding_text(c["text"], c.get("entities_text")) for c in chunk_dicts
         ]
         embeddings = await loop.run_in_executor(None, embedder.encode, texts_for_embedding)
         lancedb_rows = [

@@ -29,6 +29,9 @@ class FlashcardGenerateRequest(BaseModel):
     document_id: str
     scope: Literal["full", "section"] = "full"
     section_heading: str | None = None
+    # Names the section when scope="section"; preferred over the heading, which a
+    # display may have tidied and which two sections of one document can share.
+    section_id: str | None = None
     count: int = 10
     difficulty: Literal["easy", "medium", "hard"] = "medium"
     context: str | None = None  # selected text from reader; used directly when provided
@@ -263,6 +266,7 @@ class RepairReport(BaseModel):
     index_rows_removed: int
     cards_indexed: int
     orphan_rows_removed: int
+    cards_refiled: int
 
 
 class CoverageReportResponse(BaseModel):
@@ -318,6 +322,9 @@ class SourceContextResponse(BaseModel):
 
     section_heading: str
     section_preview: str
+    # The card's own quote. The panel shows it ahead of `section_preview`, which is the
+    # opening of the section and need not contain anything the card asked.
+    quote: str | None = None
     document_title: str
     pdf_page_number: int | None
     section_id: str

@@ -44,11 +44,13 @@ def _record(corrections: list[dict] | None, heard: str, term: str, count: int) -
 
 
 async def _reembed(chunks: list) -> None:
-    from app.services.embedder import get_embedding_service  # noqa: PLC0415
+    from app.services.embedder import (  # noqa: PLC0415
+        chunk_embedding_text,
+        get_embedding_service,
+    )
     from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
 
-    # Embedded as embed_node does: display text plus the entity tail.
-    texts = [c.text + ("\n" + c.entities_text if c.entities_text else "") for c in chunks]
+    texts = [chunk_embedding_text(c.text, c.entities_text) for c in chunks]
     vectors = await asyncio.to_thread(get_embedding_service().encode, texts)
     updates = {c.id: (c.text, vectors[i]) for i, c in enumerate(chunks)}
     await asyncio.to_thread(get_lancedb_service().replace_chunk_text, updates)

@@ -34,7 +34,7 @@ async def embed_node(state: IngestionState) -> IngestionState:
                 await _update_stage(doc_id, "embedding")
                 return {**state, "status": "indexing"}
 
-            from app.services.embedder import get_embedding_service
+            from app.services.embedder import chunk_embedding_text, get_embedding_service
             from app.services.vector_store import get_lancedb_service
 
             embedder = get_embedding_service()
@@ -64,12 +64,9 @@ async def embed_node(state: IngestionState) -> IngestionState:
             async def _write_every_batch() -> None:
                 for start_idx in range(0, len(chunks), batch_size):
                     batch_chunks = chunks[start_idx : start_idx + batch_size]
-                    # concatenate per-chunk entity tail (if any) into embedding input
-                    # so vector search can match canonical entity names that the surface
-                    # form may have spelled differently. Display text remains in
-                    # chunk["text"].
+                    # Display text remains in chunk["text"].
                     texts = [
-                        c["text"] + ("\n" + c["entities_text"] if c.get("entities_text") else "")
+                        chunk_embedding_text(c["text"], c.get("entities_text"))
                         for c in batch_chunks
                     ]
                     # CPU-bound encoding in a thread pool so the event loop stays free

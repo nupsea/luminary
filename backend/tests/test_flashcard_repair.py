@@ -136,6 +136,7 @@ async def test_repair_is_idempotent(test_db):
         "index_rows_removed": 0,
         "cards_indexed": 0,
         "orphan_rows_removed": 0,
+        "cards_refiled": 0,
     }
 
 

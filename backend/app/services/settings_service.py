@@ -6,15 +6,19 @@ import logging
 import socket
 from collections.abc import Iterator
 from contextvars import ContextVar
+from pathlib import Path
 
 import keyring
 import keyring.backends.fail
 import keyring.errors
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import get_session_factory
 from app.exceptions import CloudKeyMissing
+from app.library import DEFAULT_LIBRARY, current_library, use_library
 from app.repos.settings_repo import SettingsRepo
 from app.services.cloud_models import PROVIDER_DEFAULT_MODEL, check_key
+from app.storage import library_root
 
 logger = logging.getLogger(__name__)
 
@@ -58,16 +62,29 @@ _DEFAULTS: dict[str, str] = {
     "google_api_key": "",
 }
 
-# Module-level mutable cache — populated on startup and updated on PATCH.
-# API key fields store the raw (decrypted) value; non-key fields store as-is.
+# The default library's preferences, and the API keys of every library -- populated on startup
+# and updated on PATCH. Key fields hold the raw (decrypted) value.
 _cache: dict[str, str] = dict(_DEFAULTS)
 
-# Whether a `llm_mode` row exists at all, which is a different question from what
-# the mode is. Every library predating the engine question runs `private` because
-# that is the default in `_DEFAULTS`, not because anyone declined the cloud, and
-# the two are indistinguishable from `_cache` alone -- the load path substitutes
-# the default silently. Only the row answers it, so its presence is carried here.
-_mode_row_present: bool = False
+# Any other library's preferences, keyed by root as the database's handles are (#389). Keys are
+# the machine user's, not a library's: they stay in the keychain and the default library's rows.
+_library_caches: dict[Path, dict[str, str]] = {}
+
+# Roots whose library holds a `llm_mode` row, which is a different question from what the mode
+# is. Every library predating the engine question runs `private` because that is the default in
+# `_DEFAULTS`, not because anyone declined the cloud, and only the row tells the two apart.
+_mode_chosen: set[Path] = set()
+
+
+def _prefs() -> dict[str, str]:
+    """The current library's preferences; read API keys from `_cache` in every library."""
+    library = current_library()
+    if library == DEFAULT_LIBRARY:
+        return _cache
+    root = library_root(library=library)
+    if root not in _library_caches:
+        _library_caches[root] = {k: v for k, v in _DEFAULTS.items() if k not in API_KEY_FIELDS}
+    return _library_caches[root]
 
 
 def encrypt_setting(value: str) -> str:
@@ -165,25 +182,32 @@ def _keyring_delete(field: str) -> None:
 
 
 async def load_llm_settings(db: AsyncSession) -> None:
-    """Load LLM settings from DB into module-level cache.
+    """Load the current library's LLM settings from *db*, its database, into the cache.
 
-    For API key fields: resolves the keychain sentinel to the raw value, and
-    auto-migrates legacy XOR-encrypted values to the OS keychain on first read.
-    When no system keyring is available (e.g. Docker), XOR-encrypted DB values
+    For API key fields, read from the default library alone: resolves the keychain sentinel
+    to the raw value, and auto-migrates legacy XOR-encrypted values to the OS keychain on
+    first read. When no system keyring is available (e.g. Docker), XOR-encrypted DB values
     are used directly without migration.
     """
-    global _mode_row_present
+    prefs = _prefs()
+    root = library_root()
+    in_default = current_library() == DEFAULT_LIBRARY
     for key in _LLM_SETTING_KEYS:
+        if key in API_KEY_FIELDS and not in_default:
+            continue
         row = await SettingsRepo(db).find(key)
         if key == "llm_mode":
-            _mode_row_present = row is not None
+            if row is None:
+                _mode_chosen.discard(root)
+            else:
+                _mode_chosen.add(root)
         if row is None:
             continue
 
         raw_value = str(row.value)
 
         if key not in API_KEY_FIELDS:
-            _cache[key] = raw_value
+            prefs[key] = raw_value
             continue
 
         # API key field: resolve by storage format
@@ -221,18 +245,19 @@ async def load_llm_settings(db: AsyncSession) -> None:
 async def get_llm_settings(db: AsyncSession) -> dict:
     """Return current LLM settings (with has_*_key booleans, no raw key values)."""
     await load_llm_settings(db)
+    prefs = _prefs()
     return {
-        "mode": _cache["llm_mode"],
-        "provider": _cache["cloud_provider"],
-        "model": _cache["cloud_model"],
+        "mode": prefs["llm_mode"],
+        "provider": prefs["cloud_provider"],
+        "model": prefs["cloud_model"],
         "local_chat_model": get_local_chat_model(),
         "vision_model": get_vision_model(),
         "has_openai_key": bool(_cache["openai_api_key"]),
         "has_anthropic_key": bool(_cache["anthropic_api_key"]),
         "has_google_key": bool(_cache["google_api_key"]),
-        "mode_chosen": _mode_row_present,
+        "mode_chosen": library_root() in _mode_chosen,
         "keyring_available": keyring_available(),
-        "offer_dismissed": bool(_cache["llm_offer_dismissed"]),
+        "offer_dismissed": bool(prefs["llm_offer_dismissed"]),
     }
 
 
@@ -248,7 +273,7 @@ def configured_chat_override() -> str | None:
     whatever the machine can hold. `get_local_chat_model()` cannot answer which
     of the two happened -- it has already substituted the default.
     """
-    chosen = _cache["local_chat_model"]
+    chosen = _prefs()["local_chat_model"]
     return _with_ollama_prefix(chosen) if chosen else None
 
 
@@ -266,7 +291,7 @@ def configured_vision_override() -> str | None:
     not fit the host, while the *default* is free to resolve to whatever the
     machine can actually hold.
     """
-    chosen = _cache["vision_model"]
+    chosen = _prefs()["vision_model"]
     return _with_ollama_prefix(chosen) if chosen else None
 
 
@@ -309,7 +334,7 @@ async def update_llm_settings(
     Passing an empty string for a key field means 'clear this key'.
 
     API keys are stored in the OS keychain; the sentinel '__keychain__' is
-    written to SQLite so no raw key ever appears in the database.
+    written to the default library's SQLite so no raw key ever appears in a database.
     """
     updates_db: dict[str, str] = {}
     updates_cache: dict[str, str] = {}
@@ -327,7 +352,7 @@ async def update_llm_settings(
         # model -- produced `anthropic/gpt-4o-mini` and a first answer that could
         # not resolve. Only a provider *change* resets it, so a model deliberately
         # picked for the provider being kept survives.
-        if model is None and provider != _cache.get("cloud_provider"):
+        if model is None and provider != _prefs().get("cloud_provider"):
             fallback = PROVIDER_DEFAULT_MODEL.get(provider)
             if fallback:
                 updates_db["cloud_model"] = fallback
@@ -347,39 +372,58 @@ async def update_llm_settings(
         updates_db["llm_offer_dismissed"] = "1" if offer_dismissed else ""
         updates_cache["llm_offer_dismissed"] = "1" if offer_dismissed else ""
 
-    key_args = {
-        "openai_api_key": openai_api_key,
-        "anthropic_api_key": anthropic_api_key,
-        "google_api_key": google_api_key,
-    }
-    for field, raw_value in key_args.items():
+    repo = SettingsRepo(db)
+    for key, value in updates_db.items():
+        await repo.put(key, value)
+    await db.commit()
+    await _store_keys(
+        db,
+        {
+            "openai_api_key": openai_api_key,
+            "anthropic_api_key": anthropic_api_key,
+            "google_api_key": google_api_key,
+        },
+    )
+    if "llm_mode" in updates_db:
+        _mode_chosen.add(library_root())
+    _prefs().update(updates_cache)
+    logger.debug("LLM settings updated: %s", list(updates_db.keys()))
+
+
+async def _store_keys(db: AsyncSession, keys: dict[str, str | None]) -> None:
+    """Keep each key given, or clear it when empty, in the keychain and the default library."""
+    rows: dict[str, str] = {}
+    for field, raw_value in keys.items():
         if raw_value is None:
             continue
         if raw_value:
             if _keyring_set(field, raw_value):
                 # OS keyring available — store sentinel in DB
-                updates_db[field] = _KEYCHAIN_SENTINEL
+                rows[field] = _KEYCHAIN_SENTINEL
             else:
                 # No system keyring (e.g. Docker) — store with plaintext prefix.
                 # XOR is avoided because Docker container hostnames change on restart,
                 # making the derived XOR key unstable across runs.
-                updates_db[field] = _PLAINTEXT_PREFIX + raw_value
-            updates_cache[field] = raw_value
+                rows[field] = _PLAINTEXT_PREFIX + raw_value
         else:
-            # Clear key from keychain and DB
             _keyring_delete(field)
-            updates_db[field] = ""
-            updates_cache[field] = ""
+            rows[field] = ""
+    if not rows:
+        return
+    if current_library() == DEFAULT_LIBRARY:
+        await _put_rows(db, rows)
+    else:
+        with use_library(DEFAULT_LIBRARY):
+            async with get_session_factory()() as session:
+                await _put_rows(session, rows)
+    _cache.update({field: keys[field] or "" for field in rows})
 
+
+async def _put_rows(db: AsyncSession, rows: dict[str, str]) -> None:
     repo = SettingsRepo(db)
-    for key, value in updates_db.items():
+    for key, value in rows.items():
         await repo.put(key, value)
     await db.commit()
-    if "llm_mode" in updates_db:
-        global _mode_row_present
-        _mode_row_present = True
-    _cache.update(updates_cache)
-    logger.debug("LLM settings updated: %s", list(updates_db.keys()))
 
 
 _RERANK_KEY = "rerank_enabled"
@@ -405,7 +449,7 @@ def get_llm_error_message(exc: BaseException | None = None) -> str:
         from app.services.llm_errors import describe  # noqa: PLC0415
 
         return describe(exc)[1]
-    mode = _cache.get("llm_mode", "private")
+    mode = _prefs().get("llm_mode", "private")
     if mode == "private":
         from app.host_support import local_inference_support  # noqa: PLC0415
 
@@ -446,8 +490,8 @@ def cloud_provider_prefixes() -> frozenset[str]:
     return frozenset(_PROVIDER_KEY_FIELDS)
 
 
-# An unsaved mode/provider/model, layered over `_cache` for the current task only.
-# A ContextVar rather than a write to `_cache`: a preview must never reach a real call.
+# An unsaved mode/provider/model, layered over the preferences for the current task only.
+# A ContextVar rather than a write to the cache: a preview must never reach a real call.
 _routing_preview: ContextVar[dict[str, str] | None] = ContextVar("routing_preview", default=None)
 
 
@@ -455,7 +499,7 @@ def _routing_value(key: str) -> str:
     preview = _routing_preview.get()
     if preview and key in preview:
         return preview[key]
-    return _cache[key]
+    return _prefs()[key]
 
 
 @contextlib.contextmanager
@@ -469,7 +513,7 @@ def previewing_routing(mode: str | None, provider: str | None, model: str | None
         preview["llm_mode"] = mode
     if provider:
         preview["cloud_provider"] = provider
-        if not model and provider != _cache["cloud_provider"]:
+        if not model and provider != _prefs()["cloud_provider"]:
             model = PROVIDER_DEFAULT_MODEL.get(provider)
     if model:
         preview["cloud_model"] = model

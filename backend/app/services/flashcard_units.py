@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Sequence
 
 # A footnote number after a word's full stop ("the model.2 For") still ends the sentence; a
 # digit before the dot ("GPT-3.5 Turbo") does not.
@@ -47,9 +48,10 @@ _HEADING_WORD = re.compile(
     r"\b(?:ACT|SCENE|CHAPTER|BOOK|PART|SECTION|CANTO|VOLUME|NOTES?|CONTENTS|PREFACE|FOOTNOTES"
     r"|INTRODUCTION|EPILOGUE|PROLOGUE|APPENDIX|FINIS|END|[IVXLC]+)\b"
 )
-# A chunk's section label ("[CHAPTER II — Sanjaya.]") read inside a sentence was taken for its
-# speaker, so the model never sees it there; the stored quote keeps it.
-_LEADING_LABEL = re.compile(r"^\s*\[[^\]]*\]\s*")
+# A chunk's section labels ("[CHAPTER II]", "[the_gita > CHAPTER II]") read inside a sentence
+# were taken for its speaker. They are ours, not the source's, so neither the model nor the
+# stored quote carries them.
+_LEADING_LABEL = re.compile(r"^(?:\s*\[[^\]]*\])+\s*")
 
 _WORD = re.compile(r"[a-z0-9]+")
 # The list the coverage floor below was measured with; a different list moves the floor.
@@ -218,9 +220,20 @@ def split_units(text: str) -> list[str]:
     return [unit for unit, _speaker in split_speeches(text)]
 
 
+def bare_passage(texts: Sequence[str]) -> str:
+    """Chunk texts without the section label a chunk may open with. A check on what the
+    model wrote reads this, never the prompt: the label is ours, not evidence."""
+    return "\n\n".join(_LEADING_LABEL.sub("", t, count=1) for t in texts)
+
+
+def unit_quote(unit: str) -> str:
+    """A unit without the section labels in front of it: still verbatim in the prompt."""
+    return _LEADING_LABEL.sub("", unit, count=1) or unit
+
+
 def listed_sentence(unit: str, speaker: str | None) -> str:
     """How a chosen unit is shown to the model: section label cut, speaker named."""
-    body = _LEADING_LABEL.sub("", unit, count=1) or unit
+    body = unit_quote(unit)
     return f"{speaker} says: {body}" if speaker else body
 
 
