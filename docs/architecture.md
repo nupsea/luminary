@@ -66,6 +66,11 @@ naming the library. `RequestAuthMiddleware` runs each request in its principal's
 app's own origin is the default library, and a paired device is the library recorded beside it in
 the default library's `devices` table. A library's background work (its enrichment queue and
 startup backfills) starts in that library the first time the process serves it
+(`runtime/library_work.py`). Models, the engine and downloads are shared (`machine_root()`).
+A library's snapshot is one archive of its root (`services/library_snapshot.py`, #390); a
+folder joined onto `library_root()` must be listed in `storage.LIBRARY_FILE_DIRS` to be carried.
+Its vectors are derived from its database: a re-embed (`services/reembed.py`) rebuilds every
+table beside the live folder, resumes a killed run, and swaps the rebuild in once it matches.
 (`runtime/library_work.py`), after loading its preferences: engine mode, model picks and
 background pacing are each library's, while API keys stay the machine user's
 (`docs/engine-and-hosts.md`). Models, the engine and downloads are shared (`machine_root()`).

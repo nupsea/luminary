@@ -57,6 +57,13 @@ class ConceptRepo:
         )
         return list(result.scalars().all())
 
+    async def all_evidence(self) -> list[tuple[str, list]]:
+        """(id, evidence) of every concept, by id."""
+        result = await self.session.execute(
+            select(ConceptModel.id, ConceptModel.evidence_json).order_by(ConceptModel.id)
+        )
+        return [(i, e or []) for i, e in result.all()]
+
     async def by_ids(self, concept_ids: Collection[str]) -> Sequence[ConceptModel]:
         result = await self.session.execute(
             select(ConceptModel).where(ConceptModel.id.in_(concept_ids))

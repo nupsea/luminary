@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **A library can be saved to one archive and restored as a new library** (`python -m app.scripts.library_snapshot`). Stored API keys and paired devices are left out of the archive; a restore refuses an archive from a newer version or a different embedder.
+- **A library's vectors can be rebuilt from its database** (`make reembed`, with the app stopped). A run killed midway resumes where it stopped; the replaced vectors are kept as `vectors.previous`. It drops vectors left behind by deleted notes and images, and the unused type field older chunk tables carry.
 - **The note panel beside a document shows the editor's keyboard shortcuts** (keyboard button, or ⌘/ / Ctrl+/ in the editor), inline rather than over the document. ⌘⇧E / Ctrl+Shift+E wraps the selection in inline math.
 - **An EPUB reopens at the paragraph where reading stopped, and can hold one bookmark,** as a PDF does. Chapters run to 20,000 words, so the place saved is the block on screen, not the chapter.
 
