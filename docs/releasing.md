@@ -5,15 +5,16 @@ one-time job — see `releasing.md`.
 
 ## The model
 
-A pushed `v*` tag is the only trigger. Two workflows answer it and attach their
+A pushed `v*` tag is the only trigger. Three workflows answer it and attach their
 artifacts to the same GitHub release:
 
 | Workflow | Runner | Produces | Time |
 |---|---|---|---|
 | `release.yml` | ubuntu | source tarball for `bootstrap.sh` / headless installs | ~20 min |
 | `release-macos-app.yml` | macos-14 | signed, notarized `Luminary_<v>_aarch64.dmg` | 45–80 min |
+| `desktop-installers.yml` | ubuntu-22.04, windows | `.deb`, AppImage, unsigned `_x64-setup.exe`, each installed and launched first | about an hour |
 
-Whichever finishes first creates the release; the other uploads into it. Order
+Whichever finishes first creates the release; the others upload into it. Order
 does not matter.
 
 **There is no auto-updater.** A new version reaches an existing user only when
@@ -99,9 +100,10 @@ build them.
 ## Building the Windows and Linux installers
 
 `.github/workflows/desktop-installers.yml` builds, installs and launches both,
-on any push touching `scripts/desktop/`, `src-tauri/` or the workflow itself, and
-on demand from the Actions tab. It is not wired to a tag and attaches nothing to
-a release.
+on any push touching `scripts/desktop/`, `src-tauri/`, `backend/pyproject.toml`,
+`backend/uv.lock` or the workflow itself, and on demand from the Actions tab. On a
+`v*` tag it also attaches the `.deb`, AppImage and `.exe`, with `.sha256` files, to
+the release, so a tag whose installer build fails ships without them.
 
 | Artifact | Contents | Kept |
 |---|---|---|

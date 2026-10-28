@@ -158,6 +158,9 @@ prune_dependencies() {
     # Build-time tools needing a Visual C++ runtime not shipped beside them
     # (verify_dll_imports.ps1). pip writes script wrappers with distlib's own launchers.
     rm -f "$site/torch/bin"/protoc* "$site/setuptools"/cli*.exe "$site/setuptools"/gui*.exe
+    # torch's C++ tests: linuxdeploy cannot resolve their libtorch.so and fails the AppImage.
+    # NOT torch_shm_manager, which shared-memory multiprocessing runs.
+    rm -f "$site/torch/bin"/test_* "$site/torch/bin"/*Test "$site/torch/bin"/*Test.exe
     # pip stays: it installs post-install components.
     rm -rf "$site/onnxruntime"/{transformers,quantization,tools}      # export/training helpers
     # NOT litellm/proxy: plain `import litellm` reaches litellm.proxy._types.
@@ -175,6 +178,12 @@ prune_dependencies() {
     rm -rf "$site/litellm/proxy/_experimental/out"
     # Benchmark fixtures holding the stage's longest paths (over STAGE_PATH_BUDGET).
     rm -rf "$site/litellm/proxy/guardrails/guardrail_hooks"/*/guardrail_benchmarks
+    # torch's vendored notices nest past STAGE_PATH_BUDGET. Shipped, so kept, as one archive.
+    local notices
+    for notices in "$site"/torch-*.dist-info/licenses/third_party; do
+        [ -d "$notices" ] || continue
+        tar -czf "$notices.tar.gz" -C "$(dirname "$notices")" third_party && rm -rf "$notices"
+    done
     find "$site" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
     find "$site" -name '*.dist-info' -type d -exec rm -rf {}/RECORD \; 2>/dev/null || true
 }

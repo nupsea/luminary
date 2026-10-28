@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An EPUB reopens at the paragraph where reading stopped, and can hold one bookmark,** as a PDF does. Chapters run to 20,000 words, so the place saved is the block on screen, not the chapter.
 
 ### Fixed
+- **The Windows and Linux installers did not build after the torch upgrade.** Its license notices nest up to 196 characters deep, past the 190 a Windows install path leaves; they now ship as one archive. Its new C++ test executables failed the AppImage bundler and are no longer staged.
 - **Studying one chapter could ask about the whole book.** A chapter whose heading lost its trailing colon on display matched no section, and generation read every chapter instead; a chapter is now named by id, and one that cannot be found is an error.
 - **A card showed another chapter's passage and counted towards that chapter.** Every card from one generation run was filed under the run's first chapter: 551 of 2,103 cards in a test library. Cards are filed by the chunk their quote is in, stored cards are moved at startup, and the source panel shows the card's own quote.
 - **Questions said "according to Chapter V"**, a label the card never shows. Such questions are refused and the model is asked for brief context instead.
