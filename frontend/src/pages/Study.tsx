@@ -10,7 +10,7 @@
  */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   ArrowLeft,
   ArrowRight,
@@ -64,8 +64,9 @@ import type { DocListItem } from "./Study/types"
 import { fetchDocList } from "./Study/api"
 import { StudyBrowser, type CollectionNode } from "./Study/StudyBrowser"
 import { DocumentChapters } from "@/components/DocumentChapters"
-import { DocumentTopics } from "@/components/DocumentTopics"
+import { DocumentTopics, type StudyTopic } from "@/components/DocumentTopics"
 import { type Chapter, practiceChapter } from "@/lib/chapterApi"
+import { topCards } from "@/lib/topCards"
 import { FlashcardManager } from "./Study/FlashcardManager"
 
 
@@ -172,7 +173,7 @@ export default function Study() {
   // "preparing" phase via prepareStudySession (one user click = one call).
   type StudyPhase =
     | { phase: "idle" }
-    | { phase: "preparing"; mode: StudyMode }
+    | { phase: "preparing"; mode: StudyMode; progress?: string }
     | {
         phase: "ready"
         mode: StudyMode
@@ -284,33 +285,40 @@ export default function Study() {
     void startStudy("teachback", filters ?? null, resumeId ?? null)
   }
 
+  // One section's cards: its deck when it holds `atLeast`, else that plus `write` new ones
+  // written from the section alone. By id, never heading: a heading can be shared or tidied.
+  const cardsForSection = async (
+    documentId: string,
+    sectionId: string,
+    atLeast: number,
+    write: number,
+  ): Promise<Flashcard[]> => {
+    const existing = await apiGet<{ items: Flashcard[] }>("/flashcards/search", {
+      document_id: documentId,
+      section_id: sectionId,
+      page_size: FLASHCARD_CARD_LIMIT,
+    })
+    const cards = existing.items ?? []
+    if (cards.length >= atLeast) return cards
+    const written = await apiPost<Flashcard[]>("/flashcards/generate", {
+      document_id: documentId,
+      scope: "section",
+      section_id: sectionId,
+      count: write,
+      ...(activeStudyModel ? { model: activeStudyModel } : {}),
+    })
+    return [...cards, ...written]
+  }
+
   // Study one coherent SECTION in either mode: use its existing cards (or generate them from its own
   // text), then run a flashcard review or teach-back scoped to that section. Reuses the existing
   // generator + StudySession/TeachbackSession + FSRS.
-  const runSectionStudy = async (
-    sectionId: string,
-    sectionHeading: string,
-    mode: StudyMode,
-  ) => {
+  const runSectionStudy = async (sectionId: string, mode: StudyMode) => {
     if (studyPhase.phase !== "idle" || !studyDocumentId) return
     setStudyPhase({ phase: "preparing", mode })
     try {
-      const existing = await apiGet<{ items: Flashcard[] }>("/flashcards/search", {
-        document_id: studyDocumentId,
-        section_id: sectionId,
-        page_size: FLASHCARD_CARD_LIMIT,
-      })
-      let cards = existing.items ?? []
+      const cards = await cardsForSection(studyDocumentId, sectionId, 1, 8)
       if (cards.length === 0) {
-        cards = await apiPost<Flashcard[]>("/flashcards/generate", {
-          document_id: studyDocumentId,
-          scope: "section",
-          section_heading: sectionHeading,
-          count: 8,
-          ...(activeStudyModel ? { model: activeStudyModel } : {}),
-        })
-      }
-      if (!cards || cards.length === 0) {
         setStudyPhase({ phase: "idle" })
         toast.error("Couldn't generate cards for this section — is the model (Ollama) running?")
         return
@@ -329,6 +337,60 @@ export default function Study() {
       console.warn("Failed to study section", err)
       setStudyPhase({ phase: "idle" })
       toast.error("Couldn't start studying this section.")
+    }
+  }
+
+  // Every chapter in turn: its top few cards, writing them where it has too few.
+  const sweepStopped = useRef(false)
+  const runAllChaptersStudy = async (topics: StudyTopic[], perChapter: number) => {
+    if (studyPhase.phase !== "idle" || !studyDocumentId) return
+    const documentId = studyDocumentId
+    sweepStopped.current = false
+    const picked = new Map<string, Flashcard>()
+    let empty = 0
+    for (const [i, topic] of topics.entries()) {
+      if (sweepStopped.current) break
+      setStudyPhase({
+        phase: "preparing",
+        mode: "flashcard",
+        progress: `${topic.title} (${i + 1} of ${topics.length})`,
+      })
+      let top: Flashcard[] = []
+      try {
+        const cards = await cardsForSection(documentId, topic.sectionId, perChapter, perChapter)
+        top = topCards(cards, perChapter)
+      } catch (err) {
+        console.warn("No cards for chapter", topic.title, err)
+      }
+      if (top.length === 0) empty += 1
+      for (const card of top) picked.set(card.id, card)
+    }
+    if (picked.size === 0) {
+      setStudyPhase({ phase: "idle" })
+      toast.error(
+        sweepStopped.current
+          ? "Stopped before any questions were ready."
+          : "Couldn't write questions for any chapter — is the model (Ollama) running?",
+      )
+      return
+    }
+    if (empty > 0) {
+      toast.warning(`${empty} chapter${empty === 1 ? " has" : "s have"} no questions yet and ${empty === 1 ? "is" : "are"} left out.`)
+    }
+    try {
+      const outcome = await prepareSectionStudyFromCards(documentId, [...picked.values()], "flashcard")
+      const scope: PrepareStudySessionOptions = {
+        mode: "flashcard",
+        documentId,
+        collectionId: null,
+        cardLimit: FLASHCARD_CARD_LIMIT,
+        resumeSessionId: null,
+      }
+      setStudyPhase({ phase: "ready", mode: "flashcard", outcome, scopeForBeginNew: scope })
+    } catch (err) {
+      console.warn("Failed to study all chapters", err)
+      setStudyPhase({ phase: "idle" })
+      toast.error("Couldn't start studying these chapters.")
     }
   }
 
@@ -355,10 +417,8 @@ export default function Study() {
     }
   }
 
-  const handleStudySection = (sectionId: string, sectionHeading: string) =>
-    void runSectionStudy(sectionId, sectionHeading, "flashcard")
-  const handleTeachbackSection = (sectionId: string, sectionHeading: string) =>
-    void runSectionStudy(sectionId, sectionHeading, "teachback")
+  const handleStudySection = (sectionId: string) => void runSectionStudy(sectionId, "flashcard")
+  const handleTeachbackSection = (sectionId: string) => void runSectionStudy(sectionId, "teachback")
 
   // Auto-resume a session interrupted by "Open in reader" navigation.
   // SourceContextPanel saves session info to the store before navigating away;
@@ -445,7 +505,7 @@ export default function Study() {
   // ---- Active session routes ------------------------------------------------
   if (studyPhase.phase === "preparing") {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div className="flex h-full flex-col items-center justify-center gap-3">
         <Loader2
           size={32}
           className={
@@ -454,6 +514,19 @@ export default function Study() {
               : "animate-spin text-primary"
           }
         />
+        {studyPhase.progress && (
+          <>
+            <p className="text-sm text-muted-foreground">Preparing questions: {studyPhase.progress}</p>
+            <button
+              onClick={() => {
+                sweepStopped.current = true
+              }}
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
+            >
+              Stop and study what's ready
+            </button>
+          </>
+        )}
       </div>
     )
   }
@@ -593,6 +666,7 @@ export default function Study() {
               documentId={studyDocumentId}
               onStudySection={handleStudySection}
               onTeachbackSection={handleTeachbackSection}
+              onStudyAll={(topics, perChapter) => void runAllChaptersStudy(topics, perChapter)}
             />
             <FlashcardManager
               documentId={studyDocumentId}

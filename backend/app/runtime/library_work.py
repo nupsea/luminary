@@ -121,6 +121,19 @@ async def _fail_interrupted_ingestions() -> None:
         logger.warning("could not reconcile interrupted ingestions", exc_info=True)
 
 
+async def _refile_flashcards() -> None:
+    # Cards written before I-35 sit under their generation call's first chapter.
+    try:
+        await asyncio.sleep(15)
+        from app.services.flashcard_repair import refile_cards
+
+        async with get_session_factory()() as session:
+            await refile_cards(session)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("Flashcard refile failed (non-fatal): %s", exc)
+
+
 def _start_backfills() -> None:
     # Delayed so they do not compete with model warmup; each no-ops once its library is caught up.
     async def backfill_descriptions():
@@ -165,6 +178,7 @@ def _start_backfills() -> None:
         except Exception as exc:
             logger.warning("Section summary backfill failed (non-fatal): %s", exc)
 
+    _background_tasks.add(asyncio.create_task(_refile_flashcards()))
     with unattended():
         _background_tasks.add(asyncio.create_task(backfill_descriptions()))
     _background_tasks.add(asyncio.create_task(backfill_note_vectors()))

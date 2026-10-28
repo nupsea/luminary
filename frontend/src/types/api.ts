@@ -3295,12 +3295,11 @@ export interface paths {
          * Get Source Context
          * @description Return source passage for a flashcard (for SourceContextPanel on Again/Hard).
          *
-         *     Join chain: FlashcardModel.chunk_id -> ChunkModel.section_id -> SectionModel -> DocumentModel.
-         *     Returns 404 when:
+         *     Join chain: the chunk holding the card's quote (`card_home_chunk`) -> SectionModel ->
+         *     DocumentModel. Returns 404 when:
          *       - flashcard not found
-         *       - flashcard.chunk_id is null
-         *       - ChunkModel.section_id is null (chunk not section-assigned)
-         *       - SectionModel row not found for that section_id
+         *       - the card names no chunk
+         *       - that chunk has no section, or the section row is gone
          */
         get: operations["get_source_context_flashcards__card_id__source_context_get"];
         put?: never;
@@ -8728,6 +8727,8 @@ export interface components {
             scope: "full" | "section";
             /** Section Heading */
             section_heading?: string | null;
+            /** Section Id */
+            section_id?: string | null;
             /**
              * Count
              * @default 10
@@ -10582,6 +10583,8 @@ export interface components {
             cards_indexed: number;
             /** Orphan Rows Removed */
             orphan_rows_removed: number;
+            /** Cards Refiled */
+            cards_refiled: number;
         };
         /**
          * ReparseRequest
@@ -11150,6 +11153,8 @@ export interface components {
             section_heading: string;
             /** Section Preview */
             section_preview: string;
+            /** Quote */
+            quote?: string | null;
             /** Document Title */
             document_title: string;
             /** Pdf Page Number */

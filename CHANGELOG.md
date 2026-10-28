@@ -7,12 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Study topics can be reviewed all at once**: "All chapters" takes the top 1, 2, 3 or 5 questions from every chapter, due and weakest first, writing them for a chapter that has too few.
 - **A library can be saved to one archive and restored as a new library** (`python -m app.scripts.library_snapshot`). Stored API keys and paired devices are left out of the archive; a restore refuses an archive from a newer version or a different embedder.
 - **A library's vectors can be rebuilt from its database** (`make reembed`, with the app stopped). A run killed midway resumes where it stopped; the replaced vectors are kept as `vectors.previous`. It drops vectors left behind by deleted notes and images, and the unused type field older chunk tables carry.
 - **The note panel beside a document shows the editor's keyboard shortcuts** (keyboard button, or ⌘/ / Ctrl+/ in the editor), inline rather than over the document. ⌘⇧E / Ctrl+Shift+E wraps the selection in inline math.
 - **An EPUB reopens at the paragraph where reading stopped, and can hold one bookmark,** as a PDF does. Chapters run to 20,000 words, so the place saved is the block on screen, not the chapter.
 
 ### Fixed
+- **Studying one chapter could ask about the whole book.** A chapter whose heading lost its trailing colon on display matched no section, and generation read every chapter instead; a chapter is now named by id, and one that cannot be found is an error.
+- **A card showed another chapter's passage and counted towards that chapter.** Every card from one generation run was filed under the run's first chapter: 551 of 2,103 cards in a test library. Cards are filed by the chunk their quote is in, stored cards are moved at startup, and the source panel shows the card's own quote.
+- **Questions said "according to Chapter V"**, a label the card never shows. Such questions are refused and the model is asked for brief context instead.
+- **The Gita's chapters were headed with their first speaker** ("CHAPTER V — Arjuna."), and cards credited Krishna's words to Arjuna. A speaker's name that runs straight into the speech is no longer read as a subtitle; existing documents pick this up when reprocessed.
 - **A second library shared the first one's engine settings.** Engine mode, model picks and background pacing are now each library's own; API keys stay in the keychain and the default library, whichever library saves them (#389).
 - **The "database is locked" report could name a writer in another library** as the lock holder. It now names only writers on the refused write's own database.
 - **Finishing a chapter's practice left the reader at the last card's source** rather than where you were reading. It now returns to the section you had read to, or to the view you practised from (#231).

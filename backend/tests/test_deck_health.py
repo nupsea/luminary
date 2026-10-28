@@ -272,8 +272,6 @@ async def test_generate_for_uncovered_calls_flashcard_service(test_db):
             total = await svc.generate_for_uncovered(doc_id, [section_id], session)
 
     mock_svc.generate.assert_called_once()
-    call_kwargs = mock_svc.generate.call_args
-    assert call_kwargs.kwargs.get("section_heading") == "Chapter 7" or (
-        len(call_kwargs.args) >= 3 and call_kwargs.args[2] == "Chapter 7"
-    )
+    # By id: a heading can be shared by two sections of one document.
+    assert mock_svc.generate.call_args.kwargs["section_id"] == section_id
     assert total == 0  # mock returns empty list

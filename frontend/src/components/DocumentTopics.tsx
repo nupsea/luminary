@@ -1,12 +1,14 @@
 // DocumentTopics -- a document's study topics (chapters, from its authored structure or an LLM
 // outline when messy) plus a SEARCH over all its sub-sections for drill-down study. Front/back-matter
-// (index, copyright, publisher) is filtered. Each studyable topic offers flashcard review or teach-back.
+// (index, copyright, publisher) is filtered. Each studyable topic offers flashcard review or teach-back,
+// and "All chapters" reviews the top few questions from every topic at once.
 
 import { useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ListTree, Loader2, MessageSquare, Play, Search, Sparkles } from "lucide-react"
 
 import { apiGet } from "@/lib/apiClient"
+import { CARDS_PER_CHAPTER_CHOICES, DEFAULT_CARDS_PER_CHAPTER } from "@/lib/topCards"
 
 interface TopicItem {
   title: string
@@ -22,6 +24,11 @@ interface DocumentTopics {
 }
 
 type SectionAction = (sectionId: string, sectionHeading: string) => void
+
+export interface StudyTopic {
+  sectionId: string
+  title: string
+}
 
 function SectionActions({
   sectionId,
@@ -64,14 +71,50 @@ function SectionActions({
   )
 }
 
+function StudyAllChapters({
+  topics,
+  onStudyAll,
+}: {
+  topics: StudyTopic[]
+  onStudyAll: (topics: StudyTopic[], perChapter: number) => void
+}) {
+  const [perChapter, setPerChapter] = useState<number>(DEFAULT_CARDS_PER_CHAPTER)
+  return (
+    <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+      <select
+        value={perChapter}
+        onChange={(e) => setPerChapter(Number(e.target.value))}
+        aria-label="Questions per chapter"
+        className="rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
+      >
+        {CARDS_PER_CHAPTER_CHOICES.map((n) => (
+          <option key={n} value={n}>
+            {n} per chapter
+          </option>
+        ))}
+      </select>
+      <button
+        onClick={() => onStudyAll(topics, perChapter)}
+        title={`Review the top ${perChapter} question${perChapter === 1 ? "" : "s"} from each of ${topics.length} chapters; chapters without enough are written first`}
+        className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 font-medium text-foreground hover:bg-blue-500/10 hover:text-blue-600"
+      >
+        <Play size={12} />
+        All chapters
+      </button>
+    </span>
+  )
+}
+
 export function DocumentTopics({
   documentId,
   onStudySection,
   onTeachbackSection,
+  onStudyAll,
 }: {
   documentId: string
   onStudySection?: SectionAction
   onTeachbackSection?: SectionAction
+  onStudyAll?: (topics: StudyTopic[], perChapter: number) => void
 }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["doc-topics", documentId],
@@ -92,10 +135,13 @@ export function DocumentTopics({
       apiGet<TopicItem[]>(`/study/sections/${documentId}`, { q: q || undefined, limit: 60 }),
     enabled: q.length >= 2,
   })
+  const studyable: StudyTopic[] = (data?.topics ?? []).flatMap((t) =>
+    t.section_id ? [{ sectionId: t.section_id, title: t.title }] : [],
+  )
 
   return (
     <div className="mb-8 rounded-xl border border-border bg-card/40 p-5">
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <ListTree size={18} className="text-primary" />
         <h2 className="text-lg font-semibold text-foreground">Study topics</h2>
         {data && (
@@ -117,6 +163,9 @@ export function DocumentTopics({
             {" · "}
             {data.topics.length}
           </span>
+        )}
+        {onStudyAll && studyable.length >= 2 && (
+          <StudyAllChapters topics={studyable} onStudyAll={onStudyAll} />
         )}
       </div>
 

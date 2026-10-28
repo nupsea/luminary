@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,6 +86,47 @@ def run_containing(runs: Sequence[Sequence[ChunkModel]], excerpt: str) -> list[C
         and excerpt_is_verbatim(excerpt, text)
     ]
     return matches[0] if len(matches) == 1 else None
+
+
+def home_chunk(
+    chunks: Sequence[ChunkModel], card_chunk_ids: Sequence[str], excerpt: str
+) -> ChunkModel | None:
+    """The chunk holding the card's quote, else the first of its passage: the card's
+    `chunk_id`, which files it under a section (I-35)."""
+    by_id = {c.id: c for c in chunks}
+    own = [by_id[cid] for cid in card_chunk_ids if cid in by_id]
+    held = next((c for c in own if excerpt and excerpt_is_verbatim(excerpt, c.text or "")), None)
+    return held or (own[0] if own else None)
+
+
+def card_quote(card: FlashcardModel) -> str | None:
+    """The span of its source a card quotes; a gap card's excerpt is a label, not a quote."""
+    if card.source in _PASSAGE_LESS_SOURCES:
+        return None
+    return card.source_excerpt or None
+
+
+def quote_home(card: FlashcardModel, chunks: Mapping[str, ChunkModel]) -> ChunkModel | None:
+    """The chunk holding a stored card's quote, found in the one window of its passage that
+    contains it; None when no single window does."""
+    quote = card_quote(card)
+    own = [chunks[cid] for cid in card.source_chunk_ids or [] if cid in chunks]
+    run = run_containing(contiguous_runs(own), quote) if quote else None
+    return home_chunk(run, [c.id for c in run], quote or "") if run else None
+
+
+async def card_home_chunk(card: FlashcardModel, session: AsyncSession) -> ChunkModel | None:
+    """Where a stored card's quote is; `chunk_id` only when the quote cannot be placed.
+
+    Cards written before I-35 carry their call's first chunk, which can be another chapter.
+    """
+    repo = DocumentRepo(session)
+    ids = [c for c in (card.source_chunk_ids or []) if isinstance(c, str)]
+    chunks = {c.id: c for c in await repo.chunks_by_ids(ids)} if ids else {}
+    home = quote_home(card, chunks)
+    if home is None and card.chunk_id:
+        home = await repo.chunk(card.chunk_id)
+    return home
 
 
 async def passage_for_card(card: FlashcardModel, session: AsyncSession) -> str:

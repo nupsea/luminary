@@ -38,7 +38,7 @@ from app.services.flashcard_factuality import (
     factuality_model,
     is_self_judging,
 )
-from app.services.flashcard_grounding import contiguous_runs, run_containing
+from app.services.flashcard_grounding import contiguous_runs, home_chunk, run_containing
 from app.services.flashcard_parsers import (
     GROUNDING_UNCHECKED,
     REJECT_NOT_A_QUESTION,
@@ -76,11 +76,13 @@ from app.services.flashcard_prompts import (
 )
 from app.services.flashcard_units import (
     MIN_ANSWER_COVERAGE,
+    bare_passage,
     best_unit,
     choose_units,
     listed_sentence,
     names_not_in,
     split_speeches,
+    unit_quote,
 )
 from app.services.llm import LLMAPIConnectionError, LLMServiceUnavailableError
 from app.telemetry import trace_chain
@@ -135,6 +137,11 @@ def _card_chunk_ids(
     recorded = set(passage_chunk_ids)
     run = run_containing(contiguous_runs([c for c in chunks if c.id in recorded]), excerpt)
     return passage_chunk_ids if run is None else [c.id for c in run]
+
+
+def _passage_text(chunks: Sequence[ChunkModel], passage_chunk_ids: list[str]) -> str:
+    by_id = {c.id: c.text or "" for c in chunks}
+    return bare_passage([by_id[cid] for cid in passage_chunk_ids if cid in by_id])
 
 
 async def generate_technical(
@@ -216,10 +223,12 @@ async def generate_technical(
         # number: the prompt no longer names a taxonomy (I-28), and the level a
         # type maps to is a decision this codebase owns rather than the model.
         bloom_level: int | None = bloom_from(item)
+        card_chunk_ids = _card_chunk_ids(chunks, passage_chunk_ids, source_excerpt)
+        home = home_chunk(chunks, card_chunk_ids, source_excerpt)
         card = FlashcardModel(
             id=str(uuid.uuid4()),
             document_id=document_id,
-            chunk_id=first_chunk_id,
+            chunk_id=getattr(home, "id", first_chunk_id),
             question=question,
             answer=answer,
             source_excerpt=source_excerpt,
@@ -235,7 +244,7 @@ async def generate_technical(
             bloom_level=bloom_level,
             grounding=item.get("grounding", GROUNDING_UNCHECKED),
             factuality=item.get("factuality", FACTUALITY_UNCHECKED),
-            source_chunk_ids=_card_chunk_ids(chunks, passage_chunk_ids, source_excerpt),
+            source_chunk_ids=card_chunk_ids,
         )
         session.add(card)
         await FlashcardRepo(session).sync_fts(card)
@@ -821,7 +830,13 @@ async def _generate_concept_cards(
 
 
 async def _unit_cards(
-    llm: Any, text: str, want: int, used: set[str], model: str | None, document_id: str
+    llm: Any,
+    text: str,
+    want: int,
+    used: set[str],
+    model: str | None,
+    document_id: str,
+    names_text: str,
 ) -> list[dict]:
     """One call phrasing a card for each of *want* sentences code chose from *text*.
 
@@ -860,11 +875,11 @@ async def _unit_cards(
             llm_output_stats.record_card_gate(REJECT_UNGROUNDED)
             logger.info("flashcard: dropped unit card, answer in no sentence: %r", answer[:80])
             continue
-        if names_not_in(question, text):
+        if names_not_in(question, names_text):
             llm_output_stats.record_card_gate(REJECT_UNGROUNDED)
             logger.info("flashcard: dropped unit card, names someone unshown: %r", question[:80])
             continue
-        cards.append({"question": question, "answer": answer, "source_excerpt": unit})
+        cards.append({"question": question, "answer": answer, "source_excerpt": unit_quote(unit)})
     return cards
 
 
@@ -878,6 +893,7 @@ async def generate(
     context: str | None = None,
     model: str | None = None,
     exclude_chunk_ids: set[str] | None = None,
+    section_id: str | None = None,
 ) -> list[FlashcardModel]:
     """Generate flashcards from document chunks using LLM.
 
@@ -936,10 +952,11 @@ async def generate(
     passage_chunk_ids: list[str] = []
     if context and context.strip():
         combined_text = context.strip()[:_CHUNK_CHAR_LIMIT]
+        names_text = combined_text
         # The document's first chunk, or none: never the document id, which is not a chunk.
         first_chunk_id = await DocumentRepo(session).first_chunk_id(document_id)
     else:
-        chunks = await _fetch_chunks(document_id, scope, section_heading, session)
+        chunks = await _fetch_chunks(document_id, scope, section_heading, session, section_id)
         if not chunks:
             return []
 
@@ -994,6 +1011,7 @@ async def generate(
             combined_text, first_chunk_id, passage_chunk_ids = _build_text(eligible_chunks)
         if not combined_text:
             return []
+        names_text = _passage_text(eligible_chunks, passage_chunk_ids)
 
         first_sec = eligible_chunks[0].section_id if eligible_chunks else None
         if first_sec and first_sec in section_ctx:
@@ -1052,7 +1070,13 @@ async def generate(
         nonlocal call_q, call_a, deduped
         if unit_first:
             parsed = await _unit_cards(
-                llm, combined_text, want, asked_units, model or _generation_model(), document_id
+                llm,
+                combined_text,
+                want,
+                asked_units,
+                model or _generation_model(),
+                document_id,
+                names_text,
             )
         else:
             batch_prompt = flashcard_user_tmpl().format(
@@ -1148,6 +1172,7 @@ async def generate(
                 combined_text = next_text
                 passage_chunk_ids = next_p_ids
                 eligible_chunks = fallback_chunks
+                names_text = _passage_text(eligible_chunks, passage_chunk_ids)
                 chunk_classification = None
                 tried_chunks.update(passage_chunk_ids)
                 first_sec = fallback_chunks[0].section_id if fallback_chunks else None
@@ -1183,11 +1208,13 @@ async def generate(
         # states whatever difficulty was asked for; the stored level says so (#222).
         card_bloom_level = DEPTH_TO_BLOOM["fact"] if unit_first else bloom_from(item)
         card_difficulty = "easy" if unit_first else difficulty
+        card_chunk_ids = _card_chunk_ids(eligible_chunks, passage_chunk_ids, source_excerpt)
+        home = home_chunk(eligible_chunks, card_chunk_ids, source_excerpt)
 
         card = FlashcardModel(
             id=str(uuid.uuid4()),
             document_id=document_id,
-            chunk_id=first_chunk_id,
+            chunk_id=home.id if home else first_chunk_id,
             question=question,
             answer=answer,
             source_excerpt=source_excerpt,
@@ -1201,10 +1228,12 @@ async def generate(
             created_at=now,
             chunk_classification=chunk_classification,
             bloom_level=card_bloom_level,
-            section_heading=resolved_section_heading,
+            section_heading=(
+                _resolve_section_heading(home, section_ctx) if home else resolved_section_heading
+            ),
             grounding=item.get("grounding", GROUNDING_UNCHECKED),
             factuality=item.get("factuality", FACTUALITY_UNCHECKED),
-            source_chunk_ids=_card_chunk_ids(eligible_chunks, passage_chunk_ids, source_excerpt),
+            source_chunk_ids=card_chunk_ids,
         )
         session.add(card)
         await FlashcardRepo(session).sync_fts(card)

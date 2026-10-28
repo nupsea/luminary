@@ -80,6 +80,16 @@ def is_nav_line(line: str) -> bool:
     return _NAV_LINE.fullmatch(line) is not None
 
 
+# A play or dialogue opens its chapter with the first speaker's name ("Arjuna.",
+# "Dhritirashtra:") and the speech follows on the very next line. A subtitle that
+# ends in a full stop ("Loomings.") is set apart by a blank line instead.
+_SPEAKER_LABEL = re.compile(r"[A-Z][\w'-]*(?: [A-Z][\w'-]*){0,2}[.:](?:\[FN#\w+\])?")
+
+
+def is_speaker_label(line: str, next_line: str) -> bool:
+    return bool(next_line.strip()) and _SPEAKER_LABEL.fullmatch(line) is not None
+
+
 def _has_page_nav(lines: list[str]) -> bool:
     stripped = [ln.strip() for ln in lines]
     footers = sum(

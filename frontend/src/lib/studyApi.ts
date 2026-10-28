@@ -35,6 +35,7 @@ export interface Flashcard {
 export interface SourceContext {
   section_heading: string
   section_preview: string
+  quote?: string | null
   document_title: string
   pdf_page_number: number | null
   section_id: string

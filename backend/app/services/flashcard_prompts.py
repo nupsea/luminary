@@ -510,6 +510,9 @@ FLASHCARD_UNITS_SYSTEM = (
     "- Name the subject in the question: the character, thing or idea by its name as the "
     'passage gives it. Never "he", "she", "it", "they", "the narrator", "the author", '
     '"this system", "the text" or "the passage".\n'
+    "- The card is shown without the passage, so never refer to a chapter, section or part "
+    "by its number or heading. When the question needs context, give it in a few words: who "
+    "is speaking, to whom, or what is happening.\n"
     '- Ask "why" only when the sentence itself gives the reason. Otherwise ask what, who, '
     "which, when or how, about what the sentence states.\n"
     "- Do not ask about something the sentence does not say.\n"
