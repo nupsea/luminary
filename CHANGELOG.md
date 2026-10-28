@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-28
+
 ### Added
 - **Study topics can be reviewed all at once**: "All chapters" takes the top 1, 2, 3 or 5 questions from every chapter, due and weakest first, writing them for a chapter that has too few.
 - **A library can be saved to one archive and restored as a new library** (`python -m app.scripts.library_snapshot`). Stored API keys and paired devices are left out of the archive; a restore refuses an archive from a newer version or a different embedder.
@@ -61,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The backend's TLS roots, web server and upload parser are past their open advisories**: certifi drops the compromised emSign intermediates, and starlette 1.3.1 (with FastAPI 0.133.0) and python-multipart 0.0.31 fix request-handling bugs.
 - **Diagrams are sanitized by DOMPurify 3.4.17**, past one critical and four lower advisories in the 3.4.13 that mermaid pulled in. Mermaid's string-mode calls did not appear to reach them.
 - **The local models load through transformers 5.10.2, torch 2.13.0 and sentence-transformers 5.6.0**, past model-loading advisories that include a `trust_remote_code` bypass. Embeddings, reranker scores, entities and transcripts are bit-identical to before on library text.
+
+### Known issues
+- **Saving a note can be refused at once with "database is locked"** while another write is in progress, although the app waits up to 5 seconds for a lock. Seen only in the test suite on CI, mostly on Windows, and the code path that causes it is not yet found (#211).
 
 ## [0.16.2] - 2026-10-19
 
