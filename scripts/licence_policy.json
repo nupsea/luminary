@@ -1,0 +1,67 @@
+{
+  "allowed": [
+    "\\bMIT\\b",
+    "BSD",
+    "Apache",
+    "\\bISC\\b",
+    "\\bPSF\\b",
+    "Python Software Foundation",
+    "\\bZlib\\b",
+    "Unlicense",
+    "\\bCC0\\b",
+    "Public Domain",
+    "MPL-2\\.0",
+    "Mozilla Public License 2\\.0"
+  ],
+  "review": [
+    "GPL",
+    "General Public License",
+    "Affero",
+    "SSPL",
+    "Server Side Public License",
+    "BUSL",
+    "Business Source",
+    "Elastic License",
+    "Commons Clause",
+    "\\bNC\\b",
+    "Non-?Commercial",
+    "Proprietary"
+  ],
+  "declared": {
+    "python:colorama": {"licence": "BSD-3-Clause", "source": "https://pypi.org/pypi/colorama/0.4.6/json (Windows only)"},
+    "python:jeepney": {"licence": "MIT", "source": "https://pypi.org/pypi/jeepney/0.9.0/json (Linux only)"},
+    "python:pywin32-ctypes": {"licence": "BSD-3-Clause", "source": "https://pypi.org/pypi/pywin32-ctypes/0.2.3/json (Windows only)"},
+    "python:secretstorage": {"licence": "BSD-3-Clause", "source": "https://pypi.org/pypi/secretstorage/3.5.0/json (Linux only)"},
+    "python:tzdata": {"licence": "Apache-2.0", "source": "https://pypi.org/pypi/tzdata/2025.3/json (Windows only)"},
+    "python:sentencepiece": {"licence": "Apache-2.0", "source": "https://github.com/google/sentencepiece/blob/v0.2.1/LICENSE; its metadata states none"},
+    "npm:fuzzy": {"licence": "MIT", "source": "node_modules/fuzzy/LICENSE-MIT; package.json uses the deprecated `licenses` array"},
+    "npm:khroma": {"licence": "MIT", "source": "node_modules/khroma/license; package.json states none"}
+  },
+  "exceptions": {
+    "python:pymupdf": {
+      "licence": "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License",
+      "reason": "PDF parsing. Makes every distributed build AGPL-3.0, as README, About and THIRD-PARTY-LICENSES state. Replacing it is #377's decision.",
+      "issue": "#378"
+    },
+    "python:ebooklib": {
+      "licence": "GNU Affero General Public License; GNU Affero General Public License v3 or later (AGPLv3+)",
+      "reason": "EPUB reading and writing. Same consequence and same replacement decision as pymupdf.",
+      "issue": "#378"
+    },
+    "python:chardet": {
+      "licence": "LGPL-2.1-or-later; GNU Lesser General Public License v2 or later (LGPLv2+)",
+      "reason": "Encoding detection. LGPL holds only while it ships unmodified as its own importable package, with its notice.",
+      "issue": "#377"
+    },
+    "python:frozendict": {
+      "licence": "LGPL v3; GNU Lesser General Public License v3 (LGPLv3)",
+      "reason": "Pulled in by genanki (Anki export). Same LGPL condition as chardet: unmodified, own package, notice shipped.",
+      "issue": "#378"
+    },
+    "python:tld": {
+      "licence": "MPL-1.1 OR GPL-2.0-only OR LGPL-2.1-or-later",
+      "reason": "Pulled in by courlan (web import). Tri-licensed; Luminary takes it under MPL-1.1, unmodified.",
+      "issue": "#378"
+    }
+  }
+}
