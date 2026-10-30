@@ -383,6 +383,9 @@ Constraints that fall out of that, each enforced in `stage_python.sh`:
   and send a read-only bundle trying to rewrite them.
 - uv's hardlinks back into `~/.cache/uv` are broken after install. Otherwise
   `codesign --force` mutates the shared cache inode instead of the bundle's copy.
+- litellm's tiktoken files are restored to the bytes tiktoken pins
+  (`repair_tiktoken_cache.py`, I-72). litellm's `win_amd64` wheel ships them with CRLF line
+  endings, and a mismatched file makes `import litellm` download it again.
 - Console-script shebangs are rewritten to the sh/Python trampoline below, since
   uv writes them pointing at the build machine's interpreter. They cannot just be
   deleted — `youtube_downloader.py` spawns `yt-dlp` off `PATH`, so the sidecar's

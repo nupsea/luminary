@@ -60,6 +60,8 @@ export interface InPlaceCitation {
   against: string[]
   words: string[]
   page: number | null
+  /** A transcript marks its passage by chunk, not by words (YouTubeTranscriptView). */
+  chunkId: string | null
 }
 
 /**
@@ -77,9 +79,10 @@ export interface InPlaceCitation {
 export function resolveInPlaceCitation(
   inPlace: InPlaceCitation | null,
   initialCitationWords: string[],
-): { words: string[]; page: number | null } {
+  initialChunkId: string | null = null,
+): { words: string[]; page: number | null; chunkId: string | null } {
   if (inPlace?.against === initialCitationWords) {
-    return { words: inPlace.words, page: inPlace.page }
+    return { words: inPlace.words, page: inPlace.page, chunkId: inPlace.chunkId }
   }
-  return { words: initialCitationWords, page: null }
+  return { words: initialCitationWords, page: null, chunkId: initialChunkId }
 }

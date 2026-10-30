@@ -63,6 +63,9 @@ from this repo. The full set is in `docs/invariants.md`.
   placeholders and defaults are not evidence; a verification the product can pass with its own
   text verifies nothing. `.claude/rules/common/product-integrity.md`.
 - **`uv` only.** Never `pip`, never `poetry`. Add packages with `uv add`; a hook blocks the others.
+- **Read a dependency's licence before adding it.** `make ci` fails on a shipped package whose
+  licence `scripts/licence_policy.json` has not decided; copyleft needs an exception with a reason
+  and an issue, granted by the maintainer, never added to make a run green. (I-71)
 - **All LLM calls go through LiteLLM.** Never a provider SDK directly.
 - **Services and repos raise `LuminaryError` subclasses, never `HTTPException`.** One handler
   in `main.py` maps them.

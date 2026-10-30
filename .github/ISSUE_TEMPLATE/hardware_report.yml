@@ -1,0 +1,47 @@
+name: "Hardware report"
+description: "Ran Luminary on your machine? Say what worked and what did not"
+title: "[Hardware]: "
+labels: ["hardware-report"]
+body:
+  - type: textarea
+    id: machine
+    attributes:
+      label: "Machine"
+      description: |
+        Desktop app: Settings → Report an issue fills this in (it redacts paths and keys first).
+        Otherwise give the OS and version, CPU, graphics card and driver version, and memory.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: install
+    attributes:
+      label: "Luminary version and how you installed it"
+      placeholder: "0.17.0, the .deb from the release page"
+    validations:
+      required: true
+  - type: checkboxes
+    id: steps
+    attributes:
+      label: "What worked"
+      description: "Tick what completed. Leave anything you did not try unticked and say so below."
+      options:
+        - label: "Installed with no terminal"
+        - label: "First run finished setup"
+        - label: "Setup offered local models, and the first answer came from one"
+        - label: "Ingested a PDF"
+        - label: "Ingested an EPUB"
+        - label: "Ingested an audio file"
+        - label: "Ingested a YouTube link"
+        - label: "Ingested a web page"
+        - label: "Asked a question and a citation landed on its passage"
+        - label: "Ran a practice session"
+        - label: "Wrote a note that links to another"
+        - label: "Quit and relaunched with the library intact"
+  - type: textarea
+    id: details
+    attributes:
+      label: "What went wrong, and anything slow"
+      description: "Errors, what the app told you, and timings that seemed off. Attach the log from Settings → Report an issue."
+    validations:
+      required: false

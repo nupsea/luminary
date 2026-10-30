@@ -7,7 +7,7 @@ import { TranscriptFixForm } from "./TranscriptFixForm"
 import type { ChunkItem, DocumentDetail } from "./types"
 import { relativeDate } from "@/components/library/utils"
 import { cn } from "@/lib/utils"
-import { CITATION_MARK_TOKEN, formatTimestamp } from "@/lib/citation"
+import { CITATION_MARK_TOKEN, formatTimestamp, settleIntoView } from "@/lib/citation"
 import { usePanelZoomStore } from "@/store/panelZoomStore"
 
 const fetchChunks = (documentId: string): Promise<ChunkItem[]> =>
@@ -48,10 +48,17 @@ function highlightText(text: string, term: string): React.ReactNode {
 interface YouTubeTranscriptViewProps {
   doc: DocumentDetail
   initialSectionId?: string | null
-  initialChunkId?: string | null
+  /** The cited chunk, from an arrival or a citation clicked in the docked panel. */
+  citedChunkId?: string | null
+  citationTrigger?: number
 }
 
-export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }: YouTubeTranscriptViewProps) {
+export function YouTubeTranscriptView({
+  doc,
+  initialSectionId,
+  citedChunkId,
+  citationTrigger = 0,
+}: YouTubeTranscriptViewProps) {
   const readerZoom = usePanelZoomStore((s) => s.getZoom("reader"))
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
@@ -71,27 +78,29 @@ export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }:
     },
   })
 
-  // Scroll to initialSectionId or initialChunkId once chunks load
+  // A citation owns the scroll (I-41). Settling rather than scrolling once,
+  // because the chunks may still be loading and the pane may still be hidden.
   useEffect(() => {
-    if (!chunks || chunks.length === 0 || !contentRef.current) return
+    if (!citedChunkId) return
+    return settleIntoView<Element>({
+      find: () => document.getElementById(`chunk-${citedChunkId}`),
+      distance: (el) => {
+        const mark = el.getBoundingClientRect()
+        const port = contentRef.current?.getBoundingClientRect()
+        if (!port) return 0
+        return mark.top + mark.height / 2 - (port.top + port.height / 2)
+      },
+      centre: (el) => el.scrollIntoView({ behavior: "instant", block: "center" }),
+      schedule: (fn, ms) => window.setTimeout(fn, ms),
+      cancel: (handle) => window.clearTimeout(handle),
+    })
+  }, [citedChunkId, citationTrigger])
 
-    // Prioritize chunk_id if provided (exact match)
-    if (initialChunkId) {
-      const el = document.getElementById(`chunk-${initialChunkId}`)
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "start" })
-        return
-      }
-    }
-
-    // Fallback to section_id
-    if (initialSectionId) {
-      const el = contentRef.current.querySelector(`[data-section-id="${initialSectionId}"]`)
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "start" })
-      }
-    }
-  }, [initialSectionId, initialChunkId, chunks])
+  useEffect(() => {
+    if (citedChunkId || !initialSectionId || !chunks?.length || !contentRef.current) return
+    const el = contentRef.current.querySelector(`[data-section-id="${initialSectionId}"]`)
+    el?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }, [initialSectionId, citedChunkId, chunks])
 
   // Cmd+F / Ctrl+F opens search bar
   useEffect(() => {
@@ -264,14 +273,9 @@ export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }:
                     data-section-id={chunk.section_id || ""}
                     className={cn(
                       "text-sm leading-relaxed text-foreground",
-                      // A transcript renders one element per chunk, and a citation
-                      // names its chunk exactly -- so the cited passage is marked by
-                      // id here rather than by matching its text, which is what the
-                      // Read view has to do because prose has no chunk boundaries.
-                      // Stays until the reader leaves: they are still reading around
-                      // the passage, and a mark that vanishes answers "which words
-                      // were the source" worse than not marking at all.
-                      chunk.id === initialChunkId &&
+                      // One element per chunk, so the citation is marked by id, not by
+                      // matching words. It stays until the next citation: the reader is still reading.
+                      chunk.id === citedChunkId &&
                         `${CITATION_MARK_TOKEN} -mx-2 rounded-md bg-amber-200/70 px-2 py-1 ` +
                           "ring-1 ring-amber-400/60 dark:bg-amber-500/25 dark:ring-amber-400/40",
                     )}
