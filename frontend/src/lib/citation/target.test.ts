@@ -72,22 +72,33 @@ describe("resolveInPlaceCitation", () => {
   const arrival = ["some", "arrival", "words"]
 
   it("has no page when the reader has not clicked a citation yet", () => {
-    expect(resolveInPlaceCitation(null, arrival)).toEqual({ words: arrival, page: null })
+    expect(resolveInPlaceCitation(null, arrival)).toEqual({ words: arrival, page: null, chunkId: null })
   })
 
   it("carries the clicked citation's own page, not the mount-time page", () => {
-    const clicked = { against: arrival, words: ["cited", "prose"], page: 517 }
-    expect(resolveInPlaceCitation(clicked, arrival)).toEqual({ words: ["cited", "prose"], page: 517 })
+    const clicked = { against: arrival, words: ["cited", "prose"], page: 517, chunkId: null }
+    expect(resolveInPlaceCitation(clicked, arrival)).toEqual({ words: ["cited", "prose"], page: 517, chunkId: null })
   })
 
   it("drops a stale click once a new arrival supersedes it", () => {
-    const staleClick = { against: ["old", "arrival"], words: ["stale"], page: 517 }
-    expect(resolveInPlaceCitation(staleClick, arrival)).toEqual({ words: arrival, page: null })
+    const staleClick = { against: ["old", "arrival"], words: ["stale"], page: 517, chunkId: "c-old" }
+    expect(resolveInPlaceCitation(staleClick, arrival, "c-arrival")).toEqual({
+      words: arrival,
+      page: null,
+      chunkId: "c-arrival",
+    })
   })
 
   it("resets the page to null for a citation with no page of its own", () => {
-    const clicked = { against: arrival, words: ["heading", "only"], page: null }
-    expect(resolveInPlaceCitation(clicked, arrival)).toEqual({ words: ["heading", "only"], page: null })
+    const clicked = { against: arrival, words: ["heading", "only"], page: null, chunkId: null }
+    expect(resolveInPlaceCitation(clicked, arrival)).toEqual({ words: ["heading", "only"], page: null, chunkId: null })
+  })
+
+  it("carries the clicked citation's chunk, not the arrival's (#415)", () => {
+    // A transcript marks by chunk id alone, so a click that dropped it left
+    // the YouTube reader scrolled to the section with nothing marked.
+    const clicked = { against: arrival, words: ["cited"], page: null, chunkId: "c-clicked" }
+    expect(resolveInPlaceCitation(clicked, arrival, "c-arrival").chunkId).toBe("c-clicked")
   })
 })
 
