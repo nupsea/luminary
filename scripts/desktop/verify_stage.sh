@@ -37,6 +37,10 @@ else
 fi
 [ -e "$STAGE/python/pyvenv.cfg" ] && _fail "pyvenv.cfg leaked into the stage" || _pass "no pyvenv.cfg"
 
+# Before the first step that runs staged code, so step 7 sees a write made by any of them.
+MARKER="$BUILD_DIR/verify-stage.marker"
+touch "$MARKER"
+
 _step "2. Interpreter sees itself inside the stage"
 if "$PY" -I -c '
 import os, sys
@@ -66,8 +70,6 @@ else
 fi
 
 _step "5. Server boots and serves the SPA"
-MARKER="$BUILD_DIR/verify-stage.marker"
-touch "$MARKER"
 D="$(mktemp -d)"; PORT=7931
 DATA_DIR="$D" LUMINARY_MODE=public LOG_LEVEL=WARNING \
     "$PY" -I -m uvicorn app.main:app --host 127.0.0.1 --port "$PORT" --no-access-log \
@@ -117,8 +119,8 @@ fi
 _step "7. Nothing was written inside the stage"
 # The install directory is read-only on a user's machine.
 newer="$(find "$STAGE" -type f -newer "$MARKER" 2>/dev/null | head -5)"
-[ -z "$newer" ] && _pass "stage untouched by the boot test" \
-    || { _fail "files written inside the stage during boot:"; echo "$newer" >&2; }
+[ -z "$newer" ] && _pass "stage untouched by steps 2-6" \
+    || { _fail "files written inside the stage by steps 2-6:"; echo "$newer" >&2; }
 rm -f "$MARKER"
 
 _step "8. Stage size"
