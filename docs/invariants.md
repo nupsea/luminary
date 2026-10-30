@@ -287,6 +287,14 @@ Requested-but-uncomputed fails; not-requested is a skip (`_check(requested=)`). 
 `tests/test_eval_gate.py` and `tests/test_eval_search_failures.py` guard it. See the `eval-integrity`
 skill.
 
+**I-71. A dependency ships only under a licence `scripts/licence_policy.json` has decided.**
+A licence is invisible in the code and in `uv add`, and the repository's `LICENSE` says nothing about
+what an installer contains: AGPL-3.0 PyMuPDF and ebooklib shipped under an Apache-2.0 label (#378).
+`scripts/check_licences.py`, in `make ci`, reads the licence of everything the installers install
+(`uv export --group full`, non-dev `package-lock.json` entries) and fails on a licence neither allowed
+nor excepted. An exception holds only for the exact string it records, so a relicensing bump fails
+too. `tests/test_check_licences.py` fails CI if a copyleft licence passes without one.
+
 ## Privacy & Local-First
 
 **I-18. User content never reaches external telemetry, and every library's phone-home is switched off.**
