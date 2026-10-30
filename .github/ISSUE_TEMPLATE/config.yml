@@ -1,8 +1,5 @@
-blank_issues_enabled: false
+blank_issues_enabled: true
 contact_links:
-  - name: "Ask a Question & Get Support"
-    url: https://github.com/nupsea/luminary/discussions
-    about: For local setup troubleshooting, general LLM/Ollama questions, or feedback, please open a discussion instead of an issue.
-  - name: "Community Chat"
-    url: https://discord.gg/luminary
-    about: Join our Discord server to connect with other contributors and chat in real-time.
+  - name: "Report a security vulnerability"
+    url: https://github.com/nupsea/luminary/security/advisories/new
+    about: Privately, never in a public issue. See SECURITY.md.

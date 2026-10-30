@@ -1,0 +1,32 @@
+name: DCO
+
+on:
+  pull_request:
+    branches: ["master"]
+
+jobs:
+  sign-off:
+    runs-on: ubuntu-latest
+    # The owner's own commits need no certificate of origin; bots cannot give one.
+    if: github.event.pull_request.author_association != 'OWNER' && github.event.pull_request.user.type != 'Bot'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every commit is signed off by its author
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          missing=0
+          for c in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            author=$(git show -s --format='%ae' "$c")
+            if ! git show -s --format='%(trailers:key=Signed-off-by,valueonly)' "$c" | grep -qiF "<$author>"; then
+              echo "::error::$(git show -s --format='%h %s' "$c") has no Signed-off-by for $author"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Sign off with 'git commit -s', or fix a branch with 'git rebase --signoff master'. See CONTRIBUTING.md."
+            exit 1
+          fi

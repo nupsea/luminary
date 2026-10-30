@@ -1,13 +1,13 @@
 name: "Feature Request"
 description: "Suggest an idea or enhancement for Luminary"
 title: "[Feature]: "
-labels: ["enhancement", "status/needs-triage"]
+labels: ["enhancement"]
 body:
   - type: textarea
     id: feature_desc
     attributes:
       label: "What feature would you like to see?"
-      description: "Describe the idea and how it improves your learning experience."
+      description: "What you are trying to learn or do, and what gets in the way today."
       placeholder: "e.g., I would like to have keyboard shortcuts during flashcard reviews because..."
     validations:
       required: true
