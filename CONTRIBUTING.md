@@ -82,6 +82,9 @@ The full set is `docs/architecture.md` and `docs/invariants.md`. These are the o
 - Every LLM call goes through LiteLLM, never a provider SDK.
 - Services and repos raise `LuminaryError` subclasses, never `HTTPException`.
 - Python packages are added with `uv add`, never pip or poetry.
+- Read a dependency's licence before adding it. `make ci` fails on a shipped package whose licence
+  `scripts/licence_policy.json` has not decided; copyleft needs an exception the maintainer grants
+  (I-71).
 - A new endpoint gets a pytest test and a `surface-manifest.json` entry (`add-endpoint` skill).
 - A schema change edits `backend/app/models.py` and runs `make db-revision m="…"`, never raw
   `alembic revision`. Read the generated revision for drops you did not intend (I-23,

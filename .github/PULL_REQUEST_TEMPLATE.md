@@ -23,3 +23,4 @@ Closes #
 - [ ] `make smoke` passes, if an endpoint's request or response changed
 - [ ] Every commit is signed off (`git commit -s`)
 - [ ] A schema change came from `make db-revision`, and I read the revision for unintended drops
+- [ ] A new or bumped dependency is named here with its licence, and `make ci`'s licence check passes
