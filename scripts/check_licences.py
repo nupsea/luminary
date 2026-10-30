@@ -88,7 +88,7 @@ def python_licence(name: str) -> str | None:
 
 
 def shipping_npm() -> dict[str, str | None]:
-    lock = json.loads((REPO / "frontend" / "package-lock.json").read_text())
+    lock = json.loads((REPO / "frontend" / "package-lock.json").read_text(encoding="utf-8"))
     found: dict[str, str | None] = {}
     for path, entry in lock["packages"].items():
         # Native binaries for one os/cpu run under node, never inside the browser bundle.
@@ -102,7 +102,7 @@ def shipping_npm() -> dict[str, str | None]:
 
 
 def npm_dependants(name: str) -> list[str]:
-    lock = json.loads((REPO / "frontend" / "package-lock.json").read_text())
+    lock = json.loads((REPO / "frontend" / "package-lock.json").read_text(encoding="utf-8"))
     return sorted(
         {
             path.rsplit("node_modules/", 1)[-1] or "frontend"
@@ -191,7 +191,7 @@ def check(shipped: dict[str, str | None], policy: dict) -> list[str]:
 
 
 def main() -> int:
-    policy = json.loads(POLICY.read_text())
+    policy = json.loads(POLICY.read_text(encoding="utf-8"))
     shipped = {f"python:{n}": python_licence(n) for n in shipping_python()}
     shipped |= {f"npm:{n}": lic for n, lic in shipping_npm().items()}
     problems = check(shipped, policy)
