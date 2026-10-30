@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **On Windows, the first start downloaded a tokenizer file from OpenAI's servers, and could not start offline.** litellm's Windows package ships the file with Windows line endings, so its checksum failed; the installer now ships the exact file the tokenizer expects.
+
 ## [0.17.0] - 2026-10-28
 
 ### Added
