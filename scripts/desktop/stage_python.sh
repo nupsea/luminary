@@ -36,10 +36,10 @@ _tok() {
     local f="$SITE/litellm/litellm_core_utils/tokenizers/9b5ad71b2ce5302211f9c61530b329a4922fc6a4"
     local cached cr stage_size cache_size with_cr
     cr=$'\r'
-    cached="$(find "$(uv cache dir)" -path '*litellm_core_utils/tokenizers/9b5ad71b2ce5302211f9c61530b329a4922fc6a4' 2>/dev/null | head -1 || true)"
+    cached="$(find "$(uv cache dir)" -path '*litellm_core_utils/tokenizers/9b5ad71b2ce5302211f9c61530b329a4922fc6a4' 2>/dev/null | head -1)"
     stage_size="$(stat -c %s "$f" 2>/dev/null || echo absent)"
     cache_size="$(stat -c %s "$cached" 2>/dev/null || echo absent)"
-    with_cr="$({ grep -rlI "$cr" --include='*.py' "$SITE" 2>/dev/null || true; } | wc -l)"
+    with_cr="$(grep -rlI "$cr" --include='*.py' "$SITE" 2>/dev/null | wc -l)"
     _info "DIAG $1: stage=$stage_size uv-cache=$cache_size py-with-CR=$with_cr"
 }
 
