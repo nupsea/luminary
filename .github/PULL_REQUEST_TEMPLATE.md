@@ -1,46 +1,26 @@
-## Description
+Closes #
 
-Include a clear summary of the changes and specify which issue is fixed. Mention any new dependencies introduced.
+## What and why
 
-Fixes # (issue number)
+<!-- Two or three lines: what was wrong or missing, and the rule the change follows. The diff says the rest. -->
 
----
+## How it was checked
 
-## Type of Change
+<!-- What you ran and what you looked at. Paste the tail of `make ci`. For a UI change, a screenshot or recording. -->
 
-Please check the options that apply:
+**Not checked:** <!-- what you could not verify, e.g. a platform you do not have -->
 
-- [ ] **Bug Fix** (non-breaking change which fixes an issue)
-- [ ] **New Feature** (non-breaking change which adds functionality)
-- [ ] **Breaking Change** (fix or feature that would cause existing functionality to behave differently)
-- [ ] **Documentation Update** (improvements to docs, evals, or comments)
-- [ ] **Refactoring / Maintenance** (code cleanup, performance optimizations, no API/schema changes)
+## AI use
 
----
+- Tools: <!-- e.g. none, Claude Code, Cursor, Copilot -->
+- How much: <!-- none / suggestions / most of the diff -->
 
-## Key Verification Steps
+## Checklist
 
-Describe the tests or steps you ran to verify your changes. If this is a UI change, please include **screenshots** or a **GIF** showing the before/after behavior.
-
-### Local Tests Run
-- [ ] **Backend Tests**: Run `make test` and ensure all tests pass.
-- [ ] **Linting & Formatting Check**: Run `make lint` (runs `ruff` and checks schema coverage).
-- [ ] **Frontend Build & Types**: Run `make build` and verify `cd frontend && npx tsc --noEmit` passes.
-- [ ] **Full Integration Suite**: Run `make ci` (runs all checks together).
-
-### Database Changes (If applicable)
-*If you modified `backend/app/models.py`:*
-- [ ] I ran `make db-revision m="description"` to generate the migration file.
-- [ ] I inspected the generated revision under `backend/alembic/versions/` to verify it matches my intention (no destructive auto-drops).
-- [ ] I applied the migration locally using `make db-migrate` and verified it runs.
-
----
-
-## Contributor Checklist
-
-- [ ] My code follows the code style guidelines of this project (runs `ruff` locally).
-- [ ] I have performed a self-review of my own code.
-- [ ] I have commented my code, particularly in hard-to-understand areas (e.g., FTS5 column contracts, Alembic overrides).
-- [ ] My changes generate no new warnings during the build or test runs.
-- [ ] I have added tests that cover my changes (unit tests, integration tests, or evaluation harness cases).
-- [ ] I have updated the documentation (or inline comments) to reflect my changes.
+- [ ] The linked issue carries the `accepted` label
+- [ ] I have read every line of this diff and can explain it
+- [ ] `make ci` passes locally
+- [ ] `make smoke` passes, if an endpoint's request or response changed
+- [ ] Every commit is signed off (`git commit -s`)
+- [ ] A schema change came from `make db-revision`, and I read the revision for unintended drops
+- [ ] A new or bumped dependency is named here with its licence, and `make ci`'s licence check passes

@@ -112,6 +112,10 @@ PYEOF
     fi
     # The +alternate form: bash 3.2 treats an empty array as unbound under set -u.
     uv pip sync --python "$py" --system ${index_args[@]+"${index_args[@]}"} "$req"
+
+    _step "Restoring tiktoken's cached encodings"
+    "$py" -I "$(native_path "$REPO_ROOT/scripts/desktop/repair_tiktoken_cache.py")" \
+        "$(native_path "$(staged_site)")" || _die "a tiktoken cache file is not the one tiktoken pins"
 }
 
 # Never add `testing`: `import torch` imports `torch.testing`.

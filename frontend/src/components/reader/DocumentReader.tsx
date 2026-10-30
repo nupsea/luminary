@@ -76,7 +76,7 @@ import { SummaryPanel } from "./SummaryPanel"
 import { ChatConversation } from "@/pages/Chat/ChatConversation"
 import { docThreadKey } from "@/store/chatThreads"
 import type { SourceCitation } from "@/components/SourceCitationChips"
-import { buildCitationTarget, resolveInPlaceCitation } from "@/lib/citation"
+import { buildCitationTarget, resolveInPlaceCitation, type InPlaceCitation } from "@/lib/citation"
 import type { AnnotationItem, DocumentDetail, SectionItem } from "./types"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
 
@@ -245,11 +245,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // of state to another, and no window where the old mark answers the new
   // citation. `savedCitationWords` is state in `Learning.tsx`, so its identity
   // changes only when a citation actually does.
-  const [inPlaceCitation, setInPlaceCitation] =
-    useState<{ against: string[]; words: string[]; page: number | null } | null>(null)
+  const [inPlaceCitation, setInPlaceCitation] = useState<InPlaceCitation | null>(null)
   const [citationTrigger, setCitationTrigger] = useState(0)
-  const { words: citationWords, page: citationPdfPage } =
-    resolveInPlaceCitation(inPlaceCitation, initialCitationWords)
+  const { words: citationWords, page: citationPdfPage, chunkId: citedChunkId } =
+    resolveInPlaceCitation(inPlaceCitation, initialCitationWords, initialChunkId ?? null)
   const focusOnCitation = citationOwnsScroll && !insightsRestored
   const insightsCollapsed = insights.collapsed || focusOnCitation
   const toggleInsights = useCallback(() => {
@@ -1041,7 +1040,12 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     closeReaderSearch()
     const target = buildCitationTarget(c)
     pushHistory()
-    setInPlaceCitation({ against: initialCitationWords, words: target.words, page: c.pdf_page_number ?? null })
+    setInPlaceCitation({
+      against: initialCitationWords,
+      words: target.words,
+      page: c.pdf_page_number ?? null,
+      chunkId: target.chunkId,
+    })
     setCitationTrigger((n) => n + 1)
     if (doc?.format === "pdf" && c.pdf_page_number) {
       setLeftTab("pdfview")
@@ -1663,7 +1667,12 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             className={cn("flex-1 overflow-hidden", leftTab !== "read" && "hidden")}
           >
             {isYouTube ? (
-              <YouTubeTranscriptView doc={doc} initialSectionId={readTargetSectionId} initialChunkId={initialChunkId} />
+              <YouTubeTranscriptView
+                doc={doc}
+                initialSectionId={readTargetSectionId}
+                citedChunkId={citedChunkId}
+                citationTrigger={citationTrigger}
+              />
             ) : (
               <ReadView
                 documentId={documentId}

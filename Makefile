@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-full eval-gen-full eval-cards-full eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-followups eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards golden-flashcards-corpus eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-epub-place verify-reader-switch verify-note-nav luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama stage-notices verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-full eval-gen-full eval-cards-full eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-followups eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards golden-flashcards-corpus eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-epub-place verify-reader-switch verify-note-nav luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama stage-notices verify-stage check-stage check-licences desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
 
 # install.sh puts uv (and Node on Linux) in ~/.local/bin, which a shell opened
 # before the install does not have on PATH.
@@ -895,6 +895,7 @@ endif
 	$(PY) scripts/check_manifest_coverage.py
 	$(PY) scripts/check_public_surface_calls.py
 	$(PY) scripts/check_smoke_paths.py
+	$(PY) scripts/check_licences.py
 	bash scripts/check_powershell.sh
 	# `npm run build` includes tsc. Vite only warns past chunkSizeWarningLimit; make it fatal.
 	cd frontend && out="$$(npm run build 2>&1)"; rc=$$?; printf '%s\n' "$$out"; \
@@ -909,6 +910,10 @@ endif
 	# master green. It costs ~1s.
 	cd frontend && npm run test:coverage
 	@echo "CI passed."
+
+# What I-71 gates in `make ci`: every shipped dependency's licence against scripts/licence_policy.json.
+check-licences:
+	$(PY) scripts/check_licences.py
 
 regen-api-types:
 	cd frontend && npm run regen:api-types
