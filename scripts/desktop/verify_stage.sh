@@ -39,6 +39,8 @@ fi
 
 # Before the first step that runs staged code, so step 7 sees a write made by any of them.
 MARKER="$BUILD_DIR/verify-stage.marker"
+SIZES="$BUILD_DIR/verify-stage.sizes"
+find "$STAGE" -type f -printf '%s %p\n' >"$SIZES"
 touch "$MARKER"
 
 _step "2. Interpreter sees itself inside the stage"
@@ -119,9 +121,17 @@ fi
 _step "7. Nothing was written inside the stage"
 # The install directory is read-only on a user's machine.
 newer="$(find "$STAGE" -type f -newer "$MARKER" 2>/dev/null | head -5)"
-[ -z "$newer" ] && _pass "stage untouched by steps 2-6" \
-    || { _fail "files written inside the stage by steps 2-6:"; echo "$newer" >&2; }
-rm -f "$MARKER"
+if [ -z "$newer" ]; then
+    _pass "stage untouched by steps 2-6"
+else
+    # Size before (absent = created) and the hash now tell a replaced file from a new one.
+    _fail "files written inside the stage by steps 2-6:"
+    while IFS= read -r f; do
+        before="$(awk -v p="$f" '{ s = $1; sub(/^[0-9]+ /, "") } $0 == p { print s; exit }' "$SIZES")"
+        echo "    $f  before=${before:-absent} now=$(stat -c %s "$f") sha256=$(sha256sum "$f" | cut -c1-64)" >&2
+    done <<<"$newer"
+fi
+rm -f "$MARKER" "$SIZES"
 
 _step "8. Stage size"
 size_mb="$(du -sm "$STAGE" | cut -f1)"
