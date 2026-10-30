@@ -91,7 +91,7 @@ def _attach(component: Component, files: list[Path], base: Path) -> None:
 
 
 def _vendored(ecosystem: str, name: str) -> Path | None:
-    table = json.loads((VENDORED_DIR / "vendored.json").read_text())[ecosystem]
+    table = json.loads((VENDORED_DIR / "vendored.json").read_text(encoding="utf-8"))[ecosystem]
     for pattern, file in table.items():
         if fnmatch.fnmatchcase(name, pattern):
             return VENDORED_DIR / file
@@ -101,7 +101,7 @@ def _vendored(ecosystem: str, name: str) -> Path | None:
 def python_components(site: Path) -> list[Component]:
     out = []
     for dist in sorted(site.glob("*.dist-info")):
-        meta = Parser().parsestr((dist / "METADATA").read_text(errors="replace"))
+        meta = Parser().parsestr((dist / "METADATA").read_text(encoding="utf-8", errors="replace"))
         field = (meta.get("License") or "").strip()
         classifiers = [
             c.split("::")[-1].strip()
@@ -117,7 +117,7 @@ def python_components(site: Path) -> list[Component]:
         _attach(c, _licence_files(dist, recursive=True), site)
         if not c.texts:
             tops = (
-                (dist / "top_level.txt").read_text().split()
+                (dist / "top_level.txt").read_text(encoding="utf-8").split()
                 if (dist / "top_level.txt").exists()
                 else []
             )
@@ -131,7 +131,7 @@ def python_components(site: Path) -> list[Component]:
 
 
 def npm_components(root: Path) -> list[Component]:
-    lock = json.loads((root / "package-lock.json").read_text())
+    lock = json.loads((root / "package-lock.json").read_text(encoding="utf-8"))
     out = []
     for path, entry in sorted(lock["packages"].items()):
         # Native binaries for one os/cpu run under node, never inside the browser bundle.
@@ -140,7 +140,7 @@ def npm_components(root: Path) -> list[Component]:
         pkg_dir = root / path
         if not pkg_dir.is_dir():
             continue
-        pkg = json.loads((pkg_dir / "package.json").read_text())
+        pkg = json.loads((pkg_dir / "package.json").read_text(encoding="utf-8"))
         licence = pkg.get("license")
         if isinstance(licence, dict):
             licence = licence.get("type")
