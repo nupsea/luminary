@@ -170,6 +170,17 @@ export first. So in practice, treat any release carrying a migration as a
 commitment: if it has to be pulled, users who already ran it move forward, not
 back. Say so in the release notes.
 
+## The licence of a release
+
+The repository's code is Apache-2.0. The DMG, `.deb`, AppImage and setup `.exe` contain PyMuPDF
+and ebooklib (AGPL-3.0), so each is distributed under AGPL-3.0, and AGPL §13 extends the source
+offer to anyone using a Luminary server over a network; the About dialog makes it, linking to
+`github.com/nupsea/luminary/tree/v<version>`. The source tarball ships no third-party code.
+
+Every installer carries `licenses/THIRD-PARTY-LICENSES.txt`. Staging fails when a shipped package
+has no licence text (`desktop-bundle.md`, "Licence notices"), so a new dependency cannot reach a
+release without its notice.
+
 ## Before tagging
 
 - `make ci` green.

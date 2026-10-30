@@ -340,6 +340,21 @@ function AboutDialog({ open, onClose }: { open: boolean; onClose: () => void }) 
             Everything lives in a local <code className="font-mono">.luminary</code> folder — copy it
             to back up or move to a new machine.
           </p>
+          {/* AGPL-3.0 section 13: a user over the network is offered the source too (#378). */}
+          <p className="text-xs text-muted-foreground">
+            Luminary's code is Apache-2.0. The app includes PyMuPDF and ebooklib, which are AGPL-3.0,
+            so as distributed it is licensed under AGPL-3.0.{" "}
+            {data?.version && (
+              <a
+                href={`https://github.com/nupsea/luminary/tree/v${data.version}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                Source code for {data.version}
+              </a>
+            )}
+          </p>
         </div>
       </DialogContent>
     </Dialog>

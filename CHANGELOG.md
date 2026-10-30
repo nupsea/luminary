@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The installers shipped AGPL-3.0 PyMuPDF and ebooklib as an Apache-2.0 app, with no third-party notices.** Every bundled package's licence now ships in `licenses/THIRD-PARTY-LICENSES.txt`, builds are stated as AGPL-3.0, and About links to the running version's source; staging fails on a package without a notice (#378).
+
 ## [0.17.0] - 2026-10-28
 
 ### Added

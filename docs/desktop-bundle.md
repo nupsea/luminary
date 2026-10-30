@@ -17,7 +17,7 @@ stage/                        <- Contents/Resources
 ├── backend/{app,alembic,alembic.ini,pyproject.toml}
 ├── python/                   relocatable CPython + all dependencies
 ├── ollama/{ollama,llama-server}
-└── licenses/
+└── licenses/                 THIRD-PARTY-LICENSES.txt, Ollama, llama.cpp, Luminary
 ```
 
 The tree mirrors the repo because `backend/app` resolves `surface-manifest.json`,
@@ -336,6 +336,7 @@ on (unsupported host, too little disk, Luminary still open) writes no report.
 | `desktop/stage_payload.sh` | Backend source, SPA, manifest, license notices. Strips `code_executor`. |
 | `desktop/stage_python.sh` | Windows and Linux: relocatable interpreter + every dependency. |
 | `desktop/stage_ollama.sh` | Windows and Linux: checksummed engine, CPU + Vulkan + CUDA 13. |
+| `desktop/stage_notices.sh` | Every platform, last: `THIRD-PARTY-LICENSES.txt` from `third_party_notices.py`. |
 | `desktop/verify_stage.sh` | Windows and Linux: relocatability + import + real boot of the staged backend. |
 | `desktop/verify_ollama.sh` | Windows and Linux: structure + a real pull and generation. |
 | `desktop/verify_installed.sh` | Launches an installed app and waits for the shell's `ready` line. |
@@ -417,6 +418,31 @@ for `pymupdf/_extra.so`, `/opt/homebrew/opt/libomp` for torch's `libomp.dylib`.
 Consumers resolve through `@rpath`, so those are identity, not linkage. A check
 for external linkage must exclude the install name (`otool -D`) or it reports
 three false positives. Excluded, the stage has zero external linkage.
+
+## Licence notices
+
+`stage_notices.sh` writes `licenses/THIRD-PARTY-LICENSES.txt` with the staged interpreter, after
+the payload and the runtime: a contents list, then each licence text once, then "same text as"
+for repeats. Its header states the build's licence, worked out from the packages present
+(`releasing.md`, "The licence of a release").
+
+| Covered | Text taken from |
+|---|---|
+| Every `*.dist-info` in the staged `site-packages` | The dist-info's licence files, then licence files at the top of the package's own directory |
+| CPython | The runtime's `LICENSE.txt` |
+| Every non-dev package in `frontend/package-lock.json` | Licence files anywhere in the package, outside nested `node_modules` |
+| A package that ships no text | `scripts/desktop/third_party/`, keyed by name or glob in `vendored.json`; each file's first line is its upstream URL |
+
+A package with no text from any of these **fails staging, naming it**. Add the upstream licence
+file to `third_party/` and key it; never key a package to a text other than its own. An npm entry
+restricted by `os` or `cpu` is skipped: it is a native binary run under node, never part of the
+browser bundle. Step 10 of both `verify_stage.sh` scripts reruns the generator with `--check` and
+fails when the file is missing or no longer matches the stage. `test_third_party_notices.py`
+guards both failures.
+
+Not yet covered: the Rust crates compiled into the shell, the libraries python-build-standalone
+links into CPython (OpenSSL, SQLite, libffi and others), and the GPU runtimes Ollama ships on
+Windows and Linux.
 
 ## Ollama
 
@@ -534,8 +560,9 @@ Two things must stay out of the installer:
 | `transcription` (faster-whisper) | `python_extra` | Pulls PyAV, whose wheels bundle `libx264`/`libx265` (GPL-2.0-or-later). `libavcodec`/`libavformat`/`libavfilter`/`libavdevice` hard-link them via `@loader_path`, so they cannot be stripped from the wheel. | `DATA_DIR/extras` |
 | `ffmpeg` | `tool` | Static builds carrying x264/x265 are GPL. | `DATA_DIR/bin` |
 
-Luminary is Apache-2.0, so GPL code must not travel inside a distributed
-installer. `faster-whisper` therefore sits in its own `media` dependency group,
+GPL code stays out of a distributed installer. Builds are AGPL-3.0 only through PyMuPDF and
+ebooklib, which #377 may replace, and bundled GPL codecs would keep them copyleft after that.
+`faster-whisper` therefore sits in its own `media` dependency group,
 which the bundle does not install; `AudioTranscriber.__init__` raises through
 `require_extra(..., group="media")` until the component is present.
 
