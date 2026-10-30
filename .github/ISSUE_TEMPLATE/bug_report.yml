@@ -1,7 +1,7 @@
 name: "Bug Report"
 description: "Report a bug or crash in Luminary"
 title: "[Bug]: "
-labels: ["bug", "status/needs-triage"]
+labels: ["bug"]
 body:
   - type: textarea
     id: bug_desc

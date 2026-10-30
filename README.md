@@ -179,8 +179,9 @@ you submit it.
 
 ## Contributing
 
-Contributions are welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**. Fork, branch from
-`master`, set up with `make install-dev`, and run `make ci` before opening a PR.
+Contributions are welcome, AI-assisted ones included — see **[CONTRIBUTING.md](CONTRIBUTING.md)**.
+Start from an issue labelled `accepted`, keep the PR to that issue, and sign off your commits.
+Running Luminary on your own hardware and filing a hardware report helps without any code.
 
 | Read | For |
 |---|---|
