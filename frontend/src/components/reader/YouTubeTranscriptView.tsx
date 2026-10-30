@@ -273,13 +273,8 @@ export function YouTubeTranscriptView({
                     data-section-id={chunk.section_id || ""}
                     className={cn(
                       "text-sm leading-relaxed text-foreground",
-                      // A transcript renders one element per chunk, and a citation
-                      // names its chunk exactly -- so the cited passage is marked by
-                      // id here rather than by matching its text, which is what the
-                      // Read view has to do because prose has no chunk boundaries.
-                      // Stays until the next citation or the reader leaves: they are still reading around
-                      // the passage, and a mark that vanishes answers "which words
-                      // were the source" worse than not marking at all.
+                      // One element per chunk, so the citation is marked by id, not by
+                      // matching words. It stays until the next citation: the reader is still reading.
                       chunk.id === citedChunkId &&
                         `${CITATION_MARK_TOKEN} -mx-2 rounded-md bg-amber-200/70 px-2 py-1 ` +
                           "ring-1 ring-amber-400/60 dark:bg-amber-500/25 dark:ring-amber-400/40",
