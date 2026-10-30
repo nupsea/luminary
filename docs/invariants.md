@@ -364,6 +364,14 @@ the fix. `background_call` unloads the model, with nothing in flight, once its r
 more than `/api/ps` reports (capped peak 1.60 GB, uncapped passes 3 GB by call 13); that holds the
 banner until that server restarts. `test_prompt_cache_guard.py` guards it.
 
+**I-72. A staged tiktoken file is the exact bytes tiktoken pins, on every platform.**
+A platform wheel can ship different data from the others: litellm 1.102.2's `win_amd64` wheel
+carries its tiktoken files with CRLF line endings (cl100k_base 1,781,382 bytes, not 1,681,126).
+tiktoken checks a cached file's sha256 at `import litellm`; on a mismatch it deletes the file,
+downloads it from openaipublic.blob.core.windows.net and writes the install directory, and offline
+the import fails. `repair_tiktoken_cache.py` converts a file only when the LF form matches a pinned
+hash, and fails the stage otherwise. `test_repair_tiktoken_cache.py` guards it.
+
 ## Retired numbers
 
 Kept so existing references resolve.
