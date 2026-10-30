@@ -31,9 +31,20 @@ SITE="$(staged_site)"
 # A private runtime we ship, not uv's shared toolchain.
 rm -f "$STDLIB/EXTERNALLY-MANAGED"
 
+# DIAGNOSTIC (#416), revert before merge: where the cl100k cache file gains CRLF on Windows.
+_tok() {
+    local f="$SITE/litellm/litellm_core_utils/tokenizers/9b5ad71b2ce5302211f9c61530b329a4922fc6a4"
+    local cached
+    cached="$(find "$(uv cache dir)" -path '*litellm_core_utils/tokenizers/9b5ad71b2ce5302211f9c61530b329a4922fc6a4' 2>/dev/null | head -1)"
+    _info "DIAG $1: stage=$(stat -c %s "$f" 2>/dev/null || echo absent) uv-cache=$(stat -c %s "$cached" 2>/dev/null || echo absent) py-with-CR=$(grep -rlI $'\r' --include='*.py' "$SITE" 2>/dev/null | wc -l)"
+}
+
 install_shipping_dependencies "$PY"
+_tok "after install"
 prune_test_suites "$SITE"
+_tok "after prune_test_suites"
 write_backend_pth "$SITE"
+_tok "after write_backend_pth"
 
 _step "Sanitizing build-machine paths"
 # _sysconfigdata leaks the build prefix, in any of three Windows spellings. Text files only.
@@ -76,6 +87,7 @@ else
     relocatable_shebangs "$PY" "$PY_STAGE/bin"
 fi
 
+_tok "after sanitize and launchers"
 _step "Pruning the interpreter"
 # tkinter/tcl/tk and the interpreter's own test suite: nothing in the backend imports them.
 if [ "$DESKTOP_OS" = windows ]; then
@@ -91,8 +103,10 @@ else
 fi
 
 prune_dependencies "$SITE"
+_tok "after prune_dependencies"
 relink_bundled_libs "$SITE"
 byte_compile "$PY" "$STDLIB"
 [ -d "$STAGE/backend" ] && byte_compile "$PY" "$STAGE/backend"
+_tok "after byte_compile"
 
 _info "runtime staged: $(du -sh "$PY_STAGE" | awk '{print $1}')"
