@@ -1,0 +1,256 @@
+{
+  "build": "20250918",
+  "python": "3.13.7",
+  "platforms": {
+    "darwin": {
+      "LICENSE.bzip2.txt": {
+        "licence": "bzip2-1.0.6",
+        "modules": [
+          "_bz2"
+        ]
+      },
+      "LICENSE.expat.txt": {
+        "licence": "MIT",
+        "modules": [
+          "_elementtree",
+          "pyexpat"
+        ]
+      },
+      "LICENSE.libedit.txt": {
+        "licence": "BSD-3-Clause",
+        "modules": [
+          "readline"
+        ]
+      },
+      "LICENSE.libffi.txt": {
+        "licence": "MIT",
+        "modules": [
+          "_ctypes"
+        ]
+      },
+      "LICENSE.liblzma.txt": {
+        "licence": "public domain",
+        "modules": [
+          "_lzma"
+        ]
+      },
+      "LICENSE.libuuid.txt": {
+        "licence": "BSD-3-Clause",
+        "modules": [
+          "_uuid"
+        ]
+      },
+      "LICENSE.mpdecimal.txt": {
+        "licence": "BSD-2-Clause",
+        "modules": [
+          "_decimal"
+        ]
+      },
+      "LICENSE.ncurses.txt": {
+        "licence": "X11",
+        "modules": [
+          "_curses",
+          "_curses_panel",
+          "readline"
+        ]
+      },
+      "LICENSE.openssl-3.txt": {
+        "licence": "Apache-2.0",
+        "modules": [
+          "_hashlib",
+          "_ssl"
+        ]
+      },
+      "LICENSE.sqlite.txt": {
+        "licence": "public domain",
+        "modules": [
+          "_sqlite3"
+        ]
+      },
+      "LICENSE.tcl.txt": {
+        "licence": "TCL",
+        "modules": [
+          "_tkinter"
+        ]
+      },
+      "LICENSE.zlib.txt": {
+        "licence": "Zlib",
+        "modules": [
+          "zlib"
+        ]
+      }
+    },
+    "win32": {
+      "LICENSE.bzip2.txt": {
+        "licence": "bzip2-1.0.6",
+        "modules": [
+          "_bz2"
+        ]
+      },
+      "LICENSE.expat.txt": {
+        "licence": "MIT",
+        "modules": [
+          "_elementtree",
+          "pyexpat"
+        ]
+      },
+      "LICENSE.libffi.txt": {
+        "licence": "MIT",
+        "modules": [
+          "_ctypes"
+        ]
+      },
+      "LICENSE.liblzma.txt": {
+        "licence": "public domain",
+        "modules": [
+          "_lzma"
+        ]
+      },
+      "LICENSE.libuuid.txt": {
+        "licence": "BSD-3-Clause",
+        "modules": [
+          "_uuid"
+        ]
+      },
+      "LICENSE.mpdecimal.txt": {
+        "licence": "BSD-2-Clause",
+        "modules": [
+          "_decimal"
+        ]
+      },
+      "LICENSE.openssl-3.txt": {
+        "licence": "Apache-2.0",
+        "modules": [
+          "_hashlib",
+          "_ssl"
+        ]
+      },
+      "LICENSE.sqlite.txt": {
+        "licence": "public domain",
+        "modules": [
+          "_sqlite3"
+        ]
+      },
+      "LICENSE.tcl.txt": {
+        "licence": "TCL",
+        "modules": [
+          "_tkinter"
+        ]
+      },
+      "LICENSE.tix.txt": {
+        "licence": "TCL",
+        "modules": [
+          "_tkinter"
+        ]
+      },
+      "LICENSE.zlib.txt": {
+        "licence": "Zlib",
+        "modules": [
+          "zlib"
+        ]
+      }
+    },
+    "linux": {
+      "LICENSE.bdb.txt": {
+        "licence": "Sleepycat",
+        "modules": [
+          "_dbm"
+        ]
+      },
+      "LICENSE.bzip2.txt": {
+        "licence": "bzip2-1.0.6",
+        "modules": [
+          "_bz2"
+        ]
+      },
+      "LICENSE.expat.txt": {
+        "licence": "MIT",
+        "modules": [
+          "_elementtree",
+          "pyexpat"
+        ]
+      },
+      "LICENSE.libX11.txt": {
+        "licence": "MIT / TCL / X11",
+        "modules": [
+          "_tkinter"
+        ]
+      },
+      "LICENSE.libXau.txt": {
+        "licence": "MIT / TCL / X11",
+        "modules": [
+          "_tkinter"
+        ]
+      },
+      "LICENSE.libedit.txt": {
+        "licence": "BSD-3-Clause",
+        "modules": [
+          "readline"
+        ]
+      },
+      "LICENSE.libffi.txt": {
+        "licence": "MIT",
+        "modules": [
+          "_ctypes"
+        ]
+      },
+      "LICENSE.liblzma.txt": {
+        "licence": "public domain",
+        "modules": [
+          "_lzma"
+        ]
+      },
+      "LICENSE.libuuid.txt": {
+        "licence": "BSD-3-Clause",
+        "modules": [
+          "_uuid"
+        ]
+      },
+      "LICENSE.libxcb.txt": {
+        "licence": "MIT / TCL / X11",
+        "modules": [
+          "_tkinter"
+        ]
+      },
+      "LICENSE.mpdecimal.txt": {
+        "licence": "BSD-2-Clause",
+        "modules": [
+          "_decimal"
+        ]
+      },
+      "LICENSE.ncurses.txt": {
+        "licence": "X11",
+        "modules": [
+          "_curses",
+          "_curses_panel",
+          "readline"
+        ]
+      },
+      "LICENSE.openssl-3.txt": {
+        "licence": "Apache-2.0",
+        "modules": [
+          "_hashlib",
+          "_ssl"
+        ]
+      },
+      "LICENSE.sqlite.txt": {
+        "licence": "public domain",
+        "modules": [
+          "_sqlite3"
+        ]
+      },
+      "LICENSE.tcl.txt": {
+        "licence": "MIT / TCL / X11",
+        "modules": [
+          "_tkinter"
+        ]
+      },
+      "LICENSE.zlib.txt": {
+        "licence": "Zlib",
+        "modules": [
+          "zlib"
+        ]
+      }
+    }
+  }
+}

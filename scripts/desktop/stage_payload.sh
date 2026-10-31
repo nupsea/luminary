@@ -37,10 +37,14 @@ find "$STAGE/backend" "$STAGE/frontend" \( -name '*.pyc' -o -name '*.db' -o -nam
 _step "Staging third-party notices"
 cp "$REPO_ROOT/LICENSE" "$STAGE/licenses/LUMINARY-LICENSE"
 
-# License obligation: Ollama and its vendored llama.cpp (both MIT).
+# License obligation: Ollama and its vendored llama.cpp (both MIT), at the tag Ollama builds.
 curl -fsSL "https://raw.githubusercontent.com/ollama/ollama/$OLLAMA_VERSION/LICENSE" \
     -o "$STAGE/licenses/OLLAMA-LICENSE"
-curl -fsSL "https://raw.githubusercontent.com/ggml-org/llama.cpp/master/LICENSE" \
+llama_tag="$(curl -fsSL "https://raw.githubusercontent.com/ollama/ollama/$OLLAMA_VERSION/LLAMA_CPP_VERSION" | tr -d '[:space:]')"
+vendored_tag="$(sed -n 's/^ *"tag": "\(.*\)",$/\1/p' "$REPO_ROOT/scripts/desktop/third_party/llama.cpp/components.json")"
+[ "$llama_tag" = "$vendored_tag" ] || _die "Ollama $OLLAMA_VERSION builds llama.cpp $llama_tag, the \
+vendored notices in third_party/llama.cpp/ are for $vendored_tag; re-vendor them at $llama_tag"
+curl -fsSL "https://raw.githubusercontent.com/ggml-org/llama.cpp/$llama_tag/LICENSE" \
     -o "$STAGE/licenses/LLAMA.CPP-LICENSE"
 
 _step "Verifying payload layout"

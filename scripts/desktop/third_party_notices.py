@@ -1,6 +1,7 @@
 """Write the third-party notices for a stage, or check an existing file still matches it.
 
-    third_party_notices.py --site SITE --runtime-license FILE --npm-root DIR
+    third_party_notices.py --site SITE --runtime-license FILE --runtime-build FILE
+                           --npm-root DIR --cargo-manifest FILE --ollama FILE
                            --version V --out FILE [--check]
 
 Exits 1 naming every shipped package without a licence text, so a new dependency
@@ -13,8 +14,10 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import re
+import subprocess
 import sys
 from email.parser import Parser
 from pathlib import Path
@@ -41,6 +44,11 @@ CODE_SUFFIXES = {
 }
 # A License field longer than this is the licence text itself, not its name.
 SHORT_LICENCE_FIELD = 100
+GO_BUILDINFO = b"\xff Go buildinf:"
+
+
+class NoticeError(Exception):
+    pass
 
 
 class Component:
@@ -151,6 +159,120 @@ def npm_components(root: Path) -> list[Component]:
     return out
 
 
+def _cargo_metadata(manifest: Path) -> dict:
+    rustc = subprocess.run(  # noqa: S603 -- fixed arguments, no user input
+        ["rustc", "-vV"],  # noqa: S607 -- the toolchain on PATH builds the shell
+        capture_output=True,
+        check=True,
+    ).stdout.decode()
+    host = re.search(r"^host: (\S+)", rustc, re.M).group(1)
+    cmd = ["cargo", "metadata", "--format-version", "1", "--filter-platform", host]
+    cmd += ["--manifest-path", str(manifest)]
+    return json.loads(subprocess.run(cmd, capture_output=True, check=True).stdout)  # noqa: S603
+
+
+def cargo_components(meta: dict) -> list[Component]:
+    """Crates compiled into the shell: normal dependencies only, build and dev ones never ship."""
+    pkgs = {p["id"]: p for p in meta["packages"]}
+    nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
+    seen, todo = set(), [meta["resolve"]["root"]]
+    while todo:
+        node = todo.pop()
+        if node not in seen:
+            seen.add(node)
+            todo += [
+                d["pkg"]
+                for d in nodes[node]["deps"]
+                if any(k["kind"] is None for k in d["dep_kinds"])
+            ]
+    out = []
+    # A path dependency is this repository's own code.
+    for p in sorted(
+        (pkgs[i] for i in seen if pkgs[i]["source"]), key=lambda p: (p["name"], p["version"])
+    ):
+        c = Component("cargo", p["name"], p["version"], p.get("license") or "")
+        crate = Path(p["manifest_path"]).parent
+        _attach(c, _licence_files(crate, recursive=False), crate.parent)
+        out.append(c)
+    std = Component("cargo", "Rust standard library", "", "MIT OR Apache-2.0")
+    std.texts.append(("upstream rust-std.txt", _read_text(VENDORED_DIR / "cargo" / "rust-std.txt")))
+    return [std, *out]
+
+
+def _go_string(data: bytes, pos: int) -> tuple[bytes, int]:
+    n = shift = 0
+    while True:
+        b = data[pos]
+        pos += 1
+        n |= (b & 0x7F) << shift
+        shift += 7
+        if b < 0x80:
+            return data[pos : pos + n], pos + n
+
+
+def go_components(binary: Path) -> list[Component]:
+    """Modules compiled into the ollama binary, read from the build info Go embeds in it."""
+    data = binary.read_bytes()
+    at = data.find(GO_BUILDINFO)
+    while at != -1 and at % 16:
+        at = data.find(GO_BUILDINFO, at + 1)
+    # Flag 2: version and module list inline, the layout of every Go since 1.18.
+    if at == -1 or not data[at + 15] & 2:
+        raise NoticeError(f"{binary}: no Go build info, so its modules cannot be listed")
+    version, pos = _go_string(data, at + 32)
+    modinfo, _ = _go_string(data, pos)
+    go_version = version.decode().removeprefix("go")
+    std = Component("go", "Go standard library", go_version, "BSD-3-Clause")
+    std.texts.append(("upstream go-stdlib.txt", _read_text(VENDORED_DIR / "go" / "go-stdlib.txt")))
+    out = [std]
+    for line in modinfo[16:-16].decode().splitlines():
+        fields = line.split("\t")
+        # A replaced module is listed twice; the "=>" line is the code that was built.
+        if fields[0] == "=>":
+            out.pop()
+        if fields[0] in ("dep", "=>"):
+            out.append(Component("go", fields[1], fields[2], "see text"))
+    return out
+
+
+def llama_cpp_components() -> list[Component]:
+    """Libraries llama.cpp vendors into llama-server, at the tag Ollama pins (stage_payload.sh)."""
+    table = json.loads((VENDORED_DIR / "llama.cpp" / "components.json").read_text(encoding="utf-8"))
+    out = []
+    for name, entry in table["components"].items():
+        c = Component("native", name, f"llama.cpp {table['tag']}", entry["licence"])
+        text = _read_text(VENDORED_DIR / "llama.cpp" / entry["file"])
+        c.texts.append((f"upstream {entry['file']}", text))
+        out.append(c)
+    return out
+
+
+def runtime_components(build_file: Path) -> list[Component]:
+    """Libraries python-build-standalone links into CPython, which ship no notice of their own."""
+    table = json.loads(
+        (VENDORED_DIR / "python-build-standalone" / "pbs.json").read_text(encoding="utf-8")
+    )
+    build = build_file.read_text(encoding="utf-8").strip() if build_file.exists() else "absent"
+    python = ".".join(map(str, sys.version_info[:3]))
+    if (build, python) != (table["build"], table["python"]):
+        raise NoticeError(
+            f"the staged runtime is CPython {python} build {build}, the vendored notices are for "
+            f"{table['python']} build {table['build']}; re-vendor python-build-standalone/ from "
+            "the new build's full archive (docs/desktop-bundle.md, Licence notices)"
+        )
+    out = []
+    for file, entry in table["platforms"][sys.platform].items():
+        # Staging prunes some modules (tkinter on macOS); their libraries do not ship.
+        if not any(importlib.util.find_spec(m) for m in entry["modules"]):
+            continue
+        lib = file.removeprefix("LICENSE.").removesuffix(".txt")
+        c = Component("runtime", f"{lib} (in {', '.join(entry['modules'])})", "", entry["licence"])
+        text = _read_text(VENDORED_DIR / "python-build-standalone" / file)
+        c.texts.append((f"python-build-standalone {build} {file}", text))
+        out.append(c)
+    return out
+
+
 def _fill_from_vendored(components: list[Component]) -> list[Component]:
     missing = []
     for c in components:
@@ -164,7 +286,7 @@ def _fill_from_vendored(components: list[Component]) -> list[Component]:
     return missing
 
 
-def render(components: list[Component], runtime: Component, version: str) -> str:
+def render(components: list[Component], runtime: list[Component], version: str) -> str:
     agpl = sorted({c.name for c in components if c.copyleft_network})
     lines = [f"Third-party software in Luminary {version}", "=" * 60, ""]
     lines.append("Luminary's own source code is licensed under Apache-2.0 (LUMINARY-LICENSE).")
@@ -182,7 +304,7 @@ def render(components: list[Component], runtime: Component, version: str) -> str
         "Contents",
         "-" * 8,
     ]
-    everything = [runtime, *components]
+    everything = [*runtime, *components]
     if agpl:
         # pymupdf names its licence without shipping the text.
         agpl_text = Component("licence", "GNU Affero General Public License", "3.0", "AGPL-3.0")
@@ -207,13 +329,27 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--site", type=Path, required=True)
     ap.add_argument("--runtime-license", type=Path, required=True)
+    ap.add_argument("--runtime-build", type=Path, required=True, help="the runtime's BUILD file")
     ap.add_argument("--npm-root", type=Path, required=True)
+    ap.add_argument("--cargo-manifest", type=Path, required=True)
+    ap.add_argument("--ollama", type=Path, required=True, help="the staged ollama binary")
     ap.add_argument("--version", required=True)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--check", action="store_true", help="fail if --out differs from the stage")
     args = ap.parse_args()
 
-    components = python_components(args.site) + npm_components(args.npm_root)
+    try:
+        runtime_libs = runtime_components(args.runtime_build)
+        components = (
+            python_components(args.site)
+            + npm_components(args.npm_root)
+            + cargo_components(_cargo_metadata(args.cargo_manifest))
+            + go_components(args.ollama)
+            + llama_cpp_components()
+        )
+    except NoticeError as e:
+        print(e, file=sys.stderr)
+        return 1
     missing = _fill_from_vendored(components)
     if missing:
         for c in missing:
@@ -230,7 +366,7 @@ def main() -> int:
 
     runtime = Component("runtime", "CPython", sys.version.split()[0], "PSF-2.0")
     runtime.texts.append((args.runtime_license.name, _read_text(args.runtime_license)))
-    notices = render(components, runtime, args.version)
+    notices = render(components, [runtime, *runtime_libs], args.version)
 
     if args.check:
         current = args.out.read_text(encoding="utf-8") if args.out.exists() else ""

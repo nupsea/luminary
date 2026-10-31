@@ -1,0 +1,2 @@
+https://github.com/astral-sh/python-build-standalone/releases/tag/20250918 (cpython-3.13.7+20250918, python/licenses/LICENSE.liblzma.txt)
+liblzma is in the public domain.
