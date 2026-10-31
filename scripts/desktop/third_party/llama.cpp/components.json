@@ -1,0 +1,10 @@
+{
+  "tag": "b10091",
+  "components": {
+    "cpp-httplib": {"licence": "MIT", "file": "cpp-httplib.txt"},
+    "nlohmann/json": {"licence": "MIT", "file": "nlohmann-json.txt"},
+    "stb_image": {"licence": "MIT OR Unlicense", "file": "stb.txt"},
+    "miniaudio": {"licence": "Unlicense OR MIT-0", "file": "miniaudio.txt"},
+    "subprocess.h": {"licence": "Unlicense", "file": "subprocess.txt"}
+  }
+}
