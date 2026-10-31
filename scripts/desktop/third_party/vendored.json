@@ -118,6 +118,8 @@
     "alloc-stdlib": "cargo/alloc-stdlib.txt",
     "block2": "cargo/objc2.txt",
     "dispatch2": "cargo/objc2.txt",
+    "dlopen2*": "cargo/dlopen2.txt",
+    "libappindicator-sys": "cargo/libappindicator-rs.txt",
     "objc2*": "cargo/objc2.txt",
     "selectors": "cargo/selectors.txt",
     "unic-*": "cargo/rust-unic.txt",
