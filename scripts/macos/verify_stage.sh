@@ -51,6 +51,11 @@ while IFS= read -r -d '' f; do
 done < <(macho_files "$STAGE")
 [ "$bad" = 0 ] && _pass "$n Mach-O files, no external linkage"
 
+# Before the first step that runs staged code, so step 8 sees a write made by any of them.
+mkdir -p "$BUILD_DIR"
+MARKER="$BUILD_DIR/verify-stage.marker"
+touch "$MARKER"
+
 _step "2. Interpreter sees itself inside the stage"
 if out="$("$PY" -I -c 'import sys; print(sys.prefix)' 2>&1)"; then
     case "$out" in
@@ -131,12 +136,12 @@ else
 fi
 
 _step "8. Nothing was written inside the stage"
-# In the .app this is enforced by the code signature; here we approximate it by
-# looking for anything newer than the staging run.
-if newer="$(find "$STAGE" -type f -newer "$STAGE/surface-manifest.json" ! -path '*/verify-*' 2>/dev/null | head -5)"; then
-    [ -z "$newer" ] && _pass "stage untouched by the boot test" \
-        || { _fail "files written inside the stage during boot:"; echo "$newer" >&2; }
-fi
+# In the .app a write breaks the code signature. Not an `if` on the pipeline: under
+# pipefail, `head` closing early fails it, and the step then reported nothing.
+newer="$(find "$STAGE" -type f -newer "$MARKER" 2>/dev/null | head -5)"
+[ -z "$newer" ] && _pass "stage untouched by steps 2-7" \
+    || { _fail "files written inside the stage by steps 2-7:"; echo "$newer" >&2; }
+rm -f "$MARKER"
 
 _step "9. Stage size"
 # Reported, never gated, and there is deliberately no path-length step here.

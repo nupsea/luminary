@@ -370,7 +370,8 @@ carries its tiktoken files with CRLF line endings (cl100k_base 1,781,382 bytes, 
 tiktoken checks a cached file's sha256 at `import litellm`; on a mismatch it deletes the file,
 downloads it from openaipublic.blob.core.windows.net and writes the install directory, and offline
 the import fails. `repair_tiktoken_cache.py` converts a file only when the LF form matches a pinned
-hash, and fails the stage otherwise. `test_repair_tiktoken_cache.py` guards it.
+hash, and fails the stage otherwise. `test_repair_tiktoken_cache.py` guards it, and a file it
+misses fails step 7 (8 on macOS) of `verify_stage.sh`, which watches every step that runs staged code.
 
 ## Retired numbers
 
