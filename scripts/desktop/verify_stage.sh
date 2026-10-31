@@ -146,6 +146,10 @@ else
     echo "$long" | head -10 >&2
 fi
 
+_step "10. Third-party notices cover every shipped package"
+third_party_notices --check && _pass "THIRD-PARTY-LICENSES.txt matches the stage" \
+    || _fail "THIRD-PARTY-LICENSES.txt is missing, stale, or a package has no notice"
+
 echo
 [ "$FAILED" = 0 ] && printf '\033[1;32mstage verified\033[0m\n' || printf '\033[1;31mstage verification FAILED\033[0m\n'
 exit "$FAILED"

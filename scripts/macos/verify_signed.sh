@@ -67,7 +67,7 @@ fi
 
 _step "4. Attribution ships"
 # A licence obligation, so a hard failure rather than a checklist item.
-for f in OLLAMA-LICENSE LLAMA.CPP-LICENSE; do
+for f in OLLAMA-LICENSE LLAMA.CPP-LICENSE THIRD-PARTY-LICENSES.txt; do
     [ -s "$APP/Contents/Resources/licenses/$f" ] && _pass "$f" || _fail "missing licences/$f"
 done
 

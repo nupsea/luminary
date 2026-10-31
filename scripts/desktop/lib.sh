@@ -67,6 +67,23 @@ native_path() {
     if [ "$DESKTOP_OS" = windows ]; then cygpath -w "$1"; else echo "$1"; fi
 }
 
+# Write (or with --check, verify) the notices for every package the stage ships (#378).
+# The staged interpreter runs it, so the runtime it names is the one that ships.
+third_party_notices() {
+    local lic version
+    for lic in "$(staged_stdlib)/LICENSE.txt" "$STAGE/python/LICENSE.txt"; do
+        [ -f "$lic" ] && break
+    done
+    [ -f "$lic" ] || _die "no CPython LICENSE.txt in the staged runtime"
+    version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$REPO_ROOT/backend/pyproject.toml" | head -1)"
+    "$(staged_python)" -I "$(native_path "$REPO_ROOT/scripts/desktop/third_party_notices.py")" \
+        --site "$(native_path "$(staged_site)")" \
+        --runtime-license "$(native_path "$lic")" \
+        --npm-root "$(native_path "$REPO_ROOT/frontend")" \
+        --version "$version" \
+        --out "$(native_path "$STAGE/licenses/THIRD-PARTY-LICENSES.txt")" "$@"
+}
+
 # `full` without `dev`; `media` stays out for its GPL codecs (docs/desktop-bundle.md).
 # Keep in step with scripts/bootstrap.sh.
 install_shipping_dependencies() {

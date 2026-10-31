@@ -244,6 +244,7 @@ jobs:
           bash scripts/desktop/stage_payload.sh
           bash scripts/desktop/stage_python.sh
           bash scripts/desktop/stage_ollama.sh
+          bash scripts/desktop/stage_notices.sh
 
       - name: Verify the stage
         run: |

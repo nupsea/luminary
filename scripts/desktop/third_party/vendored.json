@@ -1,0 +1,22 @@
+{
+  "python": {
+    "flatbuffers": "flatbuffers.txt",
+    "lance-namespace": "lance-namespace.txt",
+    "lance-namespace-urllib3-client": "lance-namespace.txt",
+    "langchain-core": "langchain.txt",
+    "langchain-text-splitters": "langchain.txt",
+    "langsmith": "langsmith.txt",
+    "opentelemetry-util-http": "opentelemetry-python-contrib.txt",
+    "sentencepiece": "sentencepiece.txt",
+    "tokenizers": "tokenizers.txt",
+    "webencodings": "webencodings.txt"
+  },
+  "npm": {
+    "@excalidraw/excalidraw": "excalidraw.txt",
+    "@radix-ui/*": "radix-ui-primitives.txt",
+    "react-remove-scroll-bar": "react-remove-scroll-bar.txt",
+    "rehype-katex": "remark-math.txt",
+    "remark-math": "remark-math.txt",
+    "victory-vendor": "victory.txt"
+  }
+}

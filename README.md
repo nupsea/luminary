@@ -4,7 +4,7 @@
 > A local-first study workspace built on your own documents, that measures what you actually know.
 
 [![Release](https://img.shields.io/github/v/release/nupsea/luminary?label=release)](https://github.com/nupsea/luminary/releases/latest)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0%20source%20%7C%20AGPL--3.0%20builds-blue)](#license)
 [![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-black?logo=apple)](#install)
 [![Windows](https://img.shields.io/badge/Windows-x64-0078D6?logo=windows)](#install)
 [![Linux](https://img.shields.io/badge/Linux-x86__64-FCC624?logo=linux&logoColor=black)](#install)
@@ -195,4 +195,8 @@ Found a bug or have an idea? **[Open an issue](https://github.com/nupsea/luminar
 
 ## License
 
-Apache 2.0
+Luminary's source code is Apache 2.0 ([LICENSE](LICENSE)), and contributions are accepted under it.
+The installers also contain PyMuPDF and ebooklib, which are AGPL-3.0, so a distributed build is
+licensed under AGPL-3.0, including for anyone using a Luminary server over a network. Every
+bundled package's licence ships in the app as `licenses/THIRD-PARTY-LICENSES.txt`, and the About
+dialog links to the source of the running version.

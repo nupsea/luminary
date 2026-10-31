@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-full eval-gen-full eval-cards-full eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-followups eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards golden-flashcards-corpus eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-epub-place verify-reader-switch verify-note-nav luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage check-licences desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-full eval-gen-full eval-cards-full eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-followups eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards golden-flashcards-corpus eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-epub-place verify-reader-switch verify-note-nav luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama stage-notices verify-stage check-stage check-licences desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
 
 # install.sh puts uv (and Node on Linux) in ~/.local/bin, which a shell opened
 # before the install does not have on PATH.
@@ -88,10 +88,13 @@ STAGE_SCRIPTS = scripts/desktop
 STAGE_REQUIRED = surface-manifest.json python/python.exe backend/app frontend ollama/ollama.exe ollama/lib/ollama
 endif
 
-stage: stage-payload stage-python stage-ollama
+stage: stage-payload stage-python stage-ollama stage-notices
 
 stage-payload:
 	bash scripts/desktop/stage_payload.sh
+
+stage-notices:
+	bash scripts/desktop/stage_notices.sh
 
 stage-python:
 	bash $(STAGE_SCRIPTS)/stage_python.sh
