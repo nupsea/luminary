@@ -35,6 +35,7 @@ Patterns discovered through completed stories. Read before implementing new feat
 
 - **A node that cannot continue raises; it never returns `status="error"`.** Every ingestion node is added with `error_handler=_to_error_finalize` (`workflows/ingestion.py`), which records the message on the document. A failure the next attempt can fix gets a `RetryPolicy` limited to its own exception type, as `embed` has for `VectorCountMismatch`. A node that may fail without failing the document catches its own errors, as `keyword_index` and `section_summarize` do. `test_ingestion_error_routing.py` and `test_graph_shape.py` pin both.
 - **Keep the ingestion graph sequential.** In the LangGraph that `pyproject.toml` pins, a node that raises while another node runs in the same step skips its `error_handler` and fails the whole run, so the document gets no error message. Parallelising `keyword_index` with `embed` was measured not to be worth it: across 360 dev-library ingests, `keyword_index` averaged 0.11 s and `embed` 34 s.
+- **A stage that persists something new records it where it is discovered, never only in graph state.** A resumed run (`resume_ingestion`) rebuilds its state from the rows, so a value that was held only in memory is lost: the word and page counts are written by `parse_node`, not at the end of the run. A stage added after `entity_extract` must also be idempotent (I-74), and a new resume entry goes in `_RESUME_AT`.
 
 ## Database Migrations and Schema Evolution
 

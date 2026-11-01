@@ -19,13 +19,12 @@ These small nodes complete the ingestion pipeline:
 
 import asyncio
 import logging
-import uuid
 from collections.abc import Coroutine
 from typing import Any
 
 from app.database import get_session_factory
-from app.models import EnrichmentJobModel
 from app.repos.document_repo import DocumentRepo
+from app.repos.enrichment_repo import EnrichmentRepo
 from app.services.activity_service import ActivityService
 from app.services.document_tagger import enrich_document_tags
 from app.services.enrichment_worker import get_enrichment_worker
@@ -246,7 +245,9 @@ async def error_finalize_node(state: IngestionState) -> IngestionState:
     doc_id = state["document_id"]
     error_detail = state.get("error")
     async with get_session_factory()() as session:
-        await DocumentRepo(session).update_fields(doc_id, stage="error", error_message=error_detail)
+        await DocumentRepo(session).update_fields(
+            doc_id, stage="error", error_message=error_detail, ingest_resumes=0
+        )
         await session.commit()
     logger.error(
         "Ingestion failed at node",
@@ -260,7 +261,7 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
 
     Non-fatal: enrichment failure does not prevent document from being usable.
 
-    Job rows are written to the DB first. _update_stage("complete") is called
+    Job rows are written to the DB first. stage='complete' is written
     before any asyncio.create_task so that the worker's concurrent DB writes
     do not race with the stage update (SQLite allows only one writer at a time).
     """
@@ -270,99 +271,37 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
 
     # Phase 1: write all job rows to DB (no background tasks yet).
     needs_dispatch = False
-
+    job_types = ["concept_link", "chapter_cards"]
     if fmt in _IMAGE_FORMATS:
+        job_types.insert(0, "image_extract")
+    for job_type in job_types:
         try:
-            job_id = str(uuid.uuid4())
             async with get_session_factory()() as session:
-                session.add(
-                    EnrichmentJobModel(
-                        id=job_id,
-                        document_id=doc_id,
-                        job_type="image_extract",
-                        status="pending",
-                    )
-                )
-                await DocumentRepo(session).update_fields(doc_id, stage="enriching")
+                # A resumed ingestion can reach this node a second time.
+                job = await EnrichmentRepo(session).enqueue_unless_active(doc_id, job_type)
+                if job_type == "image_extract":
+                    await DocumentRepo(session).update_fields(doc_id, stage="enriching")
                 await session.commit()
             needs_dispatch = True
-            logger.info(
-                "enrichment_enqueue_node: enqueued image_extract job=%s doc=%s",
-                job_id,
-                doc_id,
-            )
+            if job is not None:
+                logger.info(
+                    "enrichment_enqueue_node: enqueued %s job=%s doc=%s", job_type, job.id, doc_id
+                )
         except Exception as exc:
             logger.warning(
-                "enrichment_enqueue_node: image_extract enqueue failed (non-fatal): %s",
+                "enrichment_enqueue_node: %s enqueue failed (non-fatal): %s",
+                job_type,
                 exc,
                 extra={"doc_id": doc_id},
             )
-    else:
-        logger.info(
-            "enrichment_enqueue_node: skipping image_extract (format=%s has no images)",
-            fmt,
-            extra={"doc_id": doc_id},
-        )
-
-    try:
-        cl_job_id = str(uuid.uuid4())
-        async with get_session_factory()() as session:
-            session.add(
-                EnrichmentJobModel(
-                    id=cl_job_id,
-                    document_id=doc_id,
-                    job_type="concept_link",
-                    status="pending",
-                )
-            )
-            await session.commit()
-        needs_dispatch = True
-        logger.info(
-            "enrichment_enqueue_node: enqueued concept_link job=%s doc=%s",
-            cl_job_id,
-            doc_id,
-        )
-    except Exception as exc:
-        logger.warning(
-            "enrichment_enqueue_node: concept_link enqueue failed (non-fatal): %s",
-            exc,
-            extra={"doc_id": doc_id},
-        )
-
-    try:
-        async with get_session_factory()() as session:
-            session.add(
-                EnrichmentJobModel(
-                    id=str(uuid.uuid4()),
-                    document_id=doc_id,
-                    job_type="chapter_cards",
-                    status="pending",
-                )
-            )
-            await session.commit()
-        needs_dispatch = True
-    except Exception as exc:
-        logger.warning(
-            "enrichment_enqueue_node: chapter_cards enqueue failed (non-fatal): %s",
-            exc,
-            extra={"doc_id": doc_id},
-        )
-
-    # Persist parser word/page counts (chunk nodes only wrote chapter_count).
-    # pd is None for audio/video, which set word_count in transcribe.
-    pd = state.get("parsed_document")
-    if pd:
-        async with get_session_factory()() as session:
-            await DocumentRepo(session).update_fields(
-                doc_id, word_count=pd.get("word_count") or 0, page_count=pd.get("pages") or 0
-            )
-            await session.commit()
 
     # Phase 2: mark complete BEFORE creating background tasks.
     # asyncio.create_task schedules work that runs at the next await; if tasks
     # were created earlier, _dispatch_pending would race with this write for the
     # SQLite write lock and intermittently fail (leaving stage='indexing').
-    await _update_stage(doc_id, "complete")
+    async with get_session_factory()() as session:
+        await DocumentRepo(session).update_fields(doc_id, stage="complete", ingest_resumes=0)
+        await session.commit()
 
     # The hub reads content_activity and nothing else, so without this a library
     # full of documents renders empty. On completion, not on upload: a failed

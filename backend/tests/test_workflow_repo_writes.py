@@ -85,8 +85,4 @@ async def test_script_reads_and_the_startup_reconcile(session):
     assert [d.id for d in await docs.complete_without_word_count()] == ["d2"]
     assert [row[0] for row in await docs.chunk_ner_inputs("d1")] == ["c0", "c1"]
 
-    assert await docs.fail_unfinished("interrupted") == 1
-    await session.commit()
-    stages = {d.id: (d.stage, d.error_message) for d in await docs.all_documents()}
-    assert stages["d2"] == ("complete", None)
-    assert stages["d1"][0] == "error"
+    assert [d.id for d in await docs.unfinished()] == ["d1"]

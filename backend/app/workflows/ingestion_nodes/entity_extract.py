@@ -277,7 +277,8 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 chunks,
                 profile,
             )
-            await graph.write_document_graph(doc_id, document_graph)
+            # Replace: co-occurrence weights add, so a second run would double them.
+            await graph.write_document_graph(doc_id, document_graph, replace=True)
             await record_entity_coverage(doc_id, len(ner_chunks))
         except ModelNotDownloaded:
             # Optional, installed from Settings; the document is complete without it.

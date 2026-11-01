@@ -16,7 +16,6 @@ from pathlib import Path
 from app.database import get_session_factory
 from app.db_init import open_library
 from app.library import use_library
-from app.repos.document_repo import DocumentRepo
 from app.services.background import task_registry
 from app.services.background_prefs import load_background_prefs
 from app.services.chapter_cards import chapter_cards_handler
@@ -30,6 +29,7 @@ from app.services.reference_enricher import web_refs_handler
 from app.services.settings_service import load_llm_settings
 from app.storage import library_root
 from app.types import DEFAULT_LIBRARY
+from app.workflows.ingestion import resume_interrupted_ingestions
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ async def _start() -> None:
     for job_type, handler in JOB_HANDLERS.items():
         worker.register(job_type, handler)
     await worker.start()
-    await _fail_interrupted_ingestions()
+    await _resume_interrupted_ingestions()
     if "pytest" not in sys.modules:
         _start_backfills()
 
@@ -106,17 +106,14 @@ async def _load_preferences() -> None:
         logger.warning("could not load the library's settings; using defaults", exc_info=True)
 
 
-async def _fail_interrupted_ingestions() -> None:
-    # An ingestion running when the process died has no task left to finish it (I-10).
+async def _resume_interrupted_ingestions() -> None:
+    # An ingestion running when the process died has no task left to finish it.
     try:
-        async with get_session_factory()() as session:
-            failed = await DocumentRepo(session).fail_unfinished(
-                "Ingestion was interrupted before it finished. "
-                "Delete this document and upload it again."
+        resumed, failed = await resume_interrupted_ingestions()
+        if resumed or failed:
+            logger.warning(
+                "interrupted ingestions at startup: %d resumed, %d failed", resumed, failed
             )
-            await session.commit()
-        if failed:
-            logger.warning("marked %d interrupted ingestion(s) as failed at startup", failed)
     except Exception:
         logger.warning("could not reconcile interrupted ingestions", exc_info=True)
 

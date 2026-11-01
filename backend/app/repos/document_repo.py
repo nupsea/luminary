@@ -667,14 +667,12 @@ class DocumentRepo:
         )
         return result.scalar_one()
 
-    async def fail_unfinished(self, message: str) -> int:
-        """Mark every document not complete or failed as failed; the number marked."""
+    async def unfinished(self) -> Sequence[DocumentModel]:
+        """Documents neither complete nor failed: at startup, ingestions the process lost."""
         result = await self.session.execute(
-            update(DocumentModel)
-            .where(DocumentModel.stage.notin_(("complete", "error")))
-            .values(stage="error", error_message=message)
+            select(DocumentModel).where(DocumentModel.stage.notin_(("complete", "error")))
         )
-        return result.rowcount
+        return result.scalars().all()
 
     async def chunk_ner_inputs(self, document_id: str) -> list[tuple[str, str, bool | None]]:
         """(id, text, has_code) for a document's chunks, in reading order."""
