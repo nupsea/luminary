@@ -216,8 +216,10 @@ jobs:
       # Each worker gets its own DATA_DIR (conftest); only the model cache is shared,
       # read-only. loadfile keeps a module's tests, and its fixtures, on one worker.
       # `logical`, not `auto`: auto counts physical cores, 2 of the runner's 4 vCPUs.
+      # No worker restarts: under loadfile, xdist 3.8.0 never finishes after replacing a
+      # crashed worker, so one crash ran to the 50-minute limit with no test named.
       - name: Full backend suite, on the platform it got wrong
-        run: uv run --with pytest-xdist==3.8.0 pytest -n logical --dist loadfile
+        run: uv run --with pytest-xdist==3.8.0 pytest -n logical --dist loadfile --max-worker-restart=0
 
       - name: Manifest schema
         run: uv run python ../scripts/check_manifest_schema.py

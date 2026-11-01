@@ -223,6 +223,23 @@ def _reset_lancedb_singleton():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _fresh_default_engine():
+    """Give each test its own default engine; the database file itself is kept.
+
+    Each TestClient runs on its own loop, and aiosqlite answers a call on the loop that
+    made it: a pooled connection whose call returns after that loop closed loses its
+    worker thread (`RuntimeError: Event loop is closed`), and the next test's call on
+    it never returns. Dropped engines close their connections as they are collected.
+    """
+    yield
+    import app.database as db_module
+
+    db_module._engine = None
+    db_module._session_factory = None
+    db_module._libraries.clear()
+
+
 # --- The default-executor join, bounded -------------------------------------
 #
 # `with TestClient(app)` runs the app on anyio's blocking portal, whose thread ends
