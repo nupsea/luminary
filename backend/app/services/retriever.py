@@ -151,6 +151,7 @@ def _rerank_candidates(
             source=candidates[i].source,
             chunk_index=candidates[i].chunk_index,
             speaker=candidates[i].speaker,
+            rerank_score=ce[i],
         )
         for i in order[:k]
     ]

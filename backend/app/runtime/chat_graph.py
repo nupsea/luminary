@@ -12,7 +12,7 @@ Graph flow:
         → comparative_node → synthesize_node
         → search_node      → synthesize_node
       → confidence_gate_node
-        → (high|medium confidence, OR retry_attempted=True) → END
+        → (high|unknown confidence, OR retry_attempted=True) → END
         → (low confidence, retry_attempted=False) → augment_node
           → synthesize_node → confidence_gate_node → END
 

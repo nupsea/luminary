@@ -60,6 +60,23 @@ def _cap_text_tokens(text: str, token_cap: int) -> str:
 # answer obey the same cap.
 
 
+# Logit 0 is the cross-encoder's own relevance boundary. Bracketed on the dev
+# library: "5-string vs 6-string bass guitar?" library-wide scored -0.41 and must
+# read low; the lowest answerable question whose best passage held the answer
+# scored +0.5 (I-73).
+RELEVANT_RERANK_LOGIT = 0.0
+
+
+def _retrieval_confidence(chunks: list[dict]) -> str:
+    """'low' when nothing relevant came back, 'unknown' when no reranker scored it (I-73)."""
+    if not chunks:
+        return "low"
+    logits = [c["rerank_score"] for c in chunks if c.get("rerank_score") is not None]
+    if not logits:
+        return "unknown"
+    return "high" if max(logits) >= RELEVANT_RERANK_LOGIT else "low"
+
+
 # Cap injected visual descriptions so they inform the answer without crowding out
 # the retrieved prose. image_ids are already scoped to the answer's documents by
 # HybridRetriever.retrieve_with_images.
@@ -488,23 +505,7 @@ async def synthesize_node(state: ChatState) -> dict:
         "augmented": transparency_augmented,
     }
 
-    # Estimate retrieval confidence from chunk scores so confidence_gate_node
-    # can make an informed routing decision.  Before this fix the gate always
-    # saw the initial "low" default (synthesize_node prepares the prompt but
-    # does not call the LLM, so LLM-derived confidence is not available yet).
-    retrieval_confidence = "low"
-    if chunks_dicts:
-        scores = sorted(
-            (c.get("score", 0) for c in chunks_dicts),
-            reverse=True,
-        )
-        top3_avg = sum(scores[:3]) / min(len(scores), 3)
-        # RRF with k=60: max score ~0.033 (rank 1 in both sources).
-        # 0.025+ = strong matches in both sources; 0.015+ = decent single-source.
-        if top3_avg >= 0.025:
-            retrieval_confidence = "high"
-        elif top3_avg >= 0.015:
-            retrieval_confidence = "medium"
+    retrieval_confidence = _retrieval_confidence(chunks_dicts)
 
     # Return prompt fields for stream_answer() to call the LLM streaming directly.
     # This enables true token-by-token streaming: the first SSE token event is sent

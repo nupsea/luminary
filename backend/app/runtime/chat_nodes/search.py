@@ -262,6 +262,7 @@ async def search_node(state: ChatState) -> dict:
                     "section_summary": section_summary,
                     "page": c.page,
                     "score": c.score,
+                    "rerank_score": c.rerank_score,
                     "source": c.source,
                 }
             )

@@ -221,6 +221,9 @@ class ScoredChunk:
     source: Literal["vector", "keyword", "both", "context_expansion"]
     chunk_index: int = 0
     speaker: str | None = None
+    # The raw cross-encoder logit, set only by rerank. `score` is an ordering and
+    # says nothing about relevance; this is the only absolute relevance signal (I-73).
+    rerank_score: float | None = None
 
 
 # Chat Router types
@@ -269,7 +272,7 @@ class ChatState(TypedDict):
     # Set by synthesize_node
     answer: str
     citations: list[dict]
-    confidence: str  # 'high' | 'medium' | 'low'
+    confidence: str  # 'high' | 'low' | 'unknown' (no reranker logit to judge by)
     not_found: bool
 
     # Internal streaming fields: synthesize_node prepares the LLM prompt but does not
