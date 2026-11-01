@@ -1,11 +1,10 @@
 """transcribe_node and the audio-window chunker `_chunk_audio`.
 
-transcribe_node is a pass-through for non-audio/video content. For
-audio it dispatches to the AudioTranscriber service; for video it
-shells out to ffmpeg first to extract a 16kHz mono WAV, then runs
-the same path. Whisper segments are grouped into ~60-second windows
-by `_chunk_audio` and stored as `_audio_chunks` so chunk_node can
-pick them up downstream.
+For audio, transcribe_node dispatches to the AudioTranscriber service;
+for video it shells out to ffmpeg first to extract a 16kHz mono WAV,
+then runs the same path. Whisper segments are grouped into ~60-second
+windows by `_chunk_audio` and stored as `_audio_chunks` for
+chunk_transcript downstream.
 
 Also persists `audio_duration_seconds` and the word_count of the
 transcript to DocumentModel.
@@ -21,6 +20,7 @@ import wave
 from pathlib import Path
 
 from app.database import get_session_factory
+from app.exceptions import DependencyUnavailable, InvalidInput
 from app.repos.document_repo import DocumentRepo
 from app.repos.transcript_repo import fetch_transcript_inputs
 from app.services import (
@@ -31,7 +31,6 @@ from app.services.captions import captions_path, parse_vtt
 from app.services.components import resolve_tool
 from app.services.transcript_correction import correct_transcript
 from app.services.transcript_vocabulary import hotwords
-from app.types import MEDIA_FORMATS
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _persist_classification,
@@ -142,18 +141,15 @@ async def _transcript(doc_id: str, source: Path, audio: Path) -> tuple[list[dict
 async def transcribe_node(state: IngestionState) -> IngestionState:
     """Transcribe audio/video files using faster-whisper.
 
-    For non-audio/video content types this is a pass-through.
-    An uploader's caption track beside the audio is read instead of transcribing;
-    otherwise Whisper runs, primed with the document's `transcript_vocabulary`.
+    The graph routes only audio and video here. An uploader's caption track
+    beside the audio is read instead of transcribing; otherwise Whisper runs,
+    primed with the document's `transcript_vocabulary`.
     For audio files: calls AudioTranscriber directly.
     For video files: runs ffmpeg to extract audio first, then transcribes.
     Builds parsed_document from segments, writes audio_duration_seconds to
     DocumentModel, stores pre-built _audio_chunks.
     """
     fmt = state["format"]
-    if fmt not in MEDIA_FORMATS:
-        return state
-
     doc_id = state["document_id"]
     await _update_stage(doc_id, "transcribing")
     logger.info("transcribe_node: start", extra={"doc_id": doc_id, "format": fmt})
@@ -166,14 +162,10 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
         if fmt == "mp4":
             ffmpeg = resolve_tool("ffmpeg")
             if not ffmpeg:
-                return {
-                    **state,
-                    "status": "error",
-                    "error": (
-                        "Audio and video support (ffmpeg) is not installed. "
-                        "Add it from Settings to ingest video files."
-                    ),
-                }
+                raise DependencyUnavailable(
+                    "Audio and video support (ffmpeg) is not installed. "
+                    "Add it from Settings to ingest video files."
+                )
             wav_path = Path(tempfile.mkdtemp(prefix="luminary-transcribe-")) / "audio.wav"
             proc = await asyncio.create_subprocess_exec(
                 ffmpeg,
@@ -193,13 +185,9 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
             )
             await proc.wait()
             if proc.returncode != 0:
-                return {
-                    **state,
-                    "status": "error",
-                    "error": (
-                        "ffmpeg audio extraction failed. Ensure the video file is a valid MP4."
-                    ),
-                }
+                raise InvalidInput(
+                    "ffmpeg audio extraction failed. Ensure the video file is a valid MP4."
+                )
             transcribe_fp = wav_path
             logger.info(
                 "transcribe_node: ffmpeg extracted audio",
@@ -272,9 +260,6 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
             "_audio_chunks": audio_chunks,
             "status": "chunking",
         }
-    except Exception as exc:
-        logger.exception("transcribe_node failed")
-        return {**state, "status": "error", "error": str(exc)}
     finally:
         ingestion_progress.clear(doc_id)
         if wav_path is not None:

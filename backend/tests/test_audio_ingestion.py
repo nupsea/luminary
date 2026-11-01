@@ -169,7 +169,7 @@ async def test_a_transcript_gets_sections_so_the_reader_can_show_it(test_db, mon
     from sqlalchemy import select
 
     from app.models import ChunkModel, SectionModel
-    from app.workflows.ingestion_nodes.chunk import chunk_node
+    from app.workflows.ingestion_nodes.chunk import chunk_transcript_node
 
     _engine, factory, _tmp = test_db
     doc_id = "audio-sections-doc"
@@ -195,7 +195,7 @@ async def test_a_transcript_gets_sections_so_the_reader_can_show_it(test_db, mon
         ],
     }
 
-    result = await chunk_node(state)
+    result = await chunk_transcript_node(state)
     assert result["status"] == "embedding"
 
     async with factory() as session:

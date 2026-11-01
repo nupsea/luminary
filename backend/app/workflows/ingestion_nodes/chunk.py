@@ -1,9 +1,9 @@
-"""The chunker family: chunk_node + form-specific chunkers.
+"""The chunker family: one graph node per chunker.
 
-chunk_node is the dispatcher. Media and code are recognised by their content
-type; everything else by the document's measured form:
-- audio path            uses pre-built `_audio_chunks` from transcribe_node
-- _chunk_code_file      source-code files (function/class granularity via CodeParser)
+The graph routes media to `chunk_transcript` and everything else by the
+document's measured form (`route_chunker`):
+- _chunk_transcript     pre-built `_audio_chunks` from transcribe_node
+- _chunk_code           source-code files (function/class granularity via CodeParser)
 - _chunk_tech_book      reference and article: fenced code, numbered headings
 - _chunk_book           prose and script, read start to finish
 - _chunk_conversation   dialogue: speaker turns
@@ -33,7 +33,7 @@ from app.services.tech_section_parser import (
     is_objective_candidate,
 )
 from app.telemetry import trace_ingestion_node
-from app.types import MEDIA_FORMATS, PREVIEW_CHARS, chunk_config_for_form
+from app.types import PREVIEW_CHARS, chunk_config_for_form
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _background_tasks,
@@ -664,141 +664,126 @@ async def _chunk_conversation(
     return {**state, "chunks": chunks, "status": "embedding"}
 
 
-async def chunk_node(state: IngestionState) -> IngestionState:
-    logger.debug("node_start", extra={"node": "chunk", "doc_id": state["document_id"]})
-    # The splitter's first import loads torch. Run on the loop inside a chunk
-    # transaction, it froze the app and held the write lock for 12-43s (I-2, #88).
-    await asyncio.to_thread(_splitter_cls)
-    await _update_stage(state["document_id"], "chunking")
-    with trace_ingestion_node("chunk", state):
-        try:
-            pd = state["parsed_document"]
-            doc_id = state["document_id"]
-            file_path = state["file_path"]
-
-            if state["format"] in MEDIA_FORMATS:
-                audio_chunks = state.get("_audio_chunks") or []
-                chunks = []
-                async with get_session_factory()() as session:
-                    # A transcript needs sections like any other document. This
-                    # branch alone wrote chunks with section_id=None and created
-                    # none, so `GET /sections/{id}/content` returned [] and the
-                    # reader showed "No content available" for a document whose
-                    # whole transcript was sitting in chunks -- retrievable and
-                    # unreadable. The orphan-chunk fallback in sections.py could
-                    # not cover it either: that fires when sections exist but are
-                    # empty, and here there were none at all.
-                    #
-                    # One section per transcript chunk, and the heading stays
-                    # empty: nobody wrote one. I-30 -- a heading is a label the
-                    # source authored, and a timestamp dressed up as one would
-                    # be this pipeline inventing structure it was not given.
-                    section_models: list[SectionModel] = []
-                    for order, c in enumerate(audio_chunks):
-                        section_models.append(
-                            SectionModel(
-                                id=str(uuid.uuid4()),
-                                document_id=doc_id,
-                                heading="",
-                                level=1,
-                                page_start=0,
-                                page_end=0,
-                                section_order=order,
-                                body=c["text"],
-                                preview=c["text"][:PREVIEW_CHARS],
-                            )
-                        )
-                    session.add_all(section_models)
-                    await session.flush()
-
-                    chunk_models: list[ChunkModel] = []
-                    for c, section in zip(audio_chunks, section_models, strict=True):
-                        chunk_models.append(
-                            ChunkModel(
-                                id=c["id"],
-                                document_id=doc_id,
-                                section_id=section.id,
-                                text=c["text"],
-                                token_count=len(c["text"].split()),
-                                page_number=0,
-                                speaker=None,
-                                chunk_index=c["index"],
-                                start_time=c["start_time"],
-                                end_time=c["end_time"],
-                            )
-                        )
-                        chunks.append(
-                            {
-                                "id": c["id"],
-                                "document_id": doc_id,
-                                "text": c["text"],
-                                "index": c["index"],
-                                "start_time": c["start_time"],
-                                "end_time": c["end_time"],
-                            }
-                        )
-                    session.add_all(chunk_models)
-                    await session.commit()
-                logger.info(
-                    "transcript chunked",
-                    extra={"doc_id": doc_id, "num_chunks": len(chunks)},
+async def _chunk_transcript(state: IngestionState, pd: dict | None, doc_id: str) -> IngestionState:
+    """The transcript windows transcribe_node built, one section each."""
+    audio_chunks = state.get("_audio_chunks") or []
+    chunks = []
+    async with get_session_factory()() as session:
+        # A transcript needs sections like any other document, or the reader shows
+        # "No content available" for text that retrieval can find. The heading stays
+        # empty: nobody wrote one (I-30).
+        section_models: list[SectionModel] = []
+        for order, c in enumerate(audio_chunks):
+            section_models.append(
+                SectionModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    heading="",
+                    level=1,
+                    page_start=0,
+                    page_end=0,
+                    section_order=order,
+                    body=c["text"],
+                    preview=c["text"][:PREVIEW_CHARS],
                 )
-                return {**state, "chunks": chunks, "status": "embedding"}
+            )
+        session.add_all(section_models)
+        await session.flush()
 
-            if profile_of_state(state).form == "source_code":
-                raw_text = pd["raw_text"] if pd else ""
-                raw_chunks, code_metas = _chunk_code_file(raw_text, file_path, doc_id)
-                chunks = []
-                async with get_session_factory()() as session:
-                    chunk_models: list[ChunkModel] = []
-                    for idx, (rc, meta) in enumerate(zip(raw_chunks, code_metas, strict=False)):
-                        chunk_models.append(
-                            ChunkModel(
-                                id=rc["id"],
-                                document_id=doc_id,
-                                section_id=None,
-                                text=rc["text"],
-                                token_count=len(rc["text"].split()),
-                                page_number=meta.get("start_line", 0),
-                                speaker=None,
-                                chunk_index=idx,
-                            )
-                        )
-                        chunks.append(
-                            {
-                                "id": rc["id"],
-                                "document_id": doc_id,
-                                "text": rc["text"],
-                                "index": idx,
-                                **{k: v for k, v in meta.items() if k != "chunk_id"},
-                            }
-                        )
-                    session.add_all(chunk_models)
-                    await session.commit()
-                logger.info(
-                    "Code chunked document",
-                    extra={"doc_id": doc_id, "num_chunks": len(chunks)},
+        chunk_models: list[ChunkModel] = []
+        for c, section in zip(audio_chunks, section_models, strict=True):
+            chunk_models.append(
+                ChunkModel(
+                    id=c["id"],
+                    document_id=doc_id,
+                    section_id=section.id,
+                    text=c["text"],
+                    token_count=len(c["text"].split()),
+                    page_number=0,
+                    speaker=None,
+                    chunk_index=c["index"],
+                    start_time=c["start_time"],
+                    end_time=c["end_time"],
                 )
-                return {**state, "chunks": chunks, "status": "embedding"}
+            )
+            chunks.append(
+                {
+                    "id": c["id"],
+                    "document_id": doc_id,
+                    "text": c["text"],
+                    "index": c["index"],
+                    "start_time": c["start_time"],
+                    "end_time": c["end_time"],
+                }
+            )
+        session.add_all(chunk_models)
+        await session.commit()
+    logger.info("transcript chunked", extra={"doc_id": doc_id, "num_chunks": len(chunks)})
+    return {**state, "chunks": chunks, "status": "embedding"}
 
-            profile = profile_of_state(state)
-            if profile.form in ("reference", "article"):
-                return await _chunk_tech_book(state, pd, doc_id)
 
-            # A play is read start to finish, as prose is.
-            if profile.form in ("prose", "script"):
-                return await _chunk_book(state, pd, doc_id)
+async def _chunk_code(state: IngestionState, pd: dict | None, doc_id: str) -> IngestionState:
+    raw_text = pd["raw_text"] if pd else ""
+    raw_chunks, code_metas = _chunk_code_file(raw_text, state["file_path"], doc_id)
+    chunks = []
+    async with get_session_factory()() as session:
+        chunk_models: list[ChunkModel] = []
+        for idx, (rc, meta) in enumerate(zip(raw_chunks, code_metas, strict=False)):
+            chunk_models.append(
+                ChunkModel(
+                    id=rc["id"],
+                    document_id=doc_id,
+                    section_id=None,
+                    text=rc["text"],
+                    token_count=len(rc["text"].split()),
+                    page_number=meta.get("start_line", 0),
+                    speaker=None,
+                    chunk_index=idx,
+                )
+            )
+            chunks.append(
+                {
+                    "id": rc["id"],
+                    "document_id": doc_id,
+                    "text": rc["text"],
+                    "index": idx,
+                    **{k: v for k, v in meta.items() if k != "chunk_id"},
+                }
+            )
+        session.add_all(chunk_models)
+        await session.commit()
+    logger.info("Code chunked document", extra={"doc_id": doc_id, "num_chunks": len(chunks)})
+    return {**state, "chunks": chunks, "status": "embedding"}
 
-            if profile.form == "dialogue":
-                return await _chunk_conversation(state, pd, doc_id)
 
-            if profile.form == "paper":
-                return await _chunk_paper(state, pd, doc_id)
+def route_chunker(state: IngestionState) -> str:
+    """The chunker node for a text document's measured form."""
+    form = profile_of_state(state).form
+    if form == "source_code":
+        return "chunk_code"
+    if form in ("reference", "article"):
+        return "chunk_tech_book"
+    # A play is read start to finish, as prose is.
+    if form in ("prose", "script"):
+        return "chunk_book"
+    if form == "dialogue":
+        return "chunk_conversation"
+    if form == "paper":
+        return "chunk_paper"
+    return "chunk_generic"
 
-            return await _chunk_generic(state, pd, doc_id)
-        except Exception as exc:
-            logger.exception("chunk_node failed", exc_info=exc)
-            return {**state, "status": "error", "error": str(exc)}
+
+def _chunker_node(chunker):
+    async def node(state: IngestionState) -> IngestionState:
+        logger.debug("node_start", extra={"node": chunker.__name__, "doc_id": state["document_id"]})
+        # The splitter's first import loads torch. Run on the loop inside a chunk
+        # transaction, it froze the app and held the write lock for 12-43s (I-2, #88).
+        await asyncio.to_thread(_splitter_cls)
+        await _update_stage(state["document_id"], "chunking")
+        with trace_ingestion_node("chunk", state):
+            return await chunker(state, state["parsed_document"], state["document_id"])
+
+    return node
 
 
 async def _chunk_paper(state: IngestionState, pd: dict | None, doc_id: str) -> IngestionState:
@@ -1012,3 +997,12 @@ async def _chunk_generic(state: IngestionState, pd: dict | None, doc_id: str) ->
         extra={"doc_id": doc_id, "num_chunks": len(chunks)},
     )
     return {**state, "chunks": chunks, "status": "embedding"}
+
+
+chunk_transcript_node = _chunker_node(_chunk_transcript)
+chunk_code_node = _chunker_node(_chunk_code)
+chunk_tech_book_node = _chunker_node(_chunk_tech_book)
+chunk_book_node = _chunker_node(_chunk_book)
+chunk_conversation_node = _chunker_node(_chunk_conversation)
+chunk_paper_node = _chunker_node(_chunk_paper)
+chunk_generic_node = _chunker_node(_chunk_generic)
