@@ -23,11 +23,19 @@ def test_malformed_or_impossible_pids_are_ignored(monkeypatch):
 
 
 def test_a_real_parent_pid_starts_a_daemon_thread(monkeypatch):
+    from app import parent_watch
+
+    # A real `_watch` polls for the rest of the session, through globals other tests
+    # patch (`platform.system`, `os.getppid`); a poll inside one can signal the worker.
+    watched: list[int] = []
+    monkeypatch.setattr(parent_watch, "_watch", watched.append)
     monkeypatch.setenv("LUMINARY_PARENT_PID", str(os.getppid()))
     thread = watch_parent()
     assert thread is not None
     # Daemon, so a wedged watcher can never keep the process alive.
     assert thread.daemon
+    thread.join(timeout=5)
+    assert watched == [os.getppid()]
 
 
 def test_our_own_parent_is_recognised_as_present():

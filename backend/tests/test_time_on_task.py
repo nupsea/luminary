@@ -20,6 +20,21 @@ def test_db(memory_db):
     return memory_db.engine, memory_db.factory
 
 
+_NOW = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
+
+
+class _FrozenClock(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return _NOW
+
+
+@pytest.fixture(autouse=True)
+def _frozen_clock(monkeypatch):
+    # On the real clock, a slow runner adds a second between backdating and the beat.
+    monkeypatch.setattr("app.services.time_on_task_service.datetime", _FrozenClock)
+
+
 # The two cases that bracket the ceiling, as literals rather than as arithmetic
 # on the constant under test: one slow round trip on a busy machine is real time
 # on task, a minute away from the desk is not.
@@ -31,7 +46,7 @@ async def _age_last_beat(factory, seconds: float) -> None:
     """Backdate the open interval so the next beat sees a gap of `seconds`."""
     async with factory() as s:
         row = (await s.execute(select(TimeOnTaskModel))).scalars().one()
-        row.last_beat_at = datetime.now(UTC) - timedelta(seconds=seconds)
+        row.last_beat_at = _NOW - timedelta(seconds=seconds)
         await s.commit()
 
 
@@ -118,7 +133,7 @@ async def test_activities_are_accrued_separately(test_db):
     async with factory() as s:
         rows = (await s.execute(select(TimeOnTaskModel))).scalars().all()
         for row in rows:
-            row.last_beat_at = datetime.now(UTC) - timedelta(seconds=10)
+            row.last_beat_at = _NOW - timedelta(seconds=10)
         await s.commit()
 
     async with factory() as s:
