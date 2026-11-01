@@ -70,16 +70,20 @@ native_path() {
 # Write (or with --check, verify) the notices for every package the stage ships (#378).
 # The staged interpreter runs it, so the runtime it names is the one that ships.
 third_party_notices() {
-    local lic version
+    local lic version ollama="$STAGE/ollama/ollama"
     for lic in "$(staged_stdlib)/LICENSE.txt" "$STAGE/python/LICENSE.txt"; do
         [ -f "$lic" ] && break
     done
     [ -f "$lic" ] || _die "no CPython LICENSE.txt in the staged runtime"
+    [ "$DESKTOP_OS" = windows ] && ollama="$ollama.exe"
     version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$REPO_ROOT/backend/pyproject.toml" | head -1)"
     "$(staged_python)" -I "$(native_path "$REPO_ROOT/scripts/desktop/third_party_notices.py")" \
         --site "$(native_path "$(staged_site)")" \
         --runtime-license "$(native_path "$lic")" \
+        --runtime-build "$(native_path "$STAGE/python/BUILD")" \
         --npm-root "$(native_path "$REPO_ROOT/frontend")" \
+        --cargo-manifest "$(native_path "$REPO_ROOT/src-tauri/Cargo.toml")" \
+        --ollama "$(native_path "$ollama")" \
         --version "$version" \
         --out "$(native_path "$STAGE/licenses/THIRD-PARTY-LICENSES.txt")" "$@"
 }

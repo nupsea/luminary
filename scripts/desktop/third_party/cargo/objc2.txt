@@ -1,0 +1,68 @@
+https://github.com/madsmtm/objc2/blob/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md
+# License
+
+The licensing of these crates is a bit complicated:
+- The crates `objc2`, `block2`, `objc2-foundation` and `objc2-encode` are
+  [currently][#23] licensed under [the MIT license][MIT].
+- All other crates are trio-licensed under the [Zlib], [Apache-2.0] or [MIT]
+  license, at your option.
+
+Furthermore, the crates are (usually automatically) derived from Apple SDKs,
+and that may have implications for licensing, see below for details.
+
+[#23]: https://github.com/madsmtm/objc2/issues/23
+[MIT]: https://opensource.org/license/MIT
+[Zlib]: https://zlib.net/zlib_license.html
+[Apache-2.0]: https://www.apache.org/licenses/LICENSE-2.0
+
+
+## Apple SDKs
+
+These crates are derived from Apple SDKs shipped with Xcode. You can obtain a
+copy of the Xcode license at:
+
+https://www.apple.com/legal/sla/docs/xcode.pdf
+
+Or by typing `xcodebuild -license` in your terminal.
+
+From reading the license, it is unclear whether distributing derived works
+such as these crates are allowed?
+
+But in any case, to practically use these crates, you will have to link, and
+that only works when you have the correct Xcode SDK available to provide the
+required `.tbd` files, which is why we choose to still use the normal SPDX
+identifiers in the crates (Xcode is required to use the crates, and when using
+Xcode you have already agreed to the Xcode license).
+
+https://github.com/spdx/license-list-data/blob/main/text/MIT.txt
+MIT License
+
+Copyright (c) <year> <copyright holders>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the
+following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+https://github.com/spdx/license-list-data/blob/main/text/Zlib.txt
+zlib License
+
+This software is provided 'as-is', without any express or implied warranty.  In no event will the authors be held liable for any damages arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely, subject to the following restrictions:
+
+     1. The origin of this software must not be misrepresented; you must not claim that you wrote the original software. If you use this software in a product, an acknowledgment in the product documentation would be appreciated but is not required.
+
+     2. Altered source versions must be plainly marked as such, and must not be misrepresented as being the original software.
+
+     3. This notice may not be removed or altered from any source distribution.

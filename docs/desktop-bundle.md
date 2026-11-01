@@ -433,7 +433,11 @@ for repeats. Its header states the build's licence, worked out from the packages
 |---|---|
 | Every `*.dist-info` in the staged `site-packages` | The dist-info's licence files, then licence files at the top of the package's own directory |
 | CPython | The runtime's `LICENSE.txt` |
+| Libraries python-build-standalone links into CPython (OpenSSL, SQLite, libffi, ...) | `third_party/python-build-standalone/`, per platform in `pbs.json`; a library whose modules staging pruned is left out |
 | Every non-dev package in `frontend/package-lock.json` | Licence files anywhere in the package, outside nested `node_modules` |
+| Crates compiled into the shell: normal dependencies of `src-tauri` for the host triple, plus Rust's standard library | Licence files at the top of the crate, from `cargo metadata` |
+| Go modules compiled into `ollama`, read from the build info in the staged binary, plus Go's standard library | `third_party/go/`, keyed by module path |
+| Libraries llama.cpp vendors into `llama-server` (cpp-httplib, nlohmann/json, stb, miniaudio, subprocess.h) | `third_party/llama.cpp/`, at the tag Ollama pins |
 | A package that ships no text | `scripts/desktop/third_party/`, keyed by name or glob in `vendored.json`; each file's first line is its upstream URL |
 
 A package with no text from any of these **fails staging, naming it**. Add the upstream licence
@@ -441,11 +445,24 @@ file to `third_party/` and key it; never key a package to a text other than its 
 restricted by `os` or `cpu` is skipped: it is a native binary run under node, never part of the
 browser bundle. Step 10 of both `verify_stage.sh` scripts reruns the generator with `--check` and
 fails when the file is missing or no longer matches the stage. `test_third_party_notices.py`
-guards both failures.
+guards each of these failures.
 
-Not yet covered: the Rust crates compiled into the shell, the libraries python-build-standalone
-links into CPython (OpenSSL, SQLite, libffi and others), and the GPU runtimes Ollama ships on
-Windows and Linux.
+Two pins fail staging until their texts are re-vendored:
+
+| Pin | Fails when | Re-vendor |
+|---|---|---|
+| Runtime build | `python/BUILD` or the interpreter version differs from `pbs.json`. A uv upgrade can change the build behind the same `PY_RELEASE`. | `uv run --no-project python scripts/desktop/vendor_pbs_licences.py <build> <version>`. The install_only build uv stages carries no library licences, so it reads the full archives. |
+| llama.cpp tag | Ollama's `LLAMA_CPP_VERSION` at `OLLAMA_VERSION` differs from `third_party/llama.cpp/components.json` (`stage_payload.sh`) | Fetch each library's licence at the new tag; `LLAMA.CPP-LICENSE` itself is fetched at that tag |
+
+Not in this file, and why:
+
+- CUDA is not in the installer. The app downloads it later from Ollama's own release archive.
+- The Linux AppImage bundles system libraries (GTK, WebKitGTK and others), and linuxdeploy copies
+  each one's Debian `copyright` file beside it.
+- The Windows runtime's `vcruntime140.dll` and `vcruntime140_1.dll` are Microsoft's Visual C++
+  redistributable, shipped as python-build-standalone ships them.
+- On Linux, `_dbm` links Berkeley DB under the Sleepycat licence. That licence asks for an offer of
+  the source of the software that uses it, and the AGPL source offer already makes one.
 
 ## Ollama
 
