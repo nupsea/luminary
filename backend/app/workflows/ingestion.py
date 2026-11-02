@@ -67,11 +67,8 @@ CHUNKERS = (
 )
 
 
-# The stored rows are the checkpoint, and the stored stage says which are complete:
-# `embedding` is written once entity extraction has stored its tails, `indexing` once
-# the keyword index is written. Re-running is safe from there: embed upserts by chunk
-# id and section summaries replace their rows. An earlier stage leaves a partial
-# parse, which is cleared and ingested again from the file.
+# The stored stage says which rows are complete, and those rows are the checkpoint
+# (I-74). An earlier stage leaves a partial parse, cleared and ingested from the file.
 _RESUME_AT = {
     "embedding": "embed",
     "indexing": "section_summarize",
