@@ -102,6 +102,14 @@ head of its curated list), and Settings swaps the model field on the same click;
 stored provider is not a change, and a model named in the same PATCH wins. `test_settings.py` fails
 CI if an offered provider resolves outside its own family.
 
+**I-73. A relevance judgment reads `ScoredChunk.rerank_score`, never `score`.**
+`score` only orders. RRF is a function of rank alone, and rerank rescales its pool to [0, 1], so the
+best chunk scores 1.0 whatever it says: a gate on `score` read "high" for "zxqv plorbinate the
+flumox". `rerank_score` is the cross-encoder's raw logit. `RELEVANT_RERANK_LOGIT` is 0, bracketed by
+an off-library question at -0.41 and the lowest answerable best passage at +0.5. Without a logit the
+gate reads `unknown`, never `high`. `test_retrieval_confidence.py` fails CI if the gate reads `score`
+or the logit is dropped before `synthesize_node`.
+
 ## Local models
 
 **I-9. Notes, chunks and concepts share one embedding space, whose dimension is a stored property of the corpus, not a setting.**

@@ -98,6 +98,7 @@ def _chunk_to_dict(c: ScoredChunk) -> dict:
         "section_heading": c.section_heading,
         "page": c.page,
         "score": c.score,
+        "rerank_score": c.rerank_score,
         "source": c.source,
     }
 

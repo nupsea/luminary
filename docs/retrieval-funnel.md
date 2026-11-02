@@ -103,6 +103,11 @@ precision/faithfulness lever only -- it can never add hits, and the top
 candidate always survives so a strict cut degrades context rather than
 emptying it.
 
+A reranked chunk carries two numbers. `score` is min-max normalised over the
+pool and is an ordering only. `rerank_score` is the raw cross-encoder logit, the
+one absolute relevance signal; the chat confidence gate reads it and nothing
+else (I-73).
+
 ## Tuning workflow
 
 Every knob change goes through the eval harness, never straight to config:

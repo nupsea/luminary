@@ -60,7 +60,7 @@ def test_low_confidence_first_attempt_routes_to_augment():
 @pytest.mark.parametrize(
     "confidence, retry_attempted",
     [
-        pytest.param("medium", False, id="medium_confidence_skips_retry"),
+        pytest.param("unknown", False, id="unscored_confidence_skips_retry"),
         pytest.param("high", False, id="high_confidence_skips_retry"),
         pytest.param("low", True, id="no_double_retry"),
     ],
