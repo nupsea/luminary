@@ -13,10 +13,10 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.main import app  # noqa: F401 (used via ASGITransport)
-from app.models import ChunkModel
+from app.models import ChunkModel, DocumentModel
 from app.services.content_classifier import classify_content
-from app.workflows.ingestion import IngestionState, transcribe_node
-from app.workflows.ingestion_nodes.chunk import chunk_node
+from app.workflows.ingestion import IngestionState, ingestion_graph, transcribe_node
+from app.workflows.ingestion_nodes.chunk import chunk_transcript_node
 from tests.factories import make_document
 
 # Shared DB fixture
@@ -42,7 +42,7 @@ def test_classify_returns_audio_for_wav_unchanged():
 
 
 async def test_transcribe_node_video_no_ffmpeg(test_db, tmp_path):
-    """transcribe_node returns error state when ffmpeg is not found."""
+    """Without ffmpeg the document ends as an error that says so."""
     video_file = tmp_path / "lecture.mp4"
     video_file.write_bytes(b"\x00" * 100)
 
@@ -76,11 +76,13 @@ async def test_transcribe_node_video_no_ffmpeg(test_db, tmp_path):
     }
 
     with patch("app.workflows.ingestion_nodes.transcribe.resolve_tool", return_value=None):
-        result = await transcribe_node(state)
+        result = await ingestion_graph.ainvoke(state)
 
     assert result["status"] == "error"
-    assert result["error"] is not None
-    assert "ffmpeg" in result["error"].lower()
+    async with factory() as session:
+        doc = await session.get(DocumentModel, doc_id)
+    assert doc.stage == "error"
+    assert "ffmpeg" in doc.error_message.lower()
 
 
 async def test_transcribe_node_video_with_ffmpeg(test_db, tmp_path):
@@ -162,37 +164,13 @@ async def test_transcribe_node_video_with_ffmpeg(test_db, tmp_path):
     assert len(result["_audio_chunks"]) >= 1
 
 
-async def test_transcribe_node_passthrough_for_non_video(test_db, tmp_path):
-    """transcribe_node is a no-op for non-audio/video content types."""
-    doc_file = tmp_path / "book.txt"
-    doc_file.write_text("Some text content")
-    doc_id = str(uuid.uuid4())
+async def test_only_media_is_routed_to_transcribe():
+    """A text document goes from classify straight to the chunker for its form."""
+    from app.workflows.ingestion import _after_classify
 
-    state: IngestionState = {
-        "document_id": doc_id,
-        "file_path": str(doc_file),
-        "format": "txt",
-        "parsed_document": {
-            "title": "Test",
-            "sections": [],
-            "raw_text": "text",
-            "pages": 0,
-            "word_count": 2,
-            "format": "txt",
-        },
-        "form": "prose",
-        "chunks": None,
-        "status": "classifying",
-        "error": None,
-        "section_summary_count": None,
-        "audio_duration_seconds": None,
-        "_audio_chunks": None,
-    }
-
-    result = await transcribe_node(state)
-    # Should return state unchanged
-    assert result["form"] == "prose"
-    assert result["status"] == "classifying"
+    assert _after_classify({"format": "mp4", "form": "dialogue"}) == "transcribe"
+    assert _after_classify({"format": "mp3", "form": None}) == "transcribe"
+    assert _after_classify({"format": "txt", "form": "prose"}) == "chunk_book"
 
 
 # API endpoint tests
@@ -324,7 +302,7 @@ async def test_transcript_chunks_keep_the_moment_they_came_from(test_db):
         ],
     }
 
-    result = await chunk_node(state)
+    result = await chunk_transcript_node(state)
     assert result["status"] == "embedding", result.get("error")
 
     async with factory() as session:

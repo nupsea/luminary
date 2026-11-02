@@ -1,6 +1,6 @@
 """Audio ingested before 0.7.5 had chunks and no sections, so the reader showed
 "No content available" for a transcript it could retrieve from (#97). Revision
-087906440dcf writes one section per transcript window, as chunk_node does now."""
+087906440dcf writes one section per transcript window, as chunk_transcript does now."""
 
 import sqlite3
 

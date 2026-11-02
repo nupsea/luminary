@@ -5,8 +5,10 @@ without this file moving with it fails CI instead of leaving the diagram wrong.
 `conditional` marks an edge taken only when its router picks it.
 """
 
+import pytest
+
 from app.runtime.chat_graph import build_chat_graph
-from app.workflows.ingestion import ingestion_graph
+from app.workflows.ingestion import ingestion_graph, route_chunker
 
 START, END = "__start__", "__end__"
 
@@ -45,23 +47,27 @@ CHAT_EDGES = {
     ("web_augment_node", "synthesize_node", False),
 }
 
-_ERROR_CHECKED = [
-    ("parse", "classify"),
-    ("classify", "transcribe"),
-    ("transcribe", "chunk"),
-    ("chunk", "entity_extract"),
-    ("embed", "keyword_index"),
-]
+_CHUNKERS = (
+    "chunk_code",
+    "chunk_tech_book",
+    "chunk_book",
+    "chunk_conversation",
+    "chunk_paper",
+    "chunk_generic",
+)
 INGESTION_EDGES = {
     (START, "parse", False),
-    *((node, nxt, True) for node, nxt in _ERROR_CHECKED),
-    *((node, "error_finalize", True) for node, _ in _ERROR_CHECKED),
+    ("parse", "classify", False),
+    ("classify", "transcribe", True),
+    *(("classify", chunker, True) for chunker in _CHUNKERS),
+    ("transcribe", "chunk_transcript", False),
+    *((chunker, "entity_extract", False) for chunker in ("chunk_transcript", *_CHUNKERS)),
     ("entity_extract", "embed", False),
+    ("embed", "keyword_index", False),
     ("keyword_index", "section_summarize", False),
     ("section_summarize", "summarize", False),
     ("summarize", "enrichment_enqueue", False),
     ("enrichment_enqueue", END, False),
-    ("error_finalize", END, False),
 }
 
 
@@ -75,3 +81,30 @@ def test_chat_graph_shape():
 
 def test_ingestion_graph_shape():
     assert _edges(ingestion_graph) == INGESTION_EDGES
+
+
+def test_every_ingestion_stage_fails_to_error_finalize():
+    """A handler's goto is not an edge, so get_graph() draws error_finalize unconnected."""
+    handled = {
+        name for name, spec in ingestion_graph.builder.nodes.items() if spec.error_handler_node
+    }
+    assert handled == {source for source, _, _ in INGESTION_EDGES} - {START}
+    assert "error_finalize" in ingestion_graph.builder.nodes
+
+
+@pytest.mark.parametrize(
+    "form, chunker",
+    [
+        ("source_code", "chunk_code"),
+        ("reference", "chunk_tech_book"),
+        ("article", "chunk_tech_book"),
+        ("prose", "chunk_book"),
+        ("script", "chunk_book"),
+        ("dialogue", "chunk_conversation"),
+        ("paper", "chunk_paper"),
+        ("entries", "chunk_generic"),
+        (None, "chunk_generic"),
+    ],
+)
+def test_each_form_routes_to_its_chunker(form, chunker):
+    assert route_chunker({"format": "txt", "form": form}) == chunker

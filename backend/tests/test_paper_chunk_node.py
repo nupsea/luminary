@@ -1,4 +1,4 @@
-"""chunk_node's paper path: routing, reference exclusion, and fallback safety."""
+"""The paper chunker: routing, reference exclusion, and fallback safety."""
 
 import threading
 from pathlib import Path
@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models import ChunkModel, SectionModel
-from app.workflows.ingestion import chunk_node
+from app.workflows.ingestion import chunk_paper_node, route_chunker
 from tests.factories import make_document
 
 PROSE = " ".join(f"Sentence {i} states a claim about the model." for i in range(60))
@@ -64,13 +64,17 @@ PAPER_SECTIONS = [
 ]
 
 
+def test_a_paper_routes_to_the_paper_chunker(tmp_path):
+    assert route_chunker(_state("d", PAPER_SECTIONS, tmp_path)) == "chunk_paper"
+
+
 @pytest.mark.asyncio
 async def test_paper_path_excludes_references_from_chunks(test_db):
     _, factory, tmp_path = test_db
     doc_id = "paper-refs"
     await _insert_document(factory, doc_id, tmp_path)
 
-    result = await chunk_node(_state(doc_id, PAPER_SECTIONS, tmp_path))
+    result = await chunk_paper_node(_state(doc_id, PAPER_SECTIONS, tmp_path))
     assert result["status"] == "embedding"
 
     async with factory() as session:
@@ -96,7 +100,7 @@ async def test_paper_path_sets_context_header(test_db):
     _, factory, tmp_path = test_db
     doc_id = "paper-header"
     await _insert_document(factory, doc_id, tmp_path)
-    await chunk_node(_state(doc_id, PAPER_SECTIONS, tmp_path))
+    await chunk_paper_node(_state(doc_id, PAPER_SECTIONS, tmp_path))
 
     async with factory() as session:
         chunk = (
@@ -116,7 +120,7 @@ async def test_unrecognised_structure_falls_back_to_generic(test_db):
     await _insert_document(factory, doc_id, tmp_path)
 
     sections = [_section("Getting Started"), _section("Installing"), _section("FAQ")]
-    result = await chunk_node(_state(doc_id, sections, tmp_path))
+    result = await chunk_paper_node(_state(doc_id, sections, tmp_path))
 
     assert result["status"] == "embedding"
     async with factory() as session:
@@ -153,7 +157,7 @@ async def test_the_splitter_import_runs_off_the_event_loop_before_any_write(test
         patch.object(chunk_module, "_splitter_cls", splitter),
         patch.object(chunk_module, "_update_stage", stage),
     ):
-        await chunk_node(_state(doc_id, PAPER_SECTIONS, tmp_path))
+        await chunk_paper_node(_state(doc_id, PAPER_SECTIONS, tmp_path))
 
     assert events[:2] == ["import", "write"], events
 
@@ -170,7 +174,7 @@ async def test_paper_chunker_failure_falls_back_without_duplicating_sections(tes
         "app.services.paper_chunker.chunk_paper_section",
         side_effect=RuntimeError("boom"),
     ):
-        result = await chunk_node(_state(doc_id, PAPER_SECTIONS, tmp_path))
+        result = await chunk_paper_node(_state(doc_id, PAPER_SECTIONS, tmp_path))
 
     assert result["status"] == "embedding"
     async with factory() as session:

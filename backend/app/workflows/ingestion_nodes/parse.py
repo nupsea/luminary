@@ -42,50 +42,46 @@ async def parse_node(state: IngestionState) -> IngestionState:
     if Path(state["file_path"]).suffix.lstrip(".").lower() in MEDIA_FORMATS:
         return {**state, "parsed_document": None, "status": "classifying"}
     with trace_ingestion_node("parse", state):
-        try:
-            await _update_stage(state["document_id"], "parsing")
-            fp = Path(state["file_path"])
-            # Off the event loop: parsing is one uninterrupted CPU call with no
-            # await inside it, so on the single worker it stalls every other
-            # request for its whole duration -- measured 44.9s on a 23MB PDF,
-            # during which the app serves neither the API nor its own SPA
-            # chunks, and the UI cannot navigate (I-2).
-            parsed = await asyncio.to_thread(_parser.parse, fp, state["format"])
-            sections = [
-                {
-                    "heading": s.heading,
-                    "level": s.level,
-                    "text": s.text,
-                    "page_start": s.page_start,
-                    "page_end": s.page_end,
-                    "page_breaks": s.page_breaks,
-                }
-                for s in parsed.sections
-            ]
-            # Persisted here, beside the parse that discovers them.
-            if parsed.structure_type:
-                await _persist_structure_type(state["document_id"], parsed.structure_type)
-            if parsed.extraction_report is not None:
-                await _persist_extraction_report(state["document_id"], parsed.extraction_report)
-            return {
-                **state,
-                "parsed_document": {
-                    "title": parsed.title,
-                    "format": parsed.format,
-                    "pages": parsed.pages,
-                    "word_count": parsed.word_count,
-                    "sections": sections,
-                    "raw_text": parsed.raw_text,
-                    # Sheet -> printed page, for PDFs that number front matter
-                    # separately. Empty when counting sheets is already right.
-                    "page_labels": parsed.page_labels,
-                },
-                "structure_type": parsed.structure_type,
-                "status": "classifying",
+        await _update_stage(state["document_id"], "parsing")
+        fp = Path(state["file_path"])
+        # Off the event loop: parsing is one uninterrupted CPU call with no
+        # await inside it, so on the single worker it stalls every other
+        # request for its whole duration -- measured 44.9s on a 23MB PDF,
+        # during which the app serves neither the API nor its own SPA
+        # chunks, and the UI cannot navigate (I-2).
+        parsed = await asyncio.to_thread(_parser.parse, fp, state["format"])
+        sections = [
+            {
+                "heading": s.heading,
+                "level": s.level,
+                "text": s.text,
+                "page_start": s.page_start,
+                "page_end": s.page_end,
+                "page_breaks": s.page_breaks,
             }
-        except Exception as exc:
-            logger.exception("parse_node failed", exc_info=exc)
-            return {**state, "status": "error", "error": str(exc)}
+            for s in parsed.sections
+        ]
+        # Persisted here, beside the parse that discovers them.
+        if parsed.structure_type:
+            await _persist_structure_type(state["document_id"], parsed.structure_type)
+        if parsed.extraction_report is not None:
+            await _persist_extraction_report(state["document_id"], parsed.extraction_report)
+        return {
+            **state,
+            "parsed_document": {
+                "title": parsed.title,
+                "format": parsed.format,
+                "pages": parsed.pages,
+                "word_count": parsed.word_count,
+                "sections": sections,
+                "raw_text": parsed.raw_text,
+                # Sheet -> printed page, for PDFs that number front matter
+                # separately. Empty when counting sheets is already right.
+                "page_labels": parsed.page_labels,
+            },
+            "structure_type": parsed.structure_type,
+            "status": "classifying",
+        }
 
 
 def _measure_form(state: IngestionState) -> str:
@@ -122,8 +118,6 @@ async def _measure_facets(form: str, pd: dict) -> tuple[str | None, str | None]:
 
 async def classify_node(state: IngestionState) -> IngestionState:
     result = await _measure_classification(state)
-    if result.get("status") == "error":
-        return result
     async with get_session_factory()() as session:
         if state.get("kind"):
             chosen = await DocumentKindRepo(session).choose(state["document_id"], state["kind"])
@@ -145,19 +139,15 @@ async def _measure_classification(state: IngestionState) -> IngestionState:
     # Before the classify probes, which queue behind other LLM work (#142).
     await _update_stage(state["document_id"], "classifying")
     with trace_ingestion_node("classify", state):
-        try:
-            # Measured from structure, never from a type: the old type map reached
-            # `reference` only through `tech_book`, so a non-technical manual never could.
-            form = _measure_form(state)
-            domain, register = await _measure_facets(form, pd)
-            # The classified facets reach the row, not just the state: the library,
-            # filters and every later read come from the row.
-            await _persist_classification(state["document_id"], form, domain, register)
-            logger.info(
-                "Classified document",
-                extra={"doc_id": state["document_id"], "form": form, "domain": domain},
-            )
-            return {**state, "form": form, "domain": domain, "status": "chunking"}
-        except Exception as exc:
-            logger.exception("classify_node failed", exc_info=exc)
-            return {**state, "status": "error", "error": str(exc)}
+        # Measured from structure, never from a type: the old type map reached
+        # `reference` only through `tech_book`, so a non-technical manual never could.
+        form = _measure_form(state)
+        domain, register = await _measure_facets(form, pd)
+        # The classified facets reach the row, not just the state: the library,
+        # filters and every later read come from the row.
+        await _persist_classification(state["document_id"], form, domain, register)
+        logger.info(
+            "Classified document",
+            extra={"doc_id": state["document_id"], "form": form, "domain": domain},
+        )
+        return {**state, "form": form, "domain": domain, "status": "chunking"}

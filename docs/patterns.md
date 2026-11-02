@@ -31,6 +31,11 @@ Patterns discovered through completed stories. Read before implementing new feat
 
 - **Services and repos raise `app.exceptions.LuminaryError` subclasses, never `HTTPException`.** `main.py` registers one handler that maps `status_code` to the response and spreads `extra` into the body. `NotFound`/`Conflict`/`InvalidInput`/`DependencyUnavailable` cover the common cases; a domain hierarchy (e.g. `GoalError`) subclasses `LuminaryError` and sets `status_code` per leaf. A router may still catch a specific type to add context, but it no longer has to -- an unmapped domain error returns its own status instead of a 500. `repos/_helpers.get_or_404` keeps its name and raises `NotFound`.
 
+## Ingestion graph
+
+- **A node that cannot continue raises; it never returns `status="error"`.** Every ingestion node is added with `error_handler=_to_error_finalize` (`workflows/ingestion.py`), which records the message on the document. A failure the next attempt can fix gets a `RetryPolicy` limited to its own exception type, as `embed` has for `VectorCountMismatch`. A node that may fail without failing the document catches its own errors, as `keyword_index` and `section_summarize` do. `test_ingestion_error_routing.py` and `test_graph_shape.py` pin both.
+- **Keep the ingestion graph sequential.** In the LangGraph that `pyproject.toml` pins, a node that raises while another node runs in the same step skips its `error_handler` and fails the whole run, so the document gets no error message. Parallelising `keyword_index` with `embed` was measured not to be worth it: across 360 dev-library ingests, `keyword_index` averaged 0.11 s and `embed` 34 s.
+
 ## Database Migrations and Schema Evolution
 
 - **Replace model in-place with table name unchanged**: keep the SQLAlchemy class declaration as the new schema (so `create_all` generates the correct CREATE TABLE for fresh databases) and add idempotent ALTER TABLE statements in `db_init.py` for existing databases with the old schema. New columns are nullable by default; legacy NOT NULL columns in old databases are tolerated by the new model if it declares them nullable.

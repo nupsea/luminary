@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models import ChunkModel, SummaryModel
-from app.workflows.ingestion import IngestionState, chunk_node, embed_node, summarize_node
+from app.workflows.ingestion import IngestionState, chunk_generic_node, embed_node, summarize_node
 from tests.factories import make_document
 
 # Shared DB fixture
@@ -73,8 +73,13 @@ async def test_embedding_called_in_batch(test_db):
             return [[0.1] * 1024 for _ in texts]
 
     class FakeLanceDB:
+        stored = 0
+
         def upsert_chunks(self, rows):
-            pass
+            self.stored += len(rows)
+
+        def count_for_document(self, doc_id):
+            return self.stored
 
     with (
         patch("app.services.embedder.get_embedding_service", return_value=TrackingEmbedder()),
@@ -208,7 +213,7 @@ async def test_summarization_is_fire_and_forget(test_db):
 
 @pytest.mark.asyncio
 async def test_chunks_written_in_batch(test_db):
-    """chunk_node persists all N chunks in one batch — verified via functional check."""
+    """A chunker persists all N chunks in one batch — verified via functional check."""
     _engine, factory, tmp_path = test_db
     doc_id = str(uuid.uuid4())
 
@@ -248,7 +253,7 @@ async def test_chunks_written_in_batch(test_db):
         "error": None,
     }
 
-    result = await chunk_node(state)
+    result = await chunk_generic_node(state)
 
     # All chunks must be in the DB
     async with factory() as session:
@@ -262,4 +267,4 @@ async def test_chunks_written_in_batch(test_db):
     assert len(db_chunks) == len(in_state), (
         f"DB has {len(db_chunks)} chunks but state has {len(in_state)}"
     )
-    assert len(db_chunks) > 0, "chunk_node produced no chunks"
+    assert len(db_chunks) > 0, "the chunker produced no chunks"

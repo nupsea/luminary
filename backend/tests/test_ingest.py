@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.main import app
 from app.models import ChunkModel, DocumentModel
 from app.services.content_classifier import classify_content
-from app.workflows.ingestion import IngestionState, chunk_node
+from app.workflows.ingestion import IngestionState, chunk_generic_node
 from tests.factories import make_document
 
 # Classification heuristic unit tests (pure functions, no DB)
@@ -50,8 +50,8 @@ def test_classify_defaults_to_notes():
 # Workflow node tests
 
 
-async def test_chunk_node_writes_to_db(test_db):
-    """chunk_node should persist chunks to the chunks table."""
+async def test_chunker_node_writes_to_db(test_db):
+    """A chunker node persists its chunks to the chunks table."""
     engine, factory, tmp_path = test_db
     doc_id = str(uuid.uuid4())
 
@@ -94,7 +94,7 @@ async def test_chunk_node_writes_to_db(test_db):
         "error": None,
     }
 
-    result = await chunk_node(state)
+    result = await chunk_generic_node(state)
 
     assert result["status"] == "embedding"
     assert result["chunks"] is not None

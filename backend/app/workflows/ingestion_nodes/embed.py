@@ -22,114 +22,80 @@ from app.workflows.ingestion_nodes._shared import IngestionState, _update_stage
 logger = logging.getLogger(__name__)
 
 
+class VectorCountMismatch(Exception):
+    """LanceDB holds fewer vectors than the document has chunks. The graph retries embed once."""
+
+
 async def embed_node(state: IngestionState) -> IngestionState:
 
     logger.debug("node_start", extra={"node": "embed", "doc_id": state["document_id"]})
     with trace_ingestion_node("embed", state):
-        try:
-            doc_id = state["document_id"]
-            chunks = state.get("chunks") or []
-            if not chunks:
-                logger.warning("embed_node: no chunks to embed", extra={"doc_id": doc_id})
-                await _update_stage(doc_id, "embedding")
-                return {**state, "status": "indexing"}
-
-            from app.services.embedder import chunk_embedding_text, get_embedding_service
-            from app.services.vector_store import get_lancedb_service
-
-            embedder = get_embedding_service()
-
-            # Update stage BEFORE encoding so UI reflects current work immediately
+        doc_id = state["document_id"]
+        chunks = state.get("chunks") or []
+        if not chunks:
+            logger.warning("embed_node: no chunks to embed", extra={"doc_id": doc_id})
             await _update_stage(doc_id, "embedding")
-            logger.info(
-                "Embedding started",
-                extra={"doc_id": doc_id, "num_chunks": len(chunks)},
-            )
-
-            # A batch is the unit of work, not a document. Encoding every chunk
-            # and then materialising every row held three copies of the document's
-            # text at once -- the chunk list, the encoder input and the rows --
-            # plus one vector per chunk, so peak memory scaled with document size.
-            # Only the LanceDB write was bounded, which is what the 9400-chunk note
-            # below is about: this limit was already met here once and only the
-            # last step was fixed.
-            #
-            # Vectors are untouched by the change. Encoding is per-text, and 500
-            # texts encoded whole against the same 500 in batches compare bitwise
-            # identical, so the index is byte-for-byte what it was.
-            batch_size = 1000
-            lancedb_svc = get_lancedb_service()
-            loop = asyncio.get_event_loop()
-
-            async def _write_every_batch() -> None:
-                for start_idx in range(0, len(chunks), batch_size):
-                    batch_chunks = chunks[start_idx : start_idx + batch_size]
-                    # Display text remains in chunk["text"].
-                    texts = [
-                        chunk_embedding_text(c["text"], c.get("entities_text"))
-                        for c in batch_chunks
-                    ]
-                    # CPU-bound encoding in a thread pool so the event loop stays free
-                    # for status poll requests during the (potentially long) pass.
-                    embeddings = await loop.run_in_executor(None, embedder.encode, texts)
-                    rows = [
-                        {
-                            "chunk_id": c["id"],
-                            "document_id": doc_id,
-                            "section_heading": "",
-                            "page": 0,
-                            "chunk_index": c.get("index", 0),
-                            "speaker": "",
-                            "text": c["text"],
-                            "vector": embeddings[i],
-                        }
-                        for i, c in enumerate(batch_chunks)
-                    ]
-                    # Batched to avoid memory/spill issues in LanceDB/DataFusion with
-                    # very large documents (like the Bible with 9400+ chunks). Wrapped
-                    # in asyncio.to_thread (I-2): LanceDB is synchronous; calling it
-                    # directly in the event loop blocks it and can corrupt aiosqlite
-                    # state when DataFusion's BackgroundLoop encounters errors.
-                    await asyncio.to_thread(lancedb_svc.upsert_chunks, rows)
-                    logger.info(
-                        "Upserted batch %d-%d to LanceDB",
-                        start_idx,
-                        min(start_idx + batch_size, len(chunks)),
-                    )
-                    # Explicit: the next batch's encode allocates before CPython would
-                    # otherwise drop these, so the peak would still hold two batches.
-                    del texts, embeddings, rows
-
-            await _write_every_batch()
-
-            # Integrity guard: a silent LanceDB write failure (e.g. a spill/IO
-            # error under concurrent ingestion -- LanceDB is single-writer) must
-            # NEVER leave a document marked complete with missing vectors. Verify
-            # the count, retry the upsert once, and fail the node loudly if it is
-            # still short so retrieval can't run against a half-indexed doc.
-            written = await asyncio.to_thread(lancedb_svc.count_for_document, doc_id)
-            if written != len(chunks):
-                logger.warning(
-                    "embed integrity: doc=%s vectors=%d != chunks=%d, retrying upsert",
-                    doc_id,
-                    written,
-                    len(chunks),
-                )
-                # Re-encodes rather than keeping every vector alive for a path
-                # that almost never runs. Holding them to save this retry is what
-                # made peak memory scale with document size in the first place.
-                await _write_every_batch()
-                written = await asyncio.to_thread(lancedb_svc.count_for_document, doc_id)
-            if written != len(chunks):
-                msg = f"vector count {written} != chunk count {len(chunks)} after retry"
-                logger.error("embed integrity check FAILED: doc=%s %s", doc_id, msg)
-                return {**state, "status": "error", "error": msg}
-
-            logger.info("Embedded %d chunks", len(chunks), extra={"doc_id": doc_id})
             return {**state, "status": "indexing"}
-        except Exception as exc:
-            logger.exception("embed_node failed", exc_info=exc)
-            return {**state, "status": "error", "error": str(exc)}
+
+        from app.services.embedder import chunk_embedding_text, get_embedding_service
+        from app.services.vector_store import get_lancedb_service
+
+        embedder = get_embedding_service()
+
+        # Update stage BEFORE encoding so UI reflects current work immediately
+        await _update_stage(doc_id, "embedding")
+        logger.info(
+            "Embedding started",
+            extra={"doc_id": doc_id, "num_chunks": len(chunks)},
+        )
+
+        # A batch is the unit of work, not a document: peak memory is one batch's
+        # text and vectors, whatever the document's size. Encoding is per-text, so
+        # batching leaves every vector bitwise identical.
+        batch_size = 1000
+        lancedb_svc = get_lancedb_service()
+        loop = asyncio.get_event_loop()
+        for start_idx in range(0, len(chunks), batch_size):
+            batch_chunks = chunks[start_idx : start_idx + batch_size]
+            # Display text remains in chunk["text"].
+            texts = [chunk_embedding_text(c["text"], c.get("entities_text")) for c in batch_chunks]
+            # CPU-bound encoding in a thread pool so the event loop stays free
+            # for status poll requests during the (potentially long) pass.
+            embeddings = await loop.run_in_executor(None, embedder.encode, texts)
+            rows = [
+                {
+                    "chunk_id": c["id"],
+                    "document_id": doc_id,
+                    "section_heading": "",
+                    "page": 0,
+                    "chunk_index": c.get("index", 0),
+                    "speaker": "",
+                    "text": c["text"],
+                    "vector": embeddings[i],
+                }
+                for i, c in enumerate(batch_chunks)
+            ]
+            # Batched so LanceDB/DataFusion never spills on a 9400-chunk document;
+            # synchronous, so off the loop (I-2).
+            await asyncio.to_thread(lancedb_svc.upsert_chunks, rows)
+            logger.info(
+                "Upserted batch %d-%d to LanceDB",
+                start_idx,
+                min(start_idx + batch_size, len(chunks)),
+            )
+            # Explicit: the next batch's encode allocates before CPython would
+            # otherwise drop these, so the peak would still hold two batches.
+            del texts, embeddings, rows
+
+        # A silent LanceDB write failure (LanceDB is single-writer) must never leave
+        # a document complete with missing vectors. Upserts are keyed by chunk id,
+        # so the retry rewrites the whole document safely.
+        written = await asyncio.to_thread(lancedb_svc.count_for_document, doc_id)
+        if written != len(chunks):
+            raise VectorCountMismatch(f"vector count {written} != chunk count {len(chunks)}")
+
+        logger.info("Embedded %d chunks", len(chunks), extra={"doc_id": doc_id})
+        return {**state, "status": "indexing"}
 
 
 async def keyword_index_node(state: IngestionState) -> IngestionState:

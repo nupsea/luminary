@@ -1,9 +1,12 @@
 import logging
 from typing import Any
 
+from langgraph.errors import NodeError
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, RetryPolicy
 
 from app.telemetry import trace_chain
+from app.types import MEDIA_FORMATS
 from app.workflows.ingestion_nodes._shared import (
     ENTITY_TAIL_MAX,  # noqa: F401  re-exported for back-compat
     IngestionState,
@@ -18,9 +21,16 @@ from app.workflows.ingestion_nodes.chunk import (
     _chunk_conversation,  # noqa: F401  re-exported for tests
     _chunk_tech_book,  # noqa: F401  re-exported for tests
     _run_objective_extraction,  # noqa: F401  re-exported for back-compat
-    chunk_node,
+    chunk_book_node,
+    chunk_code_node,
+    chunk_conversation_node,
+    chunk_generic_node,
+    chunk_paper_node,
+    chunk_tech_book_node,
+    chunk_transcript_node,
+    route_chunker,
 )
-from app.workflows.ingestion_nodes.embed import embed_node, keyword_index_node
+from app.workflows.ingestion_nodes.embed import VectorCountMismatch, embed_node, keyword_index_node
 from app.workflows.ingestion_nodes.entity_extract import (
     _build_call_graph,  # noqa: F401  re-exported for tests
     entity_extract_node,
@@ -40,37 +50,66 @@ from app.workflows.ingestion_nodes.transcribe import (
 
 logger = logging.getLogger(__name__)
 
+CHUNKERS = (
+    "chunk_code",
+    "chunk_tech_book",
+    "chunk_book",
+    "chunk_conversation",
+    "chunk_paper",
+    "chunk_generic",
+)
 
-def _route_on_status(builder: StateGraph, node: str, next_node: str) -> None:
-    """Go to error_finalize if status=='error', else next_node."""
 
-    def _router(state: IngestionState) -> str:
-        return "error_finalize" if state.get("status") == "error" else next_node
+def _to_error_finalize(state: IngestionState, error: NodeError) -> Command:
+    """Any node that raises ends the run at error_finalize, which records the message."""
+    logger.error(
+        "ingestion node %s failed",
+        error.node,
+        exc_info=error.error,
+        extra={"document_id": state["document_id"]},
+    )
+    return Command(goto="error_finalize", update={"status": "error", "error": str(error.error)})
 
-    # Without the targets listed, get_graph() cannot see past this edge.
-    builder.add_conditional_edges(node, _router, [next_node, "error_finalize"])
+
+def _after_classify(state: IngestionState) -> str:
+    # Media has no text until transcription; its chunks are the transcript's windows.
+    return "transcribe" if state["format"] in MEDIA_FORMATS else route_chunker(state)
 
 
 def _build_graph():
     builder: StateGraph = StateGraph(IngestionState)
-    builder.add_node("parse", parse_node)
-    builder.add_node("classify", classify_node)
-    builder.add_node("transcribe", transcribe_node)
-    builder.add_node("chunk", chunk_node)
-    builder.add_node("embed", embed_node)
-    builder.add_node("keyword_index", keyword_index_node)
-    builder.add_node("entity_extract", entity_extract_node)
-    builder.add_node("section_summarize", section_summarize_node)
-    builder.add_node("summarize", summarize_node)
-    builder.add_node("enrichment_enqueue", enrichment_enqueue_node)
+
+    def node(name: str, action, **policies) -> None:
+        builder.add_node(name, action, error_handler=_to_error_finalize, **policies)
+
+    node("parse", parse_node)
+    node("classify", classify_node)
+    node("transcribe", transcribe_node)
+    node("chunk_transcript", chunk_transcript_node)
+    node("chunk_code", chunk_code_node)
+    node("chunk_tech_book", chunk_tech_book_node)
+    node("chunk_book", chunk_book_node)
+    node("chunk_conversation", chunk_conversation_node)
+    node("chunk_paper", chunk_paper_node)
+    node("chunk_generic", chunk_generic_node)
+    node("entity_extract", entity_extract_node)
+    embed_retry = RetryPolicy(max_attempts=2, retry_on=VectorCountMismatch)
+    node("embed", embed_node, retry_policy=embed_retry)
+    node("keyword_index", keyword_index_node)
+    node("section_summarize", section_summarize_node)
+    node("summarize", summarize_node)
+    node("enrichment_enqueue", enrichment_enqueue_node)
+    # No handler of its own: a failure here fails the run, and run_ingestion records it.
     builder.add_node("error_finalize", error_finalize_node)
+
     builder.add_edge(START, "parse")
-    _route_on_status(builder, "parse", "classify")
-    _route_on_status(builder, "classify", "transcribe")
-    _route_on_status(builder, "transcribe", "chunk")
-    _route_on_status(builder, "chunk", "entity_extract")
+    builder.add_edge("parse", "classify")
+    builder.add_conditional_edges("classify", _after_classify, ["transcribe", *CHUNKERS])
+    builder.add_edge("transcribe", "chunk_transcript")
+    for chunker in ("chunk_transcript", *CHUNKERS):
+        builder.add_edge(chunker, "entity_extract")
     builder.add_edge("entity_extract", "embed")
-    _route_on_status(builder, "embed", "keyword_index")
+    builder.add_edge("embed", "keyword_index")
     builder.add_edge("keyword_index", "section_summarize")
     builder.add_edge("section_summarize", "summarize")
     builder.add_edge("summarize", "enrichment_enqueue")
