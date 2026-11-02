@@ -29,6 +29,7 @@
   ],
   "declared": {
     "python:colorama": {"licence": "BSD-3-Clause", "source": "https://pypi.org/pypi/colorama/0.4.6/json (Windows only)"},
+    "python:httpx2-jsfetch": {"licence": "BSD-3-Clause", "source": "https://pypi.org/pypi/httpx2-jsfetch/1.0/json (Emscripten only)"},
     "python:jeepney": {"licence": "MIT", "source": "https://pypi.org/pypi/jeepney/0.9.0/json (Linux only)"},
     "python:pywin32-ctypes": {"licence": "BSD-3-Clause", "source": "https://pypi.org/pypi/pywin32-ctypes/0.2.3/json (Windows only)"},
     "python:secretstorage": {"licence": "BSD-3-Clause", "source": "https://pypi.org/pypi/secretstorage/3.5.0/json (Linux only)"},

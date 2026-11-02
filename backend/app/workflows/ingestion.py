@@ -41,13 +41,14 @@ from app.workflows.ingestion_nodes.transcribe import (
 logger = logging.getLogger(__name__)
 
 
-def _route_on_status(next_node: str):
-    """Return a router that goes to error_finalize if status=='error', else next_node."""
+def _route_on_status(builder: StateGraph, node: str, next_node: str) -> None:
+    """Go to error_finalize if status=='error', else next_node."""
 
     def _router(state: IngestionState) -> str:
         return "error_finalize" if state.get("status") == "error" else next_node
 
-    return _router
+    # Without the targets listed, get_graph() cannot see past this edge.
+    builder.add_conditional_edges(node, _router, [next_node, "error_finalize"])
 
 
 def _build_graph():
@@ -64,12 +65,12 @@ def _build_graph():
     builder.add_node("enrichment_enqueue", enrichment_enqueue_node)
     builder.add_node("error_finalize", error_finalize_node)
     builder.add_edge(START, "parse")
-    builder.add_conditional_edges("parse", _route_on_status("classify"))
-    builder.add_conditional_edges("classify", _route_on_status("transcribe"))
-    builder.add_conditional_edges("transcribe", _route_on_status("chunk"))
-    builder.add_conditional_edges("chunk", _route_on_status("entity_extract"))
+    _route_on_status(builder, "parse", "classify")
+    _route_on_status(builder, "classify", "transcribe")
+    _route_on_status(builder, "transcribe", "chunk")
+    _route_on_status(builder, "chunk", "entity_extract")
     builder.add_edge("entity_extract", "embed")
-    builder.add_conditional_edges("embed", _route_on_status("keyword_index"))
+    _route_on_status(builder, "embed", "keyword_index")
     builder.add_edge("keyword_index", "section_summarize")
     builder.add_edge("section_summarize", "summarize")
     builder.add_edge("summarize", "enrichment_enqueue")
