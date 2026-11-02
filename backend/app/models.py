@@ -48,6 +48,9 @@ class DocumentModel(Base):
     # Human-readable error detail written by error_finalize_node (e.g. "ffmpeg not found").
     # Surfaced to the UI via GET /documents/{id}/status as error_message.
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Startup resumes of the current ingestion; capped so a document that kills the
+    # process is failed rather than retried at every launch. Reset when it finishes.
+    ingest_resumes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # Original URL for YouTube-ingested documents (e.g. https://www.youtube.com/watch?v=...).
     # Null for locally uploaded files.
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)

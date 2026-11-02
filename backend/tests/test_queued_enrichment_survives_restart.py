@@ -1,6 +1,6 @@
 """A document whose enrichment is still queued at quit is not failed by the next launch.
 
-The startup reconcile (I-10) fails every document not 'complete' or 'error'. Queued
+The startup reconcile resumes or fails every document not 'complete' or 'error'. Queued
 enrichment is safe only because ingestion leaves the document 'complete' before any
 job runs; a document left 'enriching' while its jobs wait would be failed at launch.
 """
@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 import app.workflows.ingestion_nodes.finalize as fin
 from app.models import DocumentModel, EnrichmentJobModel
-from app.runtime.library_work import _fail_interrupted_ingestions
+from app.runtime.library_work import _resume_interrupted_ingestions
 from tests.test_pdf_page_number import _make_doc, _make_pdf_sections, _make_state
 
 
@@ -37,7 +37,7 @@ async def test_a_document_with_queued_enrichment_survives_the_startup_reconcile(
     monkeypatch.setattr(fin, "get_enrichment_worker", lambda: _NoWorker())
     await fin.enrichment_enqueue_node(_make_state(doc_id, _make_pdf_sections(3), format="pdf"))
 
-    await _fail_interrupted_ingestions()
+    await _resume_interrupted_ingestions()
 
     async with factory() as session:
         doc = await session.get(DocumentModel, doc_id)

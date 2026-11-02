@@ -287,6 +287,18 @@ real library, storing "AbbÃ©" in the Federalist Papers; charset-normalizer mis
 BOM file as plain `utf_8`, which leaves U+FEFF in front of the text. `source_text.decode` tries strict
 `utf-8-sig` first. `tests/test_source_text.py` guards it.
 
+**I-74. An ingestion stage that runs twice on a document leaves what one run leaves.**
+At startup, an ingestion the process lost resumes at the stage it had reached. The stored stage
+shows which rows are complete, and the rows are the checkpoint, so the interrupted stage runs
+again on top of its own partial output. A write that adds instead of replacing corrupts a
+resumed document without failing: entity extraction without `replace` doubled every
+entity's frequency. Embed upserts by chunk id, the keyword index and section summaries rewrite
+their rows, and enrichment jobs are queued unless active. A run interrupted before entity
+extraction finishes is cleared and ingested again from the file. One resume per run
+(`MAX_INGEST_RESUMES`): a quit mid-ingest resumes, and a document that kills the process at
+every launch fails at the next launch. `tests/test_ingestion_resume.py` fails CI if a stage
+doubles its rows, or if a resume enters at the wrong stage or past the cap.
+
 ## Quality gates
 
 **I-32. An eval metric that could not be computed is a failure, never a pass.**

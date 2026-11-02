@@ -98,35 +98,25 @@ async def test_pdf_chunks_have_page_numbers(test_db):
     assert None not in page_numbers, "pdf_page_number must not be None for PDF chunks"
 
 
-async def test_finalize_persists_word_and_page_count(test_db, monkeypatch):
-    """enrichment_enqueue_node writes parser word_count/page_count to the doc row
-    (chunk nodes only set chapter_count, leaving both at 0)."""
-    import app.workflows.ingestion_nodes.finalize as fin
+async def test_parse_persists_word_and_page_count(test_db):
+    """The counts reach the row where the parse discovers them, so a resumed
+    ingestion, which has no parsed document in memory, still finishes with them."""
+    from app.workflows.ingestion_nodes.parse import parse_node
 
-    _, factory, _ = test_db
+    _, factory, tmp_path = test_db
     doc_id = str(uuid.uuid4())
+    source = tmp_path / "notes.md"
+    source.write_text("# Title\n\n" + " ".join(f"word{i}" for i in range(120)) + "\n")
     async with factory() as session:
-        session.add(_make_doc(doc_id, word_count=0, page_count=0))
+        session.add(_make_doc(doc_id, word_count=0, page_count=0, format="md"))
         await session.commit()
 
-    async def _noop(*_a, **_k):
-        return None
-
-    class _Worker:
-        async def _dispatch_pending(self):
-            return None
-
-    monkeypatch.setattr(fin, "_run_pregenerate", _noop)
-    monkeypatch.setattr(fin, "enrich_document_tags", _noop)
-    monkeypatch.setattr(fin, "get_enrichment_worker", lambda: _Worker())
-
-    state = _make_state(doc_id, _make_pdf_sections(5), format="pdf")
-    await fin.enrichment_enqueue_node(state)
+    state = await parse_node({"document_id": doc_id, "file_path": str(source), "format": "md"})
 
     async with factory() as session:
         doc = await session.get(DocumentModel, doc_id)
-        assert doc.word_count == state["parsed_document"]["word_count"] > 0
-        assert doc.page_count == 5
+    assert doc.word_count == state["parsed_document"]["word_count"] > 0
+    assert doc.page_count == state["parsed_document"]["pages"]
 
 
 async def test_finalize_records_document_activity(test_db, monkeypatch):

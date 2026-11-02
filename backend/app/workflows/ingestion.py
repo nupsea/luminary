@@ -1,10 +1,17 @@
+import asyncio
 import logging
+from pathlib import Path
 from typing import Any
 
 from langgraph.errors import NodeError
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, RetryPolicy
 
+from app.database import get_session_factory
+from app.models import DocumentModel
+from app.repos.document_repo import DocumentRepo
+from app.services.document_deletion_service import get_document_deletion_service
+from app.services.ingestion_jobs import get_ingestion_jobs
 from app.telemetry import trace_chain
 from app.types import MEDIA_FORMATS
 from app.workflows.ingestion_nodes._shared import (
@@ -60,6 +67,28 @@ CHUNKERS = (
 )
 
 
+# The stored stage says which rows are complete, and those rows are the checkpoint
+# (I-74). An earlier stage leaves a partial parse, cleared and ingested from the file.
+_RESUME_AT = {
+    "embedding": "embed",
+    "indexing": "section_summarize",
+    "summarizing": "section_summarize",
+}
+_RESTART_FROM_FILE = frozenset(
+    {"parsing", "classifying", "transcribing", "correcting", "chunking", "entity_extract"}
+)
+# One resume: a quit mid-ingest resumes, while a document that kills the process at
+# every launch fails on the next one instead of looping.
+MAX_INGEST_RESUMES = 1
+
+_INTERRUPTED = (
+    "Ingestion was interrupted before it finished. Delete this document and upload it again."
+)
+_INTERRUPTED_AGAIN = (
+    "Ingestion was interrupted again after resuming. Delete this document and upload it again."
+)
+
+
 def _to_error_finalize(state: IngestionState, error: NodeError) -> Command:
     """Any node that raises ends the run at error_finalize, which records the message."""
     logger.error(
@@ -69,6 +98,10 @@ def _to_error_finalize(state: IngestionState, error: NodeError) -> Command:
         extra={"document_id": state["document_id"]},
     )
     return Command(goto="error_finalize", update={"status": "error", "error": str(error.error)})
+
+
+def _entry(state: IngestionState) -> str:
+    return state.get("resume_from") or "parse"
 
 
 def _after_classify(state: IngestionState) -> str:
@@ -102,7 +135,7 @@ def _build_graph():
     # No handler of its own: a failure here fails the run, and run_ingestion records it.
     builder.add_node("error_finalize", error_finalize_node)
 
-    builder.add_edge(START, "parse")
+    builder.add_conditional_edges(START, _entry, ["parse", *sorted(set(_RESUME_AT.values()))])
     builder.add_edge("parse", "classify")
     builder.add_conditional_edges("classify", _after_classify, ["transcribe", *CHUNKERS])
     builder.add_edge("transcribe", "chunk_transcript")
@@ -140,6 +173,7 @@ async def run_ingestion(
         "section_summary_count": None,
         "audio_duration_seconds": None,
         "_audio_chunks": None,
+        "resume_from": None,
     }
     logger.info(
         "Ingestion task started",
@@ -149,6 +183,48 @@ async def run_ingestion(
         await _update_stage(document_id, "parsing")
     else:
         await _update_stage(document_id, "classifying")
+    await _run_graph(initial_state)
+
+
+async def resume_ingestion(document_id: str, resume_from: str) -> None:
+    """Re-enter the graph at `resume_from`, reading what earlier stages stored."""
+    async with get_session_factory()() as session:
+        repo = DocumentRepo(session)
+        doc = await repo.get_or_404(document_id)
+        chunks = [
+            {
+                "id": c.id,
+                "document_id": document_id,
+                "text": c.text,
+                "index": c.chunk_index,
+                "entities_text": c.entities_text,
+            }
+            for c in await repo.chunks_for_document(document_id)
+        ]
+    state: IngestionState = {
+        "document_id": document_id,
+        "file_path": doc.file_path,
+        "format": doc.format,
+        "parsed_document": None,
+        "kind": None,
+        "chunks": chunks,
+        "status": "resuming",
+        "error": None,
+        "section_summary_count": None,
+        "audio_duration_seconds": doc.audio_duration_seconds,
+        "form": doc.form,
+        "domain": doc.domain,
+        "structure_type": doc.structure_type,
+        "defer_section_summaries": None,
+        "_audio_chunks": None,
+        "resume_from": resume_from,
+    }
+    logger.info("Ingestion resumed", extra={"document_id": document_id, "resume_from": resume_from})
+    await _run_graph(state)
+
+
+async def _run_graph(initial_state: IngestionState) -> None:
+    document_id, format = initial_state["document_id"], initial_state["format"]
     with trace_chain(
         "ingestion.workflow",
         input_value=f"doc={document_id} format={format}",
@@ -167,4 +243,56 @@ async def run_ingestion(
                 extra={"document_id": document_id},
                 exc_info=exc,
             )
-            await _update_stage(document_id, "error")
+            async with get_session_factory()() as session:
+                await DocumentRepo(session).update_fields(
+                    document_id, stage="error", ingest_resumes=0
+                )
+                await session.commit()
+
+
+def _why_not_resumable(doc: DocumentModel) -> str | None:
+    if doc.stage not in _RESUME_AT and doc.stage not in _RESTART_FROM_FILE:
+        return _INTERRUPTED
+    if not Path(doc.file_path).exists():
+        return _INTERRUPTED
+    if doc.ingest_resumes >= MAX_INGEST_RESUMES:
+        return _INTERRUPTED_AGAIN
+    return None
+
+
+async def _fail(document_id: str, message: str) -> None:
+    async with get_session_factory()() as session:
+        await DocumentRepo(session).update_fields(
+            document_id, stage="error", error_message=message, ingest_resumes=0
+        )
+        await session.commit()
+
+
+async def _resume(doc: DocumentModel) -> None:
+    deletion = get_document_deletion_service()
+    entry = _RESUME_AT.get(doc.stage)
+    async with get_session_factory()() as session:
+        await DocumentRepo(session).update_fields(doc.id, ingest_resumes=doc.ingest_resumes + 1)
+        if entry is None:
+            await deletion.delete_derived_for_reparse(session, doc.id)
+        await session.commit()
+    if entry is None:
+        await asyncio.to_thread(deletion.delete_lancedb_vectors, doc.id)
+        work = run_ingestion(doc.id, doc.file_path, doc.format)
+    else:
+        work = resume_ingestion(doc.id, entry)
+    get_ingestion_jobs().launch(doc.id, work)
+
+
+async def resume_interrupted_ingestions() -> tuple[int, int]:
+    """Resume, or fail, every ingestion the last process left unfinished: (resumed, failed)."""
+    async with get_session_factory()() as session:
+        unfinished = await DocumentRepo(session).unfinished()
+    failed = 0
+    for doc in unfinished:
+        if message := _why_not_resumable(doc):
+            await _fail(doc.id, message)
+            failed += 1
+        else:
+            await _resume(doc)
+    return len(unfinished) - failed, failed

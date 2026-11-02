@@ -66,6 +66,13 @@ async def parse_node(state: IngestionState) -> IngestionState:
             await _persist_structure_type(state["document_id"], parsed.structure_type)
         if parsed.extraction_report is not None:
             await _persist_extraction_report(state["document_id"], parsed.extraction_report)
+        async with get_session_factory()() as session:
+            await DocumentRepo(session).update_fields(
+                state["document_id"],
+                word_count=parsed.word_count or 0,
+                page_count=parsed.pages or 0,
+            )
+            await session.commit()
         return {
             **state,
             "parsed_document": {

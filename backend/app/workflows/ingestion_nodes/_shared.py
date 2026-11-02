@@ -116,6 +116,8 @@ class IngestionState(TypedDict):
     structure_type: str | None
     defer_section_summaries: bool | None
     _audio_chunks: list[dict[str, Any]] | None
+    # The node a startup resume re-enters at; None runs from parse.
+    resume_from: str | None
 
 
 def profile_of_state(state: IngestionState) -> DocumentProfile:

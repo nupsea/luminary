@@ -56,7 +56,10 @@ _CHUNKERS = (
     "chunk_generic",
 )
 INGESTION_EDGES = {
-    (START, "parse", False),
+    (START, "parse", True),
+    # A startup resume re-enters after the stages whose rows are already stored.
+    (START, "embed", True),
+    (START, "section_summarize", True),
     ("parse", "classify", False),
     ("classify", "transcribe", True),
     *(("classify", chunker, True) for chunker in _CHUNKERS),
