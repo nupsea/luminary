@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The installers shipped AGPL-3.0 PyMuPDF and ebooklib as an Apache-2.0 app, with no third-party notices.** Every bundled package's licence now ships in `licenses/THIRD-PARTY-LICENSES.txt`, builds are stated as AGPL-3.0, and About links to the running version's source; staging fails on a package without a notice (#378).
 - **The notices left out the shell's Rust crates, the C libraries inside the bundled Python, and the Go modules inside Ollama.** All three are now listed with their texts, and llama.cpp's licence is taken at the version Ollama builds rather than its latest (#378).
 - **On Windows, the first start downloaded a tokenizer file from OpenAI's servers, and could not start offline.** litellm's Windows package ships the file with Windows line endings, so its checksum failed; the installer now ships the exact file the tokenizer expects.
+- **A Project Gutenberg text without chapters kept the site's licence as part of the book.** On *The Fall of the House of Usher*, 60 of 118 stored paragraphs were Gutenberg's header and licence, searchable and open to card writing; text outside the START and END lines is now dropped on every path.
 
 ## [0.17.0] - 2026-10-28
 
