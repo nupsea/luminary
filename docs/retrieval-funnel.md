@@ -22,7 +22,7 @@ L3  final re-ordering      (not built) MMR diversity, dedup, listwise polish
   L1's metric is HR@depth of the fused pool -- if the answer chunk is not in the
   pool, nothing downstream can recover it.
 - **L2 (precision).** `_rerank_candidates` re-scores the top-`depth` RRF
-  candidates with `cross-encoder/ms-marco-MiniLM-L-6-v2` and returns top-k,
+  candidates with `cross-encoder/ms-marco-MiniLM-L-12-v2` (`config.RERANK_MODEL`) and returns top-k,
   optionally cutting candidates below a score threshold. L2's metrics are
   MRR/nDCG at fixed k, and faithfulness downstream (junk cut = cleaner
   generation context).
