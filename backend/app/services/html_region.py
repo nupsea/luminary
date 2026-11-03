@@ -58,9 +58,15 @@ _UNAMBIGUOUS_HINT = re.compile(
     # every slider label and value read out as a sentence. `byline` covers the
     # author/affiliation/date/citation block that custom-element pages wrap in
     # a plain div inside a tag no tag list can anticipate.
-    r"controls|slider|byline",
+    r"controls|slider|byline|"
+    # Teasers for the site's next article.
+    r"next-post|read-next|up-next",
     re.I,
 )
+
+# A comment thread is never the article at any length: dev.to's was two thirds of
+# its region. Matched by whole class/id name, so `commentary` stays ambiguous.
+_COMMENT_THREAD = re.compile(r"^(comments|comments?[-_].+|disqus.*)$", re.I)
 
 _FURNITURE_HINT = re.compile(f"{_UNAMBIGUOUS_HINT.pattern}|{_AMBIGUOUS_HINT.pattern}", re.I)
 
@@ -89,6 +95,11 @@ def _is_article_body(tag: Tag, region_words: int) -> bool:
     return link_words < words * _MAX_LINK_SHARE
 
 
+def _is_comment_thread(tag: Tag) -> bool:
+    names = [*(tag.get("class") or []), tag.get("id") or ""]
+    return any(_COMMENT_THREAD.match(name) for name in names)
+
+
 def _is_long_ambiguous(tag: Tag, attribute: str) -> bool:
     raw = tag.get(attribute) or ""
     value = " ".join(raw) if isinstance(raw, list) else raw
@@ -97,10 +108,31 @@ def _is_long_ambiguous(tag: Tag, attribute: str) -> bool:
     )
 
 
+def drop_comment_threads(root: Tag) -> None:
+    """Remove the page's comment threads, before any extraction compares its output."""
+    for tag in root.find_all(_is_comment_thread):
+        if tag is not root and not tag.decomposed:
+            tag.decompose()
+
+
+def _drop_teasers(root: Tag, region_words: int) -> None:
+    """A nested <article> with little of the region is a teaser card or an author box.
+
+    GitHub's hold 0-2% of their region, while a post nested in <main> holds 98-100%.
+    """
+    for tag in root.find_all("article"):
+        if tag is root or tag.decomposed:
+            continue
+        if len(tag.get_text().split()) < region_words * _CONTENT_SHARE:
+            tag.decompose()
+
+
 def _strip_furniture(root: Tag) -> None:
     for tag in root.find_all(_FURNITURE_TAGS):
         tag.decompose()
+    drop_comment_threads(root)
     region_words = len(root.get_text().split())
+    _drop_teasers(root, region_words)
     for attribute in ("class", "id"):
         for tag in root.find_all(attrs={attribute: _FURNITURE_HINT}):
             # A hint on the region itself is not licence to delete the article.

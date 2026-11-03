@@ -732,3 +732,17 @@ def test_every_pillow_open_in_the_app_names_its_formats():
             ):
                 missing.append(f"{path.relative_to(app_dir)}:{node.lineno}")
     assert not missing, f"Image.open without formats=: {missing}"
+
+
+def test_an_article_image_below_the_figure_floor_is_not_analysed(tmp_path):
+    """The floor PDF and EPUB images get: a 50px avatar is a vision call that describes nothing."""
+    out_dir = tmp_path / "md-doc"
+    out_dir.mkdir()
+    (out_dir / "figure.png").write_bytes(_image_bytes("PNG"))
+    avatar = BytesIO()
+    PILImage.new("RGB", (50, 50), (1, 2, 3)).save(avatar, format="PNG")
+    (out_dir / "avatar.png").write_bytes(avatar.getvalue())
+
+    results = extract_images_md(tmp_path, "md-doc", ExtractionOutcome())
+
+    assert [r.abs_path.name for r in results] == ["figure.png"]

@@ -614,6 +614,36 @@ class TestImageMirroring:
         assert fetched == ["https://cdn.test/d.png"]
         assert parsed.extraction_report["dropped"] == {}
 
+    async def test_an_authors_photo_is_not_a_figure(self, web):
+        extract, responses, fetched, _ = web
+        responses["https://cdn.test/d.png"] = (200, _image_bytes("PNG"))
+        byline = (
+            '<div class="author-bio"><div class="author-bio__avatar">'
+            '<img src="https://cdn.test/face.png" alt="Ada"></div><p>Ada writes here.</p></div>'
+        )
+
+        await extract(f'{byline}<figure><img src="https://cdn.test/d.png"></figure>')
+
+        assert fetched == ["https://cdn.test/d.png"]
+
+    def test_a_portrait_in_a_figure_is_the_figure(self):
+        """An interview's captioned photo of its subject is content, whatever its class.
+
+        Asked of the rule itself: trafilatura drops an `author`-named block on its own.
+        """
+        from bs4 import BeautifulSoup
+
+        from app.services.article_extractor import _not_a_figure
+
+        soup = BeautifulSoup(
+            '<figure><div class="author-photo"><img src="s.png"></div></figure>'
+            '<div class="author-bio"><img src="a.png"></div>',
+            "html.parser",
+        )
+        subject, byline = soup.find_all("img")
+        assert not _not_a_figure(subject, "s.png")
+        assert _not_a_figure(byline, "a.png")
+
     async def test_a_hidden_placeholder_under_the_real_image_is_left_out(self, web):
         extract, responses, _, images_dir = web
         responses["https://cdn.test/real.png"] = (200, _image_bytes("PNG"))
@@ -646,3 +676,24 @@ class TestImageMirroring:
 
         assert fetched == ["https://cdn.test/fig-light.png"]
         assert parsed.raw_text.count("![Fig]") == 1
+
+
+class TestCommentThreads:
+    async def test_a_long_thread_leaves_neither_serialiser(self):
+        """With the thread only out of our region, trafilatura's reference still held it,
+        our region read as a mis-pick against it, and the fallback kept the comments."""
+        thread = "<p>" + ("Great post, this helped me with my own talk. " * 60) + "</p>"
+        html = (
+            "<html><body><article><h1>Speaking</h1><h2>Getting started</h2>"
+            f"<p>{PAD}</p><h2>Travel</h2><p>{PAD}</p>"
+            f'<section id="comments"><h2>Top comments (40)</h2>{thread * 4}</section>'
+            "</article></body></html>"
+        )
+
+        parsed = await ArticleExtractor().extract(
+            "https://example.com/talk", doc_id="talk", rendered_html=html
+        )
+
+        assert parsed.extraction_report["serializer"] == "region"
+        assert "Great post" not in parsed.raw_text
+        assert "## Travel" in parsed.raw_text
