@@ -197,6 +197,19 @@ def _split_epub_document(raw_html: str, fallback_heading: str) -> list[tuple[str
     return out
 
 
+# The EPUB path's floor on a section's text; a bundle shares it, so a book parses alike either way.
+MIN_SECTION_CHARS = 50
+
+
+def epub_chapter_sections(raw_html: str, fallback_heading: str) -> list[Section]:
+    """One chapter document's sections, split at its headings."""
+    return [
+        Section(heading=heading, level=1, text=text, page_start=0, page_end=0)
+        for heading, text in _split_epub_document(raw_html, fallback_heading)
+        if len(text) >= MIN_SECTION_CHARS
+    ]
+
+
 # Kindle clippings separator
 _KINDLE_SEP = "=========="
 # Highlight/note header: "- Your Highlight on page X | Added on Date"
@@ -587,6 +600,11 @@ class DocumentParser:
     """
 
     def parse(self, file_path: Path, format: str) -> ParsedDocument:
+        # By storage, not `format`: a bundle keeps the format a reader shows it in (#433).
+        if file_path.is_dir():
+            from app.services.source_bundle import parse_bundle  # noqa: PLC0415 - imports us
+
+            return parse_bundle(file_path)
         fmt = format.lower()
         if fmt == "pdf":
             return self._parse_pdf(file_path)
@@ -1170,19 +1188,9 @@ class DocumentParser:
 
             raw_html = item.get_content().decode("utf-8", errors="replace")
             fallback = Path(item_name).stem.replace("_", " ").replace("-", " ").title()
-            for heading_text, plain in _split_epub_document(raw_html, fallback):
-                if len(plain) < 50:
-                    continue
-                sections.append(
-                    Section(
-                        heading=heading_text,
-                        level=1,
-                        text=plain,
-                        page_start=0,
-                        page_end=0,
-                    )
-                )
-                raw_parts.append(plain)
+            chapter = epub_chapter_sections(raw_html, fallback)
+            sections.extend(chapter)
+            raw_parts.extend(s.text for s in chapter)
 
         if not sections:
             # Fallback: treat entire content as one section

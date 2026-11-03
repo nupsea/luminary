@@ -1,0 +1,317 @@
+{
+  "$defs": {
+    "AudioMedia": {
+      "additionalProperties": false,
+      "properties": {
+        "audio": {
+          "maxLength": 512,
+          "pattern": "^assets/[^\\\\:]+$",
+          "title": "Audio",
+          "type": "string"
+        },
+        "captions": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "pattern": "^assets/[^\\\\:]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Captions"
+        },
+        "kind": {
+          "const": "audio",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "audio"
+      ],
+      "title": "AudioMedia",
+      "type": "object"
+    },
+    "BundleSection": {
+      "additionalProperties": false,
+      "description": "One entry of the table of contents, in reading order; `level` makes the tree.",
+      "properties": {
+        "file": {
+          "maxLength": 512,
+          "pattern": "^sections/[^\\\\:]+$",
+          "title": "File",
+          "type": "string"
+        },
+        "heading": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Heading",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "level": {
+          "maximum": 6,
+          "minimum": 1,
+          "title": "Level",
+          "type": "integer"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "maxLength": 2048,
+              "pattern": "^https?://",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Url"
+        }
+      },
+      "required": [
+        "id",
+        "heading",
+        "level",
+        "file"
+      ],
+      "title": "BundleSection",
+      "type": "object"
+    },
+    "Connector": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "title": "Connector",
+      "type": "object"
+    },
+    "Terms": {
+      "additionalProperties": false,
+      "description": "What the source's own terms page says about this work, quoted, and where it says it.",
+      "properties": {
+        "statement": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        },
+        "url": {
+          "maxLength": 2048,
+          "pattern": "^https?://",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "statement",
+        "url"
+      ],
+      "title": "Terms",
+      "type": "object"
+    },
+    "TextMedia": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "text",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "TextMedia",
+      "type": "object"
+    },
+    "YoutubeMedia": {
+      "additionalProperties": false,
+      "properties": {
+        "audio": {
+          "maxLength": 512,
+          "pattern": "^assets/[^\\\\:]+$",
+          "title": "Audio",
+          "type": "string"
+        },
+        "captions": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "pattern": "^assets/[^\\\\:]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Captions"
+        },
+        "kind": {
+          "const": "youtube",
+          "title": "Kind",
+          "type": "string"
+        },
+        "url": {
+          "maxLength": 2048,
+          "pattern": "^https?://",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "url",
+        "audio"
+      ],
+      "title": "YoutubeMedia",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "authors": {
+      "default": [],
+      "items": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Authors",
+      "type": "array"
+    },
+    "bundle_version": {
+      "const": 1,
+      "title": "Bundle Version",
+      "type": "integer"
+    },
+    "connector": {
+      "$ref": "#/$defs/Connector"
+    },
+    "cover": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "pattern": "^assets/[^\\\\:]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cover"
+    },
+    "locator": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Locator"
+    },
+    "media": {
+      "discriminator": {
+        "mapping": {
+          "audio": "#/$defs/AudioMedia",
+          "text": "#/$defs/TextMedia",
+          "youtube": "#/$defs/YoutubeMedia"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TextMedia"
+        },
+        {
+          "$ref": "#/$defs/AudioMedia"
+        },
+        {
+          "$ref": "#/$defs/YoutubeMedia"
+        }
+      ],
+      "title": "Media"
+    },
+    "sections": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/BundleSection"
+      },
+      "title": "Sections",
+      "type": "array"
+    },
+    "source_url": {
+      "anyOf": [
+        {
+          "maxLength": 2048,
+          "pattern": "^https?://",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Url"
+    },
+    "tags": {
+      "default": [],
+      "items": {
+        "maxLength": 100,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "terms": {
+      "$ref": "#/$defs/Terms"
+    },
+    "title": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "bundle_version",
+    "connector",
+    "title",
+    "media",
+    "terms"
+  ],
+  "title": "BundleManifest",
+  "type": "object"
+}
