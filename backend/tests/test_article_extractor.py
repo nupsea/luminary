@@ -13,7 +13,7 @@ PAD = "padding sentence for extractor density. " * 20
 def _extract(html: str) -> str:
     """The real pipeline: prepare, extract, then restore protected blocks."""
     extractor = ArticleExtractor()
-    prepared, protected = extractor._prepare_html(html, "testdoc")
+    prepared, protected, _ = extractor._prepare_html(html, "testdoc")
     markdown = trafilatura.extract(
         prepared,
         output_format="markdown",
@@ -284,7 +284,7 @@ class TestExtractionReport:
         extractor = ArticleExtractor()
         markdown = "Prose LUMINARYPROTECTEDBLOCK0000ENDPROTECTED more prose."
         protected = {"LUMINARYPROTECTEDBLOCK0000ENDPROTECTED": "```py\nx = 1\n```"}
-        dropped = extractor._dropped_blocks(markdown, protected)
+        dropped = extractor._dropped_blocks(markdown, protected, {})
         report = extractor._extraction_report(markdown, dropped, [])
         assert report["dropped"] == {}
         assert report["complete"] is True
@@ -296,7 +296,7 @@ class TestExtractionReport:
             "LUMINARYPROTECTEDBLOCK0000ENDPROTECTED": "```py\nx = 1\n```",
             "LUMINARYPROTECTEDBLOCK0001ENDPROTECTED": "![Diagram](__LUMINARY_IMG__/d/a.svg)",
         }
-        dropped = extractor._dropped_blocks(markdown, protected)
+        dropped = extractor._dropped_blocks(markdown, protected, {})
         report = extractor._extraction_report(markdown, dropped, [])
         assert report["dropped"] == {"code block": 1, "diagram": 1}
         assert report["complete"] is False
@@ -447,3 +447,183 @@ class TestWikipediaEditLinks:
         assert "Fresnel lens" in text
         assert "Modern construction" in text
         assert not re.search(r"\bedit\b", text, re.I)
+
+
+def _image_bytes(fmt: str) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    out = BytesIO()
+    Image.new("RGB", (40, 30), "red").save(out, format=fmt)
+    return out.getvalue()
+
+
+SVG_BYTES = b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="40"/>'
+PAGE = "https://www.example.com/articles/post/"
+
+
+class TestImageMirroring:
+    """An image the article kept is stored by its whole URL, whatever shape that URL has."""
+
+    @pytest.fixture(params=["region", "trafilatura"])
+    def web(self, request, tmp_path, monkeypatch):
+        """A fake network serving `responses` (url -> (status, bytes)); 404 for the rest."""
+        import cloudscraper
+
+        from app.config import get_settings
+        from app.services import article_extractor
+
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        get_settings.cache_clear()
+        if request.param == "trafilatura":
+            monkeypatch.setattr(article_extractor, "region_is_plausible", lambda *_: False)
+        responses: dict[str, tuple[int, bytes]] = {}
+        fetched: list[str] = []
+
+        class Response:
+            def __init__(self, status, content):
+                self.status_code, self.content = status, content
+                self.headers = {"content-type": "test/fake"}
+
+        class Scraper:
+            def get(self, url, timeout, headers=None):
+                fetched.append(url)
+                return Response(*responses.get(url, (404, b"not found")))
+
+        monkeypatch.setattr(cloudscraper, "create_scraper", Scraper)
+
+        async def extract(body: str, page: str | None = None):
+            parsed = await ArticleExtractor().extract(
+                PAGE, doc_id="testdoc", rendered_html=page or _wrap(body)
+            )
+            assert parsed.extraction_report["serializer"] == request.param
+            return parsed
+
+        yield extract, responses, fetched, tmp_path / "images" / "testdoc"
+        get_settings.cache_clear()
+
+    @pytest.mark.parametrize(
+        "src, url",
+        [
+            pytest.param(
+                "https://imgopt.infoq.com/fit-in/3000x4000/filters:quality(85)"
+                "/filters:no_upscale()/articles/a/en/resources/graph.jpg",
+                None,
+                id="parentheses-in-path",
+            ),
+            pytest.param("https://cdn.test/f(x(1))/g.png", None, id="nested-parentheses"),
+            pytest.param("https://miro.test/v2/resize:fit:1400/0*a1B2", None, id="no-extension"),
+            pytest.param("https://cdn.test/img.php?id=7&amp;w=800", None, id="query-only"),
+            pytest.param("/img/d.png", "https://www.example.com/img/d.png", id="root-relative"),
+            pytest.param("//cdn.test/d.png", "https://cdn.test/d.png", id="protocol-relative"),
+            pytest.param(
+                "../shared/d.png", "https://www.example.com/articles/shared/d.png", id="relative"
+            ),
+            pytest.param("https://cdn.test/my diagram.png", None, id="space-in-path"),
+        ],
+    )
+    async def test_every_url_shape_is_fetched_whole_and_stored(self, web, src, url):
+        extract, responses, fetched, images_dir = web
+        url = (url or src).replace("&amp;", "&")
+        responses[url] = (200, _image_bytes("PNG"))
+
+        parsed = await extract(f'<figure><img src="{src}" alt="Trends"></figure>')
+
+        assert fetched == [url]
+        (stored,) = images_dir.iterdir()
+        assert f"![Trends](__LUMINARY_IMG__/testdoc/{stored.name})" in parsed.raw_text
+        assert parsed.extraction_report["captured"]["images"] == 1
+        assert parsed.extraction_report["dropped"] == {}
+
+    async def test_an_svg_diagram_is_stored(self, web):
+        extract, responses, _, images_dir = web
+        responses["https://cdn.test/arch.svg"] = (200, SVG_BYTES)
+
+        parsed = await extract('<figure><img src="https://cdn.test/arch.svg" alt="Arch"></figure>')
+
+        (stored,) = images_dir.iterdir()
+        assert stored.suffix == ".svg"
+        assert f"![Arch](__LUMINARY_IMG__/testdoc/{stored.name})" in parsed.raw_text
+
+    async def test_the_file_is_named_for_what_arrived(self, web):
+        extract, responses, _, images_dir = web
+        responses["https://cdn.test/photo.jpg"] = (200, _image_bytes("WEBP"))
+
+        await extract('<figure><img src="https://cdn.test/photo.jpg"></figure>')
+
+        assert [p.suffix for p in images_dir.iterdir()] == [".webp"]
+
+    async def test_brackets_in_the_alt_text_do_not_end_the_link(self, web):
+        extract, responses, _, images_dir = web
+        responses["https://cdn.test/d.png"] = (200, _image_bytes("PNG"))
+
+        parsed = await extract(
+            '<figure><img src="https://cdn.test/d.png" alt="Fig [2]: flow"></figure>'
+        )
+
+        (stored,) = images_dir.iterdir()
+        assert f"![Fig (2): flow](__LUMINARY_IMG__/testdoc/{stored.name})" in parsed.raw_text
+
+    async def test_a_placeholder_pixel_gives_way_to_the_lazy_url(self, web):
+        extract, responses, fetched, _ = web
+        responses["https://cdn.test/real.png"] = (200, _image_bytes("PNG"))
+        pixel = "data:image/gif;base64,R0lGODlhAQABAAAAACw="
+
+        await extract(f'<figure><img src="{pixel}" data-src="https://cdn.test/real.png"></figure>')
+
+        assert fetched == ["https://cdn.test/real.png"]
+
+    async def test_an_image_inside_a_paragraph_keeps_its_sentence(self, web):
+        extract, responses, _, images_dir = web
+        responses["https://cdn.test/icon.png"] = (200, _image_bytes("PNG"))
+
+        parsed = await extract(
+            '<p>Press <img src="https://cdn.test/icon.png" alt="run"> to start.</p>'
+        )
+
+        (stored,) = images_dir.iterdir()
+        assert f"Press ![run](__LUMINARY_IMG__/testdoc/{stored.name}) to start." in parsed.raw_text
+
+    @pytest.mark.parametrize(
+        "status, content",
+        [(404, b"not found"), (200, b"<!DOCTYPE html><html><body>Hotlinking denied</body></html>")],
+        ids=["http-error", "html-instead-of-image"],
+    )
+    async def test_an_image_that_cannot_be_stored_is_reported_missing(self, web, status, content):
+        extract, responses, _, images_dir = web
+        responses["https://cdn.test/d.png"] = (status, content)
+
+        parsed = await extract('<figure><img src="https://cdn.test/d.png" alt="Gone"></figure>')
+
+        assert "![Gone](https://cdn.test/d.png)" in parsed.raw_text
+        assert not images_dir.exists() or list(images_dir.iterdir()) == []
+        assert parsed.extraction_report["captured"]["images"] == 0
+        assert parsed.extraction_report["dropped"] == {"image": 1}
+        assert parsed.extraction_report["complete"] is False
+
+    async def test_an_image_outside_the_article_is_never_fetched(self, web):
+        extract, responses, fetched, _ = web
+        responses["https://cdn.test/d.png"] = (200, _image_bytes("PNG"))
+        page = _wrap('<figure><img src="https://cdn.test/d.png"></figure>').replace(
+            "<body>", '<body><nav><img src="https://cdn.test/logo.png" alt="Logo"></nav>'
+        )
+
+        parsed = await extract("", page)
+
+        assert fetched == ["https://cdn.test/d.png"]
+        assert parsed.extraction_report["dropped"] == {}
+
+    async def test_a_hidden_placeholder_under_the_real_image_is_left_out(self, web):
+        extract, responses, _, images_dir = web
+        responses["https://cdn.test/real.png"] = (200, _image_bytes("PNG"))
+        blur = "data:image/bmp;base64,Qk32BAAAAAAAADYAAAAoAAAACAAAAAgAAAABABgA"
+
+        parsed = await extract(
+            f'<figure><img src="{blur}" alt="" aria-hidden="true">'
+            '<img src="https://cdn.test/real.png" alt="Real"></figure>'
+        )
+
+        (stored,) = images_dir.iterdir()
+        assert f"![Real](__LUMINARY_IMG__/testdoc/{stored.name})" in parsed.raw_text
+        assert "data:image" not in parsed.raw_text

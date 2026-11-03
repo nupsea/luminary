@@ -299,6 +299,17 @@ extraction finishes is cleared and ingested again from the file. One resume per 
 every launch fails at the next launch. `tests/test_ingestion_resume.py` fails CI if a stage
 doubles its rows, or if a resume enters at the wrong stage or past the cap.
 
+**I-75. A web article's image is located by a token set in the HTML, never by a URL read back
+out of the markdown.**
+Neither serialiser escapes anything: both write `![alt](src)` verbatim, so a `)` in the URL or a
+`]` in the alt text ends the link early, and trafilatura keeps only a `src` ending in a raster
+extension. InfoQ's CDN paths contain `filters:quality(85)`, which cut every diagram to one
+broken URL while the report said complete. `_protect_images` swaps each `<img>` for a token, and
+only tokens that survive extraction are downloaded. A file is kept only when its bytes are an
+image, and `captured.images` counts stored copies, with every one that failed counted in
+`dropped`. `TestImageMirroring` in `tests/test_article_extractor.py` fails CI if a URL shape
+breaks the link on either serialiser, or if a failed image reads as captured.
+
 ## Quality gates
 
 **I-32. An eval metric that could not be computed is a failure, never a pass.**

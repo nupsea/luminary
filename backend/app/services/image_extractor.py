@@ -29,16 +29,13 @@ from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
 from app.storage import library_root
+from app.types import DOCUMENT_IMAGE_FORMATS
 
 logger = logging.getLogger(__name__)
 
 _RE_EXTERNAL_SRC = re.compile(r"^(?:data:|https?://)", re.IGNORECASE)
 
-# Pillow picks a decoder by sniffing the bytes, not the name, so without a list a
-# document image named ".png" that holds TIFF, PSD or MSP data reaches that decoder.
-# These are what each source legitimately carries: EPUB's core image types, and for
-# PDFs the JPEG 2000 streams PyMuPDF passes through raw.
-DOCUMENT_IMAGE_FORMATS = ("PNG", "JPEG", "GIF", "WEBP")
+# The JPEG 2000 streams PyMuPDF passes through raw; DOCUMENT_IMAGE_FORMATS says why a list.
 PDF_IMAGE_FORMATS = ("PNG", "JPEG", "JPEG2000")
 
 

@@ -3,17 +3,19 @@ import hashlib
 import logging
 import re
 from html import unescape
+from io import BytesIO
 from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup, Comment, NavigableString
+from PIL import Image as PILImage
 
 from app.config import get_settings
 from app.full_extras import require_extra
 from app.services.html_region import region_is_plausible, select_region
 from app.services.html_to_markdown import to_markdown
 from app.storage import library_root
-from app.types import ParsedDocument, Section
+from app.types import DOCUMENT_IMAGE_FORMATS, ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,36 @@ _MIN_ARTICLE_WORDS_FOR_VISUAL_WARNING = 200
 # article: a claude.ai artifact's viewer yields 5, the shortest article in a real
 # library is 517.
 _MIN_PAGE_WORDS = 50
+
+# Parents in which an <img> sits inside running text.
+_INLINE_PARENTS = frozenset(
+    [
+        "a",
+        "b",
+        "em",
+        "figcaption",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "i",
+        "label",
+        "li",
+        "p",
+        "small",
+        "span",
+        "strong",
+        "sub",
+        "sup",
+        "td",
+        "th",
+    ]
+)
+
+# Without image/avif listed, a negotiating CDN answers with a format Pillow can open.
+_IMAGE_ACCEPT = {"Accept": "image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.5"}
 
 # Placeholder tokens for content restored after extraction. Letters and digits
 # only, and long enough that no article writes one by accident: trafilatura
@@ -125,6 +157,35 @@ def _decoded(response) -> str:
         if detected:
             response.encoding = detected
     return response.text
+
+
+def _md_image(alt: str, dest: str) -> str:
+    """`![alt](dest)` that reads back as one link.
+
+    Neither serialiser escapes anything, so a `]` in the alt text or a `)` in the URL
+    ends the link early: InfoQ's CDN puts `filters:quality(85)` in every image path.
+    """
+    alt = " ".join(alt.split()).replace("[", "(").replace("]", ")")
+    if re.search(r"[\s()<>]", dest):
+        dest = "<" + dest.replace("<", "%3C").replace(">", "%3E") + ">"
+    return f"![{alt}]({dest})"
+
+
+def _image_extension(content: bytes) -> str | None:
+    """The extension for what the bytes are, or None when they are no image we can store.
+
+    Neither the URL nor the status says what arrived: a CDN negotiates the format
+    (InfoQ's `.jpg` URLs answer with WebP), and a refused hotlink answers 200 with HTML.
+    """
+    head = content[:4096].lower()
+    if b"<svg" in head and b"<html" not in head and b"<!doctype html" not in head:
+        return "svg"
+    try:
+        with PILImage.open(BytesIO(content), formats=DOCUMENT_IMAGE_FORMATS) as image:
+            found = image.format
+    except Exception:
+        return None
+    return "jpg" if found == "JPEG" else found.lower()
 
 
 def _describe_block(markdown: str) -> str:
@@ -244,7 +305,7 @@ class ArticleExtractor:
 
         # 3. Mirror Images AND Extract Markdown in one pass
         # We let trafilatura handle the extraction first to find the "real" content
-        prepared_html, protected = self._prepare_html(html_content, doc_id)
+        prepared_html, protected, images = self._prepare_html(html_content, doc_id)
         reference = trafilatura.extract(
             prepared_html,
             url=url,
@@ -283,17 +344,14 @@ class ArticleExtractor:
             markdown_text[:500],
         )
 
-        # 4. Localize Image Links in Markdown
-        # Trafilatura outputs markdown like ![alt](url), often with root-relative
-        # src (/foo/bar.png) that must be resolved against the article URL.
-        markdown_text = await self._mirror_markdown_images(markdown_text, doc_id, url)
+        # 4. Store each image extraction kept, and link the local copy.
+        not_stored = await self._mirror_images(markdown_text, images, protected, doc_id, url)
 
         # 5. Measure fidelity BEFORE restoring, then restore. Order is
         # load-bearing: restoration replaces every token with its content, so a
         # report taken afterwards finds no tokens and calls a clean import a
-        # total loss. Restore after mirroring, never before -- a fenced block can
-        # legitimately contain an ![alt](url) line the mirror pass would fetch.
-        dropped = self._dropped_blocks(markdown_text, protected)
+        # total loss.
+        dropped = self._dropped_blocks(markdown_text, protected, images) + ["image"] * not_stored
         markdown_text = self._restore_protected(markdown_text, protected)
 
         # 6. Normalize Markdown (The "### Fix")
@@ -394,11 +452,14 @@ class ArticleExtractor:
             "charts or diagrams may be missing."
         ]
 
-    def _prepare_html(self, html: str, doc_id: str) -> tuple[str, dict[str, str]]:
+    def _prepare_html(
+        self, html: str, doc_id: str
+    ) -> tuple[str, dict[str, str], dict[str, tuple[str, str]]]:
         """Repairs markup that trafilatura's extractor silently drops.
 
-        Returns the repaired HTML plus a token -> markdown map for content that
-        cannot survive extraction as markup and is restored afterwards. Measured
+        Returns the repaired HTML, a token -> markdown map for content that
+        cannot survive extraction as markup and is restored afterwards, and the
+        image tokens among them as token -> (src, alt). Measured
         losses that these passes exist to close: code blocks come back with every
         leading space stripped and no language, inline math takes the words after
         it with it, figure captions vanish, and an inline <svg> extracts as
@@ -427,8 +488,9 @@ class ArticleExtractor:
         for comment in soup.find_all(string=lambda s: isinstance(s, Comment)):
             comment.extract()
         self._protect_math(soup, protected)
+        images = self._protect_images(soup, protected)
         self._flatten_inline_formatting(soup)
-        return str(soup), protected
+        return str(soup), protected, images
 
     def _serialize(self, prepared_html: str, reference: str) -> tuple[str, str]:
         """Our Markdown if the region holds up, else the reference extraction.
@@ -566,9 +628,45 @@ class ArticleExtractor:
             alt = svg.get("aria-label") or "Diagram"
             placeholder = soup.new_tag("p")
             placeholder.string = self._token(
-                protected, f"![{alt}](__LUMINARY_IMG__/{doc_id}/{name})"
+                protected, _md_image(alt, f"__LUMINARY_IMG__/{doc_id}/{name}")
             )
             svg.replace_with(placeholder)
+
+    def _protect_images(
+        self, soup: BeautifulSoup, protected: dict[str, str]
+    ) -> dict[str, tuple[str, str]]:
+        """Set every <img> aside as a token (I-75); returns token -> (src, alt).
+
+        Neither serialiser hands a URL back intact: trafilatura keeps only a src
+        ending in a raster extension, so an .svg diagram or an extensionless CDN
+        URL vanishes, and both write `![alt](src)` unescaped. A token is text both
+        carry, and it reaches the output only where extraction kept the image.
+        """
+        images: dict[str, tuple[str, str]] = {}
+        for img in soup.find_all("img"):
+            src = (img.get("src") or "").strip()
+            if not src:
+                continue
+            if src.startswith("data:") and img.get("aria-hidden") == "true":
+                # A blur-up placeholder painted under the real image, not a figure.
+                img.decompose()
+                continue
+            alt = img.get("alt") or ""
+            token = self._token(protected, _md_image(alt, src))
+            images[token] = (src, alt)
+            self._replace_with_token(soup, img, token)
+        return images
+
+    @staticmethod
+    def _replace_with_token(soup: BeautifulSoup, img, token: str) -> None:
+        """Inline text where the image sits in a sentence, its own paragraph anywhere else."""
+        target = img.parent if img.parent and img.parent.name == "picture" else img
+        if target.parent is not None and target.parent.name in _INLINE_PARENTS:
+            target.replace_with(NavigableString(token))
+            return
+        placeholder = soup.new_tag("p")
+        placeholder.string = token
+        target.replace_with(placeholder)
 
     @staticmethod
     def _restore_protected(markdown: str, protected: dict[str, str]) -> str:
@@ -578,16 +676,22 @@ class ArticleExtractor:
         return markdown
 
     @staticmethod
-    def _dropped_blocks(markdown: str, protected: dict[str, str]) -> list[str]:
+    def _dropped_blocks(
+        markdown: str, protected: dict[str, str], images: dict[str, tuple[str, str]]
+    ) -> list[str]:
         """Protected blocks whose token never reached the output.
 
         This is an exact signal, not a heuristic: we know precisely what was set
         aside, so a token that is absent means extraction discarded the paragraph
-        holding it. Counting raw <img> or <pre> tags in the source instead would
-        charge us for every nav logo and share widget trafilatura correctly
-        removes, and a warning that cries wolf is not a warning.
+        holding it. Image tokens are excluded: every nav logo and share widget is
+        one, extraction correctly removes them, and a warning that cries wolf is
+        not a warning.
         """
-        return [_describe_block(body) for token, body in protected.items() if token not in markdown]
+        return [
+            _describe_block(body)
+            for token, body in protected.items()
+            if token not in markdown and token not in images
+        ]
 
     def _extraction_report(self, markdown: str, dropped: list[str], notes: list[str]) -> dict:
         """What arrived, and what did not.
@@ -602,7 +706,8 @@ class ArticleExtractor:
         return {
             "captured": {
                 "code_blocks": markdown.count("```") // 2,
-                "images": len(re.findall(r"!\[[^\]]*\]\(", markdown)),
+                # Stored copies only: a link left pointing at the page is counted in `dropped`.
+                "images": markdown.count("](__LUMINARY_IMG__/"),
                 "tables": len(re.findall(r"^\|[-\s|:]+\|$", markdown, flags=re.M)),
                 "math": len(re.findall(r"\$[^$\n]+\$", markdown)),
             },
@@ -618,7 +723,8 @@ class ArticleExtractor:
         attribute; trafilatura only reads img/@src, so those images vanish entirely.
         """
         for img in soup.find_all("img"):
-            if not img.get("src"):
+            # A data: src on a lazy image is a placeholder pixel; the real URL is elsewhere.
+            if not img.get("src") or img["src"].startswith("data:"):
                 url = None
                 picture = img.find_parent("picture")
                 if picture:
@@ -631,9 +737,8 @@ class ArticleExtractor:
                     or img.get("data-lazy-src")
                     or self._best_srcset_url(img.get("srcset"))
                 )
-                if not url:
-                    continue
-                img["src"] = url
+                if url:
+                    img["src"] = url
 
             if not img.get("alt"):
                 figure = img.find_parent("figure")
@@ -694,51 +799,61 @@ class ArticleExtractor:
             candidates.append((width, parts[0]))
         return max(candidates)[1] if candidates else None
 
-    async def _mirror_markdown_images(self, md: str, doc_id: str, base_url: str) -> str:
-        """Finds ![alt](url) in markdown, downloads them, and updates to local path."""
+    async def _mirror_images(
+        self,
+        markdown: str,
+        images: dict[str, tuple[str, str]],
+        protected: dict[str, str],
+        doc_id: str,
+        base_url: str,
+    ) -> int:
+        """Store each image whose token survived extraction; returns how many could not be.
+
+        A stored image's token is pointed at the local copy. One that fails keeps its
+        source link, which the reader shows as missing rather than as a local file that
+        was never written.
+        """
         import cloudscraper
 
-        img_re = re.compile(r"!\[(.*?)\]\((.*?)\)")
-        settings = get_settings()
-        images_dir = library_root(settings) / "images" / doc_id
+        images_dir = library_root(get_settings()) / "images" / doc_id
+        scraper = cloudscraper.create_scraper()
+        stored: dict[str, str | None] = {}
+        failed = 0
+        for token, (src, alt) in images.items():
+            if token not in markdown or src.startswith("data:"):
+                continue
+            # Root- and protocol-relative srcs need the article's scheme and host.
+            url = urljoin(base_url, src)
+            if url not in stored:
+                stored[url] = await self._download_image(scraper, url, images_dir)
+            name = stored[url]
+            if name is None:
+                failed += 1
+            else:
+                protected[token] = _md_image(alt, f"__LUMINARY_IMG__/{doc_id}/{name}")
+        return failed
+
+    @staticmethod
+    async def _download_image(scraper, url: str, images_dir) -> str | None:
+        """The stored file's name, or None when the URL gave no image we can store."""
+        try:
+            resp = await asyncio.to_thread(scraper.get, url, timeout=300.0, headers=_IMAGE_ACCEPT)
+        except Exception as exc:
+            logger.warning("Failed to mirror image %s: %s", url, exc)
+            return None
+        ext = _image_extension(resp.content) if resp.status_code == 200 else None
+        if ext is None:
+            logger.warning(
+                "Image %s not stored: HTTP %s, %s",
+                url,
+                resp.status_code,
+                resp.headers.get("content-type"),
+            )
+            return None
+        name = f"{hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()}.{ext}"
         images_dir.mkdir(parents=True, exist_ok=True)
-
-        async def replace_match(match):
-            alt = match.group(1)
-            url = match.group(2)
-            if url.startswith("__LUMINARY_IMG__") or url.startswith("data:"):
-                return match.group(0)
-
-            # Trafilatura emits root-relative or protocol-relative src; resolve
-            # against the article URL so the download has a scheme + host.
-            url = urljoin(base_url, url)
-
-            try:
-                ext = url.split(".")[-1].split("?")[0].lower()
-                if len(ext) > 4 or len(ext) < 2:
-                    ext = "png"
-                filename = f"{hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()}.{ext}"
-                dest_path = images_dir / filename
-
-                if not dest_path.exists():
-                    scraper = cloudscraper.create_scraper()
-                    resp = await asyncio.to_thread(scraper.get, url, timeout=300.0)
-                    if resp.status_code == 200:
-                        await asyncio.to_thread(dest_path.write_bytes, resp.content)
-
-                return f"![{alt}](__LUMINARY_IMG__/{doc_id}/{filename})"
-            except Exception as e:
-                logger.warning("Failed to mirror image %s: %s", url, e)
-                return match.group(0)
-
-        # This is a bit complex for a regex replace, so we do it manually
-        new_md = md
-        for match in list(img_re.finditer(md)):
-            original = match.group(0)
-            replacement = await replace_match(match)
-            new_md = new_md.replace(original, replacement)
-
-        return new_md
+        await asyncio.to_thread((images_dir / name).write_bytes, resp.content)
+        return name
 
     def _normalize_markdown(self, text: str) -> str:
         """Fixes common markdown parsing issues."""
