@@ -512,6 +512,10 @@ def document_kind(format: str | None, form: str | None, domain: str | None) -> D
 # What a reader can choose from a card. Media follows the file's format, and code its extension.
 EditableKind = Literal["book", "technical", "paper", "conversation", "notes"]
 MEDIA_FORMATS = (*AUDIO_EXTENSIONS, "mp4")
+# Pillow picks a decoder by sniffing the bytes, not the name, so without a list a
+# document image named ".png" that holds TIFF, PSD or MSP data reaches that decoder.
+# EPUB's core image types, and what a web page's <img> legitimately serves.
+DOCUMENT_IMAGE_FORMATS = ("PNG", "JPEG", "GIF", "WEBP")
 FACETS_FROM_READER = "reader"
 
 _FORM_OF_KIND: dict[str, str] = {"paper": "paper", "conversation": "dialogue", "notes": "entries"}
