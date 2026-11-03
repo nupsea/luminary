@@ -7,8 +7,10 @@ original private aliases via `__all__`.
 
 from __future__ import annotations
 
+import glob
 import json
 import logging
+import shutil
 
 from app.config import get_settings
 from app.storage import library_root
@@ -18,12 +20,16 @@ logger = logging.getLogger(__name__)
 
 
 def delete_raw_file(document_id: str) -> None:
-    """Remove any raw uploaded file matching ~/.luminary/raw/{doc_id}.*"""
+    """Remove the document's raw files, `raw/{doc_id}.*`, and its stored bundle directory."""
     settings = get_settings()
     raw_dir = library_root(settings) / "raw"
-    for match in raw_dir.glob(f"{document_id}.*"):
+    # Escaped: an id holding a glob character would otherwise reach another document's files.
+    for match in raw_dir.glob(f"{glob.escape(document_id)}.*"):
         try:
-            match.unlink()
+            if match.is_dir() and not match.is_symlink():
+                shutil.rmtree(match)
+            else:
+                match.unlink()
             logger.info("Deleted raw file %s", match)
         except OSError:
             logger.warning("Failed to delete raw file %s", match)
