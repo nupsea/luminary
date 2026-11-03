@@ -51,6 +51,19 @@ _RE_PG_END = re.compile(
     re.IGNORECASE,
 )
 
+
+def gutenberg_body(text: str) -> str:
+    """The text between Project Gutenberg's START and END lines; all of it when they are absent."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    m_start = _RE_PG_START.search(text)
+    if m_start:
+        text = text[m_start.end() :]
+    m_end = _RE_PG_END.search(text)
+    if m_end:
+        text = text[: m_end.start()]
+    return text
+
+
 # Roman numeral helper (I–MMMCMXCIX)
 _ROMAN = (
     r"(?=[IVXLCDM])"
@@ -601,13 +614,7 @@ class BookParser:
         )
 
     def _strip_gutenberg(self, text: str) -> tuple[str, str]:
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
-        m_start = _RE_PG_START.search(text)
-        if m_start:
-            text = text[m_start.end() :]
-        m_end = _RE_PG_END.search(text)
-        if m_end:
-            text = text[: m_end.start()]
+        text = gutenberg_body(text)
         raw_clean = text
 
         # New conservative TOC stripper: only active if "Contents" is found near start.

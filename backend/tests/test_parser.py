@@ -104,6 +104,29 @@ def test_txt_parse_detects_encoding_and_sections(parser, txt_file):
     assert result.word_count > 0
 
 
+def test_unmarked_gutenberg_text_keeps_only_the_story(parser, tmp_path):
+    """Usher has no chapter markers, so it reaches the paragraph split, licence and all (#357)."""
+    path = tmp_path / "usher.txt"
+    path.write_text(
+        "The Project Gutenberg eBook of The Fall of the House of Usher\n\n"
+        "This eBook is for the use of anyone anywhere in the United States.\n\n"
+        "*** START OF THE PROJECT GUTENBERG EBOOK THE FALL OF THE HOUSE OF USHER ***\n\n"
+        "During the whole of a dull, dark, and soundless day.\n\n"
+        "I know not how it was; but, with the first glimpse of the building.\n\n"
+        "*** END OF THE PROJECT GUTENBERG EBOOK THE FALL OF THE HOUSE OF USHER ***\n\n"
+        "Updated editions will replace the previous one.\n\n"
+        "START: FULL LICENSE\n\nTHE FULL PROJECT GUTENBERG LICENSE\n",
+        encoding="utf-8",
+    )
+    result = parser.parse(path, "txt")
+    assert [s.text for s in result.sections] == [
+        "During the whole of a dull, dark, and soundless day.",
+        "I know not how it was; but, with the first glimpse of the building.",
+    ]
+    assert "Gutenberg" not in result.raw_text
+    assert result.word_count == 24
+
+
 def test_md_parse_detects_headings(parser, md_file):
     result = parser.parse(md_file, "md")
     assert isinstance(result, ParsedDocument)
