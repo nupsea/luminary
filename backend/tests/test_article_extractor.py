@@ -627,3 +627,22 @@ class TestImageMirroring:
         (stored,) = images_dir.iterdir()
         assert f"![Real](__LUMINARY_IMG__/testdoc/{stored.name})" in parsed.raw_text
         assert "data:image" not in parsed.raw_text
+
+    @pytest.mark.parametrize(
+        "dark",
+        [
+            '<img class="hidden dark-theme:block" src="https://cdn.test/fig-dark.png" alt="Fig">',
+            '<img src="https://cdn.test/fig-dark.png#gh-dark-mode-only" alt="Fig">',
+        ],
+        ids=["tailwind-variant", "github-fragment"],
+    )
+    async def test_a_dark_theme_twin_is_not_stored_twice(self, web, dark):
+        extract, responses, fetched, _ = web
+        responses["https://cdn.test/fig-light.png"] = (200, _image_bytes("PNG"))
+
+        parsed = await extract(
+            f'<figure><img src="https://cdn.test/fig-light.png" alt="Fig">{dark}</figure>'
+        )
+
+        assert fetched == ["https://cdn.test/fig-light.png"]
+        assert parsed.raw_text.count("![Fig]") == 1

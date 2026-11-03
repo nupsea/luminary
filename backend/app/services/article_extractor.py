@@ -188,6 +188,21 @@ def _image_extension(content: bytes) -> str | None:
     return "jpg" if found == "JPEG" else found.lower()
 
 
+def _not_a_figure(img, src: str) -> bool:
+    """An <img> the page never shows as content: a placeholder or a dark-theme twin.
+
+    A blur-up placeholder is a hidden `data:` image painted under the real one. A
+    themed figure ships twice, the dark copy hidden by default (Next.js's blog:
+    `hidden dark-theme:block`; GitHub: `#gh-dark-mode-only`), and kept, it repeats.
+    """
+    if src.startswith("data:") and img.get("aria-hidden") == "true":
+        return True
+    classes = img.get("class") or []
+    if "hidden" in classes and any(c.startswith("dark") and ":" in c for c in classes):
+        return True
+    return src.endswith("#gh-dark-mode-only")
+
+
 def _describe_block(markdown: str) -> str:
     """Name a protected block by what it is, for the report the reader sees."""
     if markdown.startswith("```"):
@@ -647,8 +662,7 @@ class ArticleExtractor:
             src = (img.get("src") or "").strip()
             if not src:
                 continue
-            if src.startswith("data:") and img.get("aria-hidden") == "true":
-                # A blur-up placeholder painted under the real image, not a figure.
+            if _not_a_figure(img, src):
                 img.decompose()
                 continue
             alt = img.get("alt") or ""
