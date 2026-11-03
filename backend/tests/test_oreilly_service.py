@@ -21,6 +21,7 @@ from app.services.oreilly_service import (
     upgrade_cover_url,
 )
 from app.services.parser import DocumentParser
+from tests.oreilly_book import BOOK_ID, COVER_BYTES, FIGURE_BYTES, METADATA, FixtureBookClient
 
 
 def test_parse_oreilly_target_chapter():
@@ -260,6 +261,60 @@ def test_links_into_the_book_point_at_the_stored_chapter():
     cleaned, _ = process_chapter_html(html, "b1")
     assert 'href="ch04.xhtml#sec2"' in cleaned
     assert 'href="https://example.com/"' in cleaned
+
+
+def test_a_fixture_book_parses_to_its_section_tree(tmp_path: Path):
+    """The tree #433's bundle path must reproduce: identical sections give identical chunks."""
+    path, meta = download_oreilly_book_to_epub(BOOK_ID, tmp_path / "book.epub", FixtureBookClient())
+    parsed = DocumentParser().parse(path, "epub")
+
+    figure = next(name for name in _epub_names(path) if name.endswith("-f1.png"))
+    assert [(s.heading, s.level, s.text) for s in parsed.sections] == [
+        ("Preface", 1, "This preface says who the book is for and what each chapter covers."),
+        ("1. Storage", 1, "A log is an append-only sequence of records on disk."),
+        (
+            "Indexes",
+            1,
+            "An index is extra structure derived from the primary data.\n\n"
+            f"![An LSM tree]({figure})\n*[Figure: An LSM tree]*",
+        ),
+        (
+            "2. Replication",
+            1,
+            "Replication keeps a copy of the same data on several machines, building on logs.",
+        ),
+        ("Leaders and Followers", 1, "Every write goes to the leader, which streams it on."),
+    ]
+    assert parsed.title == meta["title"] == "Fixture Systems"
+
+
+def _epub_names(path: Path) -> set[str]:
+    return {item.get_name() for item in epub.read_epub(str(path)).get_items()}
+
+
+def test_the_stored_book_carries_its_cover_figures_and_metadata(tmp_path: Path):
+    path, _ = download_oreilly_book_to_epub(BOOK_ID, tmp_path / "book.epub", FixtureBookClient())
+    book = epub.read_epub(str(path))
+
+    assert book.get_metadata("DC", "identifier")[0][0] == f"urn:orm:book:{BOOK_ID}"
+    assert book.get_metadata("DC", "creator")[0][0] == "Ada Author"
+    assert book.get_metadata("DC", "description")[0][0] == METADATA["description"]
+    items = {item.get_name(): item for item in book.get_items()}
+    assert items["images/cover.jpg"].get_content() == COVER_BYTES
+    (figure,) = [name for name in items if name.endswith("-f1.png")]
+    assert items[figure].get_content() == FIGURE_BYTES
+    assert {"preface01.xhtml", "ch01.xhtml", "ch02.xhtml"} <= items.keys()
+
+
+def test_a_chapter_selection_downloads_only_those_chapters(tmp_path: Path):
+    client = FixtureBookClient()
+    path, _ = download_oreilly_book_to_epub(
+        BOOK_ID, tmp_path / "book.epub", client, selected_chapter_indices=[2]
+    )
+    parsed = DocumentParser().parse(path, "epub")
+
+    assert [s.heading for s in parsed.sections] == ["2. Replication", "Leaders and Followers"]
+    assert not any(url.endswith(("preface01.html", "ch01.html")) for url in client.fetched)
 
 
 @pytest.mark.skipif(
