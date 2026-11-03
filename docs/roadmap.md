@@ -123,7 +123,7 @@ is re-planned at every tag.
 
 | Iteration | Critical path | Beside it | Ends with |
 |---|---|---|---|
-| 1 | Connectors batch A (#431–#434, closes #430) | #211, #231 (0.17.1); the CI checks #24, #99, #355; #382; #330 run 1; #357 decided | 0.17.1 |
+| 1 | Connectors batch A (#431–#434, closes #430) | #211, #231 (0.17.1); the CI checks #24, #99, #355; #382; #330 run 1 | 0.17.1 |
 | 2 | Connectors batch B (#435, #436) | #334; #330 run 2; the #348 spike; #440 | |
 | 3 | Connectors batch C (#437, #438 with #348) | Checkpoint C's manual pass, with #162 and #231's last checks | 0.18.0, Checkpoint C |
 | 4 | #447; the backend half of 0.19.0 (#450–#453) | #441, #442 | |
@@ -877,7 +877,7 @@ beside 0.17.0, rather than after it:
 | Track | Issues | What it needs |
 |---|---|---|
 | Hardware session | #24, #99, #162; #155 and #156 closed | The runs below |
-| Defects the 2026-10-21 runs found | #355, #357; #354, #356 and #358 closed | Each is a `bug`, so each holds the tag. #355 closes on a CI check of the `.deb`'s `Recommends`, #357 on the maintainer's call on its 40k criterion |
+| Defects the 2026-10-21 runs found | #355; #354, #356, #357 and #358 closed | A `bug`, so it holds the tag. It closes on a CI check of the `.deb`'s `Recommends` |
 | Gate and release hygiene | #211, #231, #382 | #211 fails PRs at random on Windows; #382 keeps `make smoke` red; #231 needs its last two checks in the manual pass |
 | The Practice panel's cards | #330 | The step 4 gate on the unit path (§4) |
 | Ask on what the documents do not say | Moved to the Ask track, landing by Checkpoint D (§9) | 0.18.0 already carries the connector track |
