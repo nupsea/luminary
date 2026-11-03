@@ -615,9 +615,7 @@ async def ingest_document(
         session.add(doc)
         await session.commit()
 
-    get_ingestion_jobs().launch(
-        doc_id, run_ingestion(doc_id, str(dest), fmt, kind=kind)
-    )
+    get_ingestion_jobs().launch(doc_id, run_ingestion(doc_id, str(dest), fmt, kind=kind))
     logger.info("Ingestion started", extra={"doc_id": doc_id})
     return {"document_id": doc_id, "status": "processing"}
 
@@ -683,9 +681,7 @@ async def ingest_kindle(
             await sync_document_tag_index(doc_id, doc.tags, session, record_manual_provenance=True)
             await session.commit()
 
-        get_ingestion_jobs().launch(
-            doc_id, run_ingestion(doc_id, str(dest), "txt")
-        )
+        get_ingestion_jobs().launch(doc_id, run_ingestion(doc_id, str(dest), "txt"))
         document_ids.append(doc_id)
         logger.info(
             "Kindle book ingestion started",
@@ -795,38 +791,9 @@ async def ingest_url(
             session.add(doc)
             await session.commit()
 
-        # Convert Section objects to dicts for JSON serialization
-        parsed_sections = [
-            {
-                "heading": s.heading,
-                "level": s.level,
-                "text": s.text,
-                "page_start": s.page_start,
-                "page_end": s.page_end,
-            }
-            for s in parsed.sections
-        ]
-
-        get_ingestion_jobs().launch(
-            doc_id,
-            run_ingestion(
-                doc_id,
-                str(dest),
-                "md",
-                parsed_document={
-                    "title": parsed.title,
-                    "format": "md",
-                    "pages": 1,
-                    "word_count": parsed.word_count,
-                    "sections": parsed_sections,
-                    "raw_text": parsed.raw_text,
-                },
-            ),
-        )
-        # Persisted here, not in parse_node. The URL path hands the graph a
-        # pre-parsed document AND a .md file, and parse_node re-parses that file --
-        # producing a fresh ParsedDocument with no report and overwriting this one.
-        # Fidelity is only known at the point of extraction, so it is stored here.
+        get_ingestion_jobs().launch(doc_id, run_ingestion(doc_id, str(dest), "md"))
+        # Persisted here, not in parse_node: the graph parses the stored Markdown,
+        # which carries no report, and fidelity is only known at the extraction.
         if parsed.extraction_report is not None:
             # The extractor sees only that HTML was supplied; a page the user saved
             # from their own browser is a different source from the shell's webview.
@@ -1692,6 +1659,21 @@ async def delete_document(document_id: str, delete_notes: bool = False):
     logger.info("Deleted document %s", document_id)
 
 
+def _is_web_article(doc: DocumentModel) -> bool:
+    """Only a web article stores its extraction, as Markdown, rather than its source.
+
+    O'Reilly (`epub`), YouTube (`flac`) and a linked PDF also carry `source_url`;
+    re-fetching them read the site's page as an article (#430).
+    """
+    return bool(doc.source_url) and (doc.format or "").lower() in ("md", "markdown")
+
+
+def _replace_text_sync(path: Path, text: str) -> None:
+    partial = path.with_name(f"{path.name}.partial")
+    partial.write_text(text, encoding="utf-8")
+    partial.replace(path)
+
+
 @router.post("/{document_id}/reparse", response_model=ReparseResponse)
 async def reparse_document(document_id: str, body: ReparseRequest) -> ReparseResponse:
     """Re-run parsing and chunking for a document that is already in the library.
@@ -1702,7 +1684,9 @@ async def reparse_document(document_id: str, body: ReparseRequest) -> ReparseRes
 
     For a web article the stored raw file is the *extracted markdown*, not the
     original page, so re-parsing it would only re-read the old extraction. Those
-    are re-fetched from `source_url` instead.
+    are re-fetched from `source_url` and the stored file rewritten, because the
+    graph parses `file_path`. Every other source with a URL (an O'Reilly book, a
+    YouTube talk, a linked PDF) stores the source itself and is re-read offline.
 
     Call once with `confirm=false` to see what it costs, then again with
     `confirm=true`.
@@ -1710,7 +1694,7 @@ async def reparse_document(document_id: str, body: ReparseRequest) -> ReparseRes
     svc = get_document_deletion_service()
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
-        source = "url" if doc.source_url else "file"
+        source = "url" if _is_web_article(doc) else "file"
         if source == "file" and not Path(doc.file_path).exists():
             raise HTTPException(
                 status_code=409,
@@ -1742,7 +1726,6 @@ async def reparse_document(document_id: str, body: ReparseRequest) -> ReparseRes
             extra={"document_id": document_id},
         )
 
-    parsed_document = None
     if source == "url":
         # Without the render the re-import silently downgrades a page whose
         # content its scripts produce -- measured at 0 figures against 78 --
@@ -1752,23 +1735,9 @@ async def reparse_document(document_id: str, body: ReparseRequest) -> ReparseRes
             source_url, doc_id=document_id, rendered_html=body.rendered_html
         )
         await _persist_extraction_report(document_id, parsed.extraction_report)
-        parsed_document = {
-            "title": parsed.title,
-            "format": parsed.format,
-            "pages": parsed.pages,
-            "word_count": parsed.word_count,
-            "sections": [
-                {
-                    "heading": sec.heading,
-                    "level": sec.level,
-                    "text": sec.text,
-                    "page_start": sec.page_start,
-                    "page_end": sec.page_end,
-                }
-                for sec in parsed.sections
-            ],
-            "raw_text": parsed.raw_text,
-        }
+        # Written where the graph reads: it parses `file_path`, and a parsed
+        # document handed to it alongside was never read (#430).
+        await asyncio.to_thread(_replace_text_sync, Path(file_path), parsed.raw_text)
 
     async with get_session_factory()() as session:
         cleared = await svc.delete_derived_for_reparse(session, document_id)
@@ -1777,7 +1746,7 @@ async def reparse_document(document_id: str, body: ReparseRequest) -> ReparseRes
 
     get_ingestion_jobs().launch(
         document_id,
-        run_ingestion(document_id, file_path, fmt, parsed_document=parsed_document),
+        run_ingestion(document_id, file_path, fmt),
     )
     logger.info("Re-parse started", extra={"document_id": document_id, "source": source})
     return ReparseResponse(
