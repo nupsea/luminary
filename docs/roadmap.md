@@ -101,15 +101,64 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #158, #159, #161, #185, #186, #187, #188, #189, #191, #204, #205; #100 moved to 0.17.0, #66 to 0.18.0 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
 | III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement; chapter practice — **0.16.2 released; pairing merged (#260); chunking reads the measured form (#223, wire and column open); chapter card quality passed its gate (#305); the Practice panel's cards have not (#330)** | #160, #195, #221, #222, #226, #227, #229; #223 moved to 0.17.0, #162 to 0.18.0 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail — **0.17.0 released 2026-10-28: the library root (#388), snapshot and the resumable re-embed (#390), and per-library preferences with the shared-resource audit (#389) are built; a key per principal is deferred to the hosted work. Carried to 0.17.1: #211, and #231's page-range windows and macOS shell check.** No SQL is left outside `repos/` (79 statements to 0, #337 to #339), and every `DATA_DIR` join goes through `app/storage.py`. Closed with numbers: #100; #307 (topic F1 1.0 on d2l, 21/21 against thinkpython2's PDF bookmarks); #252 (thinkpython2's chapter cards drawn from pp. 1–22: 10 of 14 before, 0 of 14 and 0 of 17 on two fresh runs); #332 and #333 (1,040 misplaced paragraphs across 41 local books, now 0; the Federalist Papers 8 sections to 85); #286 (Usher stored as narrative on 5 of 5 fresh ingests). Open: #211, a `notes_fts` insert refused within milliseconds although `busy_timeout` is 5 s. SQLite refuses at once only when the refused connection already holds a read as it begins to write, and another connection is writing (reproduced on 3.46); which path leaves that read open is unknown, and the busy report now names the connection's preceding statements; #231 passed in the Linux shell, and finishing a chapter's cards now returns the reader to the reading place (#397); page-range windows and the macOS shell are untested | #211, #223, #231, #252, #286, #332, #333, #388, #389, #390 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
-| | 0.18.0 | Your own server, plus what Checkpoints A and B left open: the hardware session, the Practice panel's cards and Ask on what the documents do not say (§7). **#155 and #156 closed on AWS (2026-10-21).** **Checkpoint C** | #24, #66, #99, #155, #156, #162, #322, #330, #334, #354, #355, #356, #357, #358, #378 | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key; zero open `bug` issues milestoned to Phase I, II or III |
-| IV. Separation | 0.19.0 | Components separated for mobile | | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
-| V. Mobile | 0.20.0 | Topic notes and the draft inbox; mobile reading and note capture. **Checkpoint D** | #173 | A merge that leaves a source note out of every section is refused, a summary claim no source note supports is flagged, and undoing a merge restores every original; a phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated |
-| VI. Extras | 0.21.0 | Anki import; the capture extension, watch folder and Obsidian export; card review on mobile | #137, #124, #121, #25, #103, #26, #300, #314, #367 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an offline review on the phone merges without overwriting FSRS state |
-| VII. Languages | 0.22.0 | Multi-language — **conditional** | | Non-English degradation measured on the current stack first; a swap ships only through 0.17.0's rail; a no-go decision is an allowed outcome and moves the swap to 1.1 |
+| | 0.18.0 | Your own server; sources become connectors; plus what Checkpoints A and B left open: the hardware session and the Practice panel's cards (§7). **#155 and #156 closed on AWS (2026-10-21).** **Checkpoint C** | #24, #99, #155, #156, #162, #211, #231, #330, #334, #348, #354, #355, #356, #357, #358, #378, #382, #430, #431–#438 | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key; O'Reilly and YouTube ingest through out-of-process connectors with no change a reader can see; a connector built from the template outside this repo passes the conformance kit; zero open `bug` issues milestoned to Phase I, II or III |
+| IV. Separation | 0.19.0 | Components separated for mobile; beside it, the Ask track (§9) | #447–#453 | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
+| V. Mobile | 0.20.0 | Topic notes and the draft inbox; mobile reading and note capture; the Ask track lands. **Checkpoint D** | #173, #454, #455; Ask track #66, #322, #440–#443 | A merge that leaves a source note out of every section is refused, a summary claim no source note supports is flagged, and undoing a merge restores every original; a phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated; follow-up retrieval moves on two documents with numbers before and after, and no suggested question gets a general-knowledge answer |
+| VI. Extras | 0.21.0 | Anki import; the capture extension; Luminary as a read-only MCP server; card review on mobile | #349, #367, #456, #457, #458 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an MCP client receives passages only from collections the user scoped, and nothing with the setting off or without the token; an offline review on the phone merges without overwriting FSRS state |
+| VII. Models measured | 0.22.0 | Languages, the embedder, the reranker and figures, decided from measurements (§11) — **conditional** | #124, #377, #444, #445, #446 | Non-English degradation measured on the current stack first; every swap decided from its own numbers on two runs that agree, and a no-go is allowed and moves it to 1.1; at most one re-embed, through 0.17.0's rail |
 | | 1.0.0-rc → 1.0.0 | The release. **Checkpoint E** | | Zero open `bug` issues; every rung's exit gate green together, on one build; the code-quality targets met |
-| After 1.0 | 1.1.0 | Multi-page web import (HTML books, Confluence); Luminary as a read-only MCP server (§13) | #348, #349 | Each test source imports as one document whose sections match its ground-truth TOC, and 10 questions per source are answered with correct citations, read by hand; an MCP client receives passages only from collections the user scoped, and nothing with the setting off or without the token |
+| After 1.0 | 1.1.0 | Candidates. One moves onto a 0.x rung only by displacing planned work of equal size | #25, #103, #121, #137, #300, #314, #411, #459, #460 | Each candidate's own done-when |
 
 **1.0.0 itself carries no new features.** Work not on a rung above is 1.1, not 1.0.
+
+**1.0.0 targets March 2027 (decided 2026-11-03).** 1.1 work moves onto a 0.x rung when it fits
+before then. The source-connector track and #348 moved to 0.18.0, so the architecture is open to
+contributors well before the release, and the MCP server (#349) moved to 0.21.0.
+
+### Plan to 1.0.0
+
+**Two-week iterations, each planned to about three quarters of its capacity.** The quarter left
+open takes what is filed during the iteration. The iterations are an order, not dates: the next one
+is re-planned at every tag.
+
+| Iteration | Critical path | Beside it | Ends with |
+|---|---|---|---|
+| 1 | Connectors batch A (#431–#434, closes #430) | #211, #231 (0.17.1); the CI checks #24, #99, #355; #382; #330 run 1 | 0.17.1 |
+| 2 | Connectors batch B (#435, #436) | #334; #330 run 2; the #348 spike; #440 | |
+| 3 | Connectors batch C (#437, #438 with #348) | Checkpoint C's manual pass, with #162 and #231's last checks | 0.18.0, Checkpoint C |
+| 4 | #447; the backend half of 0.19.0 (#450–#453) | #441, #442 | |
+| 5 | #448, #449 | #443 | 0.19.0 |
+| 6 | #173, #454 | #66; #377's February re-check | |
+| 7 | #455; Checkpoint D | #322 closes; #444 measured | 0.20.0, Checkpoint D |
+| 8 | #456, #457, #458, #349 | | 0.21.0 |
+| 9 | #445 (the one re-embed), #446, #124 | Feature freeze | 0.22.0 |
+| 10 | 1.0.0-rc and Checkpoint E | Bugs only | 1.0.0 |
+
+**The critical path** is connectors batch B (#436) → package extraction (#448) → the mobile client
+(#454, #455). The 0.19.0 backend issues gate the phone: #451 the outbox, #453 mobile review. Work
+off that path runs beside it, never ahead of it.
+
+**Room for new issues.**
+
+- A new `bug` is triaged when filed to the current rung or the next ("Bugs to 1.0"), and it takes
+  the iteration's open quarter first.
+- A new feature goes to the 1.1.0 candidates. It moves onto a 0.x rung only by displacing planned
+  work of equal size, decided by the maintainer at an iteration boundary, never mid-iteration.
+- **The contributor lane** is the issues labelled `good first issue` or `help wanted`: #24, #99,
+  #103, #314, #334, #355, #382, #447, and #460 once #438 lands. None is on the critical path, so a
+  contributor PR never holds a tag. A connector built on the published contract (#438) needs no
+  slot at all.
+- Work in progress: one batch per lane at a time, and one heavy job (an eval or a full ingest) on
+  the host at a time.
+
+**If a rung slips one iteration, cut in this order.**
+
+1. 0.22.0's swaps (#446, #445, #124). Each allows a no-go, so a cut one is recorded as a no-go.
+2. #349 and #456, to 1.1.0.
+3. Connectors batch C, to the start of 0.19.0 (§7, "Order").
+
+**Never cut:** a checkpoint, a `bug`, or mobile reading and note capture, which is what 1.0 is
+(above).
 
 ### Checkpoint releases
 
@@ -787,8 +836,9 @@ database takes a library through snapshot and restore rather than a column backf
 | A layer-linter rule | `layer_linter.py` fails when a store handle is opened below the API without a library. Without it the seam decays | Built: an engine, a session factory, a LanceDB, SQLite or Kuzu connection opens only in the module that resolves the library (`STORE_OPENERS`), held by `tests/test_store_handle_rule.py` |
 
 **Order of work.** Each batch is a few PRs and ends in a manual test pass on the app (Code quality
-to 1.0). Chapter card quality and the Ask fixes are not on this rung: they run beside it and land by
-Checkpoint C (§7), so open-ended research cannot hold the architecture back.
+to 1.0). Chapter card quality and the Ask fixes are not on this rung: they run beside it, so
+open-ended research cannot hold the architecture back. Card quality lands by Checkpoint C (§7), the
+Ask fixes by Checkpoint D (§9).
 
 | Batch | Work | Why it is here |
 |---|---|---|
@@ -827,9 +877,50 @@ beside 0.17.0, rather than after it:
 | Track | Issues | What it needs |
 |---|---|---|
 | Hardware session | #24, #99, #162; #155 and #156 closed | The runs below |
-| Defects the 2026-10-21 runs found | #354, #355, #356, #357, #358 | Each is a `bug`, so each holds the tag |
+| Defects the 2026-10-21 runs found | #355; #354, #356, #357 and #358 closed | A `bug`, so it holds the tag. It closes on a CI check of the `.deb`'s `Recommends` |
+| Gate and release hygiene | #211, #231, #382 | #211 fails PRs at random on Windows; #382 keeps `make smoke` red; #231 needs its last two checks in the manual pass |
 | The Practice panel's cards | #330 | The step 4 gate on the unit path (§4) |
-| Ask on what the documents do not say | #66, #322 | #322 is a `retrieval-change` and follows 0.17.0's batch 1 |
+| Ask on what the documents do not say | Moved to the Ask track, landing by Checkpoint D (§9) | 0.18.0 already carries the connector track |
+| Sources become connectors | #348, #430, #431–#438 | Below |
+
+#### Sources become connectors
+
+**A connector fetches; the core ingests.** A connector turns a locator and credentials into a source
+bundle. Parsing, chunking, embedding, citations and cards stay in the core, so a connector cannot
+change what grounding means. O'Reilly and YouTube already split this way: each fetches a file (an
+EPUB in `oreilly_ingestion.py`, audio and captions in `youtube_ingestion.py`) and calls
+`run_ingestion`.
+
+| Decision | What forces it |
+|---|---|
+| A connector is a separate process that speaks JSON lines over stdin and stdout and writes a bundle directory | Inside the backend a connector could read every credential and the whole library, collide with the bundle's pinned dependencies, escape I-71 and take down the one worker. Across a pipe its licence is independent of Luminary's (Apache-2.0 source, AGPL-3.0 builds) |
+| Transcription stays in the core | faster-whisper pulls PyAV's GPL x264/x265 (the `media` group). The YouTube connector hands over audio and captions |
+| Re-import reads the stored bundle and never runs the connector | Credentials expire and the user may be offline. Re-import already mistakes O'Reilly and YouTube documents for web articles (#430) |
+| File upload and single-page URL import stay in the core | They are formats, not sources |
+| Multi-page web content is imported, not searched live: an HTML book or a Confluence page tree becomes one document with chapters (#348) | Citations, the reader locus and chapter cards then work unchanged. The local default model is weak at tool calling, so MCP is at most a fetch transport |
+| xerj is not a connector | It indexes local folders only, and its `file:line` hits come from a second index and embedder that citations and cards cannot use |
+| The SDK and the first-party connectors live in this repo (`packages/luminary-source-sdk/`, `connectors/<name>/`), and a CI check fails when either side imports the other | The contract changes with the importer that validates it. A second repo means paired PRs while the contract is still moving |
+| Third-party connectors live in their authors' repos, listed in a catalogue (#437) | Luminary hosts no code for a source whose terms it has not read |
+| A first-party connector moves to its own repo once the contract has held for two releases and someone outside maintains it, or when the maintainer decides this repo should not host it | O'Reilly's subscription download is a terms question only the maintainer can settle |
+| No incremental re-sync | Re-crawling changed pages while keeping anchored notes and cards is its own design |
+
+| Batch | Stage | Issue | Work | What a user sees |
+|---|---|---|---|---|
+| A | 0 | #431 | Characterization tests over O'Reilly and YouTube ingestion | Nothing |
+| A | 1 | #432 | The bundle format (one JSON Schema) and the one importer | Nothing |
+| A | 2 | #433 | O'Reilly fetches into a bundle; its path stops writing EPUBs, so it drops ebooklib; existing documents keep their EPUB | Nothing |
+| A | 3 | #434 | YouTube fetches into a bundle; `youtube_url` and the transcript reader unchanged | Nothing |
+| B | 4 | #435 | The SDK, the process protocol and runner; both connectors move to `connectors/`; yt-dlp moves with YouTube | Nothing; the bundled app ingests both as before |
+| B | 5 | #436 | Settings, inputs and the connect modal drawn from each connector's `describe`; `/oreilly/*` becomes `/connectors/{name}/*` | One generic connector UI |
+| C | 6 | #437 | A catalogue, and install into a per-connector environment, shown with its licence and terms first; O'Reilly and YouTube stay bundled | Installable connectors |
+| C | 7 | #438 | Publish the SDK; conformance kit, template repo, review checklist, `docs/connectors.md`; #348 as the second reference connector (MediaWiki if #348 drops) | Open to contributors |
+
+**Order.** Batch A changes nothing a user sees and lands first. #430 is a `bug`, so it holds the
+tag: batch A closes it, or a direct fix does. Batch B lands before 0.19.0 extracts `packages/ui`,
+or the O'Reilly screens it deletes move into a package first. If Checkpoint C is otherwise ready,
+whatever is left of the track moves to the start of 0.19.0 with its part of the exit gate, and the
+track never holds the tag. Each batch ends with a manual pass ("Code quality to 1.0"), and
+Checkpoint C's own manual pass ingests a YouTube link on a fresh machine.
 
 **The hardware session waits on no borrowed laptop (decided 2026-10-20).** Each item closes on the
 cheapest run that exercises its mechanism for real. What only consumer hardware would show is
@@ -851,18 +942,21 @@ Then Checkpoint C.
 
 ### 8. Components separated for mobile — 0.19.0
 
-**Frontend.** 57 raw `fetch(` calls in 32 files still bypass `lib/apiClient.ts` (2026-09-27, excluding
-tests); they move onto it first, so the phone has one place to add its token and its cache. Then
-`packages/api` (client plus types), `packages/domain` (hooks and state) and `packages/ui` are
-extracted, and desktop and mobile become thin shells. `surface-manifest.json` gains a `mobile` mode:
-a third mode, not a fork.
+**Frontend.** 56 raw `fetch(` calls in 30 files still bypass `lib/apiClient.ts` (2026-11-03, excluding
+tests). They move onto it first (#447), so the phone has one place to add its token and its cache.
+Then `packages/api` (client plus types), `packages/domain` (hooks and state) and `packages/ui` are
+extracted, and desktop and mobile become thin shells (#448). That extraction waits for #436, which
+deletes the O'Reilly screens. `surface-manifest.json` gains a `mobile` mode: a third mode, not a fork
+(#449).
 
-**Backend.**
+**Backend.** These do not depend on the frontend work and run beside it.
 
-- An incremental change feed for documents and notes.
-- Idempotent writes keyed by client ids, which the offline outbox needs.
-- A render-ready document endpoint for reading on the phone. Prose is never rebuilt from chunks (I-29).
-- Review logs made append-only, so an offline merge replays reviews rather than overwriting FSRS state.
+- An incremental change feed for documents and notes (#450).
+- Idempotent writes keyed by client ids, which the offline outbox needs (#451).
+- A render-ready document endpoint for reading on the phone. Prose is never rebuilt from chunks (I-29) (#452).
+- Review logs made append-only, so an offline merge replays reviews rather than overwriting FSRS
+  state (#453). Today FSRS state is updated in place on the card, and a session's `review_events` are
+  deleted with it (`repos/study_repo.py`).
 
 Desktop-only code stays in `luminary-host` and `src-tauri`, as today.
 
@@ -887,15 +981,27 @@ for every section. It depends on nothing cloud or mobile, so it can ship before 
 
 **A Tauri 2 mobile client for reading and notes, the two things done away from a desk.** Ingest and
 the models stay on the user's server or desktop. The phone talks to that server or to a paired
-desktop, authenticates with 0.16.0's device token, and keeps a local cache of documents plus an outbox
-for notes written offline. The outbox drains through 0.19.0's idempotent writes, so a retried note is
-never stored twice.
+desktop, authenticates with 0.16.0's device token, and keeps a local cache of documents (#454) plus an
+outbox for notes written offline (#455). The outbox drains through 0.19.0's idempotent writes, so a
+retried note is never stored twice.
+
+**The Ask track runs beside 0.19.0 and 0.20.0 and lands by Checkpoint D.** It touches retrieval and
+the answer prompts, and the mobile rungs touch neither, so the two proceed in parallel. #322 is its
+parent:
+
+| Order | Issue | What |
+|---|---|---|
+| 1 | #440 | A multi-turn golden set for follow-ups. Nothing below can be judged without it |
+| 2 | #441 | Retrieve on a standalone rewrite of every follow-up |
+| 3 | #442 | Back-of-book indexes and back matter out of retrieval and citations |
+| 4 | #443 | One rule for general knowledge in an answer: labelled, never cited, refused for a question Luminary suggested |
+| 5 | #66 | Suggestions generated from chunk text, and dropped when retrieval cannot answer them |
 
 Then Checkpoint D.
 
-### 10. Anki import, capture and mobile review — 0.21.0
+### 10. Anki import, capture, the MCP server and mobile review — 0.21.0
 
-**Anki import.** Export already ships: `export_service.py` writes a `.apkg` through genanki for a
+**Anki import (#456).** Export already ships: `export_service.py` writes a `.apkg` through genanki for a
 collection's deck. There is no import path. The hard part is not the file format. A Luminary card
 carries `source_chunk_ids` and a per-card grounding verdict (I-34, I-35), and an imported card has no
 passage in the library to point at. Decide what grounding means for a card whose source is elsewhere
@@ -904,23 +1010,47 @@ parser, or the invariant quietly stops meaning anything. FSRS state is the secon
 deck carries SM-2 scheduling, and `fsrs` v6 state is not the same shape. Importing intervals naively
 produces a schedule that looks continuous and is not.
 
-**The capture extension.** A library stays empty when filling it means opening the app and finding the
+**The capture extension (#457).** A library stays empty when filling it means opening the app and finding the
 file. The backend is already HTTP, so an extension needs a POST rather than an architecture: one click
 for a page, a PDF, a YouTube video, or a selection with its source. It pairs with 0.16.0's device auth.
 It is also how a page only a signed-in browser can see gets in: a claude.ai doc loads inside an
 iframe after sign-in, so the URL import refuses it (`remote_source._refuse_signed_in_only`), and the
 extension, already signed in, imports it with one click (#367). Luminary never holds the claude.ai
-credential. A watch folder for the desktop app, Markdown export shaped for Obsidian, and a Zotero read path ship
-with it.
+credential. The extension imports through 0.18.0's bundle importer (§7), not a route of its own.
 
-**Card review on mobile.** It rides 0.19.0's append-only review log, so a review made offline merges
-without discarding one made on the desktop.
+**Not on this rung.** A watch folder (#459) and a Zotero connector (#460, a contributor connector
+once #438 publishes the contract) are 1.1.0 candidates. Markdown export shaped for Obsidian already
+exists (`export_service.py`, `[[id|text]]` links become `[[title]]`). Whether a real Obsidian vault
+opens it cleanly has not been checked.
 
-The enhancements that were on no rung land here: PDF math as LaTeX (#137), figure-caption quality
-(#124), nugget recall for answers (#121), parent-document retrieval (#25), the Hub approximations
-(#103) and a copy-link button for notes (#26, a good first issue that can land at any time).
+**The MCP server is read-only, off by default and scoped to collections the user picks** (#349).
+An outside model writes the answer, so none of our grounding checks run; every result leaves the
+machine to that model's provider; imported pages are untrusted text handed to an agent with shell
+tools; and the backend leaves CSRF open, so it is a stdio adapter with a token rather than a new
+HTTP listener. No write tools: notes or cards from an outside model would pollute the learner record.
+It follows 0.18.0 because #348 decides how imported pages are marked as untrusted, and the server
+hands those pages out.
 
-### 11. Multi-language — 0.22.0, conditional
+**Card review on mobile (#458).** It rides 0.19.0's append-only review log (#453), so a review made
+offline merges without discarding one made on the desktop.
+
+The enhancements that were parked on this rung moved by what decides them: figure-caption quality
+(#124) to 0.22.0; PDF math as LaTeX (#137), nugget recall (#121), parent-document retrieval (#25) and
+the Hub's last items (#103) to the 1.1.0 candidates.
+
+### 11. Models measured: languages, the reranker, figures — 0.22.0, conditional
+
+**One rung decides every model and index change before 1.0, from measurements.** The component
+review's February re-check (#377, a routine on 2027-02-01) supplies the candidates. Every change that
+rewrites vectors ships in **one** re-embed through the rail (#445). No decision here is made without
+its own numbers, and a no-go is an allowed outcome for each.
+
+| Decision | Issue | What decides it |
+|---|---|---|
+| Languages | #444 | Non-English degradation on today's stack, measured before any swap |
+| Embedder, plus heading-prefixed chunks (#322 row 3) | #445 | `make eval` before and after on one corpus; ingest time and RAM on a CPU-only host; every bge-tuned threshold re-derived |
+| Reranker (#322 row 2) | #446 | HR@5 and MRR on the goldens and #440, latency on a slow host; the confidence gate's threshold re-derived (I-73) |
+| Vision model on 16GB hosts | #124 | Expected terms present in captions, per model |
 
 **Measure first.** Embeddings are `BAAI/bge-small-en-v1.5`, 384-dim and English-only, and every stored
 chunk, note, image and concept vector lives in that space. GLiNER is already multilingual
@@ -959,23 +1089,6 @@ needs a different provider.
 
 The candidate is Checkpoint E: the checkpoint gate, plus zero open `bug` issues, plus every rung's exit
 gate green together on one build. 1.0.0 is that build with no new features.
-
-### 13. Web content and an MCP server — 1.1.0
-
-**Multi-page web content is imported, not searched live** (#348). An HTML book or a Confluence page
-tree becomes one document with chapters, so citations, the reader locus and chapter cards work
-unchanged; `oreilly_service.py` already does this for one site. MCP is only a fetch transport here:
-the local default model is weak at tool calling. #348 is a spike, and dropping the feature is an
-allowed outcome.
-
-**xerj is not the integration.** It indexes local folders only (no crawler, no Confluence connector),
-and its `file:line` hits come from a second index and embedder that citations and cards cannot use.
-
-**The MCP server is read-only, off by default and scoped to collections the user picks** (#349).
-An outside model writes the answer, so none of our grounding checks run; every result leaves the
-machine to that model's provider; imported pages are untrusted text handed to an agent with shell
-tools; and the backend leaves CSRF open, so it is a stdio adapter with a token rather than a new
-HTTP listener. No write tools: notes or cards from an outside model would pollute the learner record.
 
 ### Bugs to 1.0
 
