@@ -570,7 +570,7 @@ async def test_without_captions_the_audio_alone_is_ingested(
 
     assert fetch_captions.await_count == (0 if captions_arrive is None else 1)
     audio = tmp_path / "raw" / f"{doc_id}.flac"
-    ingested.assert_awaited_once_with(doc_id, str(audio), "flac", parsed_document=None)
+    ingested.assert_awaited_once_with(doc_id, str(audio), "flac")
     assert [p.name for p in (tmp_path / "raw").glob(f"{doc_id}*")] == [audio.name]
 
 

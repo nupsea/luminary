@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any
 
 from langgraph.errors import NodeError
 from langgraph.graph import END, START, StateGraph
@@ -158,17 +157,21 @@ async def run_ingestion(
     document_id: str,
     file_path: str,
     format: str,
-    parsed_document: dict[str, Any] | None = None,
     kind: str | None = None,
 ) -> None:
+    """Ingest the document from the file at `file_path`, which the graph parses first.
+
+    Takes no parsed document: the graph always starts at parse, so one handed in was
+    discarded, and a re-import re-read its old file (#430). Write the text there instead.
+    """
     initial_state: IngestionState = {
         "document_id": document_id,
         "file_path": file_path,
         "format": format,
-        "parsed_document": parsed_document,
+        "parsed_document": None,
         "kind": kind,
         "chunks": None,
-        "status": "parsing" if parsed_document is None else "classifying",
+        "status": "parsing",
         "error": None,
         "section_summary_count": None,
         "audio_duration_seconds": None,
@@ -179,10 +182,7 @@ async def run_ingestion(
         "Ingestion task started",
         extra={"document_id": document_id, "format": format, "kind": kind},
     )
-    if parsed_document is None:
-        await _update_stage(document_id, "parsing")
-    else:
-        await _update_stage(document_id, "classifying")
+    await _update_stage(document_id, "parsing")
     await _run_graph(initial_state)
 
 
