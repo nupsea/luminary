@@ -115,25 +115,24 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 before then. The source-connector track and #348 moved to 0.18.0, so the architecture is open to
 contributors well before the release, and the MCP server (#349) moved to 0.21.0.
 
-### Schedule to 1.0.0
+### Plan to 1.0.0
 
 **Two-week iterations, each planned to about three quarters of its capacity.** The quarter left
-open takes what is filed during the iteration. From 0.13.0 to 0.17.0 the gap between rung tags was
-5 to 14 days (2026-09-23 to 10-28), but from 0.18.0 on each rung carries more, so the dates below
-are targets, re-planned at every tag.
+open takes what is filed during the iteration. The iterations are an order, not dates: the next one
+is re-planned at every tag.
 
-| Iteration | Dates | Critical path | Beside it | Tag (target) |
-|---|---|---|---|---|
-| 1 | Nov 4 – Nov 17 | Connectors batch A (#431–#434, closes #430) | #211, #231 (0.17.1); the CI checks #24, #99, #355; #382; #330 run 1; #357 decided | 0.17.1 |
-| 2 | Nov 18 – Dec 1 | Connectors batch B (#435, #436) | #334; #330 run 2; the #348 spike; #440 | |
-| 3 | Dec 2 – Dec 15 | Connectors batch C (#437, #438 with #348) | Checkpoint C's manual pass, with #162 and #231's last checks | 0.18.0, Checkpoint C (Dec 15) |
-| 4 | Dec 16 – Jan 5 | #447; the backend half of 0.19.0 (#450–#453) | #441, #442. Holidays: planned at half capacity | |
-| 5 | Jan 6 – Jan 19 | #448, #449 | #443 | 0.19.0 (Jan 19) |
-| 6 | Jan 20 – Feb 2 | #173, #454 | #66. #377's re-check runs on Feb 1 | |
-| 7 | Feb 3 – Feb 16 | #455; Checkpoint D | #322 closes; #444 measured | 0.20.0, Checkpoint D (Feb 16) |
-| 8 | Feb 17 – Mar 2 | #456, #457, #458, #349 | | 0.21.0 (Mar 2) |
-| 9 | Mar 3 – Mar 16 | #445 (the one re-embed), #446, #124 | Feature freeze on Mar 16 | 0.22.0 (Mar 16) |
-| 10 | Mar 17 – Mar 31 | 1.0.0-rc and Checkpoint E | Bugs only | 1.0.0 (Mar 31) |
+| Iteration | Critical path | Beside it | Ends with |
+|---|---|---|---|
+| 1 | Connectors batch A (#431–#434, closes #430) | #211, #231 (0.17.1); the CI checks #24, #99, #355; #382; #330 run 1; #357 decided | 0.17.1 |
+| 2 | Connectors batch B (#435, #436) | #334; #330 run 2; the #348 spike; #440 | |
+| 3 | Connectors batch C (#437, #438 with #348) | Checkpoint C's manual pass, with #162 and #231's last checks | 0.18.0, Checkpoint C |
+| 4 | #447; the backend half of 0.19.0 (#450–#453) | #441, #442 | |
+| 5 | #448, #449 | #443 | 0.19.0 |
+| 6 | #173, #454 | #66; #377's February re-check | |
+| 7 | #455; Checkpoint D | #322 closes; #444 measured | 0.20.0, Checkpoint D |
+| 8 | #456, #457, #458, #349 | | 0.21.0 |
+| 9 | #445 (the one re-embed), #446, #124 | Feature freeze | 0.22.0 |
+| 10 | 1.0.0-rc and Checkpoint E | Bugs only | 1.0.0 |
 
 **The critical path** is connectors batch B (#436) → package extraction (#448) → the mobile client
 (#454, #455). The 0.19.0 backend issues gate the phone: #451 the outbox, #453 mobile review. Work
