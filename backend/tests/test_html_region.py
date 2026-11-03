@@ -181,3 +181,34 @@ class TestContentInAFurnitureNamedContainer:
         menu = f'<div class="sidebar"><h3>Archive</h3><ul>{links}</ul></div>'
         page = _page(f"<article>{self._section('Introduction')}{menu}</article>")
         assert "Archive page number" not in select_region(page).get_text()
+
+
+class TestCommentsAndTeasers:
+    """What sits inside a post's <article> or <main> without being the post."""
+
+    THREAD = "<p>" + ("Great post, this helped me a lot with my own project. " * 40) + "</p>"
+
+    def test_a_comment_thread_is_removed_however_long(self):
+        """dev.to's thread was two thirds of the region; length rescues an ambiguous
+        name, so a thread has to be recognised by its name alone."""
+        comments = f'<section id="comments"><h2>Top comments (12)</h2>{self.THREAD * 3}</section>'
+        text = select_region(_page(f"<article>{PROSE}{comments}</article>")).get_text()
+        assert "Real article prose" in text
+        assert "Great post" not in text
+
+    def test_commentary_is_still_content(self):
+        commentary = f'<div class="commentary"><h2>Commentary</h2>{self.THREAD}</div>'
+        text = select_region(_page(f"<article>{PROSE}{commentary}</article>")).get_text()
+        assert "Great post" in text
+
+    def test_a_teaser_article_goes_and_the_post_nested_in_main_stays(self):
+        teaser = '<article class="card"><h3>Another post</h3><p>Read this next.</p></article>'
+        page = _page(f"<main><article><h1>Post</h1>{PROSE}</article>{teaser}</main>")
+        text = select_region(page).get_text()
+        assert "Real article prose" in text
+        assert "Read this next." not in text
+
+    def test_a_next_post_teaser_is_removed(self):
+        teaser = '<div class="next-post"><h3>Next: the sequel</h3></div>'
+        text = select_region(_page(f"<article>{PROSE}{teaser}</article>")).get_text()
+        assert "the sequel" not in text

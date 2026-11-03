@@ -4,6 +4,7 @@ import logging
 import re
 from html import unescape
 from io import BytesIO
+from itertools import islice
 from urllib.parse import urljoin
 
 import httpx
@@ -12,7 +13,7 @@ from PIL import Image as PILImage
 
 from app.config import get_settings
 from app.full_extras import require_extra
-from app.services.html_region import region_is_plausible, select_region
+from app.services.html_region import drop_comment_threads, region_is_plausible, select_region
 from app.services.html_to_markdown import to_markdown
 from app.storage import library_root
 from app.types import DOCUMENT_IMAGE_FORMATS, ParsedDocument, Section
@@ -87,6 +88,9 @@ _INLINE_PARENTS = frozenset(
         "th",
     ]
 )
+
+# dev.to's `crayons-avatar`, GitHub's `author-bio__avatar`, Fowler's `author-list`.
+_PORTRAIT_HINT = re.compile(r"avatar|author", re.I)
 
 # Without image/avif listed, a negotiating CDN answers with a format Pillow can open.
 _IMAGE_ACCEPT = {"Accept": "image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.5"}
@@ -188,8 +192,22 @@ def _image_extension(content: bytes) -> str | None:
     return "jpg" if found == "JPEG" else found.lower()
 
 
+def _is_portrait(img) -> bool:
+    """An author's or commenter's photo: an `avatar`/`author` box within three levels.
+
+    Outside a <figure> only, so an interview's captioned photo of its subject stays.
+    """
+    if img.find_parent("figure") is not None:
+        return False
+    for tag in (img, *islice(img.parents, 3)):
+        names = " ".join(tag.get("class") or []) + " " + (tag.get("id") or "")
+        if _PORTRAIT_HINT.search(names):
+            return True
+    return False
+
+
 def _not_a_figure(img, src: str) -> bool:
-    """An <img> the page never shows as content: a placeholder or a dark-theme twin.
+    """An <img> the page never shows as content: a placeholder, a dark-theme twin, a portrait.
 
     A blur-up placeholder is a hidden `data:` image painted under the real one. A
     themed figure ships twice, the dark copy hidden by default (Next.js's blog:
@@ -200,7 +218,7 @@ def _not_a_figure(img, src: str) -> bool:
     classes = img.get("class") or []
     if "hidden" in classes and any(c.startswith("dark") and ":" in c for c in classes):
         return True
-    return src.endswith("#gh-dark-mode-only")
+    return src.endswith("#gh-dark-mode-only") or _is_portrait(img)
 
 
 def _describe_block(markdown: str) -> str:
@@ -485,6 +503,8 @@ class ArticleExtractor:
         # MediaWiki's per-heading "[edit]" links; left in, they reach chunks and citations (#159).
         for editsection in soup.find_all(class_="mw-editsection"):
             editsection.decompose()
+        # From the page, not only our region, or the plausibility check reverts (I-76).
+        drop_comment_threads(soup)
         # Order matters: hydrate first so a lazy <img> inside a <figure> has a
         # src before the figure is rewritten, and protect <pre> before the
         # inline pass, which must never reach inside a code block.

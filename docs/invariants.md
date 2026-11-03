@@ -310,6 +310,15 @@ image, and `captured.images` counts stored copies, with every one that failed co
 `dropped`. `TestImageMirroring` in `tests/test_article_extractor.py` fails CI if a URL shape
 breaks the link on either serialiser, or if a failed image reads as captured.
 
+**I-76. Whatever the article region drops that trafilatura would keep leaves the page before
+either one reads it.**
+Our region is trusted only while it holds 90% of trafilatura's words (`region_is_plausible`), so
+removing content from one side alone reverts the import to the other. Dropped only from the region,
+dev.to's comment thread (two thirds of the page) made the region read as a mis-pick, and the
+fallback kept every comment and lost the heading text. `_prepare_html` calls
+`drop_comment_threads` on the whole page. `TestCommentThreads` in `tests/test_article_extractor.py`
+fails CI if a long thread survives or moves the import off the region.
+
 ## Quality gates
 
 **I-32. An eval metric that could not be computed is a failure, never a pass.**

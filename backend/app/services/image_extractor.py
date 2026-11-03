@@ -642,6 +642,10 @@ def extract_images_md(
         try:
             with PILImage.open(img_path, formats=DOCUMENT_IMAGE_FORMATS) as img_pil:
                 w, h = img_pil.size
+            # The floor PDF and EPUB images get: a 50px avatar or a 20px icon is a
+            # vision call that describes nothing. Still shown in the reader.
+            if w < _MIN_WIDTH or h < _MIN_HEIGHT:
+                continue
 
             # Use file content hash if possible, otherwise filename
             with open(img_path, "rb") as f:
