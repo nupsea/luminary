@@ -104,16 +104,15 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | | 0.18.0 | Your own server; sources become connectors; plus what Checkpoints A and B left open: the hardware session, the Practice panel's cards and Ask on what the documents do not say (§7). **#155 and #156 closed on AWS (2026-10-21).** **Checkpoint C** | #24, #66, #99, #155, #156, #162, #322, #330, #334, #348, #354, #355, #356, #357, #358, #378, #430, #431–#438 | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key; O'Reilly and YouTube ingest through out-of-process connectors with no change a reader can see; a connector built from the template outside this repo passes the conformance kit; zero open `bug` issues milestoned to Phase I, II or III |
 | IV. Separation | 0.19.0 | Components separated for mobile | | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
 | V. Mobile | 0.20.0 | Topic notes and the draft inbox; mobile reading and note capture. **Checkpoint D** | #173 | A merge that leaves a source note out of every section is refused, a summary claim no source note supports is flagged, and undoing a merge restores every original; a phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated |
-| VI. Extras | 0.21.0 | Anki import; the capture extension, watch folder and Obsidian export; card review on mobile | #137, #124, #121, #25, #103, #26, #300, #314, #367 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an offline review on the phone merges without overwriting FSRS state |
+| VI. Extras | 0.21.0 | Anki import; the capture extension, watch folder and Obsidian export; Luminary as a read-only MCP server; card review on mobile | #137, #124, #121, #25, #103, #26, #300, #314, #349, #367 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an MCP client receives passages only from collections the user scoped, and nothing with the setting off or without the token; an offline review on the phone merges without overwriting FSRS state |
 | VII. Languages | 0.22.0 | Multi-language — **conditional** | | Non-English degradation measured on the current stack first; a swap ships only through 0.17.0's rail; a no-go decision is an allowed outcome and moves the swap to 1.1 |
 | | 1.0.0-rc → 1.0.0 | The release. **Checkpoint E** | | Zero open `bug` issues; every rung's exit gate green together, on one build; the code-quality targets met |
-| After 1.0 | 1.1.0 | Luminary as a read-only MCP server (§13) | #349 | An MCP client receives passages only from collections the user scoped, and nothing with the setting off or without the token |
 
 **1.0.0 itself carries no new features.** Work not on a rung above is 1.1, not 1.0.
 
 **1.0.0 targets March 2027 (decided 2026-11-03).** 1.1 work moves onto a 0.x rung when it fits
-before then. The source-connector track and #348 moved to 0.18.0 first, so the architecture is
-open to contributors well before the release.
+before then. The source-connector track and #348 moved to 0.18.0, so the architecture is open to
+contributors well before the release, and the MCP server (#349) moved to 0.21.0.
 
 ### Checkpoint releases
 
@@ -937,7 +936,7 @@ never stored twice.
 
 Then Checkpoint D.
 
-### 10. Anki import, capture and mobile review — 0.21.0
+### 10. Anki import, capture, the MCP server and mobile review — 0.21.0
 
 **Anki import.** Export already ships: `export_service.py` writes a `.apkg` through genanki for a
 collection's deck. There is no import path. The hard part is not the file format. A Luminary card
@@ -957,6 +956,14 @@ extension, already signed in, imports it with one click (#367). Luminary never h
 credential. A watch folder for the desktop app, Markdown export shaped for Obsidian, and a Zotero read path ship
 with it. The extension and the watch folder import through 0.18.0's bundle importer (§7), not a
 route of their own.
+
+**The MCP server is read-only, off by default and scoped to collections the user picks** (#349).
+An outside model writes the answer, so none of our grounding checks run; every result leaves the
+machine to that model's provider; imported pages are untrusted text handed to an agent with shell
+tools; and the backend leaves CSRF open, so it is a stdio adapter with a token rather than a new
+HTTP listener. No write tools: notes or cards from an outside model would pollute the learner record.
+It follows 0.18.0 because #348 decides how imported pages are marked as untrusted, and the server
+hands those pages out.
 
 **Card review on mobile.** It rides 0.19.0's append-only review log, so a review made offline merges
 without discarding one made on the desktop.
@@ -1004,14 +1011,6 @@ needs a different provider.
 
 The candidate is Checkpoint E: the checkpoint gate, plus zero open `bug` issues, plus every rung's exit
 gate green together on one build. 1.0.0 is that build with no new features.
-
-### 13. An MCP server — 1.1.0
-
-**The MCP server is read-only, off by default and scoped to collections the user picks** (#349).
-An outside model writes the answer, so none of our grounding checks run; every result leaves the
-machine to that model's provider; imported pages are untrusted text handed to an agent with shell
-tools; and the backend leaves CSRF open, so it is a stdio adapter with a token rather than a new
-HTTP listener. No write tools: notes or cards from an outside model would pollute the learner record.
 
 ### Bugs to 1.0
 
