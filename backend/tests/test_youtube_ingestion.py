@@ -188,6 +188,9 @@ async def test_ingest_url_success_creates_document(test_db, monkeypatch):
     assert doc.source_url == "https://www.youtube.com/watch?v=abc123"
     assert doc.video_title == "Test YouTube Video"
     assert doc.format == "flac"
+    # The player and the transcribe node read these; #434's bundle maps onto them.
+    assert doc.youtube_url == "https://www.youtube.com/watch?v=abc123"
+    assert doc.file_path == str(tmp_path / "raw" / f"{doc_id}.flac")
 
 
 async def test_document_list_includes_source_url(test_db):
@@ -533,6 +536,42 @@ async def test_failed_download_marks_the_document_and_removes_partial_files(test
     assert "Video unavailable" in status["error_message"]
     assert list((tmp_path / "raw").glob(f"{doc_id}*")) == []
     ingested.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("subtitles", "captions_arrive"),
+    [({}, None), ({"en": []}, False)],
+    ids=["no-uploader-track", "track-download-fails"],
+)
+async def test_without_captions_the_audio_alone_is_ingested(
+    test_db, monkeypatch, subtitles, captions_arrive
+):
+    """No uploader track, or one that fails to download: Whisper transcribes the audio."""
+    _, _, tmp_path = test_db
+    ingested = AsyncMock()
+    monkeypatch.setattr("app.workflows.youtube_ingestion.run_ingestion", ingested)
+    fetch_captions = AsyncMock(return_value=captions_arrive)
+
+    async def _download(url, dest_stem, on_progress=None):
+        dest_stem.with_suffix(".flac").write_bytes(b"\x00" * 100)
+
+    meta = {"title": "Talk", "id": "t1", "language": "en", "subtitles": subtitles}
+    with (
+        _youtube_ready(_download),
+        patch("app.services.youtube_downloader.fetch_metadata", new=AsyncMock(return_value=meta)),
+        patch("app.services.youtube_downloader.download_captions", new=fetch_captions),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/documents/ingest-url", json={"url": "https://www.youtube.com/watch?v=t1"}
+            )
+            doc_id = resp.json()["document_id"]
+            await get_ingestion_jobs().get(doc_id)
+
+    assert fetch_captions.await_count == (0 if captions_arrive is None else 1)
+    audio = tmp_path / "raw" / f"{doc_id}.flac"
+    ingested.assert_awaited_once_with(doc_id, str(audio), "flac", parsed_document=None)
+    assert [p.name for p in (tmp_path / "raw").glob(f"{doc_id}*")] == [audio.name]
 
 
 async def test_download_reports_progress(monkeypatch, tmp_path):

@@ -211,6 +211,11 @@ async def test_captions_replace_speech_recognition(test_db, tmp_path):
     assert doc.transcript_source == "captions"
     # The audio's length, not the last cue's: the player scrubs the whole file.
     assert doc.audio_duration_seconds == pytest.approx(9.0)
+    # The cue times become the chunk times a citation seeks the player to.
+    assert [(c["start_time"], c["end_time"], c["text"]) for c in result["_audio_chunks"]] == [
+        (1.0, 3.5, "We store vectors in LanceDB"),
+        (3605.25, 3607.0, "R&D on Kimi K3"),
+    ]
 
 
 async def test_speech_recognition_is_primed_with_the_stored_vocabulary(test_db, tmp_path):
