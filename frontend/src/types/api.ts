@@ -867,6 +867,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/connectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Connectors */
+        get: operations["list_connectors_connectors_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/connectors/{name}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Connector Status */
+        get: operations["connector_status_connectors__name__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/connectors/{name}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Connect Connector */
+        put: operations["connect_connector_connectors__name__credentials_put"];
+        post?: never;
+        /** Disconnect Connector */
+        delete: operations["disconnect_connector_connectors__name__credentials_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/connectors/{name}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Link */
+        post: operations["preview_link_connectors__name__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/connectors/{name}/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ingest Link */
+        post: operations["ingest_link_connectors__name__ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/devices/pairing-code": {
         parameters: {
             query?: never;
@@ -1638,7 +1724,9 @@ export interface paths {
          *
          *     For a web article the stored raw file is the *extracted markdown*, not the
          *     original page, so re-parsing it would only re-read the old extraction. Those
-         *     are re-fetched from `source_url` instead.
+         *     are re-fetched from `source_url` and the stored file rewritten, because the
+         *     graph parses `file_path`. Every other source with a URL (an O'Reilly book, a
+         *     YouTube talk, a linked PDF) stores the source itself and is re-read offline.
          *
          *     Call once with `confirm=false` to see what it costs, then again with
          *     `confirm=true`.
@@ -4306,90 +4394,6 @@ export interface paths {
          *     response reports how many notes were queued.
          */
         post: operations["backfill_descriptions_notes_descriptions_backfill_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/oreilly/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Oreilly Status
-         * @description Check whether O'Reilly subscription cookies are configured and active.
-         */
-        get: operations["get_oreilly_status_oreilly_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/oreilly/cookies": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Set Oreilly Cookies
-         * @description Validate and save O'Reilly subscription cookies.
-         */
-        post: operations["set_oreilly_cookies_oreilly_cookies_post"];
-        /**
-         * Remove Oreilly Cookies
-         * @description Remove stored O'Reilly cookies.
-         */
-        delete: operations["remove_oreilly_cookies_oreilly_cookies_delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/oreilly/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Preview Oreilly Book
-         * @description Preview metadata and chapter list for an O'Reilly book without ingesting.
-         */
-        post: operations["preview_oreilly_book_oreilly_preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/oreilly/ingest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Ingest Oreilly Book
-         * @description Download an O'Reilly book as an EPUB and ingest with local LLM processing.
-         */
-        post: operations["ingest_oreilly_book_oreilly_ingest_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7645,6 +7649,157 @@ export interface components {
             /** Mastery */
             mastery: number;
         };
+        /** ConnectRequest */
+        ConnectRequest: {
+            /**
+             * Values
+             * @description Credential field name to its value
+             */
+            values: {
+                [key: string]: unknown;
+            };
+        };
+        /** ConnectorChoice */
+        ConnectorChoice: {
+            /** Field */
+            field: string;
+            /** Label */
+            label: string;
+            /** Options */
+            options: components["schemas"]["ConnectorOption"][];
+            /**
+             * Multiple
+             * @default false
+             */
+            multiple: boolean;
+            /**
+             * Default
+             * @default []
+             */
+            default: string[];
+        };
+        /** ConnectorField */
+        ConnectorField: {
+            /** Name */
+            name: string;
+            /** Label */
+            label: string;
+            /**
+             * Secret
+             * @default false
+             */
+            secret: boolean;
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+            /**
+             * Help
+             * @default
+             */
+            help: string;
+            /**
+             * Multiline
+             * @default false
+             */
+            multiline: boolean;
+        };
+        /** ConnectorIngestRequest */
+        ConnectorIngestRequest: {
+            /** Url */
+            url: string;
+            /**
+             * Input
+             * @description Values for the connector's inputs and preview choices, by field name
+             */
+            input?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * ConnectorItem
+         * @description What the connector described itself as, and whether it holds a sign-in.
+         */
+        ConnectorItem: {
+            /** Name */
+            name: string;
+            /** Label */
+            label: string;
+            /** Version */
+            version: string;
+            /** Licence */
+            licence: string;
+            terms: components["schemas"]["ConnectorTerms"];
+            /** Url Prefixes */
+            url_prefixes: string[];
+            /** Inputs */
+            inputs: components["schemas"]["ConnectorField"][];
+            /** Credentials */
+            credentials: components["schemas"]["ConnectorField"][];
+            /** Preview */
+            preview: boolean;
+            /** Connected */
+            connected: boolean;
+        };
+        /** ConnectorListResponse */
+        ConnectorListResponse: {
+            /** Connectors */
+            connectors: components["schemas"]["ConnectorItem"][];
+        };
+        /** ConnectorOption */
+        ConnectorOption: {
+            /** Value */
+            value: string;
+            /** Label */
+            label: string;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+        };
+        /** ConnectorPreview */
+        ConnectorPreview: {
+            /** Title */
+            title: string;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /**
+             * Choices
+             * @default []
+             */
+            choices: components["schemas"]["ConnectorChoice"][];
+        };
+        /**
+         * ConnectorStatus
+         * @description `connected` is a stored sign-in; `valid` is the connector's own check of it.
+         */
+        ConnectorStatus: {
+            /** Connected */
+            connected: boolean;
+            /** Valid */
+            valid: boolean;
+            /** Account */
+            account?: string | null;
+            /** Error */
+            error?: string | null;
+        };
+        /** ConnectorTerms */
+        ConnectorTerms: {
+            /** Statement */
+            statement: string;
+            /** Url */
+            url: string;
+        };
+        /** ConnectorUrlRequest */
+        ConnectorUrlRequest: {
+            /** Url */
+            url: string;
+        };
         /**
          * ContinueNoteItem
          * @description A note the user was writing and has not come back to.
@@ -10138,35 +10293,6 @@ export interface components {
         OllamaPullRequest: {
             /** Model */
             model: string;
-        };
-        /** OreillyCookieRequest */
-        OreillyCookieRequest: {
-            /**
-             * Cookies
-             * @description Cookie input: raw JSON, parsed JSON array/object, or Cookie header
-             */
-            cookies: unknown;
-        };
-        /** OreillyIngestRequest */
-        OreillyIngestRequest: {
-            /**
-             * Url
-             * @description O'Reilly book URL, view URL, or ISBN/identifier
-             */
-            url: string;
-            /**
-             * Selected Chapters
-             * @description Optional chapter indices to ingest (for chapter-by-chapter study)
-             */
-            selected_chapters?: number[] | null;
-        };
-        /** OreillyPreviewRequest */
-        OreillyPreviewRequest: {
-            /**
-             * Url
-             * @description O'Reilly book URL, view URL, or ISBN/identifier
-             */
-            url: string;
         };
         /**
          * OutputStatsResponse
@@ -13590,6 +13716,193 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConceptOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_connectors_connectors_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorListResponse"];
+                };
+            };
+        };
+    };
+    connector_status_connectors__name__status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connect_connector_connectors__name__credentials_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disconnect_connector_connectors__name__credentials_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_link_connectors__name__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectorUrlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_link_connectors__name__ingest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectorIngestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -19162,155 +19475,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DescriptionBackfillResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_oreilly_status_oreilly_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    set_oreilly_cookies_oreilly_cookies_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OreillyCookieRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    remove_oreilly_cookies_oreilly_cookies_delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-        };
-    };
-    preview_oreilly_book_oreilly_preview_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OreillyPreviewRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    ingest_oreilly_book_oreilly_ingest_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OreillyIngestRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
                 };
             };
             /** @description Validation Error */

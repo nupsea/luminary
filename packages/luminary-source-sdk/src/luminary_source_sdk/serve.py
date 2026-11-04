@@ -34,8 +34,10 @@ def _dispatch(connector: Connector, req: dict[str, Any], emit) -> dict[str, Any]
     op, inp, creds = req["op"], req.get("input") or {}, req.get("credentials") or {}
     if op == "describe":
         return connector.describe().to_json()
+    if op == "check":
+        return connector.check(creds).to_json()
     if op == "preview":
-        return connector.preview(inp, creds)
+        return connector.preview(inp, creds).to_json()
     dest = Path(req["dest"])
     connector.fetch(inp, creds, BundleWriter(dest), lambda f, s="": emit(protocol.progress(f, s)))
     if not (dest / "manifest.json").is_file():

@@ -43,6 +43,15 @@ prime the transcript's vocabulary.
 `finish(labels=[...])` names the library tags the document carries, applied as a user's own
 tags are; `tags` are the source's own subject tags, which only prime vocabulary.
 
+Luminary draws the connector's screens from `describe`: a settings card, a sign-in form of its
+`credentials` fields (`multiline=True` for a pasted block), and its `inputs` beside the link in
+the upload dialog. Two optional methods fill them in:
+
+- `check(credentials)` returns an `Account`: whether a sign-in works, before Luminary stores it.
+- `preview(input, credentials)` returns a `Preview`: what the link is, and `Choice`s of `Option`s
+  (a chapter list, a caption track). Set `Description.preview=True`. The user's picks reach
+  `fetch` as `input[choice.field]`, a list when `multiple`.
+
 Name it in the connector's `pyproject.toml`:
 
 ```toml

@@ -41,11 +41,14 @@ def flac_header(seconds: float, rate: int = 16_000) -> bytes:
 
 
 AUDIO = flac_header(70.0)
+SECRET = "fixture-token-5f2c"
 
 _SOURCE = """
-import os, subprocess, sys, tempfile, time
+import json, os, subprocess, sys, tempfile, time
 from pathlib import Path
-from luminary_source_sdk import Connector, ConnectorError, Description, Field, Terms
+from luminary_source_sdk import (
+    Account, Choice, Connector, ConnectorError, Description, Field, Option, Preview, Terms,
+)
 
 TERMS = Terms(
     statement="Fixture pages may be downloaded for personal study.",
@@ -58,19 +61,35 @@ class FixtureSource(Connector):
     def describe(self):
         return Description(
             name="fixture-source", version="0.1.0", licence="Apache-2.0", terms=TERMS,
-            url_prefixes=["https://fixture.example/"],
-            credentials=[Field("token", "Access token", secret=True)], preview=True,
+            url_prefixes=["https://fixture.example/"], label="Fixture Books",
+            credentials=[Field("token", "Access token", secret=True, help="From your account")],
+            inputs=[Field("edition", "Edition", required=False)], preview=True,
         )
 
+    def check(self, credentials):
+        if credentials.get("token") == SECRET:
+            return Account(True, account="reader@fixture.example")
+        return Account(False, message="that token was refused")
+
     def preview(self, input, credentials):
-        return {"argv": sys.argv, "env": dict(os.environ), "token": credentials.get("token")}
+        options = [Option("one", "Storage"), Option("two", "Replication", "chapter 2")]
+        return Preview(title="Fixture Systems", detail="Ada Author", choices=[
+            Choice("parts", "Sections", options, multiple=True, default=["one", "two"])])
 
     def fetch(self, input, credentials, bundle, report):
         kind = input["url"].rsplit("/", 1)[-1]
         if kind == "auth":
             raise ConnectorError("auth", "Sign in to Fixture again.")
         print("chatter a connector prints, which must not reach the protocol")
-        bundle.add_section("one", "Storage", html=f"<h1>Storage</h1><p>{BODY}</p>")
+        if kind == "env":
+            seen = {"argv": sys.argv, "env": dict(os.environ), "token": credentials.get("token"),
+                    "input": input}
+            bundle.add_section("seen", "Seen", markdown=json.dumps(seen))
+            bundle.finish(connector=("fixture-source", "0.1.0"), title="Seen", terms=TERMS)
+            return
+        parts = input.get("parts") or ["one", "two"]
+        if "one" in parts:
+            bundle.add_section("one", "Storage", html=f"<h1>Storage</h1><p>{BODY}</p>")
         report(0.5, "downloading")
         if kind == "crash":
             os._exit(3)
@@ -78,7 +97,8 @@ class FixtureSource(Connector):
             child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
             (bundle.dest / "pids").write_text(f"{os.getpid()} {child.pid}")
             time.sleep(600)
-        bundle.add_section("two", "Replication", html=f"<h1>Replication</h1><p>{BODY}</p>")
+        if "two" in parts:
+            bundle.add_section("two", "Replication", html=f"<h1>Replication</h1><p>{BODY}</p>")
         bundle.finish(connector=("fixture-source", "0.1.0"), title="Fixture Systems",
                       terms=TERMS, source_url=input["url"])
 
@@ -113,7 +133,7 @@ class FixtureVideo(Connector):
 def write_fixture(folder: Path, *, entry_points: str) -> Path:
     package = folder / "fixture_source"
     package.mkdir(parents=True)
-    constants = f"TALK = {TALK!r}\nVTT = {VTT!r}\nAUDIO = {AUDIO!r}\n"
+    constants = f"TALK = {TALK!r}\nVTT = {VTT!r}\nAUDIO = {AUDIO!r}\nSECRET = {SECRET!r}\n"
     (package / "__init__.py").write_text(_SOURCE + constants)
     (folder / "pyproject.toml").write_text(
         textwrap.dedent(f"""

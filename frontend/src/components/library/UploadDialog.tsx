@@ -20,8 +20,22 @@ import {
 import { useIngestionJob, useIngestionTracker } from "@/hooks/ingestionTrackerCore"
 import { capabilityOf, useCapabilities } from "@/hooks/useSetup"
 import type { CapabilityKey } from "@/lib/setupApi"
-import { fetchOreillyStatus, isOreillyUrl, parseOreillyChapter } from "@/lib/oreillyApi"
-import { OreillyConnectModal } from "@/components/library/OreillyConnectModal"
+import {
+  CONNECTORS_KEY,
+  type Connector,
+  type ConnectorPreview,
+  type Picks,
+  connectorForUrl,
+  defaultPicks,
+  fieldValues,
+  ingestLink,
+  listConnectors,
+  pickInput,
+  previewLink,
+  signInRequiredFor,
+} from "@/lib/connectorsApi"
+import { ConnectorConnectModal } from "@/components/library/ConnectorConnectModal"
+import { ConnectorLinkPanel } from "@/components/library/ConnectorLinkPanel"
 
 import {
   type Rejection,
@@ -32,7 +46,7 @@ import {
 
   isKindleClippings,
 } from "@/lib/uploadFileTypes"
-import { ComponentsRequiredError } from "@/lib/apiClient"
+import { ComponentsRequiredError, detailFromError } from "@/lib/apiClient"
 import { withStagePct } from "@/lib/ingestionStatus"
 import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import { useAppStore } from "@/store"
@@ -270,17 +284,31 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     enabled: open,
   })
 
-  const [oreillyModalOpen, setOreillyModalOpen] = useState(false)
-  const [oreillyChapterOnly, setOreillyChapterOnly] = useState(true)
-  const { data: oreillyStatus } = useQuery({
-    queryKey: ["oreilly-status"],
-    queryFn: fetchOreillyStatus,
-    enabled: open,
-  })
+  const { data: connectors } = useQuery({ queryKey: CONNECTORS_KEY, queryFn: listConnectors, enabled: open })
+  const claimed = useMemo(() => connectorForUrl(connectors ?? [], url), [connectors, url])
+  const [connecting, setConnecting] = useState<Connector | null>(null)
+  const [preview, setPreview] = useState<ConnectorPreview | null>(null)
+  const [picks, setPicks] = useState<Picks>({})
+  const [connectorInputs, setConnectorInputs] = useState<Record<string, string>>({})
+  const [previewing, setPreviewing] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
 
-  const detectedChapter = useMemo(() => {
-    return isOreillyUrl(url) ? parseOreillyChapter(url) : null
-  }, [url])
+  async function handlePreview() {
+    if (!claimed) return
+    setPreviewing(true)
+    setPreviewError(null)
+    try {
+      const found = await previewLink(claimed.name, url.trim())
+      setPreview(found)
+      setPicks(defaultPicks(found))
+    } catch (err) {
+      const signIn = signInRequiredFor(err)
+      if (signIn) setConnecting(claimed)
+      else setPreviewError(detailFromError(err, `Could not read this ${claimed.label} link`).message)
+    } finally {
+      setPreviewing(false)
+    }
+  }
 
   // Once the doc is accepted (trackedDocId set), assign it to the chosen collections
   // via the tested POST /documents/{id}/collections. Fires once per upload.
@@ -364,7 +392,10 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setFileSizeMB(0)
     setTrackedDocId(null)
     setSelectedCollectionIds([])
-    setOreillyChapterOnly(true)
+    setPreview(null)
+    setPicks({})
+    setConnectorInputs({})
+    setPreviewError(null)
     assignedRef.current = false
   }
 
@@ -549,9 +580,9 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     }
   }
 
-  // `oreillyConnected` is passed by the connect modal: its success lands before the
-  // status query refetches, so the cached status would reopen the modal.
-  async function handleUrlSubmit({ oreillyConnected = false }: { oreillyConnected?: boolean } = {}) {
+  // `signedIn` is passed by the connect modal: its success lands before the connector list
+  // refetches, so the cached list would open the modal again.
+  async function handleUrlSubmit({ signedIn = false }: { signedIn?: boolean } = {}) {
     const urlValue = url.trim()
     if (!urlValue) {
       setUrlError("Enter a URL")
@@ -559,27 +590,37 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     }
     setUrlError("")
 
-    // If an O'Reilly URL is entered and not yet connected, open the connect modal
-    const connected = oreillyConnected || (oreillyStatus?.configured && oreillyStatus?.valid)
-    if (isOreillyUrl(urlValue) && !connected) {
-      setOreillyModalOpen(true)
-      return
+    let input: Record<string, string | string[]> = {}
+    if (claimed) {
+      if (!signedIn && claimed.credentials.length > 0 && !claimed.connected) {
+        setConnecting(claimed)
+        return
+      }
+      const typed = fieldValues(claimed.inputs, connectorInputs)
+      if (typed.missing.length > 0) {
+        setUrlError(`Fill in ${typed.missing.join(", ")}`)
+        return
+      }
+      input = typed.values
+      if (preview) {
+        const chosen = pickInput(preview, picks)
+        if (chosen.missing.length > 0) {
+          setUrlError(`Choose at least one: ${chosen.missing.join(", ")}`)
+          return
+        }
+        input = { ...input, ...chosen.input }
+      }
     }
 
     uploadStartRef.current = Date.now()
     setMode("uploading")
-
-    let finalUrl = urlValue
-    if (isOreillyUrl(urlValue) && detectedChapter && !oreillyChapterOnly) {
-      // Strip chapter filename to ingest the full book
-      finalUrl = urlValue.replace(/\/[^/]+\.html?([#?].*)?$/i, "/")
-    }
-
-    setDocTitle(finalUrl)
-    logger.info("[Upload] url start", { url: finalUrl })
+    setDocTitle(urlValue)
+    logger.info("[Upload] url start", { url: urlValue, connector: claimed?.name })
     try {
-      const { documentId, warnings } = await submitUrl(finalUrl, savedPage?.html)
-      track(documentId, finalUrl)
+      const { documentId, warnings } = claimed
+        ? { documentId: await ingestLink(claimed.name, urlValue, input), warnings: [] as string[] }
+        : await submitUrl(urlValue, savedPage?.html)
+      track(documentId, urlValue)
       setTrackedDocId(documentId)
       // The dialog closes immediately, so any extraction notices need a long
       // dwell to survive the transition and stay readable.
@@ -591,16 +632,19 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
       reset()
       onClose()
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : "Couldn't add the document."
-      logger.error("[Upload] url failed", { error_message: errMsg, url: urlValue })
-      if (isOreillyUrl(urlValue) && errMsg.toLowerCase().includes("cookie")) {
-        setOreillyModalOpen(true)
+      const signIn = signInRequiredFor(err)
+      const needs = signIn ? (connectors ?? []).find((c) => c.name === signIn) : undefined
+      if (needs) {
+        setConnecting(needs)
         setMode("idle")
         return
       }
+      const failure = claimed ? detailFromError(err, "Couldn't add the document.") : err
+      const errMsg = failure instanceof Error ? failure.message : "Couldn't add the document."
+      logger.error("[Upload] url failed", { error_message: errMsg, url: urlValue })
       setMode("error")
       setErrorMessage(errMsg)
-      setErrorComponents(err instanceof ComponentsRequiredError ? err.components : [])
+      setErrorComponents(failure instanceof ComponentsRequiredError ? failure.components : [])
       toast.error(errMsg)
     }
   }
@@ -744,6 +788,10 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                     onChange={(e) => {
                       setUrl(e.target.value)
                       setUrlError("")
+                      // A preview describes one link; editing the link discards it.
+                      setPreview(null)
+                      setPicks({})
+                      setPreviewError(null)
                     }}
                     placeholder="https://example.com/article or YouTube URL"
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -751,49 +799,23 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                   {urlError && (
                     <p className="mt-1 text-xs text-red-600">{urlError}</p>
                   )}
-                  {url && isOreillyUrl(url) && (
-                    <div className="mt-2 space-y-2">
-                      {oreillyStatus?.configured && oreillyStatus?.valid ? (
-                        <div className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1.5 text-xs text-emerald-400">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                          O'Reilly Book detected — Subscription Connected ({oreillyStatus.user ?? "Subscriber"})
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-between rounded-md bg-red-500/10 border border-red-500/20 px-2.5 py-1.5 text-xs text-red-300">
-                          <span>O'Reilly Book detected — Subscription cookies needed</span>
-                          <button
-                            type="button"
-                            onClick={() => setOreillyModalOpen(true)}
-                            className="font-medium text-red-400 hover:underline ml-2"
-                          >
-                            Connect
-                          </button>
-                        </div>
-                      )}
-
-                      {detectedChapter && (
-                        <div className="flex items-center justify-between rounded-md border border-border/80 bg-muted/40 px-2.5 py-2 text-xs">
-                          <label className="flex items-center gap-2 cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              checked={oreillyChapterOnly}
-                              onChange={(e) => setOreillyChapterOnly(e.target.checked)}
-                              className="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5"
-                            />
-                            <span className="text-foreground">
-                              Ingest this chapter only: <code className="font-mono text-primary font-semibold">{detectedChapter}</code>
-                            </span>
-                          </label>
-                          <span className="text-[11px] text-muted-foreground">
-                            {oreillyChapterOnly ? "Fast (single chapter)" : "Full book"}
-                          </span>
-                        </div>
-                      )}
-                    </div>
+                  {claimed && (
+                    <ConnectorLinkPanel
+                      connector={claimed}
+                      preview={preview}
+                      picks={picks}
+                      previewing={previewing}
+                      previewError={previewError}
+                      inputs={connectorInputs}
+                      onInputs={setConnectorInputs}
+                      onConnect={() => setConnecting(claimed)}
+                      onPreview={() => void handlePreview()}
+                      onPicks={setPicks}
+                    />
                   )}
                   {!url && !urlError && (
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Articles are extracted to Markdown. YouTube videos and O'Reilly books are automatically detected. All processing is local.
+                      Articles are extracted to Markdown. YouTube videos and the links an installed connector takes are detected. All processing is local.
                     </p>
                   )}
                 </div>
@@ -1005,14 +1027,12 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
         )}
       </div>
 
-      <OreillyConnectModal
-        open={oreillyModalOpen}
-        onClose={() => setOreillyModalOpen(false)}
+      <ConnectorConnectModal
+        connector={connecting}
+        onClose={() => setConnecting(null)}
         onSuccess={() => {
-          void queryClient.invalidateQueries({ queryKey: ["oreilly-status"] })
-          if (url.trim()) {
-            void handleUrlSubmit({ oreillyConnected: true })
-          }
+          void queryClient.invalidateQueries({ queryKey: CONNECTORS_KEY })
+          if (url.trim()) void handleUrlSubmit({ signedIn: true })
         }}
       />
     </div>

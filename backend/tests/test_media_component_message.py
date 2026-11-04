@@ -12,17 +12,17 @@ from pathlib import Path
 
 import pytest
 
-from app.routers.documents import _media_missing_message
+from app.services.component_advice import media_missing_message as _media_missing_message
 
 
 @pytest.fixture()
 def in_container(monkeypatch):
-    monkeypatch.setattr("app.routers.documents.running_in_container", lambda: True)
+    monkeypatch.setattr("app.services.component_advice.running_in_container", lambda: True)
 
 
 @pytest.fixture()
 def on_a_host(monkeypatch):
-    monkeypatch.setattr("app.routers.documents.running_in_container", lambda: False)
+    monkeypatch.setattr("app.services.component_advice.running_in_container", lambda: False)
 
 
 def test_a_container_is_told_to_rebuild_the_image(in_container):
@@ -89,9 +89,7 @@ def test_the_container_runs_what_the_image_was_built_with():
 def test_a_component_with_no_licence_constraint_is_not_blamed_on_licensing(on_a_host):
     """The dialog said yt-dlp was "not bundled for licensing reasons". yt-dlp is
     Unlicense; nothing about its licence keeps it out of anything."""
-    from app.routers import documents as docs
-
-    message = docs._media_missing_message(["yt-dlp"])
+    message = _media_missing_message(["yt-dlp"])
     assert "licensing" not in message, message
 
 
@@ -99,9 +97,9 @@ def test_an_unknown_component_is_never_offered_an_install_button():
     """`_installable` defaulted an unrecognised id to fetchable, so the dialog
     rendered "Install yt-dlp below" for a component with no catalogue entry and
     therefore no source to install from."""
-    from app.routers.documents import _installable
+    from app.services.component_advice import installable
 
-    fetchable, manual = _installable(["definitely-not-a-component"])
+    fetchable, manual = installable(["definitely-not-a-component"])
     assert fetchable == []
     assert manual == ["definitely-not-a-component"]
 

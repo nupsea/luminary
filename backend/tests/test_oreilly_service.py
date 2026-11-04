@@ -13,7 +13,6 @@ from app.services.oreilly_service import (
     delete_oreilly_cookies,
     download_oreilly_book_to_epub,
     is_oreilly_url,
-    parse_cookies_input,
     parse_oreilly_book_id,
     parse_oreilly_target_chapter,
     process_chapter_html,
@@ -88,47 +87,6 @@ def test_upgrade_cover_url():
 
     # Leaves unrelated URLs alone
     assert upgrade_cover_url("https://example.com/img.jpg") == "https://example.com/img.jpg"
-
-
-def test_parse_cookies_input():
-    # 1. JSON Array (Cookie-Editor format)
-    cookie_array = [
-        {"name": "_abck", "value": "abc123token"},
-        {"name": "sessionid", "value": "sess456"},
-    ]
-    import json
-
-    parsed_arr = parse_cookies_input(json.dumps(cookie_array))
-    assert parsed_arr == {"_abck": "abc123token", "sessionid": "sess456"}
-
-    # 2. JSON Dict
-    cookie_dict = {"_abck": "token1", "orm-jwt": "jwt2"}
-    assert parse_cookies_input(cookie_dict) == cookie_dict
-    assert parse_cookies_input(json.dumps(cookie_dict)) == cookie_dict
-
-    # 3. HTTP Cookie header string
-    header_str = "_abck=token1; bm_sz=token2; sessionid=token3"
-    parsed_header = parse_cookies_input(header_str)
-    assert parsed_header == {
-        "_abck": "token1",
-        "bm_sz": "token2",
-        "sessionid": "token3",
-    }
-
-    # 4. DevTools raw header with Cookie: prefix
-    devtools_str = "cookie: _abck=token1; bm_sz=token2; sessionid=token3"
-    assert parse_cookies_input(devtools_str) == {
-        "_abck": "token1",
-        "bm_sz": "token2",
-        "sessionid": "token3",
-    }
-
-    # 5. Multiline / tab-separated table paste
-    table_paste = "_abck\ttoken1\nsessionid\ttoken3"
-    assert parse_cookies_input(table_paste) == {
-        "_abck": "token1",
-        "sessionid": "token3",
-    }
 
 
 def test_process_chapter_html():

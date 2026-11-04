@@ -148,63 +148,6 @@ def upgrade_cover_url(url: str) -> str:
     return f"{stripped}/{_HIGH_RES_COVER_WIDTH}/"
 
 
-def parse_cookies_input(cookie_input: str | dict | list) -> dict[str, str]:
-    """Parse cookie input into a flat name-value dictionary.
-
-    Supports:
-    - JSON array of cookie objects: `[{"name": "...", "value": "..."}, ...]`
-    - JSON object: `{"_abck": "...", "sessionid": "..."}`
-    - HTTP Cookie header string: `_abck=xyz; bm_sz=123; sessionid=abc`
-    """
-    if isinstance(cookie_input, dict):
-        return {str(k).strip(): str(v).strip() for k, v in cookie_input.items() if k and v}
-
-    if isinstance(cookie_input, list):
-        cookies: dict[str, str] = {}
-        for item in cookie_input:
-            if isinstance(item, dict) and "name" in item and "value" in item:
-                cookies[str(item["name"]).strip()] = str(item["value"]).strip()
-        return cookies
-
-    if isinstance(cookie_input, str):
-        raw = cookie_input.strip()
-        if not raw:
-            return {}
-
-        # Strip optional "Cookie:" / "cookie:" header label
-        if raw.lower().startswith("cookie:"):
-            raw = raw[len("cookie:") :].strip()
-
-        # Attempt JSON parse
-        if raw.startswith(("[", "{")):
-            try:
-                parsed = json.loads(raw)
-                return parse_cookies_input(parsed)
-            except Exception:
-                logger.debug("Failed to parse cookie input as JSON, falling back to header parsing")
-
-        # Parse as HTTP Cookie header or lines of key=value / key\tvalue
-        cookies = {}
-        parts = re.split(r"[;\n\r]+", raw)
-        for part in parts:
-            cleaned = part.strip()
-            if not cleaned:
-                continue
-            if "=" in cleaned:
-                k, v = cleaned.split("=", 1)
-                k = k.strip()
-                v = v.strip()
-                if k:
-                    cookies[k] = v
-            elif "\t" in cleaned:
-                tokens = cleaned.split("\t")
-                if len(tokens) >= 2 and tokens[0].strip():
-                    cookies[tokens[0].strip()] = tokens[1].strip()
-        return cookies
-
-    return {}
-
-
 def _cookies_file_path() -> Path:
     settings = get_settings()
     data_dir = library_root(settings)
@@ -265,28 +208,6 @@ class OreillyClient:
 
     def is_configured(self) -> bool:
         return bool(self._cookies)
-
-    def validate_session(self) -> tuple[bool, str | None]:
-        """Check if current cookies provide an authenticated session.
-
-        Returns (is_valid, user_identifier_or_message).
-        """
-        if not self._cookies:
-            return False, "No cookies configured"
-
-        self._apply_cookies()
-        try:
-            resp = self.session.get(f"{_BASE_URL}/profile/", timeout=15)
-            if resp.status_code == 200 and "login" not in resp.url.lower():
-                # Extract username or email if visible in HTML
-                soup = BeautifulSoup(resp.text, "html.parser")
-                email_el = soup.find("span", class_="user-email") or soup.find(id="user-email")
-                user_label = email_el.get_text(strip=True) if email_el else "Active Subscriber"
-                return True, user_label
-            return False, f"Session expired or invalid (HTTP {resp.status_code})"
-        except Exception as exc:
-            logger.warning("O'Reilly session validation failed: %s", exc)
-            return False, str(exc)
 
     def fetch_book_metadata(self, book_id: str) -> dict[str, Any]:
         """Fetch book metadata via O'Reilly V2 APIs."""

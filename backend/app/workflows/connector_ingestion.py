@@ -13,8 +13,15 @@ from typing import Any
 from app.database import get_session_factory
 from app.models import DocumentModel
 from app.services import ingestion_progress
+from app.services.component_advice import ComponentsMissing, components_missing_detail
 from app.services.connector_runner import ConnectorFailed, InstalledConnector, call
-from app.services.connectors import load_credentials, tool_paths
+from app.services.connectors import (
+    label_of,
+    load_credentials,
+    missing_components,
+    require_credentials,
+    tool_paths,
+)
 from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.source_bundle import BUNDLE_SUFFIX, BundleRefused
 from app.storage import library_root
@@ -29,7 +36,22 @@ FETCH_SUFFIX = ".fetch"
 TEXT_BUNDLE_FORMAT = "epub"
 
 
-async def start_connector_ingestion(url: str, connector: InstalledConnector) -> dict[str, Any]:
+async def start_claimed(
+    connector: InstalledConnector, url: str, choices: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """A claimed link's checks, then its ingestion: a required sign-in, then the components
+    its media and tools need. Each refuses before a document exists."""
+    require_credentials(connector)
+    if required := await missing_components(connector):
+        raise ComponentsMissing(components_missing_detail(required, label_of(connector)))
+    return await start_connector_ingestion(url, connector, choices)
+
+
+async def start_connector_ingestion(
+    url: str, connector: InstalledConnector, choices: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Create the document at once and fetch in its job. `choices` are the user's picks from
+    the connector's preview and inputs; they reach `fetch` beside the URL."""
     doc_id = str(uuid.uuid4())
     raw = library_root() / "raw"
     raw.mkdir(parents=True, exist_ok=True)
@@ -48,7 +70,7 @@ async def start_connector_ingestion(url: str, connector: InstalledConnector) -> 
             )
         )
         await session.commit()
-    get_ingestion_jobs().launch(doc_id, fetch_and_ingest(doc_id, url, connector))
+    get_ingestion_jobs().launch(doc_id, fetch_and_ingest(doc_id, url, connector, choices or {}))
     logger.info(
         "Connector ingestion started", extra={"doc_id": doc_id, "connector": connector.name}
     )
@@ -64,14 +86,16 @@ async def _fail(doc_id: str, message: str) -> None:
             await session.commit()
 
 
-async def fetch_and_ingest(doc_id: str, url: str, connector: InstalledConnector) -> None:
+async def fetch_and_ingest(
+    doc_id: str, url: str, connector: InstalledConnector, choices: dict[str, Any] | None = None
+) -> None:
     # The connector writes here, the importer copies from here; never into the library itself.
     fetch_dir = library_root() / "raw" / f"{doc_id}{FETCH_SUFFIX}"
     try:
         await call(
             connector,
             "fetch",
-            input={"url": url, "tools": tool_paths(connector)},
+            input={**(choices or {}), "url": url, "tools": tool_paths(connector)},
             credentials=load_credentials(connector.name),
             dest=str(fetch_dir),
             on_progress=lambda f, _s: ingestion_progress.report(doc_id, "downloading", f),
