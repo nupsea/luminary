@@ -80,7 +80,13 @@ jobs:
       - name: Install the .deb and open it
         run: |
           deb="$(ls src-tauri/target/release/bundle/deb/*.deb)"
+          # Without the Vulkan loader an NVIDIA card sits unused until the CUDA runner is
+          # installed (#355): the package must recommend it, and apt must have brought it.
+          dpkg-deb -f "$deb" Recommends | grep -qw libvulkan1 \
+            || { echo "the .deb does not recommend libvulkan1 (#355)"; exit 1; }
           LUMINARY_HOST_SUPPORTED=1 LUMINARY_INSTALLER="$deb" LUMINARY_FORMAT=deb LUMINARY_NO_LAUNCH=1 bash scripts/get-luminary.sh
+          dpkg-query -W -f='${Status}' libvulkan1 2>/dev/null | grep -q "install ok installed" \
+            || { echo "libvulkan1 is not installed after the .deb (#355)"; exit 1; }
           exe="$(dpkg -L "$(dpkg-deb -f "$deb" Package)" | grep '^/usr/bin/' | head -1)"
           SCREENSHOT=build/linux-deb.png xvfb-run -a -s "-screen 0 1440x900x24" \
             bash scripts/desktop/verify_installed.sh "$exe"
