@@ -24,9 +24,9 @@ from app.workflows.ingestion import run_ingestion
 logger = logging.getLogger(__name__)
 
 FETCH_SUFFIX = ".fetch"
-# Until the reader learns a bundle's own kind (#433), a text bundle opens as a document of
-# sections, which is what the Markdown reader shows.
-TEXT_BUNDLE_FORMAT = "md"
+# A text bundle is a book of chapters, so it opens in the book view, whose routes read a
+# stored bundle as they read an EPUB (`epub_service`).
+TEXT_BUNDLE_FORMAT = "epub"
 
 
 async def start_connector_ingestion(url: str, connector: InstalledConnector) -> dict[str, Any]:

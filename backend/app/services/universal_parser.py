@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
 
+from app.services.source_bundle import parse_bundle
 from app.services.source_text import is_nav_line as _is_nav_line
 from app.services.source_text import is_speaker_label, read_source_text
 from app.types import ParsedDocument, Section
@@ -177,6 +178,8 @@ def read_document_text(file_path: Path) -> str:
     yields `%PDF-1.5 /FlateDecode`, and a golden generated from that asks
     questions about the container.
     """
+    if file_path.is_dir():  # a stored source bundle
+        return parse_bundle(file_path).raw_text
     suffix = file_path.suffix.lower()
     if suffix == ".pdf":
         return UniversalParser._read_pdf_text(file_path)

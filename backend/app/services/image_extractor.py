@@ -14,9 +14,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
-import ebooklib
 import fitz  # PyMuPDF
-from ebooklib import epub
 from PIL import Image as PILImage
 
 from app import config as _config_module  # indirect: get_settings is patched
@@ -28,6 +26,7 @@ from app.repos.image_repo import ImageRepo
 from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
+from app.services.epub_service import book_images
 from app.storage import library_root
 from app.types import DOCUMENT_IMAGE_FORMATS
 
@@ -560,7 +559,7 @@ def extract_images_epub(
 ) -> list[ExtractedImage]:
     """Extract images from an EPUB file.
 
-    Uses ebooklib to iterate EpubImage items.
+    Reads an EPUB's image items, or a stored bundle's `assets/`.
     Same size/dedup rules as PDF extraction.
     """
 
@@ -571,15 +570,15 @@ def extract_images_epub(
     seen_hashes: set[str] = set()
 
     try:
-        book = epub.read_epub(str(file_path), options={"ignore_ncx": True})
+        # An EPUB's image items, or a stored bundle's `assets/` (`book_images`).
+        items = book_images(str(file_path))
     except Exception as exc:
         logger.warning("EPUB open failed doc=%s: %s", doc_id, exc)
         return []
 
     img_idx = 0
     seen_filenames: set[str] = set()
-    for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
-        raw_bytes = item.get_content()
+    for item_name, (_mime, raw_bytes) in items.items():
         try:
             img_pil = PILImage.open(BytesIO(raw_bytes), formats=DOCUMENT_IMAGE_FORMATS)
         except Exception:
@@ -592,7 +591,7 @@ def extract_images_epub(
         # arbitrary extraction-order index. `epub_N.png` is a fallback only,
         # for a name this book doesn't have or that collides with an earlier
         # image's.
-        filename = _epub_item_filename(item.get_name())
+        filename = _epub_item_filename(item_name)
         if not filename or filename in seen_filenames:
             filename = f"epub_{img_idx}.png"
         seen_filenames.add(filename)

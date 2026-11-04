@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import html
+import json
+from pathlib import Path
+
 BOOK_ID = "9781098100001"
 BOOK_URL = f"https://learning.oreilly.com/library/view/fixture-systems/{BOOK_ID}/"
 _FILES = f"https://learning.oreilly.com/api/v2/epubs/urn:orm:book:{BOOK_ID}/files"
@@ -89,3 +93,48 @@ class FixtureBookClient:
         if url.endswith("/figs/f1.png"):
             return FIGURE_BYTES
         raise AssertionError(f"unexpected fetch {url}")
+
+
+def write_book_bundle(dest: Path, client: FixtureBookClient) -> Path:
+    """The book as the O'Reilly connector writes it: each chapter wrapped as `build_epub`
+    wraps it, its figures under `assets/images/`, the cover in `assets/`."""
+    from app.services.oreilly_service import _chapter_file_name, process_chapter_html
+
+    meta = client.fetch_book_metadata(BOOK_ID)
+    sections, taken, figures = [], set(), {}
+    (dest / "sections").mkdir(parents=True)
+    for index, ch in enumerate(client.fetch_chapter_list(BOOK_ID)):
+        url = ch["content_url"]
+        body, found = process_chapter_html(client.fetch_chapter_html(url), BOOK_ID, url)
+        stem = Path(_chapter_file_name(ch["filename"], index, taken)).stem
+        (dest / "sections" / f"{stem}.xhtml").write_text(
+            '<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" lang="en">\n'
+            f"<head><title>{html.escape(ch['title'])}</title></head>\n<body>\n{body}\n</body>\n"
+            "</html>",
+            encoding="utf-8",
+        )
+        sections.append(
+            {"id": stem, "heading": ch["title"], "level": 1, "file": f"sections/{stem}.xhtml"}
+        )
+        figures.update(found)
+    (dest / "assets" / "images").mkdir(parents=True)
+    for url, local in figures.items():
+        (dest / "assets" / "images" / local).write_bytes(client.fetch_bytes(url))
+    (dest / "assets" / "cover.jpg").write_bytes(client.fetch_bytes(meta["cover_url"]))
+    manifest = {
+        "bundle_version": 1,
+        "connector": {"name": "oreilly", "version": "0.1.0"},
+        "title": meta["title"],
+        "authors": meta["authors"],
+        "cover": "assets/cover.jpg",
+        "source_url": BOOK_URL,
+        "locator": BOOK_ID,
+        "media": {"kind": "text"},
+        "terms": {
+            "statement": "O'Reilly's Membership Agreement grants access for personal use only.",
+            "url": "https://www.oreilly.com/membership-agreement/",
+        },
+        "sections": sections,
+    }
+    (dest / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return dest
