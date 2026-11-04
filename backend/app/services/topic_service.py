@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DocumentModel, SectionModel
 from app.repos.document_repo import DocumentRepo
-from app.services.chapters import is_book_matter
+from app.services.chapters import is_book_matter, with_parts
 from app.services.llm import get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -142,12 +142,18 @@ def _pick_topic_sections(content: list) -> list | None:
     return None
 
 
-def is_junk_heading(heading: str) -> bool:
-    """True for blank/boilerplate/metadata headings that must never become a study topic."""
+def is_junk_heading(heading: str, *, roman_numbered: bool = False) -> bool:
+    """True for blank/boilerplate/metadata headings that must never become a study topic.
+
+    `roman_numbered`: the document numbers headings in roman numerals ("II", "III"), so its
+    "I" and "V" are chapters too, not list markers (#334, Gatsby).
+    """
     n = _norm(heading)
     # Empty once normalised: blank, punctuation only, or no ASCII letter or digit at all.
     if not n or n in _EXACT_JUNK or is_book_matter(heading or ""):
         return True
+    if roman_numbered and n in _ONE_LETTER_NUMERALS:
+        return False
     # bare list-markers ("1", "18", single letter) -- numbering, not a topic
     if re.fullmatch(r"\d{1,3}|[a-z]", n):
         return True
@@ -157,23 +163,49 @@ def is_junk_heading(heading: str) -> bool:
     return any(sub in n for sub in _CONTAINS_JUNK)
 
 
+_ONE_LETTER_NUMERALS = frozenset({"i", "v", "x"})
+
+
+def topic_content(sections: list) -> list:
+    """The sections that can be topics: `is_junk_heading` with the document's own numbering."""
+    roman = any(re.fullmatch(r"[ivxlc]{2,7}", _norm(s.heading)) for s in sections)
+    return [s for s in sections if not is_junk_heading(s.heading, roman_numbered=roman)]
+
+
+def topic_titles(sections: list, tops: list, with_text: set[str]) -> dict[str, str]:
+    """Each topic's title; one that repeats is named with the part it sits under, so
+    Gulliver's four "CHAPTER I" topics can be told apart (#334)."""
+    parts = with_parts([(s.heading, s.level or 1, s.id in with_text) for s in sections])
+    part_of = {s.id: part for s, part in zip(sections, parts, strict=True)}
+    titles = {s.id: _clean_title(s.heading) for s in tops}
+    counts: dict[str, int] = {}
+    for t in titles.values():
+        counts[t] = counts.get(t, 0) + 1
+    return {
+        sid: f"{_clean_title(part_of[sid])} — {t}" if counts[t] > 1 and part_of.get(sid) else t
+        for sid, t in titles.items()
+    }
+
+
 class TopicService:
     async def document_topics(self, session: AsyncSession, document_id: str) -> dict | None:
         doc = await session.get(DocumentModel, document_id)
         if doc is None:
             return None
 
-        sections = list(await DocumentRepo(session).sections_for_document(document_id))
-        content = [s for s in sections if not is_junk_heading(s.heading)]
+        repo = DocumentRepo(session)
+        sections = list(await repo.sections_for_document(document_id))
+        content = topic_content(sections)
         tops = _pick_topic_sections(content) if content else None
         if tops:
+            titles = topic_titles(sections, tops, set(await repo.section_extents(document_id)))
             return {
                 "document_id": document_id,
                 "title": doc.title,
                 "source": "sections",
                 "topics": [
                     {
-                        "title": _clean_title(s.heading),
+                        "title": titles[s.id],
                         "level": s.level,
                         "section_id": s.id,
                         "page_start": s.page_start,
