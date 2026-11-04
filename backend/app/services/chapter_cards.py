@@ -25,7 +25,7 @@ from app.models import FlashcardModel
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
 from app.repos.graph_entity_repo import GraphEntityRepo
-from app.services.chapters import Chapter, chapters_for_document
+from app.services.chapters import Chapter, chapters_for_document, stored_home
 from app.services.embedder import get_embedding_service
 from app.services.flashcard_chapter import Book, ChapterCard, Passage, write_chapter_cards
 from app.services.flashcard_factuality import FACTUALITY_UNCHECKED
@@ -63,6 +63,14 @@ def _one_writer() -> asyncio.Lock:
 
 def being_written(document_id: str) -> set[str]:
     return {chapter_id for doc, chapter_id in _writing if doc == document_id}
+
+
+async def written_chapters(
+    document_id: str, chapters: list[Chapter], session: AsyncSession
+) -> set[str]:
+    """Ids of the current chapters whose cards were written, however detection placed them then."""
+    stored = await FlashcardRepo(session).chapters_written(document_id)
+    return set(stored_home(chapters, stored).values())
 
 
 def writing_any() -> bool:
@@ -158,7 +166,7 @@ async def chapter_cards_handler(document_id: str, job_id: str) -> None:
         with unattended(False):
             for chapter in chapters[:INGEST_CHAPTERS]:
                 # Read per chapter: the backfill may have written one while this job wrote another.
-                if chapter.id not in await FlashcardRepo(session).chapters_written(document_id):
+                if chapter.id not in await written_chapters(document_id, chapters, session):
                     await write_chapter(document_id, book, chapter, session)
 
 
@@ -175,12 +183,16 @@ async def chapter_overview(
 ) -> tuple[bool, list[ChapterOverview]]:
     """(whether the reader offers practice at each chapter's end, the chapters with counts)."""
     doc = await DocumentRepo(session).get_or_404(document_id)
-    counts = await FlashcardRepo(session).chapter_counts(document_id)
-    chapters = [
-        ChapterOverview(c, *counts.get(c.id, (0, 0, 0)))
-        for c in await chapters_for_document(document_id, doc.title, session)
+    chapters = await chapters_for_document(document_id, doc.title, session)
+    stored = await FlashcardRepo(session).chapter_counts(document_id)
+    counts: dict[str, list[int]] = {}
+    for stored_id, home in stored_home(chapters, set(stored)).items():
+        total = counts.setdefault(home, [0, 0, 0])
+        for k, n in enumerate(stored[stored_id]):
+            total[k] += n
+    return not doc.chapter_prompt_off, [
+        ChapterOverview(c, *counts.get(c.id, (0, 0, 0))) for c in chapters
     ]
-    return not doc.chapter_prompt_off, chapters
 
 
 def draw(
@@ -209,7 +221,11 @@ async def practise_chapter(
     and the next practice draws them first.
     """
     repo = FlashcardRepo(session)
-    cards = await repo.list_for_chapter(document_id, chapter_id)
+    doc = await DocumentRepo(session).get_or_404(document_id)
+    chapters = await chapters_for_document(document_id, doc.title, session)
+    stored = await repo.chapter_counts(document_id)
+    ids = [i for i, home in stored_home(chapters, set(stored)).items() if home == chapter_id]
+    cards = await repo.list_for_chapter(document_id, ids or [chapter_id])
     if not cards:
         raise NotFound(f"No cards for chapter {chapter_id}")
     drawn = draw(cards, count, rng or random.Random())  # noqa: S311

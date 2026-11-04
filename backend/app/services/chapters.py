@@ -344,6 +344,17 @@ def _named_by_part(chapters: list[Chapter], parts: dict[str, str]) -> list[Chapt
     return chapters
 
 
+def stored_home(chapters: Sequence[Chapter], stored_ids: set[str]) -> dict[str, str]:
+    """{stored chapter id: the id of the chapter that now holds that section}.
+
+    Cards and written-chapter runs store a chapter's first section id, and chapters are detected
+    again on every read, so a change to detection moves starts under them (#480). An id whose
+    section is in no chapter keeps itself.
+    """
+    holder = {sid: c.id for c in chapters for sid in c.section_ids}
+    return {i: holder.get(i, i) for i in stored_ids}
+
+
 async def chapters_for_document(
     document_id: str, document_title: str, session: AsyncSession
 ) -> list[Chapter]:

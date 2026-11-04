@@ -32,9 +32,14 @@ from app.config import get_settings
 from app.database import get_session_factory
 from app.library import current_library, use_library
 from app.repos.document_repo import DocumentRepo
-from app.repos.flashcard_repo import FlashcardRepo
 from app.services.background_prefs import chapter_backfill
-from app.services.chapter_cards import being_written, book_for, write_chapter, writing_any
+from app.services.chapter_cards import (
+    being_written,
+    book_for,
+    write_chapter,
+    writing_any,
+    written_chapters,
+)
 from app.services.chapters import Chapter, chapters_for_document
 from app.services.llm_admission import unattended
 
@@ -82,7 +87,7 @@ async def next_chapter() -> Pick | None:
         reading = await DocumentRepo(session).recently_read(since)
         for document_id, title, section_id, page in reading:
             chapters = await chapters_for_document(document_id, title, session)
-            written = await FlashcardRepo(session).chapters_written(document_id)
+            written = await written_chapters(document_id, chapters, session)
             written |= being_written(document_id)
             here = _reading_index(chapters, section_id, page)
             # Ahead first, then the rest of the book from the reader onward, then what was read.

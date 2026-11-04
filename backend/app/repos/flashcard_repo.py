@@ -324,12 +324,15 @@ class FlashcardRepo:
         )
         return {cid: (int(n), int(held or 0), int(due or 0)) for cid, n, held, due in result.all()}
 
-    async def list_for_chapter(self, document_id: str, chapter_id: str) -> list[FlashcardModel]:
+    async def list_for_chapter(
+        self, document_id: str, chapter_ids: Sequence[str]
+    ) -> list[FlashcardModel]:
+        """Cards stored under any of `chapter_ids`: one chapter, under every id it was stored by."""
         result = await self.session.execute(
             select(FlashcardModel)
             .where(
                 FlashcardModel.document_id == document_id,
-                FlashcardModel.chapter_id == chapter_id,
+                FlashcardModel.chapter_id.in_(list(chapter_ids)),
             )
             .order_by(FlashcardModel.created_at, FlashcardModel.id)
         )
