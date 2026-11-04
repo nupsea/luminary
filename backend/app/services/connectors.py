@@ -36,6 +36,8 @@ _INSTALL_TIMEOUT_S = 15 * 60
 # lists the same.
 MEDIA = ("text", "audio", "youtube")
 TOOLS = ("ffmpeg",)
+# `luminary_source_sdk.protocol.PLACEHOLDER_TERMS`: an unfilled template's terms, refused.
+PLACEHOLDER_TERMS = "Quote what the source's own terms say about downloading and automated use."
 _TRANSCRIBED = {"audio", "youtube"}
 
 
@@ -95,8 +97,11 @@ def _check_description(name: str, description: dict[str, Any]) -> None:
             f"describe names the connector {description.get('name')!r}, its entry point {name!r}"
         )
     terms = description.get("terms") or {}
-    if not (terms.get("statement") and str(terms.get("url", "")).startswith("https://")):
+    statement = str(terms.get("statement") or "").strip()
+    if not (statement and str(terms.get("url", "")).startswith("https://")):
         raise ConnectorInstallFailed(f"{name} does not state its source's terms and where they are")
+    if statement == PLACEHOLDER_TERMS:
+        raise ConnectorInstallFailed(f"{name} still carries the template's placeholder terms")
     for prefix in description.get("url_prefixes") or []:
         if not re.match(r"^https?://[^/\s]+/", str(prefix)):
             raise ConnectorInstallFailed(f"{name} claims {prefix!r}, which is not a URL prefix")
