@@ -88,7 +88,8 @@ jobs:
           dpkg-query -W -f='${Status}' libvulkan1 2>/dev/null | grep -q "install ok installed" \
             || { echo "libvulkan1 is not installed after the .deb (#355)"; exit 1; }
           exe="$(dpkg -L "$(dpkg-deb -f "$deb" Package)" | grep '^/usr/bin/' | head -1)"
-          SCREENSHOT=build/linux-deb.png xvfb-run -a -s "-screen 0 1440x900x24" \
+          # RENDER_CHECK: WebKitGTK renders a page whose text only its script writes (#99).
+          RENDER_CHECK=1 SCREENSHOT=build/linux-deb.png xvfb-run -a -s "-screen 0 1440x900x24" \
             bash scripts/desktop/verify_installed.sh "$exe"
 
       - name: Build the AppImage
@@ -327,7 +328,8 @@ jobs:
             exit 1
           fi
           echo "installed at $exe"
-          SCREENSHOT=build/windows.png bash scripts/desktop/verify_installed.sh "$exe"
+          # RENDER_CHECK: WebView2 renders a page whose text only its script writes (#99).
+          RENDER_CHECK=1 SCREENSHOT=build/windows.png bash scripts/desktop/verify_installed.sh "$exe"
 
       # Recorded to compare against the stage budget across runs.
       - name: Report installer size
@@ -380,6 +382,42 @@ jobs:
               Where-Object { $_.DisplayName -eq "Luminary" }
           if ($entry) { throw "the Apps entry was left behind" }
           if (-not (Test-Path "$env:LOCALAPPDATA\sh.luminary.app")) { throw "the library was deleted" }
+
+      # A 20-character username puts the root at C:\Users\<20 characters>\AppData\Local\Luminary,
+      # and every installed path under it must stay inside MAX_PATH (#24). `/D=` moves the
+      # root there without a second account; logs and the library stay the runner user's.
+      - name: Install under a 20-character username's root
+        shell: powershell
+        run: |
+          $root = "C:\Users\luminary-learner-20c\AppData\Local\Luminary"
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          # NSIS takes /D= last and unquoted.
+          $proc = Start-Process -FilePath $setup.FullName -ArgumentList "/S /D=$root" -PassThru
+          $null = $proc.Handle
+          if (-not $proc.WaitForExit(20 * 60000)) { throw "the setup was still running after 20 minutes" }
+          if ($proc.ExitCode -ne 0) { throw "the setup exited with $($proc.ExitCode)" }
+          if (-not (Test-Path "$root\luminary-desktop.exe")) { throw "/D= was not honoured: no app under $root" }
+          if (Test-Path "$env:LOCALAPPDATA\Luminary\luminary-desktop.exe") { throw "installed to the default root, not $root" }
+          $longest = Get-ChildItem $root -Recurse -Force -File | Sort-Object { $_.FullName.Length } | Select-Object -Last 1
+          "longest installed path: $($longest.FullName.Length) of 260 ($($longest.FullName))"
+          if ($longest.FullName.Length -ge 260) { throw "an installed path passes MAX_PATH" }
+
+      - name: Open the app installed under it
+        run: |
+          exe="$(cygpath -u 'C:\Users\luminary-learner-20c\AppData\Local\Luminary')/luminary-desktop.exe"
+          SCREENSHOT=build/windows-long-root.png bash scripts/desktop/verify_installed.sh "$exe"
+
+      - name: Uninstall it
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          $root = "C:\Users\luminary-learner-20c\AppData\Local\Luminary"
+          if (-not (Test-Path "$root\uninstall.exe")) { return }
+          $proc = Start-Process -FilePath "$root\uninstall.exe" -ArgumentList "/S _?=$root" -PassThru
+          $null = $proc.Handle
+          $proc.WaitForExit(10 * 60000) | Out-Null
+          if ($proc.ExitCode -ne 0) { throw "the uninstaller exited with $($proc.ExitCode)" }
+          if (Test-Path "$root\luminary-desktop.exe") { throw "the app was left under $root" }
 
       - name: Upload screenshots and logs
         if: always()

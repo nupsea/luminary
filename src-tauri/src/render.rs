@@ -351,6 +351,44 @@ pub async fn render_page(app: AppHandle, url: String) -> Result<String, String> 
     }
 }
 
+/// The install check (#99): render each loopback URL in `LUMINARY_RENDER_SELFTEST` through
+/// this build's own webview and log what came back, so `verify_installed.sh` can show the
+/// engine ran the page's script. Loopback only: the variable never sends the app elsewhere.
+pub fn self_test(app: AppHandle, log: fn(&str, &str)) {
+    let Ok(urls) = std::env::var("LUMINARY_RENDER_SELFTEST") else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        for url in urls.split_whitespace() {
+            let outcome = if is_loopback(url) {
+                match render_page(app.clone(), url.to_string()).await {
+                    Ok(dom) => format!("rendered {} chars: {}", dom.len(), one_line(&dom, 4_000)),
+                    Err(reason) => format!("failed: {reason}"),
+                }
+            } else {
+                "refused: not a loopback url".into()
+            };
+            log("render-selftest", &format!("{url} {outcome}"));
+        }
+    });
+}
+
+fn is_loopback(url: &str) -> bool {
+    Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h == "127.0.0.1" || h == "localhost"))
+        .unwrap_or(false)
+}
+
+fn one_line(text: &str, max_chars: usize) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(max_chars)
+        .collect()
+}
+
 /// A label unique within this process. Not a UUID: nothing depends on it beyond
 /// two concurrent renders not colliding.
 fn nanos() -> u128 {
@@ -364,6 +402,15 @@ fn nanos() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_self_test_renders_only_loopback_pages() {
+        assert!(is_loopback("http://127.0.0.1:8123/page.html"));
+        assert!(is_loopback("http://localhost:8123/"));
+        assert!(!is_loopback("https://example.com/"));
+        assert!(!is_loopback("http://127.0.0.1.example.com/"));
+        assert!(!is_loopback("not a url"));
+    }
 
     #[test]
     fn a_title_we_sent_parses() {

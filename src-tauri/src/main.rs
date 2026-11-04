@@ -258,6 +258,7 @@ fn boot(app: AppHandle, sup: Arc<Supervisor>) {
             let _ = window.navigate(parsed);
         }
     }
+    render::self_test(app.clone(), logging::write);
 }
 
 /// Bring the user back to the startup screen, with Try again, if the backend dies.
