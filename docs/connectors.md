@@ -15,7 +15,8 @@ repositories is in `docs/roadmap.md` §7. This file is the contract as built.
 | Catalogue | `backend/app/services/connector_catalogue.py` |
 | Importer | `backend/app/services/source_bundle.py` (`store_bundle`, `parse_bundle`) |
 | Conformance kit | `luminary_source_sdk/conformance.py` |
-| Public connectors | [`nupsea/luminary-connectors`](https://github.com/nupsea/luminary-connectors) |
+| Public connectors | [`nupsea/luminary-connectors`](https://github.com/nupsea/luminary-connectors): `youtube`, `html-book` |
+| Template for a new connector | `luminary-connectors/template/`: fails only its placeholder terms until they are quoted |
 
 ## Process
 
