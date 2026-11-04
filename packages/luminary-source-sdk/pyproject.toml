@@ -1,0 +1,20 @@
+[project]
+name = "luminary-source-sdk"
+version = "0.1.0"
+description = "Write connectors that fetch content into Luminary source bundles."
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+# Standard library only: a connector's own dependencies are its business, and the SDK must
+# never bring Luminary's (or an AGPL package) into a connector's environment.
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/luminary_source_sdk"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"schema/source-bundle.schema.json" = "luminary_source_sdk/source-bundle.schema.json"
