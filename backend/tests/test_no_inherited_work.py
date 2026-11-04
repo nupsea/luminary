@@ -6,7 +6,7 @@ from __future__ import annotations
 import shutil
 import sqlite3
 
-from conftest import settle_inherited_work
+from inherited_work import settle_inherited_work
 
 
 def _db(tmp_path, template):
@@ -44,3 +44,10 @@ def test_queued_jobs_and_stranded_ingestions_are_settled(tmp_path, _schema_templ
 
 def test_no_database_yet_is_nothing_to_settle(tmp_path):
     assert settle_inherited_work(tmp_path / "luminary.db") == (0, 0)
+
+
+def test_a_database_without_its_schema_yet_is_nothing_to_settle(tmp_path):
+    db = tmp_path / "luminary.db"
+    sqlite3.connect(db).close()
+
+    assert settle_inherited_work(db) == (0, 0)
