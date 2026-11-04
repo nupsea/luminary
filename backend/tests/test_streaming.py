@@ -67,6 +67,8 @@ async def test_disconnect_mid_query_returns_the_connection(tmp_path, caplog):
             count = (await session.execute(text(SLOW_QUERY))).scalar()
         yield f"data: {count}\n\n"
 
+    # Collected first, so a connection an earlier test leaked is not charged to this one (#465).
+    gc.collect()
     with caplog.at_level(logging.ERROR, logger="sqlalchemy.pool"):
         await _serve(StreamingResponse(gen(), media_type="text/event-stream"), [])
         gc.collect()
