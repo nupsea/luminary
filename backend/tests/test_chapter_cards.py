@@ -633,3 +633,67 @@ async def test_dont_ask_for_this_book_is_remembered(book):
         )
 
     assert (first, off.status_code, later, unknown.status_code) == (True, 204, False, 404)
+
+
+# -- cards stored before detection moved a chapter's start (#480) ----------------------------
+
+
+@pytest.fixture
+async def moved_book(memory_db):
+    """Two marked chapters, each with a subsection. Cards and a written run are stored under the
+    first chapter's subsection, `c1b`, as an earlier detection that opened a chapter there left
+    them."""
+    from datetime import UTC, datetime
+
+    from app.models import ChapterCardRunModel
+
+    sections = [("c1", "Chapter 1. Logs"), ("c1b", "Compaction"), ("c2", "Chapter 2. Trees"),
+                ("c2b", "Pages")]  # fmt: skip
+    async with memory_db.factory() as session:
+        session.add(
+            make_document(id="mv", title="DDIA", format="pdf", file_path="/x", stage="parsing")
+        )
+        for i, (sid, heading) in enumerate(sections):
+            session.add(make_section(id=sid, document_id="mv", heading=heading, section_order=i))
+            session.add(make_chunk(id=f"k-{sid}", document_id="mv", section_id=sid,
+                                   text=_CHAPTER_TEXT, chunk_index=i))  # fmt: skip
+        for n in range(3):
+            card = make_card(
+                id=f"old{n}",
+                document_id="mv",
+                chunk_id="k-c1b",
+                question=f"Question {n}?",
+                answer="An answer.",
+                source_excerpt=LOG,
+                fsrs_state="held",
+                created_at=datetime.now(UTC),
+                chapter_id="c1b",
+            )
+            session.add(card)
+        session.add(ChapterCardRunModel(document_id="mv", chapter_id="c1b", cards=3))
+        await session.commit()
+    return memory_db
+
+
+async def test_stored_cards_follow_their_section_into_the_current_chapter(moved_book):
+    async with moved_book.factory() as session:
+        _, overview = await chapter_cards.chapter_overview("mv", session)
+
+    assert [(o.chapter.id, o.cards, o.held) for o in overview] == [("c1", 3, 3), ("c2", 0, 0)]
+
+
+async def test_practice_reaches_cards_stored_under_an_old_start(moved_book):
+    async with moved_book.factory() as session:
+        drawn = await chapter_cards.practise_chapter("mv", "c1", None, session)
+
+    assert sorted(c.id for c in drawn) == ["old0", "old1", "old2"]
+
+
+async def test_a_chapter_written_under_an_old_start_is_not_written_again(moved_book, fakes):
+    await chapter_cards.chapter_cards_handler("mv", "job")
+
+    async with moved_book.factory() as session:
+        runs = await FlashcardRepo(session).chapters_written("mv")
+        cards = (await session.execute(select(func.count()).select_from(FlashcardModel))).scalar()
+    assert runs == {"c1b", "c2"}
+    assert cards > 3, "chapter 2 was still written"
