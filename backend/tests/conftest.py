@@ -17,6 +17,7 @@ import concurrent.futures
 import os
 import shutil
 import socket
+import sqlite3
 import time
 import warnings
 from pathlib import Path
@@ -220,6 +221,34 @@ def _reset_lancedb_singleton():
     import app.services.vector_store as _vs_module
 
     _vs_module._lancedb_service = None
+    yield
+
+
+# Work a test leaves in the session's shared database must not reach the next test. Every
+# `TestClient(app)` boots the default library on that one file, and boot returns running jobs
+# to the queue (`requeue_for_boot`) and resumes unfinished ingestions, so a stranded job ran in
+# whichever test booted next: beside its writers, answering its mocks (#211, #485). Measured
+# over the suite, 881 of 5,067 tests began with a stranded `chapter_cards` job.
+_UNFINISHED_INGESTION = "left unfinished by an earlier test"
+
+
+def settle_inherited_work(db: Path) -> tuple[int, int]:
+    """Drop queued jobs and fail stranded ingestions in `db`: (jobs, documents)."""
+    if not db.is_file():
+        return 0, 0
+    with sqlite3.connect(db, timeout=30) as con:
+        jobs = con.execute("DELETE FROM enrichment_jobs WHERE status != 'done'").rowcount
+        docs = con.execute(
+            "UPDATE documents SET stage = 'error', error_message = ? "
+            "WHERE stage NOT IN ('complete', 'error')",
+            (_UNFINISHED_INGESTION,),
+        ).rowcount
+    return jobs, docs
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_work():
+    settle_inherited_work(Path(os.environ["DATA_DIR"]) / "luminary.db")
     yield
 
 
