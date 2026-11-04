@@ -18,17 +18,18 @@ from app.services import connectors
 from app.services.connector_runner import ConnectorFailed, ConnectorTimeout, call
 from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.parser import DocumentParser
-from tests.connector_fixture import SDK, install, write_fixture
-
-SECRET = "fixture-token-5f2c"
+from tests.connector_fixture import SDK, SECRET, install, write_fixture
 
 
 @pytest.fixture(scope="module")
 def installed(tmp_path_factory):
+    """The fixture connector, signed in: its links need the token (`test_connector_routes`)."""
     root = tmp_path_factory.mktemp("connectors")
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(connectors, "connectors_root", lambda: root)
-        yield install(tmp_path_factory, root, "fixture-source", "FixtureSource")
+        connector = install(tmp_path_factory, root, "fixture-source", "FixtureSource")
+        connectors.save_credentials("fixture-source", {"token": SECRET})
+        yield connector
 
 
 def test_install_records_what_the_connector_describes(installed):
@@ -79,12 +80,15 @@ def test_a_description_is_checked_before_it_is_recorded(description, message):
         connectors._check_description("x", description)
 
 
-async def test_credentials_reach_the_connector_only_in_its_request(installed, monkeypatch):
+async def test_credentials_reach_the_connector_only_in_its_request(
+    installed, monkeypatch, tmp_path
+):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-backend-secret")
-    connectors.save_credentials("fixture-source", {"token": SECRET})
-    seen = await call(
-        installed, "preview", credentials=connectors.load_credentials("fixture-source")
-    )
+    await call(
+        installed, "fetch", input={"url": "https://fixture.example/env"}, dest=str(tmp_path / "f"),
+        credentials=connectors.load_credentials("fixture-source"),
+    )  # fmt: skip
+    seen = json.loads((tmp_path / "f" / "sections" / "seen.md").read_text(encoding="utf-8"))
     assert seen["token"] == SECRET
     assert SECRET not in json.dumps(seen["argv"])
     assert SECRET not in json.dumps(seen["env"])

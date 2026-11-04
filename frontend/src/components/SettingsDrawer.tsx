@@ -18,7 +18,7 @@ import { getTheme, setTheme, type Theme } from "@/lib/theme"
 import { DevicesSettings } from "@/components/settings/DevicesSettings"
 import { ModelsAndComponents } from "@/components/settings/ModelsAndComponents"
 import { type ModelDrift } from "@/components/settings/ModelDriftNotice"
-import { OreillySettings } from "@/components/settings/OreillySettings"
+import { ConnectorSettings } from "@/components/settings/ConnectorSettings"
 import { ReportIssue } from "@/components/settings/ReportIssue"
 import { TranscriptVocabularySettings } from "@/components/settings/TranscriptVocabularySettings"
 import type { components } from "@/types/api"
@@ -673,10 +673,9 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
 
           <div className="border-t border-border" />
 
-          {/* Section 2.8: Subscriptions & Integrations */}
           <section>
-            <h3 className="mb-2 text-sm font-semibold text-foreground">Subscriptions & Integrations</h3>
-            <OreillySettings />
+            <h3 className="mb-2 text-sm font-semibold text-foreground">Connectors</h3>
+            <ConnectorSettings />
           </section>
 
           <div className="border-t border-border" />

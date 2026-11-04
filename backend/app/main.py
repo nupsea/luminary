@@ -32,6 +32,7 @@ from app.routers.chat_sessions import router as chat_sessions_router
 from app.routers.clips import router as clips_router
 from app.routers.collections import router as collections_router
 from app.routers.concepts import router as concepts_router
+from app.routers.connectors import router as connectors_router
 from app.routers.devices import router as devices_router
 from app.routers.documents import router as documents_router
 from app.routers.engagement import router as engagement_router
@@ -47,7 +48,6 @@ from app.routers.mastery import router as mastery_router
 from app.routers.model_lab import router as model_lab_router
 from app.routers.monitoring import router as monitoring_router
 from app.routers.notes import router as notes_router
-from app.routers.oreilly import router as oreilly_router
 from app.routers.pomodoro import router as pomodoro_router
 from app.routers.progress import router as progress_router
 from app.routers.qa import router as qa_router
@@ -401,6 +401,7 @@ ROUTER_REGISTRY = {
     "clips": clips_router,
     "collections": collections_router,
     "concepts": concepts_router,
+    "connectors": connectors_router,
     "devices": devices_router,
     "chat_meta": chat_meta_router,
     "chat_sessions": chat_sessions_router,
@@ -417,7 +418,6 @@ ROUTER_REGISTRY = {
     "model_lab": model_lab_router,
     "monitoring": monitoring_router,
     "notes": notes_router,
-    "oreilly": oreilly_router,
     "pomodoro": pomodoro_router,
     "progress": progress_router,
     "qa": qa_router,

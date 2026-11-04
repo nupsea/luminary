@@ -20,7 +20,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from app.exceptions import DependencyUnavailable, InvalidInput
+from app.exceptions import DependencyUnavailable, InvalidInput, LuminaryError, NotFound
 from app.services.components import capabilities, resolve_tool
 from app.services.connector_runner import InstalledConnector, call
 from app.storage import machine_root
@@ -41,6 +41,21 @@ _TRANSCRIBED = {"audio", "youtube"}
 
 class ConnectorInstallFailed(InvalidInput):
     """The folder is not an installable connector, or its environment would not build."""
+
+
+class ConnectorNotInstalled(NotFound):
+    pass
+
+
+class CredentialsRequired(LuminaryError):
+    """The connector needs a sign-in it does not have. `connector` in the body names it, so
+    the client opens that connector's connect form."""
+
+    status_code = 401
+
+
+class CredentialsRefused(LuminaryError):
+    status_code = 401
 
 
 def connectors_root() -> Path:
@@ -166,6 +181,66 @@ def connector_for_url(url: str) -> InstalledConnector | None:
         if any(url.startswith(p) for p in connector.description.get("url_prefixes") or []):
             return connector
     return None
+
+
+def get_connector(name: str) -> InstalledConnector:
+    for connector in installed_connectors():
+        if connector.name == name:
+            return connector
+    raise ConnectorNotInstalled(f"No connector named {name!r} is installed")
+
+
+def claiming(name: str, url: str) -> InstalledConnector:
+    """The connector `name`, which must claim `url`: a route never hands one another's link."""
+    connector = get_connector(name)
+    if not any(url.startswith(p) for p in connector.description.get("url_prefixes") or []):
+        raise InvalidInput(f"{label_of(connector)} does not take {url}")
+    return connector
+
+
+def label_of(connector: InstalledConnector) -> str:
+    return str(connector.description.get("label") or connector.name)
+
+
+def needs_credentials(connector: InstalledConnector) -> bool:
+    fields = connector.description.get("credentials") or []
+    return any(f.get("required", True) for f in fields)
+
+
+def is_connected(connector: InstalledConnector) -> bool:
+    return bool(load_credentials(connector.name)) or not needs_credentials(connector)
+
+
+def require_credentials(connector: InstalledConnector) -> dict[str, Any]:
+    """The stored credentials, or `CredentialsRequired` when a required sign-in is missing:
+    refused before a document exists, never after a fetch fails on it."""
+    credentials = load_credentials(connector.name)
+    if needs_credentials(connector) and not credentials:
+        raise CredentialsRequired(f"Connect {label_of(connector)} first.", connector=connector.name)
+    return credentials
+
+
+async def connect(connector: InstalledConnector, values: dict[str, Any]) -> dict[str, Any]:
+    """Check the credentials with the connector itself, then store them; its `Account`."""
+    fields = {f["name"] for f in connector.description.get("credentials") or []}
+    unknown = set(values) - fields
+    if unknown:
+        raise InvalidInput(f"{label_of(connector)} takes no field {sorted(unknown)[0]!r}")
+    account = await call(connector, "check", credentials=values)
+    if not account.get("valid"):
+        reason = account.get("message") or "those credentials were not accepted"
+        raise CredentialsRefused(f"{label_of(connector)}: {reason}", connector=connector.name)
+    save_credentials(connector.name, values)
+    return account
+
+
+def delete_credentials(name: str) -> None:
+    (connectors_root() / name / _CREDENTIALS).unlink(missing_ok=True)
+    if name == "oreilly":
+        # The built-in path's cookie file is the same login: disconnecting removes both.
+        from app.services.oreilly_service import delete_oreilly_cookies  # noqa: PLC0415
+
+        delete_oreilly_cookies()
 
 
 def save_credentials(name: str, credentials: dict[str, Any]) -> None:

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from luminary_source_sdk.bundle import BundleWriter
-from luminary_source_sdk.protocol import Description
+from luminary_source_sdk.protocol import Account, Description, Preview
 
 Report = Callable[[float, str], None]
 
@@ -26,8 +26,13 @@ class Connector:
     def describe(self) -> Description:
         raise NotImplementedError
 
-    def preview(self, input: dict[str, Any], credentials: dict[str, Any]) -> dict[str, Any]:
-        """What the user confirms before fetching, e.g. a chapter list. Optional."""
+    def check(self, credentials: dict[str, Any]) -> Account:
+        """Whether these credentials sign in, before Luminary stores them. Optional."""
+        return Account(valid=True)
+
+    def preview(self, input: dict[str, Any], credentials: dict[str, Any]) -> Preview:
+        """What the link is and the choices before fetching it, e.g. a chapter list. Optional;
+        set `Description.preview` when offered."""
         raise ConnectorError("input", "this connector offers no preview")
 
     def fetch(

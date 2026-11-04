@@ -2,7 +2,7 @@
 
 Luminary starts a connector process per call and writes one request line:
 
-    {"protocol": 1, "op": "describe" | "preview" | "fetch",
+    {"protocol": 1, "op": "describe" | "check" | "preview" | "fetch",
      "input": {...}, "credentials": {...}, "dest": "/dir/the/core/named"}
 
 The connector answers with event lines and exits:
@@ -22,13 +22,13 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 PROTOCOL_VERSION = 1
-OPS = ("describe", "preview", "fetch")
+OPS = ("describe", "check", "preview", "fetch")
 ERROR_CODES = ("input", "auth", "source", "internal")
 LOG_LEVELS = ("debug", "info", "warning", "error")
 MEDIA = ("text", "audio", "youtube")
 TOOLS = ("ffmpeg",)
 
-Op = Literal["describe", "preview", "fetch"]
+Op = Literal["describe", "check", "preview", "fetch"]
 
 
 @dataclass(frozen=True)
@@ -40,6 +40,51 @@ class Field:
     secret: bool = False
     required: bool = True
     help: str = ""
+    # A pasted block (a cookie export) rather than one line.
+    multiline: bool = False
+
+
+@dataclass(frozen=True)
+class Option:
+    value: str
+    label: str
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class Choice:
+    """A pick the user makes before a fetch; its values reach `fetch` as `input[field]`, a
+    list when `multiple`, else one value."""
+
+    field: str
+    label: str
+    options: list[Option]
+    multiple: bool = False
+    default: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Preview:
+    """What `preview` returns: what the link is, and the choices before fetching it."""
+
+    title: str
+    detail: str = ""
+    choices: list[Choice] = field(default_factory=list)
+
+    def to_json(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class Account:
+    """What `check` returns for a set of credentials."""
+
+    valid: bool
+    account: str | None = None
+    message: str | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -107,4 +152,5 @@ def result(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def error(code: str, message: str) -> dict[str, Any]:
-    return {"event": "error", "code": code if code in ERROR_CODES else "internal", "message": message}
+    code = code if code in ERROR_CODES else "internal"
+    return {"event": "error", "code": code, "message": message}

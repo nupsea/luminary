@@ -68,7 +68,6 @@
     "app/services/ner.py::_is_valid_entity",
     "app/services/okf_context.py::OkfContextService.build_concept_context",
     "app/services/oreilly_service.py::OreillyClient.fetch_book_metadata",
-    "app/services/oreilly_service.py::parse_cookies_input",
     "app/services/parser.py::DocumentParser._parse_pdf",
     "app/services/parser.py::_epub_html_to_markdown",
     "app/services/retriever.py::HybridRetriever.retrieve",
@@ -80,7 +79,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 203,
+  "complexity_over_10": 202,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",
