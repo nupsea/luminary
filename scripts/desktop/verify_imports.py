@@ -14,12 +14,13 @@ REQUIRED = [
     "sentence_transformers", "gliner", "lancedb", "pyarrow",
     "kuzu", "fitz", "PIL", "litellm", "langgraph", "keyring",
     "fastapi", "uvicorn", "alembic", "sqlalchemy", "aiosqlite",
-    "yt_dlp", "trafilatura", "tree_sitter", "cloudscraper", "pip", "zstandard",
+    "trafilatura", "tree_sitter", "cloudscraper", "pip", "zstandard",
 ]  # fmt: skip
 
 # `av` carries GPL codecs and ships as the `transcription` component; optimum/onnx are unused.
 # NOT sympy: `import transformers` pulls torch.fx, which imports it.
-FORBIDDEN = ["av", "faster_whisper", "ctranslate2", "optimum", "onnx"]
+# yt_dlp and curl_cffi belong to the YouTube and O'Reilly connectors' own environments (#467).
+FORBIDDEN = ["av", "faster_whisper", "ctranslate2", "optimum", "onnx", "yt_dlp", "curl_cffi"]
 
 
 def main() -> int:
