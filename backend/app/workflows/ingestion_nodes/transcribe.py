@@ -27,7 +27,7 @@ from app.services import (
     audio_transcriber as _audio_transcriber_module,  # indirect: get_audio_transcriber is patched
 )
 from app.services import ingestion_progress
-from app.services.captions import captions_path, parse_vtt
+from app.services.captions import captions_for, parse_vtt
 from app.services.components import resolve_tool
 from app.services.transcript_correction import correct_transcript
 from app.services.transcript_vocabulary import hotwords
@@ -113,8 +113,9 @@ def _audio_duration(path: Path) -> float | None:
 async def _transcript(doc_id: str, source: Path, audio: Path) -> tuple[list[dict], float, str]:
     """(segments, duration, transcript_source): the uploader's captions, else primed
     Whisper; then the corrections pass (`transcript_correction`)."""
-    captions = captions_path(source)
-    segments = parse_vtt(captions.read_text(encoding="utf-8")) if captions.exists() else []
+    captions = captions_for(source)
+    found = captions is not None and captions.exists()
+    segments = parse_vtt(captions.read_text(encoding="utf-8")) if found else []
     if segments:
         segments = await correct_transcript(doc_id, segments, ordinary=None)
         return segments, _audio_duration(audio) or segments[-1]["end"], "captions"

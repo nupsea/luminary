@@ -210,6 +210,16 @@
       "title": "Bundle Version",
       "type": "integer"
     },
+    "chapters": {
+      "default": [],
+      "items": {
+        "maxLength": 500,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Chapters",
+      "type": "array"
+    },
     "connector": {
       "$ref": "#/$defs/Connector"
     },
@@ -226,6 +236,19 @@
       ],
       "default": null,
       "title": "Cover"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "maxLength": 20000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
     },
     "locator": {
       "anyOf": [

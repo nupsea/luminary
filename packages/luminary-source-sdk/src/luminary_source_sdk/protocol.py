@@ -25,6 +25,8 @@ PROTOCOL_VERSION = 1
 OPS = ("describe", "preview", "fetch")
 ERROR_CODES = ("input", "auth", "source", "internal")
 LOG_LEVELS = ("debug", "info", "warning", "error")
+MEDIA = ("text", "audio", "youtube")
+TOOLS = ("ffmpeg",)
 
 Op = Literal["describe", "preview", "fetch"]
 
@@ -56,11 +58,19 @@ class Description:
     version: str
     licence: str
     terms: Terms
+    # What the user calls the source ("YouTube"), for messages; the name when empty.
+    label: str = ""
     # Links this connector takes, by prefix: `https://www.example.com/watch`.
     url_prefixes: list[str] = field(default_factory=list)
     inputs: list[Field] = field(default_factory=list)
     credentials: list[Field] = field(default_factory=list)
     preview: bool = False
+    # The bundle kinds it writes ("text", "audio", "youtube"); the core checks it can
+    # ingest them before a fetch starts.
+    media: list[str] = field(default_factory=lambda: ["text"])
+    # Host tools it runs, from `TOOLS`. The core finds each and passes its path in the
+    # fetch input as `input["tools"][name]`, or refuses the link before fetching.
+    tools: list[str] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)

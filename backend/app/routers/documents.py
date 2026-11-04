@@ -86,7 +86,7 @@ from app.services.components import (
     get_component,
     running_in_container,
 )
-from app.services.connectors import connector_for_url
+from app.services.connectors import connector_for_url, missing_components
 from app.services.document_deletion_service import get_document_deletion_service
 from app.services.document_search import get_document_search_service
 from app.services.document_tagger import enrich_document_tags, prune_auto_entity_tags
@@ -397,7 +397,7 @@ def _all_withheld_for_licence(component_ids: list[str]) -> bool:
     )
 
 
-def _media_missing_message(required: list[str]) -> str:
+def _media_missing_message(required: list[str], what: str = "YouTube") -> str:
     """One sentence naming everything missing, and what to do about each kind."""
     fetchable, manual = _installable(required)
     # Only claim a licence reason where one exists. yt-dlp is Unlicense, and
@@ -405,12 +405,12 @@ def _media_missing_message(required: list[str]) -> str:
     # that is not real and pointed the user at nothing they could act on.
     if _all_withheld_for_licence(required):
         lead = (
-            f"YouTube needs {_component_labels(required)}, "
+            f"{what} needs {_component_labels(required)}, "
             f"{'which are' if len(required) > 1 else 'which is'} not bundled for "
             f"licensing reasons."
         )
     else:
-        lead = f"YouTube needs {_component_labels(required)}."
+        lead = f"{what} needs {_component_labels(required)}."
     parts = [lead]
     if fetchable:
         parts.append(f"Install {_component_labels(fetchable)} below.")
@@ -438,6 +438,20 @@ def _media_missing_message(required: list[str]) -> str:
                 f"(for example `{ffmpeg_install_command()}`)."
             )
     return " ".join(parts)
+
+
+def _components_missing(required: list[str], what: str) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "message": _media_missing_message(required, what),
+            # Everything missing, whether or not the app can install it: `components`
+            # alone can be empty, and then the payload named nothing while the ingest refused.
+            "missing": list(required),
+            # Only what the app can fetch: a button that fails on click is worse than none.
+            "components": _installable(required)[0],
+        },
+    )
 
 
 def _installable(component_ids: list[str]) -> tuple[list[str], list[str]]:
@@ -742,6 +756,9 @@ async def ingest_url(
     # An installed connector that claims the link takes it before any built-in path.
     claimed = connector_for_url(body.url)
     if claimed is not None:
+        if required := await missing_components(claimed):
+            label = claimed.description.get("label") or claimed.name
+            raise _components_missing(required, label)
         return await start_connector_ingestion(body.url, claimed)
 
     # 0. O'Reilly Learning book detection
@@ -853,20 +870,7 @@ async def ingest_url(
         elif not present and name not in required:
             required.append(name)
     if required:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "message": _media_missing_message(required),
-                # Everything missing, whether or not the app can install it.
-                # `components` alone could be empty -- a component with no
-                # catalogue entry is not installable -- and then the payload
-                # named nothing at all while the ingest still refused.
-                "missing": list(required),
-                # Only what the app can actually fetch: a button that fails on
-                # click is worse than no button.
-                "components": _installable(required)[0],
-            },
-        )
+        raise _components_missing(required, "YouTube")
 
     try:
         meta = await _yt_module.fetch_metadata(body.url)

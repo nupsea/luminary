@@ -14,7 +14,7 @@ from app.database import get_session_factory
 from app.models import DocumentModel
 from app.services import ingestion_progress
 from app.services.connector_runner import ConnectorFailed, InstalledConnector, call
-from app.services.connectors import load_credentials
+from app.services.connectors import load_credentials, tool_paths
 from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.source_bundle import BUNDLE_SUFFIX, BundleRefused
 from app.storage import library_root
@@ -71,7 +71,7 @@ async def fetch_and_ingest(doc_id: str, url: str, connector: InstalledConnector)
         await call(
             connector,
             "fetch",
-            input={"url": url},
+            input={"url": url, "tools": tool_paths(connector)},
             credentials=load_credentials(connector.name),
             dest=str(fetch_dir),
             on_progress=lambda f, _s: ingestion_progress.report(doc_id, "downloading", f),

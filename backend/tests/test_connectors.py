@@ -1,8 +1,4 @@
-"""Connectors as separate processes (#435): install from a folder, claim a link, fetch, ingest.
-
-The fixture connector is written against the SDK in a temporary folder outside this repo and
-installed into an environment of its own, as a third-party connector would be.
-"""
+"""Connectors as separate processes (#435): install from a folder, claim a link, fetch, ingest."""
 
 from __future__ import annotations
 
@@ -11,8 +7,6 @@ import asyncio
 import json
 import os
 import sys
-import textwrap
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -21,96 +15,20 @@ from httpx import ASGITransport, AsyncClient
 from app.main import app
 from app.models import DocumentModel
 from app.services import connectors
-from app.services.components import resolve_tool
 from app.services.connector_runner import ConnectorFailed, ConnectorTimeout, call
 from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.parser import DocumentParser
+from tests.connector_fixture import SDK, install, write_fixture
 
-REPO = Path(__file__).resolve().parents[2]
-SDK = REPO / "packages" / "luminary-source-sdk"
 SECRET = "fixture-token-5f2c"
-
-_CONNECTOR = """
-import os, subprocess, sys, time
-from luminary_source_sdk import Connector, ConnectorError, Description, Field, Terms
-
-TERMS = Terms(
-    statement="Fixture pages may be downloaded for personal study.",
-    url="https://fixture.example/terms",
-)
-BODY = "A log is an append-only sequence of records on disk. " * 3
-
-
-class FixtureSource(Connector):
-    def describe(self):
-        return Description(
-            name="fixture-source", version="0.1.0", licence="Apache-2.0", terms=TERMS,
-            url_prefixes=["https://fixture.example/"],
-            credentials=[Field("token", "Access token", secret=True)], preview=True,
-        )
-
-    def preview(self, input, credentials):
-        return {"argv": sys.argv, "env": dict(os.environ), "token": credentials.get("token")}
-
-    def fetch(self, input, credentials, bundle, report):
-        kind = input["url"].rsplit("/", 1)[-1]
-        if kind == "auth":
-            raise ConnectorError("auth", "Sign in to Fixture again.")
-        print("chatter a connector prints, which must not reach the protocol")
-        bundle.add_section("one", "Storage", html=f"<h1>Storage</h1><p>{BODY}</p>")
-        report(0.5, "downloading")
-        if kind == "crash":
-            os._exit(3)
-        if kind == "hang":
-            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
-            (bundle.dest / "pids").write_text(f"{os.getpid()} {child.pid}")
-            time.sleep(600)
-        bundle.add_section("two", "Replication", html=f"<h1>Replication</h1><p>{BODY}</p>")
-        bundle.finish(connector=("fixture-source", "0.1.0"), title="Fixture Systems",
-                      terms=TERMS, source_url=input["url"])
-"""
-
-
-def _write_fixture(folder: Path, *, entry_points: str) -> Path:
-    (folder / "fixture_source").mkdir(parents=True)
-    (folder / "fixture_source" / "__init__.py").write_text(_CONNECTOR)
-    (folder / "pyproject.toml").write_text(
-        textwrap.dedent(f"""
-        [project]
-        name = "fixture-source"
-        version = "0.1.0"
-        requires-python = ">=3.11"
-        dependencies = ["luminary-source-sdk"]
-        {entry_points}
-
-        [tool.uv.sources]
-        luminary-source-sdk = {{ path = "{SDK.as_posix()}" }}
-
-        [build-system]
-        requires = ["hatchling"]
-        build-backend = "hatchling.build"
-
-        [tool.hatch.build.targets.wheel]
-        packages = ["fixture_source"]
-        """)
-    )
-    return folder
-
-
-_ONE_ENTRY = (
-    '[project.entry-points."luminary.connectors"]\nfixture-source = "fixture_source:FixtureSource"'
-)
 
 
 @pytest.fixture(scope="module")
 def installed(tmp_path_factory):
-    if resolve_tool("uv") is None:
-        pytest.skip("installing a connector needs uv")
     root = tmp_path_factory.mktemp("connectors")
-    folder = _write_fixture(tmp_path_factory.mktemp("elsewhere") / "src", entry_points=_ONE_ENTRY)
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(connectors, "connectors_root", lambda: root)
-        yield asyncio.run(connectors.install_from_folder(folder))
+        yield install(tmp_path_factory, root, "fixture-source", "FixtureSource")
 
 
 def test_install_records_what_the_connector_describes(installed):
@@ -125,7 +43,7 @@ def test_install_records_what_the_connector_describes(installed):
 
 
 def test_a_folder_must_declare_exactly_one_connector(tmp_path):
-    folder = _write_fixture(tmp_path / "src", entry_points="")
+    folder = write_fixture(tmp_path / "src", entry_points="")
     with pytest.raises(connectors.ConnectorInstallFailed, match="declares 0"):
         asyncio.run(connectors.install_from_folder(folder))
 
@@ -145,6 +63,14 @@ def test_a_folder_must_declare_exactly_one_connector(tmp_path):
                 "url_prefixes": [".*"],
             },
             "which is not a URL prefix",
+        ),
+        (
+            {"name": "x", "terms": {"statement": "s", "url": "https://x/t"}, "media": ["video"]},
+            "x writes 'video'",
+        ),
+        (
+            {"name": "x", "terms": {"statement": "s", "url": "https://x/t"}, "tools": ["curl"]},
+            "x runs 'curl'",
         ),
     ],
 )
@@ -283,6 +209,10 @@ def test_the_sdk_imports_only_the_standard_library():
                 assert root in own or root in sys.stdlib_module_names, f"{path.name} imports {root}"
     pyproject = (SDK / "pyproject.toml").read_text(encoding="utf-8")
     assert "dependencies = []" in pyproject
+
+
+def test_the_sdk_declares_what_the_core_accepts(sdk):
+    assert (sdk.protocol.MEDIA, sdk.protocol.TOOLS) == (connectors.MEDIA, connectors.TOOLS)
 
 
 @pytest.fixture

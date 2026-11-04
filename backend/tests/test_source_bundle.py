@@ -143,11 +143,11 @@ def test_a_stored_bundle_is_a_checked_copy(tmp_path: Path):
     assert sorted(p.name for p in dest.parent.iterdir()) == ["doc.bundle"]
 
 
-def _refused(source: Path, tmp_path: Path) -> str:
+def _refused(source: Path, tmp_path: Path, media: frozenset[str] = frozenset({"text"})) -> str:
     dest = tmp_path / "raw" / "doc.bundle"
     dest.parent.mkdir(exist_ok=True)
     with pytest.raises(BundleRefused) as refused:
-        store_bundle(source, dest)
+        store_bundle(source, dest, media=media)
     # A refused bundle leaves nothing behind, partial copy included.
     assert list(dest.parent.iterdir()) == []
     return refused.value.detail
@@ -325,6 +325,25 @@ def test_an_audio_bundle_is_not_ingested_yet(tmp_path: Path):
         {"assets/talk.flac": b"fLaC"},
     )
     assert _refused(source, tmp_path) == "audio bundles cannot be ingested yet"
+
+
+@pytest.mark.parametrize(
+    ("audio", "captions", "message"),
+    [
+        ("assets/talk.ogg", None, "assets/talk.ogg is not one of mp3, m4a, wav, flac"),
+        ("assets/talk.flac", "assets/talk.srt", "assets/talk.srt is not a WebVTT caption track"),
+    ],
+)
+def test_audio_the_transcriber_and_player_cannot_take_is_refused(
+    tmp_path, audio, captions, message
+):
+    media = {"kind": "youtube", "url": "https://www.youtube.com/watch?v=t1", "audio": audio}
+    files = {audio: b"fLaC"}
+    if captions:
+        media["captions"] = captions
+        files[captions] = b"1\n00:00:01,000 --> 00:00:02,000\nhi\n"
+    source = _write_bundle(tmp_path / "out", _manifest(media=media), files)
+    assert _refused(source, tmp_path, frozenset({"youtube"})) == message
 
 
 def test_markdown_sections_keep_their_declared_heading(tmp_path: Path):

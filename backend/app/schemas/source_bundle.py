@@ -73,4 +73,8 @@ class BundleManifest(_Strict):
     media: TextMedia | AudioMedia | YoutubeMedia = Field(discriminator="kind")
     terms: Terms
     tags: list[Annotated[str, Field(min_length=1, max_length=100)]] = []
+    # What the source says about itself (a talk's description, its chapter titles): the
+    # metadata the transcript vocabulary is drawn from (I-66), never document text.
+    description: str | None = Field(None, max_length=20000)
+    chapters: list[Annotated[str, Field(min_length=1, max_length=500)]] = []
     sections: list[BundleSection] = []

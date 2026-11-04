@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -70,6 +71,15 @@ class BundleWriter:
         path.write_bytes(data)
         return rel
 
+    def add_asset_file(self, name: str, source: Path) -> str:
+        """Move a file already on disk into the bundle (an hour of audio is not read into
+        memory); returns its path for the manifest."""
+        rel = f"assets/{_safe(name)}"
+        path = self.dest / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), path)
+        return rel
+
     def finish(
         self,
         *,
@@ -82,6 +92,8 @@ class BundleWriter:
         source_url: str | None = None,
         locator: str | None = None,
         tags: list[str] | None = None,
+        description: str | None = None,
+        chapters: list[str] | None = None,
     ) -> Path:
         """Write `manifest.json`. Call once, after every section and asset."""
         media = media or {"kind": "text"}
@@ -95,11 +107,12 @@ class BundleWriter:
             "media": media,
             "terms": {"statement": terms.statement, "url": terms.url},
             "tags": list(tags or []),
+            "chapters": list(chapters or []),
             "sections": self._sections,
         }
-        for key, value in (("cover", cover), ("source_url", source_url), ("locator", locator)):
-            if value is not None:
-                manifest[key] = value
+        optional = {"cover": cover, "source_url": source_url, "locator": locator,
+                    "description": description}  # fmt: skip
+        manifest |= {key: value for key, value in optional.items() if value is not None}
         path = self.dest / "manifest.json"
         path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
         return path
