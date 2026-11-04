@@ -88,7 +88,8 @@ jobs:
           dpkg-query -W -f='${Status}' libvulkan1 2>/dev/null | grep -q "install ok installed" \
             || { echo "libvulkan1 is not installed after the .deb (#355)"; exit 1; }
           exe="$(dpkg -L "$(dpkg-deb -f "$deb" Package)" | grep '^/usr/bin/' | head -1)"
-          SCREENSHOT=build/linux-deb.png xvfb-run -a -s "-screen 0 1440x900x24" \
+          # RENDER_CHECK: WebKitGTK renders a page whose text only its script writes (#99).
+          RENDER_CHECK=1 SCREENSHOT=build/linux-deb.png xvfb-run -a -s "-screen 0 1440x900x24" \
             bash scripts/desktop/verify_installed.sh "$exe"
 
       - name: Build the AppImage
@@ -327,7 +328,8 @@ jobs:
             exit 1
           fi
           echo "installed at $exe"
-          SCREENSHOT=build/windows.png bash scripts/desktop/verify_installed.sh "$exe"
+          # RENDER_CHECK: WebView2 renders a page whose text only its script writes (#99).
+          RENDER_CHECK=1 SCREENSHOT=build/windows.png bash scripts/desktop/verify_installed.sh "$exe"
 
       # Recorded to compare against the stage budget across runs.
       - name: Report installer size

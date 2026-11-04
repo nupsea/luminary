@@ -5,6 +5,8 @@
 #
 # Passes when the shell logs `ready`, the window loads the page, the app stays up,
 # and a document ingested through it is found by vector search (then deleted).
+# RENDER_CHECK=1 also has the shell render a page whose text only its script writes,
+# through the installed webview, beside the same page with the script disabled (#99).
 # SCREENSHOT=<file.png> captures the screen once ready (Linux needs a display and
 # ImageMagick's `import`, or `grim` under Wayland).
 set -uo pipefail
@@ -99,6 +101,59 @@ check_page_loaded() {
     return 1
 }
 
+# Serve two loopback pages and hand them to the shell (`render::self_test`). The marker is
+# joined by the page's script, so it is in no file: only an engine that ran the script has it.
+RENDER_TOKEN="$(date +%s)$$"
+RENDER_MARKER="luminary-render-$RENDER_TOKEN"
+start_render_fixtures() {
+    local dir py port
+    dir="$(mktemp -d)"
+    py="$(command -v python3 || command -v python)" || { _warn "no python to serve the render fixtures"; return 1; }
+    for page in scripted unscripted; do
+        local kind=""
+        [ "$page" = unscripted ] && kind=' type="text/plain"'
+        printf '<!doctype html><html><head><title>render check</title></head><body>
+<main id="out">static text</main>
+<script%s>document.getElementById("out").textContent = ["luminary", "render", "%s"].join("-");</script>
+</body></html>\n' "$kind" "$RENDER_TOKEN" > "$dir/$page.html"
+    done
+    "$py" -c '
+import http.server, functools, sys
+handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=sys.argv[1])
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+print(server.server_port, flush=True)
+server.serve_forever()' "$dir" > "$dir/port" 2>/dev/null &
+    RENDER_SERVER=$!
+    for _ in $(seq 1 20); do [ -s "$dir/port" ] && break; sleep 0.5; done
+    port="$(head -1 "$dir/port")"
+    [ -n "$port" ] || { _warn "the render fixture server did not start"; return 1; }
+    export LUMINARY_RENDER_SELFTEST="http://127.0.0.1:$port/scripted.html http://127.0.0.1:$port/unscripted.html"
+    _info "render fixtures at http://127.0.0.1:$port/"
+}
+
+check_render() {
+    local lines scripted unscripted
+    for _ in $(seq 1 "${RENDER_DEADLINE:-120}"); do
+        lines="$(this_launch | grep '\[render-selftest\]')"
+        [ "$(grep -c . <<<"$lines")" -ge 2 ] && break
+        sleep 1
+    done
+    scripted="$(grep '/scripted.html ' <<<"$lines")"
+    unscripted="$(grep '/unscripted.html ' <<<"$lines")"
+    if [ -z "$scripted" ] || [ -z "$unscripted" ]; then
+        _warn "the shell did not report both render checks:"; echo "${lines:-    (nothing)}"; return 1
+    fi
+    # The control: without its script the page must not carry the marker, or the check
+    # below would pass on any page.
+    if grep -qF "$RENDER_MARKER" <<<"$unscripted"; then
+        _warn "the page with its script disabled has the marker; the check cannot fail"; return 1
+    fi
+    if ! grep -qF "$RENDER_MARKER" <<<"$scripted"; then
+        _warn "the installed webview did not run the page's script:"; echo "    $scripted" | cut -c1-400; return 1
+    fi
+    _info "the installed webview rendered script-written text, and not without the script"
+}
+
 # Process groups under the app other than this script's own: the shell leads each
 # child in one, so a group with members after the shell exits is an orphaned tree.
 descendant_groups() {
@@ -114,6 +169,11 @@ descendant_groups() {
             for (i in pid) if (seen[pid[i]] && pg[i] != own) print pg[i]
         }' | sort -u
 }
+
+RENDER_SERVER=""
+if [ -n "${RENDER_CHECK:-}" ]; then
+    start_render_fixtures || { _warn "render check could not be set up"; RENDER_CHECK_BROKEN=1; }
+fi
 
 _step "Launching $EXE"
 "$EXE" >"$BUILD_DIR/installed-app.out" 2>&1 &
@@ -136,6 +196,9 @@ case "$result" in
             _warn "the bundled engine did not start"; FAILED=1
         fi
         check_page_loaded || FAILED=1
+        if [ -n "${RENDER_CHECK:-}" ]; then
+            [ -z "${RENDER_CHECK_BROKEN:-}" ] && check_render || FAILED=1
+        fi
         # Long enough for a backend that dies after its first connection to be seen dying.
         sleep 20
         kill -0 "$APP" 2>/dev/null || { _warn "the app exited after reporting ready"; FAILED=1; }
@@ -192,6 +255,8 @@ else
         _info "SIGTERM ended every process the app started ($(echo $groups | wc -w | tr -d ' ') groups)"
     fi
 fi
+
+[ -n "$RENDER_SERVER" ] && kill "$RENDER_SERVER" 2>/dev/null
 
 _step "This launch's log"
 this_launch | tail -60 | sed 's/^/    /'
