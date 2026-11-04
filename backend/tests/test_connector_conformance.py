@@ -162,3 +162,19 @@ def test_a_description_install_would_refuse_fails(kit):
     assert not finding.passed
     assert "an https terms.url" in finding.detail
     assert "'book.example'" in finding.detail
+
+
+def test_the_templates_placeholder_terms_fail(kit):
+    """A template ships a placeholder; it must never satisfy the terms check it stands in for."""
+    conformance, _ = kit
+    from luminary_source_sdk import PLACEHOLDER_TERMS
+
+    desc = {"name": "book", "version": "0.1.0", "licence": "Apache-2.0",
+            "terms": {"statement": PLACEHOLDER_TERMS, "url": "https://book.example/terms"},
+            "url_prefixes": ["https://book.example/"]}  # fmt: skip
+    finding = conformance.check_description(
+        desc, conformance.Truth({"url": "https://book.example/"}, TOC)
+    )[0]
+
+    assert not finding.passed
+    assert "placeholder" in finding.detail

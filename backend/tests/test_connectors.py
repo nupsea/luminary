@@ -73,6 +73,13 @@ def test_a_folder_must_declare_exactly_one_connector(tmp_path):
             {"name": "x", "terms": {"statement": "s", "url": "https://x/t"}, "tools": ["curl"]},
             "x runs 'curl'",
         ),
+        (
+            {
+                "name": "x",
+                "terms": {"statement": connectors.PLACEHOLDER_TERMS, "url": "https://x/t"},
+            },
+            "still carries the template's placeholder terms",
+        ),
     ],
 )
 def test_a_description_is_checked_before_it_is_recorded(description, message):
@@ -217,6 +224,7 @@ def test_the_sdk_imports_only_the_standard_library():
 
 def test_the_sdk_declares_what_the_core_accepts(sdk):
     assert (sdk.protocol.MEDIA, sdk.protocol.TOOLS) == (connectors.MEDIA, connectors.TOOLS)
+    assert sdk.PLACEHOLDER_TERMS == connectors.PLACEHOLDER_TERMS
 
 
 @pytest.fixture

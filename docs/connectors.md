@@ -49,7 +49,8 @@ Install refuses a connector whose `describe` breaks any of these rules
 - `name` equals its `luminary.connectors` entry-point name: lowercase letters, digits and `-`,
   at most 64.
 - `terms.statement` quotes what the source's own terms say about this use, and `terms.url` is
-  https. Licence and terms are shown before install and copied into every bundle.
+  https. Licence and terms are shown before install and copied into every bundle. The
+  template's `PLACEHOLDER_TERMS` is refused, by install and by the kit.
 - Each `url_prefixes` entry is a scheme, a host and a path (`https://doc.rust-lang.org/book/`).
   A pasted link goes to the first installed connector, by name, that claims it.
 - `media` lists only `text`, `audio` and `youtube`; `tools` lists only `ffmpeg`. The core

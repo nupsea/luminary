@@ -12,6 +12,7 @@ process (`luminary_source_sdk.serve`), one request per run.
 from luminary_source_sdk.bundle import BundleError, BundleWriter
 from luminary_source_sdk.connector import Connector, ConnectorError, Report
 from luminary_source_sdk.protocol import (
+    PLACEHOLDER_TERMS,
     PROTOCOL_VERSION,
     Account,
     Choice,
@@ -23,6 +24,7 @@ from luminary_source_sdk.protocol import (
 )
 
 __all__ = [
+    "PLACEHOLDER_TERMS",
     "PROTOCOL_VERSION",
     "Account",
     "BundleError",

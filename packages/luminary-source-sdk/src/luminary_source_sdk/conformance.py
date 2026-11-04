@@ -30,6 +30,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
+from luminary_source_sdk.protocol import PLACEHOLDER_TERMS
 from luminary_source_sdk.testing import run
 
 
@@ -105,6 +106,8 @@ def check_description(desc: dict[str, Any], truth: Truth) -> list[Finding]:
     missing += [f"terms.{k}" for k in ("statement", "url") if not terms.get(k)]
     if terms.get("url") and not str(terms["url"]).startswith("https://"):
         missing.append("an https terms.url")
+    if str(terms.get("statement", "")).strip() == PLACEHOLDER_TERMS:
+        missing.append("the source's terms, quoted (the template's placeholder is still there)")
     missing += [f"a URL prefix, not {p!r}" for p in desc.get("url_prefixes") or []
                 if not re.match(r"^https?://[^/\s]+/", str(p))]  # fmt: skip
     url = str(truth.input.get("url", ""))

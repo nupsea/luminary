@@ -27,6 +27,9 @@ ERROR_CODES = ("input", "auth", "source", "internal")
 LOG_LEVELS = ("debug", "info", "warning", "error")
 MEDIA = ("text", "audio", "youtube")
 TOOLS = ("ffmpeg",)
+# What a connector started from the template states until its author quotes the source's own
+# terms. The conformance kit and install both refuse it: a placeholder is not a reading.
+PLACEHOLDER_TERMS = "Quote what the source's own terms say about downloading and automated use."
 
 Op = Literal["describe", "check", "preview", "fetch"]
 
