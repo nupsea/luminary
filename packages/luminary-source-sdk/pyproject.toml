@@ -18,3 +18,8 @@ packages = ["src/luminary_source_sdk"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "schema/source-bundle.schema.json" = "luminary_source_sdk/source-bundle.schema.json"
+
+# A connector developed against this folder (`path = ...`) rebuilds the SDK when its code or
+# schema changes; by default uv rebuilds a path dependency only when pyproject.toml does.
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }, { file = "schema/*.json" }]

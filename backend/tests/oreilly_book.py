@@ -134,6 +134,8 @@ def write_book_bundle(dest: Path, client: FixtureBookClient) -> Path:
             "statement": "O'Reilly's Membership Agreement grants access for personal use only.",
             "url": "https://www.oreilly.com/membership-agreement/",
         },
+        "description": meta["description"],
+        "labels": ["oreilly", "Tech Book", "oreilly"],
         "sections": sections,
     }
     (dest / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")

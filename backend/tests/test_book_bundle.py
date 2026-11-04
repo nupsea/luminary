@@ -118,3 +118,28 @@ def test_a_bundle_is_sampled_as_ingestion_reads_it(twins):
     text = read_document_text(bundle)
     assert text == DocumentParser().parse(bundle, "epub").raw_text
     assert "append-only sequence of records" in text
+
+
+async def test_a_bundles_labels_become_the_documents_tags(test_db, tmp_path):
+    """The built-in O'Reilly import tags a book `oreilly` and `tech-book`; a bundle-era book
+    carries the same tags in the library and its tag index."""
+    from sqlalchemy import select
+
+    from app.models import DocumentModel, DocumentTagIndexModel
+    from app.workflows.bundle_ingestion import store_document_bundle
+
+    _, factory, _ = test_db
+    async with factory() as session:
+        session.add(make_document(id="book", title="x", format="epub", file_path="", tags=[]))
+        await session.commit()
+    await store_document_bundle("book", write_book_bundle(tmp_path / "out", _RealImages()))
+
+    async with factory() as session:
+        doc = await session.get(DocumentModel, "book")
+        indexed = await session.scalars(
+            select(DocumentTagIndexModel.tag_full).where(
+                DocumentTagIndexModel.document_id == "book"
+            )
+        )
+        assert doc.tags == ["oreilly", "tech-book"]
+        assert sorted(indexed) == ["oreilly", "tech-book"]

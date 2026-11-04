@@ -94,6 +94,7 @@ class BundleWriter:
         tags: list[str] | None = None,
         description: str | None = None,
         chapters: list[str] | None = None,
+        labels: list[str] | None = None,
     ) -> Path:
         """Write `manifest.json`. Call once, after every section and asset."""
         media = media or {"kind": "text"}
@@ -108,6 +109,7 @@ class BundleWriter:
             "terms": {"statement": terms.statement, "url": terms.url},
             "tags": list(tags or []),
             "chapters": list(chapters or []),
+            "labels": list(labels or []),
             "sections": self._sections,
         }
         optional = {"cover": cover, "source_url": source_url, "locator": locator,
