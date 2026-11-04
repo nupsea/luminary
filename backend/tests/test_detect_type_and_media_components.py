@@ -143,50 +143,6 @@ async def test_detect_type_kills_the_parse_it_gives_up_on(monkeypatch, tmp_path)
     assert spawned and spawned[0].returncode is not None
 
 
-@pytest.mark.anyio
-async def test_youtube_error_names_every_missing_component(monkeypatch) -> None:
-    """Not just the first one, and not shell instructions.
-
-    The old check tested yt-dlp then ffmpeg and returned on the first failure,
-    never reaching transcription -- so installing ffmpeg bought the user a
-    second identical wall.
-    """
-    import app.routers.documents as documents_module
-
-    async def _no_media_capabilities():
-        return {
-            "youtube_ingest": {"available": False, "requires": ["transcription", "ffmpeg"]},
-        }
-
-    monkeypatch.setattr(documents_module, "capabilities", _no_media_capabilities)
-    # Pinned, not inherited from the machine: the direct check now decides for
-    # the tools it can run, so a developer with ffmpeg installed and a CI runner
-    # without it would otherwise take different branches -- which is exactly the
-    # divergence that let a broken YouTube through a green local suite.
-    monkeypatch.setattr(documents_module._yt_module, "check_ffmpeg_available", lambda: False)
-    monkeypatch.setattr(documents_module._yt_module, "check_ytdlp_available", lambda: True)
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post(
-            "/documents/ingest-url",
-            json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
-        )
-
-    assert resp.status_code == 503
-    detail = resp.json()["detail"]
-    assert isinstance(detail, dict), "the client needs component ids, not a sentence"
-
-    # The message names everything missing, in the words the install screen uses.
-    assert "Speech to text" in detail["message"]
-    assert "Audio and video support" in detail["message"]
-
-    # But only the fetchable one is offered as a button. ffmpeg is `kind="tool"`
-    # and has no automated source -- its licence travels with the build, so it
-    # is not Luminary's to pick. A button for it fails on click, which is worse
-    # than no button.
-    assert detail["components"] == ["transcription"]
-
-
 def test_a_tool_outside_the_bundles_path_is_still_found(tmp_path, monkeypatch):
     """The actual cause of the shipped YouTube failure.
 

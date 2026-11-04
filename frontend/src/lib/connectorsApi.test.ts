@@ -30,13 +30,13 @@ function connector(name: string, url_prefixes: string[], extra: Partial<Connecto
 }
 
 const youtube = connector("youtube", ["https://www.youtube.com/watch", "https://youtu.be/"])
-const oreilly = connector("oreilly", ["https://learning.oreilly.com/"])
+const books = connector("books", ["https://books.example/"])
 
 describe("connectorForUrl", () => {
   it("routes a link to the connector whose prefix it starts with", () => {
-    expect(connectorForUrl([oreilly, youtube], "https://youtu.be/abc")?.name).toBe("youtube")
-    expect(connectorForUrl([oreilly, youtube], "  https://learning.oreilly.com/library/view/x/1/ ")?.name).toBe(
-      "oreilly",
+    expect(connectorForUrl([books, youtube], "https://youtu.be/abc")?.name).toBe("youtube")
+    expect(connectorForUrl([books, youtube], "  https://books.example/library/view/x/1/ ")?.name).toBe(
+      "books",
     )
   })
 
@@ -54,13 +54,13 @@ describe("connectorForUrl", () => {
 
 describe("signInRequiredFor", () => {
   it("names the connector a 401 asks for", () => {
-    const err = new ApiError(401, "Unauthorized", JSON.stringify({ detail: "Connect O'Reilly first.", connector: "oreilly" }))
-    expect(signInRequiredFor(err)).toBe("oreilly")
+    const err = new ApiError(401, "Unauthorized", JSON.stringify({ detail: "Connect Books first.", connector: "books" }))
+    expect(signInRequiredFor(err)).toBe("books")
   })
 
   it("is null for any other failure", () => {
     expect(signInRequiredFor(new ApiError(401, "Unauthorized", JSON.stringify({ detail: "x" })))).toBeNull()
-    expect(signInRequiredFor(new ApiError(503, "x", JSON.stringify({ connector: "oreilly" })))).toBeNull()
+    expect(signInRequiredFor(new ApiError(503, "x", JSON.stringify({ connector: "books" })))).toBeNull()
     expect(signInRequiredFor(new Error("network"))).toBeNull()
   })
 })

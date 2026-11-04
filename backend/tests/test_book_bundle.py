@@ -11,11 +11,16 @@ from PIL import Image
 
 from app.main import app
 from app.services.image_extractor import extract_images_epub
-from app.services.oreilly_service import download_oreilly_book_to_epub
 from app.services.parser import DocumentParser
 from app.services.source_bundle import store_bundle
 from tests.factories import make_document
-from tests.oreilly_book import BOOK_ID, BOOK_URL, COVER_URL, FixtureBookClient, write_book_bundle
+from tests.oreilly_book import (
+    BOOK_URL,
+    COVER_URL,
+    FixtureBookClient,
+    write_book_bundle,
+    write_book_epub,
+)
 
 
 def _image(fmt: str, size: tuple[int, int], colour: str) -> bytes:
@@ -38,7 +43,7 @@ class _RealImages(FixtureBookClient):
 @pytest.fixture
 def twins(tmp_path):
     """(EPUB path, stored bundle path) of the same book."""
-    epub_path, _ = download_oreilly_book_to_epub(BOOK_ID, tmp_path / "book.epub", _RealImages())
+    epub_path = write_book_epub(tmp_path / "book.epub", _RealImages())
     bundle = tmp_path / "raw" / "book.bundle"
     bundle.parent.mkdir()
     store_bundle(write_book_bundle(tmp_path / "out", _RealImages()), bundle)
@@ -143,3 +148,31 @@ async def test_a_bundles_labels_become_the_documents_tags(test_db, tmp_path):
         )
         assert doc.tags == ["oreilly", "tech-book"]
         assert sorted(indexed) == ["oreilly", "tech-book"]
+
+
+def test_an_epub_era_book_keeps_its_section_tree(tmp_path):
+    """Books imported before connectors keep their EPUB and read as they did (#467)."""
+    from ebooklib import epub
+
+    path = write_book_epub(tmp_path / "book.epub", FixtureBookClient())
+    parsed = DocumentParser().parse(path, "epub")
+
+    names = {item.get_name() for item in epub.read_epub(str(path)).get_items()}
+    figure = next(name for name in names if name.endswith("-f1.png"))
+    assert [(s.heading, s.level, s.text) for s in parsed.sections] == [
+        ("Preface", 1, "This preface says who the book is for and what each chapter covers."),
+        ("1. Storage", 1, "A log is an append-only sequence of records on disk."),
+        (
+            "Indexes",
+            1,
+            "An index is extra structure derived from the primary data.\n\n"
+            f"![An LSM tree]({figure})\n*[Figure: An LSM tree]*",
+        ),
+        (
+            "2. Replication",
+            1,
+            "Replication keeps a copy of the same data on several machines, building on logs.",
+        ),
+        ("Leaders and Followers", 1, "Every write goes to the leader, which streams it on."),
+    ]
+    assert parsed.title == "Fixture Systems"

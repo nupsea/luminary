@@ -74,17 +74,9 @@ from app.schemas.documents import (
 )
 from app.schemas.membership import CollectionRef
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched in tests
-
-# indirect: tests patch `app.services.youtube_downloader.{check_ytdlp_available,
-# check_ffmpeg_available, fetch_metadata, download_audio}`.
 from app.services import ingestion_progress, network_errors
-from app.services import youtube_downloader as _yt_module
 from app.services.activity_service import ActivityService
 from app.services.article_extractor import get_article_extractor
-from app.services.component_advice import ComponentsMissing, components_missing_detail
-from app.services.components import (
-    capabilities,
-)
 from app.services.connectors import connector_for_url
 from app.services.document_deletion_service import get_document_deletion_service
 from app.services.document_search import get_document_search_service
@@ -111,12 +103,12 @@ from app.services.epub_service import (
 )
 from app.services.image_extractor import DOCUMENT_IMAGE_FORMATS
 from app.services.ingestion_jobs import get_ingestion_jobs
+from app.services.known_sources import refuse_unclaimed
 from app.services.library_summary import get_library_summary_service
 from app.services.llm_admission import paused_for_interaction
 from app.services.naming import normalize_tag_slug
 from app.services.notes_service import sync_document_tag_index
 from app.services.objective_tracker import get_objective_tracker_service
-from app.services.oreilly_service import is_oreilly_url
 from app.services.parser import DocumentParser
 from app.services.remote_source import (
     RemoteDocument,
@@ -127,10 +119,8 @@ from app.services.remote_source import (
 from app.services.source_bundle import bundle_cover, bundle_image
 from app.services.summarizer import PREGENERATE_MODES
 from app.services.transcript_fix import fix_term
-from app.services.transcript_vocabulary import vocabulary_from_metadata
 from app.services.type_detection import detect_kind
 from app.services.vector_store import get_lancedb_service
-from app.services.youtube_downloader import is_youtube_url
 from app.storage import library_root
 from app.types import (
     MEDIA_FORMATS,
@@ -147,8 +137,6 @@ from app.workflows.ingestion import (
 )
 from app.workflows.ingestion_nodes._shared import _persist_extraction_report, stage_progress_pct
 from app.workflows.ingestion_nodes.finalize import launch_followup
-from app.workflows.oreilly_ingestion import start_oreilly_ingestion
-from app.workflows.youtube_ingestion import download_and_ingest
 
 logger = logging.getLogger(__name__)
 
@@ -650,170 +638,87 @@ async def ingest_url(
     body: UrlIngestRequest,
     settings: Settings = Depends(get_settings),
 ):
-    """Ingest a YouTube URL, an O'Reilly book, a linked PDF, or a web article."""
+    """Ingest a link: through the installed connector that claims it, else a linked file
+    (a PDF) when the URL resolves to one, else a web article."""
 
-    # An installed connector that claims the link takes it before any built-in path.
     claimed = connector_for_url(body.url)
     if claimed is not None:
         return await start_claimed(claimed, body.url)
+    # A YouTube or O'Reilly link with no connector: name what to install, never an article.
+    refuse_unclaimed(body.url)
 
-    # 0. O'Reilly Learning book detection
-    if is_oreilly_url(body.url):
-        return await start_oreilly_ingestion(body.url, settings)
+    doc_id = str(uuid.uuid4())
+    try:
+        remote = await fetch_remote_document(body.url)
+    except UningestibleRemoteContent as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    except RemoteDocumentTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        logger.warning("Could not reach %s: %s", body.url, exc)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not fetch that URL. {network_errors.explain(str(exc)) or exc}",
+        ) from exc
 
-    # 1. Non-YouTube: a linked file if the URL resolves to one, else a web article
-    if not is_youtube_url(body.url):
-        doc_id = str(uuid.uuid4())
-        try:
-            remote = await fetch_remote_document(body.url)
-        except UningestibleRemoteContent as exc:
-            raise HTTPException(status_code=415, detail=str(exc)) from exc
-        except RemoteDocumentTooLarge as exc:
-            raise HTTPException(status_code=413, detail=str(exc)) from exc
-        except httpx.HTTPError as exc:
-            logger.warning("Could not reach %s: %s", body.url, exc)
-            raise HTTPException(
-                status_code=400,
-                detail=f"Could not fetch that URL. {network_errors.explain(str(exc)) or exc}",
-            ) from exc
-
-        if remote is not None:
-            return await _ingest_remote_pdf(doc_id, remote, settings)
-
-        try:
-            extractor = get_article_extractor()
-            parsed = await extractor.extract(
-                body.url, doc_id=doc_id, rendered_html=body.rendered_html
-            )
-        except Exception as exc:
-            logger.exception("Article extraction failed for %s", body.url)
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        data_dir = library_root(settings)
-        raw_dir = data_dir / "raw"
-        raw_dir.mkdir(parents=True, exist_ok=True)
-        dest = raw_dir / f"{doc_id}.md"
-        await asyncio.to_thread(dest.write_text, parsed.raw_text, encoding="utf-8")
-
-        async with get_session_factory()() as session:
-            doc = DocumentModel(
-                id=doc_id,
-                title=parsed.title,
-                format="md",
-                word_count=parsed.word_count,
-                page_count=1,
-                file_path=str(dest),
-                file_hash=None,
-                stage="parsing",
-                source_url=body.url,
-            )
-            # Document row must exist in SQLite before the background ingestion job starts.
-            session.add(doc)
-            await session.commit()
-
-        get_ingestion_jobs().launch(doc_id, run_ingestion(doc_id, str(dest), "md"))
-        # Persisted here, not in parse_node: the graph parses the stored Markdown,
-        # which carries no report, and fidelity is only known at the extraction.
-        if parsed.extraction_report is not None:
-            # The extractor sees only that HTML was supplied; a page the user saved
-            # from their own browser is a different source from the shell's webview.
-            if body.render_state == "saved":
-                parsed.extraction_report["fetch"] = "saved"
-            await _persist_extraction_report(doc_id, parsed.extraction_report)
-
-        logger.info(
-            "Article ingestion started",
-            extra={
-                "doc_id": doc_id,
-                "url": body.url,
-                # Which path produced the HTML, so a silent fallback to the static
-                # fetch is visible in the log rather than inferred from word counts.
-                "fetch": (parsed.extraction_report or {}).get("fetch", "unknown"),
-                "rendered_html_supplied": bool(body.rendered_html),
-                "render_state": body.render_state or "not-reported",
-                "render_detail": body.render_detail or "",
-            },
-        )
-        return {"document_id": doc_id, "status": "processing", "warnings": parsed.warnings}
-
-    # 2. YouTube. Ask the capability what is missing rather than testing tools
-    # one at a time here.
-    #
-    # Two bugs came from doing it by hand. The checks stopped at the first
-    # failure and never covered transcription at all, so a user was told to
-    # install ffmpeg, did, and hit a second wall with a worse message. And the
-    # advice was "brew install ffmpeg" while the app ships an installer for that
-    # exact component -- ffmpeg and the transcriber are withheld from the bundle
-    # for licensing reasons (GPL), not because the app cannot fetch them. The
-    # bundled app also runs with a minimal PATH, so a brew install may not even
-    # be found.
-    yt_capability = (await capabilities()).get("youtube_ingest", {})
-    required: list[str] = []
-    if not yt_capability.get("available"):
-        required = list(yt_capability.get("requires") or [])
-    # For the two tools it can run directly, the direct check decides -- in both
-    # directions. The capability reaches them through component_status and the
-    # two can disagree; what matters here is whether the binary can actually be
-    # invoked, so an optimistic capability cannot wave a missing tool through
-    # and a pessimistic one cannot block a tool that is plainly there.
-    # Everything else (the transcriber) is the capability's to report.
-    for name, present in (
-        ("yt-dlp", _yt_module.check_ytdlp_available()),
-        ("ffmpeg", _yt_module.check_ffmpeg_available()),
-    ):
-        if present and name in required:
-            required.remove(name)
-        elif not present and name not in required:
-            required.append(name)
-    if required:
-        raise ComponentsMissing(components_missing_detail(required, "YouTube"))
+    if remote is not None:
+        return await _ingest_remote_pdf(doc_id, remote, settings)
 
     try:
-        meta = await _yt_module.fetch_metadata(body.url)
-    except RuntimeError as exc:
-        logger.warning("yt-dlp metadata fetch failed: %s", exc)
+        extractor = get_article_extractor()
+        parsed = await extractor.extract(
+            body.url, doc_id=doc_id, rendered_html=body.rendered_html
+        )
+    except Exception as exc:
+        logger.exception("Article extraction failed for %s", body.url)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    video_title = meta.get("title") or "YouTube Video"
-    channel_name = meta.get("uploader") or meta.get("channel") or None
-    doc_id = str(uuid.uuid4())
 
     data_dir = library_root(settings)
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
-    dest_stem = raw_dir / doc_id  # yt-dlp appends the extension
-    dest = dest_stem.with_suffix(_yt_module.AUDIO_SUFFIX)
+    dest = raw_dir / f"{doc_id}.md"
+    await asyncio.to_thread(dest.write_text, parsed.raw_text, encoding="utf-8")
 
     async with get_session_factory()() as session:
         doc = DocumentModel(
             id=doc_id,
-            title=video_title,
-            format=_yt_module.AUDIO_SUFFIX.lstrip("."),
-            word_count=0,
-            page_count=0,
+            title=parsed.title,
+            format="md",
+            word_count=parsed.word_count,
+            page_count=1,
             file_path=str(dest),
             file_hash=None,
-            stage="downloading",
+            stage="parsing",
             source_url=body.url,
-            video_title=video_title,
-            channel_name=channel_name,
-            youtube_url=body.url,
-            transcript_vocabulary=vocabulary_from_metadata(meta) or None,
         )
         # Document row must exist in SQLite before the background ingestion job starts.
         session.add(doc)
         await session.commit()
 
-    # The download is part of the job, not the request: a long talk takes minutes,
-    # and until the document exists there is nothing for the UI to show progress on.
-    get_ingestion_jobs().launch(
-        doc_id,
-        download_and_ingest(
-            doc_id, body.url, dest_stem, _yt_module.uploader_caption_language(meta)
-        ),
+    get_ingestion_jobs().launch(doc_id, run_ingestion(doc_id, str(dest), "md"))
+    # Persisted here, not in parse_node: the graph parses the stored Markdown,
+    # which carries no report, and fidelity is only known at the extraction.
+    if parsed.extraction_report is not None:
+        # The extractor sees only that HTML was supplied; a page the user saved
+        # from their own browser is a different source from the shell's webview.
+        if body.render_state == "saved":
+            parsed.extraction_report["fetch"] = "saved"
+        await _persist_extraction_report(doc_id, parsed.extraction_report)
+
+    logger.info(
+        "Article ingestion started",
+        extra={
+            "doc_id": doc_id,
+            "url": body.url,
+            # Which path produced the HTML, so a silent fallback to the static
+            # fetch is visible in the log rather than inferred from word counts.
+            "fetch": (parsed.extraction_report or {}).get("fetch", "unknown"),
+            "rendered_html_supplied": bool(body.rendered_html),
+            "render_state": body.render_state or "not-reported",
+            "render_detail": body.render_detail or "",
+        },
     )
-    logger.info("YouTube ingestion started", extra={"doc_id": doc_id, "url": body.url})
-    return {"document_id": doc_id, "status": "processing"}
+    return {"document_id": doc_id, "status": "processing", "warnings": parsed.warnings}
 
 
 @router.get("/facets", response_model=DocumentFacetsResponse)

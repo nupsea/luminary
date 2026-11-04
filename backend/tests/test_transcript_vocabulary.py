@@ -6,15 +6,11 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from app.main import app
 from app.models import DocumentModel
 from app.services.captions import captions_path, parse_vtt
-from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.transcript_vocabulary import hotwords, vocabulary_from_metadata
-from app.services.youtube_downloader import uploader_caption_language
 from tests.factories import make_document
 
 _TALK = {
@@ -111,21 +107,6 @@ def test_captions_parse_to_transcriber_segments():
         {"start": 1.0, "end": 3.5, "text": "We store vectors in LanceDB"},
         {"start": 3605.25, "end": 3607.0, "text": "R&D on Kimi K3"},
     ]
-
-
-def test_only_an_uploaded_track_in_the_spoken_language_is_used():
-    meta = {
-        "language": "en",
-        "subtitles": {"live_chat": [], "fr": [], "en-GB": []},
-        "automatic_captions": {"en": []},
-    }
-    assert uploader_caption_language(meta) == "en-GB"
-    assert uploader_caption_language({**meta, "subtitles": {"en": [], "en-GB": []}}) == "en"
-    # YouTube's own recognition, a translation, or an undeclared language: Whisper instead.
-    assert uploader_caption_language({**meta, "subtitles": {}}) is None
-    assert uploader_caption_language({**meta, "subtitles": {"fr": []}}) is None
-    assert uploader_caption_language({**meta, "language": None}) is None
-    assert uploader_caption_language({**meta, "subtitles": {"-x": []}, "language": "-x"}) is None
 
 
 def _write_wav(path: Path, seconds: float) -> None:
@@ -238,52 +219,3 @@ async def test_speech_recognition_without_vocabulary_is_unprimed(test_db, tmp_pa
     _, _, transcriber = await _ingest_node(factory, wav, None)
 
     assert transcriber.hotwords == [None]
-
-
-@pytest.fixture
-def _transcription_installed(monkeypatch):
-    from app.services import python_extras
-
-    monkeypatch.setitem(python_extras.EXTRA_WEIGHTS, "transcription", (lambda: True, lambda: None))
-
-
-async def test_youtube_ingest_keeps_the_vocabulary_and_fetches_captions(
-    test_db, monkeypatch, _transcription_installed
-):
-    _, factory, _ = test_db
-
-    async def _no_ingestion(*_args, **_kwargs):
-        pass
-
-    monkeypatch.setattr("app.workflows.youtube_ingestion.run_ingestion", _no_ingestion)
-
-    async def _fake_download_audio(url: str, dest_stem: Path, on_progress=None) -> None:
-        dest_stem.with_suffix(".flac").write_bytes(b"\x00" * 100)
-
-    fetch_captions = AsyncMock(return_value=True)
-    meta = {**_TALK, "id": "abc", "language": "en", "subtitles": {"en": []}}
-    with (
-        patch("app.services.youtube_downloader.check_ytdlp_available", return_value=True),
-        patch("app.services.youtube_downloader.check_ffmpeg_available", return_value=True),
-        patch("app.services.youtube_downloader.fetch_metadata", new=AsyncMock(return_value=meta)),
-        patch(
-            "app.services.youtube_downloader.download_audio",
-            new=AsyncMock(side_effect=_fake_download_audio),
-        ),
-        patch("app.services.youtube_downloader.download_captions", new=fetch_captions),
-    ):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.post(
-                "/documents/ingest-url", json={"url": "https://www.youtube.com/watch?v=abc"}
-            )
-        # Captions are fetched by the job, after the audio.
-        await get_ingestion_jobs().get(resp.json()["document_id"])
-
-    assert resp.status_code == 200, resp.text
-    doc_id = resp.json()["document_id"]
-    async with factory() as session:
-        doc = await session.scalar(select(DocumentModel).where(DocumentModel.id == doc_id))
-    assert "DataEngBytes" in doc.transcript_vocabulary
-    (url, dest, track), _ = fetch_captions.call_args
-    assert track == "en"
-    assert dest == captions_path(Path(doc.file_path))

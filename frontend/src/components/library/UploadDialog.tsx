@@ -230,8 +230,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const { data: caps } = useCapabilities()
   const canAudio = capabilityOf(caps, "audio_ingest").available
   const canVideo = capabilityOf(caps, "video_ingest").available
-  const canUrl =
-    capabilityOf(caps, "web_ingest").available || capabilityOf(caps, "youtube_ingest").available
+  const canUrl = capabilityOf(caps, "web_ingest").available
   const acceptedTypes = acceptedExtensions({ canAudio, canVideo })
   const kindOptions = KIND_OPTIONS.filter((o) => {
     const cap = KIND_CAPABILITY[o.value]
@@ -793,7 +792,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                       setPicks({})
                       setPreviewError(null)
                     }}
-                    placeholder="https://example.com/article or YouTube URL"
+                    placeholder="https://example.com/article, or a link a connector takes"
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                   {urlError && (
@@ -815,7 +814,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                   )}
                   {!url && !urlError && (
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Articles are extracted to Markdown. YouTube videos and the links an installed connector takes are detected. All processing is local.
+                      Articles are extracted to Markdown. A link an installed connector takes, such as a YouTube video, goes to that connector. All processing is local.
                     </p>
                   )}
                 </div>

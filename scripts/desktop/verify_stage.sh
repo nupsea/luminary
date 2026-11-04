@@ -97,25 +97,11 @@ fi
 kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
 rm -rf "$D"
 
-_step "6. yt-dlp runs the way the backend spawns it"
-if out="$("$PY" -I -m yt_dlp --version 2>&1 | tail -1)"; then
-    _pass "python -m yt_dlp ($out)"
-else
-    _fail "python -m yt_dlp failed: $out"
-fi
 if [ "$DESKTOP_OS" = windows ]; then
+    _step "6. No console-script launchers with a build path"
     launchers="$(find "$STAGE/python/Scripts" -mindepth 1 2>/dev/null || true)"
     [ -z "$launchers" ] && _pass "no dead console-script launchers" \
         || { _fail "launchers with an embedded build path remain:"; echo "$launchers" >&2; }
-else
-    RELOC="$(mktemp -d)/reloc"
-    cp -a "$STAGE/python" "$RELOC"
-    if out="$("$RELOC/bin/yt-dlp" --version 2>&1 | tail -1)"; then
-        _pass "bin/yt-dlp runs from a relocated copy ($out)"
-    else
-        _fail "bin/yt-dlp failed after relocation: $out"
-    fi
-    rm -rf "$(dirname "$RELOC")"
 fi
 
 _step "7. Nothing was written inside the stage"

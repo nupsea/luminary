@@ -444,7 +444,7 @@ if [ "$DEV" = 1 ]; then
     (cd backend && uv run --no-sync python -m app.services.model_prefetch --models-dir "$TEST_MODELS")
 else
     _info "Syncing backend deps into backend/.venv (public profile)..."
-    # `full` adds yt-dlp and the tree-sitter grammars. The article path
+    # `full` adds the tree-sitter grammars. The article path
     # (trafilatura, cloudscraper) moved to base dependencies, because web_ingest is
     # a `public` surface and the Docker image installs base only -- it was shipping
     # without the libraries its own manifest advertised.

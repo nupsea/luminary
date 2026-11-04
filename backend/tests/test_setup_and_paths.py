@@ -631,7 +631,6 @@ def test_capabilities_require_every_component_a_feature_depends_on(monkeypatch):
     assert caps["dictation"]["available"] is True
     assert caps["video_ingest"]["available"] is False
     assert "ffmpeg" in caps["video_ingest"]["requires"]
-    assert caps["youtube_ingest"]["available"] is False
     assert caps["vision"]["available"] is False
     assert caps["vision"]["requires"] == ["vision_model"]
     assert caps["chat"]["available"] is True
@@ -670,7 +669,6 @@ def test_capabilities_endpoint_reports_every_key():
         "audio_ingest",
         "dictation",
         "video_ingest",
-        "youtube_ingest",
         "web_ingest",
         "vision",
         "chat",
@@ -686,7 +684,7 @@ def test_media_surfaces_ship_in_public_mode():
 
     manifest = json.loads(surface_manifest_path().read_text())
     modes = {s["id"]: s["mode"] for s in manifest["surfaces"]}
-    for surface in ("web_ingest", "youtube_ingest", "audio_transcribe", "image_enrichment"):
+    for surface in ("web_ingest", "audio_transcribe", "image_enrichment"):
         assert modes[surface] == "public", f"{surface} is stripped from the shipped build"
 
 

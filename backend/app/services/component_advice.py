@@ -46,12 +46,11 @@ def _all_withheld_for_licence(component_ids: list[str]) -> bool:
     )
 
 
-def media_missing_message(required: list[str], what: str = "YouTube") -> str:
+def media_missing_message(required: list[str], what: str) -> str:
     """One sentence naming everything missing, and what to do about each kind."""
     fetchable, manual = installable(required)
-    # Only claim a licence reason where one exists. yt-dlp is Unlicense, and
-    # saying it was "not bundled for licensing reasons" stated a constraint
-    # that is not real and pointed the user at nothing they could act on.
+    # Only claim a licence reason where one exists: saying a permissive tool was "not
+    # bundled for licensing reasons" states a constraint that is not real.
     if _all_withheld_for_licence(required):
         lead = (
             f"{what} needs {component_labels(required)}, "

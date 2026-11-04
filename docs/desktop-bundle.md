@@ -53,7 +53,7 @@ CORS nor `TrustedHostMiddleware` needs relaxing — a webview on
   collide with a user's own Ollama on 11434 or an older Luminary on 7820.
 - **Both children start from `env_clear()`**, so a user's `DYLD_*`, `PYTHON*` or
   `VIRTUAL_ENV` cannot reach them. `PATH` is rebuilt to include
-  `<stage>/python/bin`, which is where `yt-dlp` lives. Proxy variables are added back
+  `<stage>/python/bin`, where the staged interpreter's console scripts live. Proxy variables are added back
   (`luminary_host::proxy_env`): the shell's own `*_PROXY`, else the Windows system proxy,
   with loopback in `NO_PROXY`. Ollama is Go and reads nothing else, so without them a model
   pull fails on a proxied network (#155).
@@ -263,8 +263,8 @@ bundle cannot quietly stop matching the hosts `host_support` offers a local mode
 none survives installation, and the extensionless `scripts=` files some packages
 ship (jsonpatch, jsonpointer) name it in a shebang Windows cannot run. The whole
 directory is emptied; it stays because the shell still puts it on `PATH`. The
-backend runs yt-dlp as `python -m yt_dlp` and pip as `python -m pip`; a dead
-launcher left on the backend's `PATH` would be found by `shutil.which` and then fail.
+backend runs pip as `python -m pip`; a dead launcher left on the backend's `PATH`
+would be found by `shutil.which` and then fail.
 
 **CI launches what it built.** `desktop-installers.yml` installs each package on
 a clean runner and runs `verify_installed.sh`, which waits for the shell's
@@ -388,9 +388,8 @@ Constraints that fall out of that, each enforced in `stage_python.sh`:
   (`repair_tiktoken_cache.py`, I-72). litellm's `win_amd64` wheel ships them with CRLF line
   endings, and a mismatched file makes `import litellm` download it again.
 - Console-script shebangs are rewritten to the sh/Python trampoline below, since
-  uv writes them pointing at the build machine's interpreter. They cannot just be
-  deleted — `youtube_downloader.py` spawns `yt-dlp` off `PATH`, so the sidecar's
-  `PATH` must include `<Resources>/python/bin`.
+  uv writes them pointing at the build machine's interpreter. The sidecar's `PATH`
+  includes `<Resources>/python/bin`, so a script found there must run from it.
 
   ```sh
   #!/bin/sh
@@ -597,8 +596,8 @@ cannot rely on a user's shell.
 
 **What the UI may offer.** `GET /setup/capabilities` reports what this install
 can actually ingest, so the frontend does not encode which component enables
-which feature — video needs both a transcriber and ffmpeg, and a YouTube URL
-needs yt-dlp on top of those. `UploadDialog` hides the Web URL tab, the
+which feature — video needs both a transcriber and ffmpeg. A link a connector
+claims checks its own components before the fetch. `UploadDialog` hides the Web URL tab, the
 audio/video content types and the media file extensions accordingly, and
 `VoiceRecordButton` hides itself on `dictation`. Two mode axes apply:
 `surface-manifest.json` decides what is built, capabilities decide what is

@@ -298,20 +298,6 @@
       "description": "Augment answers with live web search and ingest articles from URLs."
     },
     {
-      "id": "youtube_ingest",
-      "mode": "public",
-      "kind": "service",
-      "backend": {
-        "services": [
-          "youtube_downloader"
-        ]
-      },
-      "labels": {
-        "en": "YouTube ingestion"
-      },
-      "description": "Ingest and transcribe YouTube lectures as study documents."
-    },
-    {
       "id": "audio_transcribe",
       "mode": "public",
       "kind": "service",

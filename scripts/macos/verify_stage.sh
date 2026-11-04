@@ -119,31 +119,15 @@ fi
 kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
 rm -rf "$D"
 
-_step "7. Console scripts survive relocation"
-# youtube_downloader.py resolves `yt-dlp` through PATH and spawns it, so the
-# shebang trampoline has to work from a moved copy, not just in place.
-if [ -f "$STAGE/python/bin/yt-dlp" ]; then
-    RELOC="$(mktemp -d)/reloc"
-    ditto "$STAGE/python" "$RELOC/python" 2>/dev/null
-    if out="$("$RELOC/python/bin/yt-dlp" --version 2>&1 | tail -1)"; then
-        _pass "yt-dlp runs from a relocated copy ($out)"
-    else
-        _fail "yt-dlp failed after relocation: $out"
-    fi
-    rm -rf "$(dirname "$RELOC")"
-else
-    _fail "bin/yt-dlp missing (youtube ingestion spawns it by name)"
-fi
-
-_step "8. Nothing was written inside the stage"
+_step "7. Nothing was written inside the stage"
 # In the .app a write breaks the code signature. Not an `if` on the pipeline: under
 # pipefail, `head` closing early fails it, and the step then reported nothing.
 newer="$(find "$STAGE" -type f -newer "$MARKER" 2>/dev/null | head -5)"
-[ -z "$newer" ] && _pass "stage untouched by steps 2-7" \
-    || { _fail "files written inside the stage by steps 2-7:"; echo "$newer" >&2; }
+[ -z "$newer" ] && _pass "stage untouched by steps 2-6" \
+    || { _fail "files written inside the stage by steps 2-6:"; echo "$newer" >&2; }
 rm -f "$MARKER"
 
-_step "9. Stage size"
+_step "8. Stage size"
 # Reported, never gated, and there is deliberately no path-length step here.
 # The two budgets in scripts/desktop/lib.sh exist for Windows: NSIS cannot pack
 # past ~2GB, and MAX_PATH is 260. A DMG has neither ceiling and APFS takes
@@ -151,7 +135,7 @@ _step "9. Stage size"
 # with no failure case behind it. macOS still gets the payload prunes.
 _pass "$(du -sm "$STAGE" | cut -f1)MB (no budget on macOS -- reported so growth is visible)"
 
-_step "10. Third-party notices cover every shipped package"
+_step "9. Third-party notices cover every shipped package"
 third_party_notices --check && _pass "THIRD-PARTY-LICENSES.txt matches the stage" \
     || _fail "THIRD-PARTY-LICENSES.txt is missing, stale, or a package has no notice"
 

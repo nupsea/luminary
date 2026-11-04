@@ -3,7 +3,6 @@
 import logging
 import re
 
-from app.services.youtube_downloader import is_youtube_url
 from app.types import ChatState
 
 logger = logging.getLogger(__name__)
@@ -20,13 +19,19 @@ _CONTENT_REQUEST_RE = re.compile(
 )
 
 
+# A video link is always about its content: Direct mode cannot watch it.
+_VIDEO_LINK = re.compile(
+    r"^https?://(?:(?:www\.|m\.)?youtube\.com/watch|youtu\.be/)", re.IGNORECASE
+)
+
+
 def unreadable_link(question: str) -> str | None:
     """The first URL whose content the question asks about, which Direct mode cannot open."""
     urls = [u.rstrip(".,;:!?)]'\"") for u in _URL_RE.findall(question)]
     if not urls:
         return None
     for url in urls:
-        if is_youtube_url(url):
+        if _VIDEO_LINK.match(url):
             return url
     if _CONTENT_REQUEST_RE.search(_URL_RE.sub(" ", question)):
         return urls[0]

@@ -26,14 +26,14 @@ def on_a_host(monkeypatch):
 
 
 def test_a_container_is_told_to_rebuild_the_image(in_container):
-    message = _media_missing_message(["ffmpeg"])
+    message = _media_missing_message(["ffmpeg"], "This link")
     assert "WITH_MEDIA=1" in message, "the fix is a rebuild, and it must name the flag"
     assert "brew install" not in message, "host advice cannot reach a container"
 
 
 def test_a_container_says_why_installing_on_the_host_will_not_work(in_container):
     """Otherwise the user tries the obvious thing first and loses another hour."""
-    assert "does not reach the container" in _media_missing_message(["ffmpeg"])
+    assert "does not reach the container" in _media_missing_message(["ffmpeg"], "This link")
 
 
 @pytest.mark.parametrize(
@@ -48,7 +48,7 @@ def test_a_host_install_gets_its_own_platform_command(on_a_host, monkeypatch, pl
     """Windows was in neither platform the message named, so a Windows user was
     shown brew and apt and left to work it out."""
     monkeypatch.setattr("app.services.components.sys.platform", platform)
-    message = _media_missing_message(["ffmpeg"])
+    message = _media_missing_message(["ffmpeg"], "This link")
     assert command in message
     assert "WITH_MEDIA" not in message
 
@@ -89,7 +89,7 @@ def test_the_container_runs_what_the_image_was_built_with():
 def test_a_component_with_no_licence_constraint_is_not_blamed_on_licensing(on_a_host):
     """The dialog said yt-dlp was "not bundled for licensing reasons". yt-dlp is
     Unlicense; nothing about its licence keeps it out of anything."""
-    message = _media_missing_message(["yt-dlp"])
+    message = _media_missing_message(["yt-dlp"], "This link")
     assert "licensing" not in message, message
 
 

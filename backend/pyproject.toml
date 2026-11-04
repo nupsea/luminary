@@ -46,13 +46,6 @@ dependencies = [
     "python-multipart>=0.0.31",
     "sentence-transformers>=5.6.0",
     "trafilatura>=2.0.0",
-    # Unlicense, so no distribution constraint -- and youtube_ingest is a
-    # `public` surface. Withholding it only moved the user to a second wall
-    # behind a licence message that does not apply to this package.
-    # YouTube breaks yt-dlp regularly; a pin that drifts months behind stops
-    # downloading entirely. 2026.3.13 returned "HTTP Error 403: Forbidden" on
-    # every video while 2026.8.19 succeeded on the same URL and machine.
-    "yt-dlp>=2026.8.19",
     "sqlalchemy[asyncio]>=2.0.46",
     "uvicorn[standard]>=0.41.0",
     # Direct, though nothing imports it: `tool.uv.sources` applies only to a
@@ -69,7 +62,6 @@ dependencies = [
     "scipy>=1.17.1",
     "scikit-learn>=1.8.0",
     "zstandard>=0.25.0",
-    "curl-cffi>=0.7.0",
     "truststore>=0.10.4",
 ]
 

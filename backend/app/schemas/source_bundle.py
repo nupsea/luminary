@@ -73,7 +73,7 @@ class BundleManifest(_Strict):
     media: TextMedia | AudioMedia | YoutubeMedia = Field(discriminator="kind")
     terms: Terms
     tags: list[Annotated[str, Field(min_length=1, max_length=100)]] = []
-    # Library tags the document carries ("oreilly", "tech-book"), applied as a user's own tags
+    # Library tags the document carries ("tech-book"), applied as a user's own tags
     # are. `tags` are the source's own subject tags, which only prime vocabulary.
     labels: list[Annotated[str, Field(min_length=1, max_length=64)]] = []
     # What the source says about itself (a talk's description, its chapter titles): the
