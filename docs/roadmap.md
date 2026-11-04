@@ -101,7 +101,7 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #158, #159, #161, #185, #186, #187, #188, #189, #191, #204, #205; #100 moved to 0.17.0, #66 to 0.18.0 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
 | III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement; chapter practice — **0.16.2 released; pairing merged (#260); chunking reads the measured form (#223, wire and column open); chapter card quality passed its gate (#305); the Practice panel's cards have not (#330)** | #160, #195, #221, #222, #226, #227, #229; #223 moved to 0.17.0, #162 to 0.18.0 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail — **0.17.0 released 2026-10-28: the library root (#388), snapshot and the resumable re-embed (#390), and per-library preferences with the shared-resource audit (#389) are built; a key per principal is deferred to the hosted work. Carried to 0.17.1: #211, and #231's page-range windows and macOS shell check.** No SQL is left outside `repos/` (79 statements to 0, #337 to #339), and every `DATA_DIR` join goes through `app/storage.py`. Closed with numbers: #100; #307 (topic F1 1.0 on d2l, 21/21 against thinkpython2's PDF bookmarks); #252 (thinkpython2's chapter cards drawn from pp. 1–22: 10 of 14 before, 0 of 14 and 0 of 17 on two fresh runs); #332 and #333 (1,040 misplaced paragraphs across 41 local books, now 0; the Federalist Papers 8 sections to 85); #286 (Usher stored as narrative on 5 of 5 fresh ingests). Open: #211, a `notes_fts` insert refused within milliseconds although `busy_timeout` is 5 s. SQLite refuses at once only when the refused connection already holds a read as it begins to write, and another connection is writing (reproduced on 3.46); which path leaves that read open is unknown, and the busy report now names the connection's preceding statements; #231 passed in the Linux shell, and finishing a chapter's cards now returns the reader to the reading place (#397); page-range windows and the macOS shell are untested | #211, #223, #231, #252, #286, #332, #333, #388, #389, #390 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
-| | 0.18.0 | Your own server; sources become connectors; plus what Checkpoints A and B left open: the hardware session and the Practice panel's cards (§7). **#155 and #156 closed on AWS (2026-10-21).** **Checkpoint C** | #24, #99, #155, #156, #162, #211, #231, #330, #334, #348, #354, #355, #356, #357, #358, #378, #382, #430, #431–#438 | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key; O'Reilly and YouTube ingest through out-of-process connectors with no change a reader can see; a connector built from the template outside this repo passes the conformance kit; zero open `bug` issues milestoned to Phase I, II or III |
+| | 0.18.0 | Your own server; sources become connectors; plus what Checkpoints A and B left open: the hardware session and the Practice panel's cards (§7). **#155 and #156 closed on AWS (2026-10-21).** **Checkpoint C** | #24, #99, #155, #156, #162, #211, #231, #330, #334, #348, #354, #355, #356, #357, #358, #378, #382, #430, #431–#438, #465, #467 | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key; the core ships no connector, the YouTube connector installs from the catalogue and ingests a link, and documents imported before keep opening, citing and re-importing; a connector built from the template outside this repo passes the conformance kit; zero open `bug` issues milestoned to Phase I, II or III |
 | IV. Separation | 0.19.0 | Components separated for mobile; beside it, the Ask track (§9) | #447–#453 | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
 | V. Mobile | 0.20.0 | Topic notes and the draft inbox; mobile reading and note capture; the Ask track lands. **Checkpoint D** | #173, #454, #455; Ask track #66, #322, #440–#443 | A merge that leaves a source note out of every section is refused, a summary claim no source note supports is flagged, and undoing a merge restores every original; a phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated; follow-up retrieval moves on two documents with numbers before and after, and no suggested question gets a general-knowledge answer |
 | VI. Extras | 0.21.0 | Anki import; the capture extension; Luminary as a read-only MCP server; card review on mobile | #349, #367, #456, #457, #458 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an MCP client receives passages only from collections the user scoped, and nothing with the setting off or without the token; an offline review on the phone merges without overwriting FSRS state |
@@ -123,9 +123,9 @@ is re-planned at every tag.
 
 | Iteration | Critical path | Beside it | Ends with |
 |---|---|---|---|
-| 1 | Connectors batch A (#431–#434, closes #430) | #211, #231 (0.17.1); the CI checks #24, #99, #355; #382; #330 run 1 | 0.17.1 |
-| 2 | Connectors batch B (#435, #436) | #334; #330 run 2; the #348 spike; #440 | |
-| 3 | Connectors batch C (#437, #438 with #348) | Checkpoint C's manual pass, with #162 and #231's last checks | 0.18.0, Checkpoint C |
+| 1 | Connectors batch A (#431, #432; #430 fixed by #464); #435 begins | #211, #231 (0.17.1); the CI checks #24, #99, #355; #382; #330 run 1; #465 | 0.17.1 |
+| 2 | #435, then #434 and #433; #436 | #334; #330 run 2; the #348 spike; #440 | |
+| 3 | Connectors batch C (#437, #467, #438 with #348) | Checkpoint C's manual pass, with #162 and #231's last checks | 0.18.0, Checkpoint C |
 | 4 | #447; the backend half of 0.19.0 (#450–#453) | #441, #442 | |
 | 5 | #448, #449 | #443 | 0.19.0 |
 | 6 | #173, #454 | #66; #377's February re-check | |
@@ -881,7 +881,7 @@ beside 0.17.0, rather than after it:
 | Gate and release hygiene | #211, #231, #382 | #211 fails PRs at random on Windows; #382 keeps `make smoke` red; #231 needs its last two checks in the manual pass |
 | The Practice panel's cards | #330 | The step 4 gate on the unit path (§4) |
 | Ask on what the documents do not say | Moved to the Ask track, landing by Checkpoint D (§9) | 0.18.0 already carries the connector track |
-| Sources become connectors | #348, #430, #431–#438 | Below |
+| Sources become connectors | #348, #431–#438, #467; #430 fixed (#464) | Below |
 
 #### Sources become connectors
 
@@ -899,28 +899,30 @@ EPUB in `oreilly_ingestion.py`, audio and captions in `youtube_ingestion.py`) an
 | File upload and single-page URL import stay in the core | They are formats, not sources |
 | Multi-page web content is imported, not searched live: an HTML book or a Confluence page tree becomes one document with chapters (#348) | Citations, the reader locus and chapter cards then work unchanged. The local default model is weak at tool calling, so MCP is at most a fetch transport |
 | xerj is not a connector | It indexes local folders only, and its `file:line` hits come from a second index and embedder that citations and cards cannot use |
-| The SDK and the first-party connectors live in this repo (`packages/luminary-source-sdk/`, `connectors/<name>/`), and a CI check fails when either side imports the other | The contract changes with the importer that validates it. A second repo means paired PRs while the contract is still moving |
+| **The core hosts no connector (decided 2026-11-04).** Public connectors live in [`nupsea/luminary-connectors`](https://github.com/nupsea/luminary-connectors) (Apache-2.0), YouTube first. O'Reilly lives in the maintainer's private repo, `nupsea/luminary-personal-connectors` | A licence covers code, never a source's terms. O'Reilly's Membership Agreement (updated 2024-10-09) prohibits "automated retrieval mechanisms" to download content and use "as input or a prompt to a machine learning or AI system", and the connector gets past the site's bot defence, so it is not published. YouTube's terms (2023-11-06) bar downloading "except as expressly authorized by the Service"; publishing its connector opt-in, with those terms shown before install, is the maintainer's decision |
+| The SDK lives in this repo (`packages/luminary-source-sdk/`); connectors install it from here until #438 publishes it | The contract changes with the importer that validates it. Connectors in another repo pay with paired PRs while it moves, so the protocol settles in #435 before they are written |
 | Third-party connectors live in their authors' repos, listed in a catalogue (#437) | Luminary hosts no code for a source whose terms it has not read |
-| A first-party connector moves to its own repo once the contract has held for two releases and someone outside maintains it, or when the maintainer decides this repo should not host it | O'Reilly's subscription download is a terms question only the maintainer can settle |
 | No incremental re-sync | Re-crawling changed pages while keeping anchored notes and cards is its own design |
 
 | Batch | Stage | Issue | Work | What a user sees |
 |---|---|---|---|---|
-| A | 0 | #431 | Characterization tests over O'Reilly and YouTube ingestion | Nothing |
-| A | 1 | #432 | The bundle format (one JSON Schema) and the one importer | Nothing |
-| A | 2 | #433 | O'Reilly fetches into a bundle; its path stops writing EPUBs, so it drops ebooklib; existing documents keep their EPUB | Nothing |
-| A | 3 | #434 | YouTube fetches into a bundle; `youtube_url` and the transcript reader unchanged | Nothing |
-| B | 4 | #435 | The SDK, the process protocol and runner; both connectors move to `connectors/`; yt-dlp moves with YouTube | Nothing; the bundled app ingests both as before |
-| B | 5 | #436 | Settings, inputs and the connect modal drawn from each connector's `describe`; `/oreilly/*` becomes `/connectors/{name}/*` | One generic connector UI |
-| C | 6 | #437 | A catalogue, and install into a per-connector environment, shown with its licence and terms first; O'Reilly and YouTube stay bundled | Installable connectors |
-| C | 7 | #438 | Publish the SDK; conformance kit, template repo, review checklist, `docs/connectors.md`; #348 as the second reference connector (MediaWiki if #348 drops) | Open to contributors |
+| A | 0 | #431 | **Done.** Characterization tests over O'Reilly and YouTube ingestion | Nothing |
+| A | 1 | #432 | **Done.** The bundle format (one JSON Schema) and the one importer | Nothing |
+| B | 2 | #435 | The SDK, the process protocol and runner; install a connector from a folder; a pasted link goes to the installed connector that claims it | Nothing |
+| B | 3 | #434 | The YouTube connector, in `luminary-connectors`, writing a bundle; stage 0's YouTube tests become its conformance tests | Nothing yet |
+| B | 3 | #433 | The O'Reilly connector, in the private repo, writing a bundle; existing O'Reilly documents keep their EPUB | Nothing (the maintainer's library) |
+| B | 4 | #436 | Settings, inputs and the connect modal drawn from each connector's `describe`; `/oreilly/*` becomes `/connectors/{name}/*` | One generic connector UI |
+| C | 5 | #437 | A catalogue of `luminary-connectors`, and install into a per-connector environment, shown with its licence and the source's terms first. The private repo is never listed | Installable connectors |
+| C | 6 | #467 | The core drops its built-in O'Reilly and YouTube import, `yt-dlp` and `curl_cffi`; a link no installed connector claims says what to install | YouTube is a connector you install |
+| C | 7 | #438 | Publish the SDK; conformance kit, template repo, review checklist, `docs/connectors.md`; #348 as the second reference connector in `luminary-connectors` (MediaWiki if #348 drops) | Open to contributors |
 
-**Order.** Batch A changes nothing a user sees and lands first. #430 is a `bug`, so it holds the
-tag: batch A closes it, or a direct fix does. Batch B lands before 0.19.0 extracts `packages/ui`,
-or the O'Reilly screens it deletes move into a package first. If Checkpoint C is otherwise ready,
-whatever is left of the track moves to the start of 0.19.0 with its part of the exit gate, and the
-track never holds the tag. Each batch ends with a manual pass ("Code quality to 1.0"), and
-Checkpoint C's own manual pass ingests a YouTube link on a fresh machine.
+**Order.** Batch A landed, and #464 fixed #430 directly. Nothing leaves the core before the
+catalogue can install its replacement, so #467 waits on #433, #434, #436 and #437, and no user
+loses a working import. Batch B lands before 0.19.0 extracts `packages/ui`, or the O'Reilly
+screens #467 deletes move into a package first. If Checkpoint C is otherwise ready, whatever is
+left of the track moves to the start of 0.19.0 with its part of the exit gate, and the track never
+holds the tag. Each batch ends with a manual pass ("Code quality to 1.0"), and Checkpoint C's own
+manual pass installs the YouTube connector from the catalogue and ingests a link on a fresh machine.
 
 **The hardware session waits on no borrowed laptop (decided 2026-10-20).** Each item closes on the
 cheapest run that exercises its mechanism for real. What only consumer hardware would show is
