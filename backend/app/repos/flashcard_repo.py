@@ -261,13 +261,20 @@ class FlashcardRepo:
         return {cid for row in result.scalars() for cid in (row or []) if isinstance(cid, str)}
 
     async def deck_rollup(self) -> list[tuple[str | None, str, int, str | None]]:
-        """(deck, a source, cards, a document_id) per deck."""
+        """(deck, a source, cards, its document_id) per deck. The document only when every card
+        in the deck is that document's: a deck over several has none, rather than its count
+        beside whichever id sorts last (#382)."""
+        doc = FlashcardModel.document_id
+        single_document = case(
+            (
+                (func.count(func.distinct(doc)) == 1) & (func.count(doc) == func.count()),
+                func.max(doc),
+            ),
+            else_=None,
+        )
         result = await self.session.execute(
             select(
-                FlashcardModel.deck,
-                FlashcardModel.source,
-                func.count(),
-                func.max(FlashcardModel.document_id),
+                FlashcardModel.deck, FlashcardModel.source, func.count(), single_document
             ).group_by(FlashcardModel.deck)
         )
         return [tuple(r) for r in result.all()]

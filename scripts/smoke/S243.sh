@@ -15,8 +15,8 @@
 #   2. POST /flashcards/regenerate exists and answers 201
 #   3. the response reports requested/delivered/replaced separately, so a short
 #      delivery cannot be announced as a full one
-#   4. a document with nothing to generate from returns kept_previous=true and
-#      deletes nothing
+#   4. an unknown document is a 404, refused before generating (#282); an empty
+#      note run returns kept_previous=true and deletes nothing
 #   5. /flashcards/generate no longer takes `avoid` -- listing the previous
 #      questions verbatim in the prompt is the I-28 anti-pattern this replaced
 #   6. a note is a source too, and exactly one source is accepted per call --
@@ -55,23 +55,12 @@ assert 'avoid' not in schemas['FlashcardGenerateRequest']['properties'], (
 print('  the replacement takes either source and reports three counts')
 " || fail "regenerate request/response shape is wrong"
 
-BODY=$(curl -s -w '\n%{http_code}' -X POST "${BASE}/flashcards/regenerate" \
+# An unknown document is refused before any generation (#282); the empty-run guarantee for a
+# real document is test_flashcard_regenerate_differs.py's, and the note source below shows it.
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${BASE}/flashcards/regenerate" \
   -H 'Content-Type: application/json' \
   -d '{"document_id":"s243-no-such-document","count":5}')
-CODE=$(echo "$BODY" | tail -n1)
-JSON=$(echo "$BODY" | sed '$d')
-[ "$CODE" = "201" ] || fail "regenerate returned HTTP $CODE"
-
-echo "$JSON" | python3 -c "
-import sys, json
-r = json.load(sys.stdin)
-assert r['kept_previous'] is True, 'a run that produced nothing must say so'
-assert r['delivered'] == 0, f\"delivered {r['delivered']} cards from no document\"
-assert r['replaced'] == 0, 'nothing may be deleted when nothing was generated'
-assert r['cards'] == [], 'no cards can come from a document that does not exist'
-assert r['sessions_removed'] == 0, 'a deck that was kept cannot have lost its runs'
-print('  nothing generated -> nothing deleted, reported as kept_previous')
-" || fail "an empty run did not leave the deck alone"
+[ "$HTTP" = "404" ] || fail "regenerate for an unknown document returned HTTP $HTTP, not 404"
 
 # count is bounded: the UI sends the deck's own size, and 0 means "keep it".
 HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${BASE}/flashcards/regenerate" \
