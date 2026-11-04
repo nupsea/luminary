@@ -26,6 +26,20 @@ class Example(Connector):
                       source_url=input["url"])
 ```
 
+A connector that writes audio declares it, and names any host tool it runs:
+
+```python
+Description(..., label="Example talks", media=["youtube"], tools=["ffmpeg"])
+```
+
+Luminary checks before a fetch that it can transcribe what the connector writes and that it
+has each tool, so a link is refused with what to install rather than after a long download.
+It passes each tool's path in the fetch input as `input["tools"]["ffmpeg"]`, since the bundled
+app's `PATH` may not reach it. `bundle.add_asset_file(name, path)` moves a large file into the
+bundle without reading it into memory; an audio bundle's manifest carries
+`media: {"kind": "youtube", "url", "audio", "captions"}`, and its `description` and `chapters`
+prime the transcript's vocabulary.
+
 Name it in the connector's `pyproject.toml`:
 
 ```toml

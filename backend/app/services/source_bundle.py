@@ -16,8 +16,8 @@ from pathlib import Path, PurePosixPath
 from pydantic import ValidationError
 
 from app.exceptions import InvalidInput
-from app.schemas.source_bundle import BUNDLE_VERSION, BundleManifest
-from app.types import ParsedDocument, Section
+from app.schemas.source_bundle import BUNDLE_VERSION, AudioMedia, BundleManifest, YoutubeMedia
+from app.types import AUDIO_EXTENSIONS, ParsedDocument, Section
 
 MANIFEST = "manifest.json"
 BUNDLE_SUFFIX = ".bundle"
@@ -72,7 +72,25 @@ def store_bundle(
 def _admitted(manifest: BundleManifest, media: frozenset[str]) -> BundleManifest:
     if manifest.media.kind not in media:
         raise BundleRefused(f"{manifest.media.kind} bundles cannot be ingested yet")
+    if isinstance(manifest.media, AudioMedia | YoutubeMedia):
+        _check_audio(manifest.media)
     return manifest
+
+
+def _check_audio(media: AudioMedia | YoutubeMedia) -> None:
+    """The audio must be a format the transcriber and the player take, and captions WebVTT."""
+    if PurePosixPath(media.audio).suffix.lower().lstrip(".") not in AUDIO_EXTENSIONS:
+        raise BundleRefused(f"{media.audio} is not one of {', '.join(AUDIO_EXTENSIONS)}")
+    if media.captions is not None and not media.captions.lower().endswith(".vtt"):
+        raise BundleRefused(f"{media.captions} is not a WebVTT caption track")
+
+
+def bundle_of(path: Path) -> Path | None:
+    """The stored bundle `path` is inside, as `raw/<doc_id>.bundle/assets/<audio>` is."""
+    for parent in path.parents:
+        if parent.suffix == BUNDLE_SUFFIX and (parent / MANIFEST).is_file():
+            return parent
+    return None
 
 
 def _copy_checked(source: Path, dest: Path) -> None:

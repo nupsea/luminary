@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from app.exceptions import DependencyUnavailable, InvalidInput
-from app.services.components import resolve_tool
+from app.services.components import capabilities, resolve_tool
 from app.services.connector_runner import InstalledConnector, call
 from app.storage import machine_root
 
@@ -32,6 +32,11 @@ _NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _RECORD = "connector.json"
 _CREDENTIALS = "credentials.json"
 _INSTALL_TIMEOUT_S = 15 * 60
+# The bundle kinds and host tools a connector may declare; `luminary_source_sdk.protocol`
+# lists the same.
+MEDIA = ("text", "audio", "youtube")
+TOOLS = ("ffmpeg",)
+_TRANSCRIBED = {"audio", "youtube"}
 
 
 class ConnectorInstallFailed(InvalidInput):
@@ -80,6 +85,14 @@ def _check_description(name: str, description: dict[str, Any]) -> None:
     for prefix in description.get("url_prefixes") or []:
         if not re.match(r"^https?://[^/\s]+/", str(prefix)):
             raise ConnectorInstallFailed(f"{name} claims {prefix!r}, which is not a URL prefix")
+    _check_known(name, "writes", description.get("media") or ["text"], MEDIA)
+    _check_known(name, "runs", description.get("tools") or [], TOOLS)
+
+
+def _check_known(name: str, verb: str, values: list, known: tuple[str, ...]) -> None:
+    for value in values:
+        if value not in known:
+            raise ConnectorInstallFailed(f"{name} {verb} {value!r}; this Luminary knows {known}")
 
 
 async def install_from_folder(folder: Path) -> InstalledConnector:
@@ -180,3 +193,19 @@ def load_credentials(name: str) -> dict[str, Any]:
         cookies = get_oreilly_cookies()
         return {"cookies": cookies} if cookies else {}
     return {}
+
+
+async def missing_components(connector: InstalledConnector) -> list[str]:
+    """Components this install lacks for what the connector declares, checked before a fetch:
+    an hour of audio downloaded for a library that cannot transcribe it is a dead end."""
+    missing = [t for t in connector.description.get("tools") or [] if resolve_tool(t) is None]
+    if _TRANSCRIBED & set(connector.description.get("media") or []):
+        audio = (await capabilities())["audio_ingest"]
+        missing += [c for c in audio["requires"] if c not in missing]
+    return missing
+
+
+def tool_paths(connector: InstalledConnector) -> dict[str, str]:
+    """`input["tools"]` for a fetch: the bundled app's PATH may not reach a tool we found."""
+    found = {t: resolve_tool(t) for t in connector.description.get("tools") or []}
+    return {t: path for t, path in found.items() if path}

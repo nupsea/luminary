@@ -4,6 +4,8 @@ import html
 import re
 from pathlib import Path
 
+from app.services.source_bundle import bundle_of, read_manifest
+
 _TIMING = re.compile(
     r"(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{3})\s+-->\s+(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{3})"
 )
@@ -15,6 +17,16 @@ _SOUND_CUE = re.compile(r"^(?:\[[^\]]*\]|\([^)]*\)|[♪\s]+)$")
 def captions_path(audio_path: Path) -> Path:
     """`raw/<doc_id>.captions.vtt`: the document's `raw/<doc_id>.*` cleanup removes it too."""
     return audio_path.with_suffix(".captions.vtt")
+
+
+def captions_for(audio_path: Path) -> Path | None:
+    """The caption track stored with this audio: the one its bundle's manifest names, else
+    the file beside it."""
+    bundle = bundle_of(audio_path)
+    if bundle is None:
+        return captions_path(audio_path)
+    captions = getattr(read_manifest(bundle).media, "captions", None)
+    return bundle / captions if captions else None
 
 
 def _seconds(h: str | None, m: str, s: str, ms: str) -> float:
