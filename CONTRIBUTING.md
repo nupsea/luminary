@@ -92,6 +92,22 @@ The full set is `docs/architecture.md` and `docs/invariants.md`. These are the o
 - An eval change follows `evals/README.md` and the `eval-integrity` skill.
 - A UI change includes a screenshot or a short recording in the PR.
 
+## Writing a connector
+
+A connector brings in a source Luminary cannot read on its own: a site, a wiki, a service. It
+lives in its own repository and depends only on `luminary-source-sdk`, never on this repo's
+`app`. The contract is `docs/connectors.md`; the YouTube connector in
+[`nupsea/luminary-connectors`](https://github.com/nupsea/luminary-connectors) is a worked
+example.
+
+1. Read the source's terms first, and quote what they say about automated download and about
+   use as model input. If they forbid it, stop there.
+2. Write the connector against the SDK (`packages/luminary-source-sdk/README.md`).
+3. Write the source's table of contents down by reading the source, and pass the conformance
+   kit against it, with `--luminary` pointing at a checkout of this repo.
+4. To be listed in the catalogue, open an issue linking the repository. It is reviewed against
+   the checklist in `docs/connectors.md`.
+
 ## Trusted contributors
 
 After a few merged PRs, a contributor may be invited as a collaborator: they can triage issues,
