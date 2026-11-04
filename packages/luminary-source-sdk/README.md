@@ -40,6 +40,9 @@ bundle without reading it into memory; an audio bundle's manifest carries
 `media: {"kind": "youtube", "url", "audio", "captions"}`, and its `description` and `chapters`
 prime the transcript's vocabulary.
 
+`finish(labels=[...])` names the library tags the document carries, applied as a user's own
+tags are; `tags` are the source's own subject tags, which only prime vocabulary.
+
 Name it in the connector's `pyproject.toml`:
 
 ```toml

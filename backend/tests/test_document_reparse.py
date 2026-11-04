@@ -207,18 +207,26 @@ async def _confirm_reparse(doc_id: str) -> dict:
 
 
 @pytest.mark.anyio
-async def test_an_oreilly_book_is_reparsed_from_its_stored_epub_offline(
-    test_db, monkeypatch, network_refused
+@pytest.mark.parametrize("era", ["epub", "bundle"])
+async def test_an_oreilly_book_is_reparsed_from_its_stored_source_offline(
+    test_db, monkeypatch, network_refused, era
 ):
-    """#430: the book URL sent re-import through the article extractor, fetching oreilly.com."""
+    """#430: the book URL sent re-import through the article extractor, fetching oreilly.com.
+    A book stored before connectors keeps its EPUB (#433), one after keeps its bundle."""
     from app.services.oreilly_service import download_oreilly_book_to_epub
+    from app.services.source_bundle import store_bundle
     from app.workflows.ingestion_nodes.parse import parse_node
-    from tests.oreilly_book import BOOK_ID, BOOK_URL, FixtureBookClient
+    from tests.oreilly_book import BOOK_ID, BOOK_URL, FixtureBookClient, write_book_bundle
 
     _, factory, tmp_path = test_db
-    epub_path, _ = download_oreilly_book_to_epub(
-        BOOK_ID, tmp_path / "book.epub", FixtureBookClient()
-    )
+    if era == "epub":
+        epub_path, _ = download_oreilly_book_to_epub(
+            BOOK_ID, tmp_path / "book.epub", FixtureBookClient()
+        )
+    else:
+        epub_path = tmp_path / "raw" / "book.bundle"
+        epub_path.parent.mkdir(exist_ok=True)
+        store_bundle(write_book_bundle(tmp_path / "out", FixtureBookClient()), epub_path)
     async with factory() as s:
         s.add(
             make_document(

@@ -117,7 +117,7 @@ async def test_a_claimed_link_is_fetched_stored_and_ingested(installed, test_db,
         "https://fixture.example/book",
         str(stored),
     )
-    ingested.assert_awaited_once_with(doc_id, str(stored), "md")
+    ingested.assert_awaited_once_with(doc_id, str(stored), "epub")
     sections = DocumentParser().parse(stored, doc.format).sections
     assert [s.heading for s in sections] == ["Storage", "Replication"]
     assert sorted(p.name for p in (tmp_path / "raw").iterdir()) == [stored.name]
@@ -187,7 +187,7 @@ async def test_a_connector_document_is_reimported_from_its_bundle(installed, tes
     doc_id, _ = await _ingest_link("https://fixture.example/book", monkeypatch, installed)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(f"/documents/{doc_id}/reparse", json={"confirm": False})
-    # Markdown with a URL, but its own stored source: never re-fetched as a web article.
+    # A book with a URL, but its own stored source: never re-fetched as a web article.
     assert resp.json()["source"] == "file"
 
 

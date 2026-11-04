@@ -9,6 +9,8 @@ from app.exceptions import NotFound
 from app.repos.document_repo import DocumentRepo
 from app.schemas.source_bundle import AudioMedia, BundleManifest, YoutubeMedia
 from app.services.connectors import MEDIA
+from app.services.naming import normalize_tag_slug
+from app.services.notes_service import sync_document_tag_index
 from app.services.source_bundle import BUNDLE_SUFFIX, store_bundle
 from app.services.transcript_vocabulary import vocabulary_from_metadata
 from app.storage import library_root
@@ -35,8 +37,13 @@ async def store_document_bundle(doc_id: str, source: Path) -> tuple[Path, str]:
     fields: dict[str, Any] = {"file_path": str(dest), "title": manifest.title, "format": fmt}
     if isinstance(manifest.media, AudioMedia | YoutubeMedia):
         fields |= _media_fields(dest, manifest, manifest.media)
+    labels = list(dict.fromkeys(normalize_tag_slug(t) for t in manifest.labels))
+    if labels:
+        fields["tags"] = labels
     async with get_session_factory()() as session:
         await DocumentRepo(session).update_fields(doc_id, **fields)
+        if labels:
+            await sync_document_tag_index(doc_id, labels, session, record_manual_provenance=True)
         await session.commit()
     return Path(fields["file_path"]), fields["format"]
 

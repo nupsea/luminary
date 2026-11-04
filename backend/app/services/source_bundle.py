@@ -8,6 +8,7 @@ changes afterwards reaches the library. `docs/roadmap.md` §7 has the design.
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import shutil
 import stat
@@ -245,7 +246,7 @@ def parse_bundle(root: Path) -> ParsedDocument:
         raise BundleRefused(f"{manifest.media.kind} bundles are transcribed, not parsed")
     sections: list[Section] = []
     for entry in manifest.sections:
-        text = _utf8(_inside(root, entry.file).read_bytes(), entry.file)
+        text = read_section(root, entry.file)
         if PurePosixPath(entry.file).suffix.lower() != ".md":
             sections.extend(epub_chapter_sections(text, entry.heading))
         elif len(text := text.strip()) >= MIN_SECTION_CHARS:
@@ -263,3 +264,48 @@ def parse_bundle(root: Path) -> ParsedDocument:
         sections=sections,
         raw_text=raw_text,
     )
+
+
+def read_section(root: Path, rel: str) -> str:
+    """A section file of the stored bundle at `root`, as text."""
+    return _utf8(_inside(root, rel).read_bytes(), rel)
+
+
+def bundle_images(root: Path) -> dict[str, tuple[str, bytes]]:
+    """Every image under `assets/` but the cover, keyed by its path below `assets/`: the
+    figures a book's chapters show, as an EPUB's image items are."""
+    assets = root / "assets"
+    cover = read_manifest(root).cover
+    images: dict[str, tuple[str, bytes]] = {}
+    for path in sorted(assets.rglob("*")) if assets.is_dir() else []:
+        if path.relative_to(root).as_posix() == cover or path.is_symlink() or not path.is_file():
+            continue
+        mime, _ = mimetypes.guess_type(path.name)
+        # Only images: a bundle's HTML served from the API origin would run as a page there.
+        if mime and mime.startswith("image/"):
+            images[path.relative_to(assets).as_posix()] = (mime, path.read_bytes())
+    return images
+
+
+def bundle_cover(root: Path) -> bytes | None:
+    cover = read_manifest(root).cover
+    return _inside(root, cover).read_bytes() if cover else None
+
+
+def bundle_image(root: Path, rel: str) -> tuple[bytes, str] | None:
+    """One image under `assets/`, by its path as a chapter wrote it or else by base name, as
+    the EPUB asset route matches."""
+    match = _asset_named(root / "assets", rel)
+    mime = mimetypes.guess_type(match.name)[0] if match else None
+    if match is None or not mime or not mime.startswith("image/"):
+        return None
+    return match.read_bytes(), mime
+
+
+def _asset_named(assets: Path, rel: str) -> Path | None:
+    if not assets.is_dir():
+        return None
+    files = [p for p in assets.rglob("*") if p.is_file() and not p.is_symlink()]
+    name = PurePosixPath(rel).name.lower()
+    exact = next((p for p in files if p.relative_to(assets).as_posix() == rel), None)
+    return exact or next((p for p in files if p.name.lower() == name), None)

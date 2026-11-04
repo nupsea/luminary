@@ -13,12 +13,15 @@ import math
 from collections import Counter
 from collections.abc import Callable
 from functools import lru_cache
+from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
 import bleach
 import ebooklib
 from bs4 import BeautifulSoup, Tag
 from ebooklib import epub
+
+from app.services.source_bundle import bundle_images, read_manifest, read_section
 
 logger = logging.getLogger(__name__)
 
@@ -377,6 +380,48 @@ def _link_into_book(soup: BeautifulSoup, units: list[dict], chapter_index: int) 
             a["data-chapter"] = str(target)
 
 
+def _book_documents(file_path: str) -> tuple[list[tuple[str, str]], Counter[str]]:
+    """(file name, HTML) of each document in reading order, and the book's top-level TOC
+    entries by file name, from an EPUB or a stored bundle: by storage, as the parser reads."""
+    if Path(file_path).is_dir():
+        sections = read_manifest(Path(file_path)).sections
+        documents = [
+            (s.file, _without_head(read_section(Path(file_path), s.file))) for s in sections
+        ]
+        # A bundle's table of contents names each section file once, as one chapter.
+        return documents, Counter(PurePosixPath(s.file).name for s in sections)
+    book = epub.read_epub(file_path, options={"ignore_ncx": False})
+    documents = []
+    for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+        if isinstance(item, epub.EpubNav):  # the navigation document, not a chapter
+            continue
+        try:
+            documents.append((item.get_name(), item.get_content().decode("utf-8", "replace")))
+        except AttributeError:
+            documents.append((item.get_name(), ""))
+    return documents, _top_level_toc_entries(book)
+
+
+def _without_head(html_str: str) -> str:
+    """ebooklib reads an EPUB chapter back without its own `<head>`, so its `<title>` is
+    neither a chapter title nor counted words; a bundle's chapter is read the same way."""
+    soup = BeautifulSoup(html_str, "html.parser")
+    for head in soup.find_all("head"):
+        head.decompose()
+    return str(soup)
+
+
+def book_images(file_path: str) -> dict[str, tuple[str, bytes]]:
+    """{path inside the book: (media type, bytes)} for each figure, the cover excluded."""
+    if Path(file_path).is_dir():
+        return bundle_images(Path(file_path))
+    book = epub.read_epub(file_path, options={"ignore_ncx": True})
+    return {
+        item.file_name: (item.media_type or "image/png", item.content)
+        for item in book.get_items_of_type(ebooklib.ITEM_IMAGE)
+    }
+
+
 class EpubService:
     """Service for reading EPUB files and serving sanitized chapter HTML."""
 
@@ -421,28 +466,20 @@ class EpubService:
         headings rather than spine items. `get_toc` and `get_chapter` share this
         list so they cannot disagree about what chapter N is.
         """
-        book = epub.read_epub(file_path, options={"ignore_ncx": False})
-        toc_entries = _top_level_toc_entries(book)
+        documents, toc_entries = _book_documents(file_path)
         units: list[dict] = []
 
-        for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
-            # Skip EPUB navigation documents (table-of-contents spine item)
-            if isinstance(item, epub.EpubNav):
-                continue
-            try:
-                html_str = item.get_content().decode("utf-8", errors="replace")
-            except (UnicodeDecodeError, AttributeError):
-                html_str = ""
+        for name, html_str in documents:
             soup = BeautifulSoup(html_str, "html.parser")
             # A file the TOC lists as exactly one chapter is read as one, so its
             # sections are not each served as a chapter of their own. A file the
             # TOC does not list keeps the heading split.
-            if toc_entries.get(item.get_name().rsplit("/", 1)[-1]) == 1:
+            if toc_entries.get(name.rsplit("/", 1)[-1]) == 1:
                 file_units = [_whole_file_unit(soup)]
             else:
                 file_units = _split_soup_on_headings(soup)
             for unit in file_units:
-                unit["file"] = _file_stem(item.get_name())
+                unit["file"] = _file_stem(name)
                 # Skip near-empty items with no discernible title (cover pages)
                 if not unit["title"] and unit["word_count"] < 10:
                     continue
@@ -493,14 +530,10 @@ class EpubService:
         # Resolve embedded EPUB images into inline base64 data URIs so diagrams render
         if "<img" in html_content.lower():
             try:
-                book = epub.read_epub(file_path, options={"ignore_ncx": True})
                 images: dict[str, tuple[str, bytes]] = {}
-                for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
-                    raw_name = item.file_name
-                    base_name = raw_name.split("/")[-1]
-                    media_type = item.media_type or "image/png"
-                    images[raw_name] = (media_type, item.content)
-                    images[base_name] = (media_type, item.content)
+                for raw_name, image in book_images(file_path).items():
+                    images[raw_name] = image
+                    images[raw_name.split("/")[-1]] = image
 
                 for img in soup.find_all("img"):
                     src = img.get("src", "")

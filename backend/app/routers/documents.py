@@ -9,6 +9,7 @@ import uuid
 import zipfile
 from dataclasses import asdict
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 
 import httpx
@@ -125,6 +126,7 @@ from app.services.remote_source import (
     UningestibleRemoteContent,
     fetch_remote_document,
 )
+from app.services.source_bundle import bundle_cover, bundle_image
 from app.services.summarizer import PREGENERATE_MODES
 from app.services.transcript_fix import fix_term
 from app.services.transcript_vocabulary import vocabulary_from_metadata
@@ -1190,72 +1192,69 @@ def _render_cover_sync(fp: str, target: str) -> bool:
 
 
 def _extract_epub_cover_sync(fp: str, target: str) -> bool:
-    """Extract embedded cover image from an EPUB archive and cache as WEBP."""
+    """The book's declared cover (an EPUB's, or a stored bundle's), cached as WEBP."""
     try:
-        import re
-        import zipfile
-        from io import BytesIO
-
+        raw = bundle_cover(Path(fp)) if Path(fp).is_dir() else _epub_cover_bytes(fp)
+        if raw is None:
+            return False
         from PIL import Image
 
-        with zipfile.ZipFile(fp) as zf:
-            namelist = zf.namelist()
-            valid_exts = (".png", ".jpg", ".jpeg", ".webp", ".gif")
-
-            candidate_name = None
-
-            # 1. Direct match: image file with 'cover' in its name
-            for name in namelist:
-                name_lower = name.lower()
-                if any(name_lower.endswith(ext) for ext in valid_exts) and "cover" in name_lower:
-                    candidate_name = name
-                    break
-
-            # 2. OPF metadata match: look for cover-image property or meta name="cover"
-            if not candidate_name:
-                opf_names = [n for n in namelist if n.lower().endswith(".opf")]
-                for opf_name in opf_names:
-                    try:
-                        opf_content = zf.read(opf_name).decode("utf-8", errors="replace")
-                        # Look for properties="cover-image" href="..."
-                        m_prop = re.search(
-                            r'<item[^>]+properties=["\'][^"\']*cover-image[^"\']*["\'][^>]+href=["\']([^"\']+)["\']',
-                            opf_content,
-                            re.IGNORECASE,
-                        )
-                        if not m_prop:
-                            m_prop = re.search(
-                                r'<item[^>]+href=["\']([^"\']+)["\'][^>]+properties=["\'][^"\']*cover-image',
-                                opf_content,
-                                re.IGNORECASE,
-                            )
-                        if m_prop:
-                            href = m_prop.group(1).lstrip("/")
-                            base = str(Path(opf_name).parent)
-                            resolved = f"{base}/{href}" if base and base != "." else href
-                            if resolved in namelist:
-                                candidate_name = resolved
-                                break
-                    except Exception as opf_err:
-                        logger.debug("OPF parse skipped: %s", opf_err)
-
-            # No declared cover: fall through to the page render rather than
-            # promoting whichever figure happens to be first in the archive.
-            if candidate_name:
-                raw_bytes = zf.read(candidate_name)
-                img = Image.open(BytesIO(raw_bytes), formats=DOCUMENT_IMAGE_FORMATS)
-                if img.mode in ("RGBA", "P"):
-                    img = img.convert("RGB")
-                if img.height > 600:
-                    ratio = 600.0 / img.height
-                    img = img.resize((int(img.width * ratio), 600), Image.Resampling.LANCZOS)
-                target_path = Path(target)
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                img.save(target_path, "WEBP", quality=85)
-                return True
+        img = Image.open(BytesIO(raw), formats=DOCUMENT_IMAGE_FORMATS)
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        if img.height > 600:
+            ratio = 600.0 / img.height
+            img = img.resize((int(img.width * ratio), 600), Image.Resampling.LANCZOS)
+        target_path = Path(target)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        img.save(target_path, "WEBP", quality=85)
+        return True
     except Exception as exc:
         logger.warning("Failed to extract EPUB cover for %s: %s", fp, exc)
     return False
+
+
+_COVER_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+_OPF_COVER = (
+    re.compile(
+        r'<item[^>]+properties=["\'][^"\']*cover-image[^"\']*["\'][^>]+href=["\']([^"\']+)["\']',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r'<item[^>]+href=["\']([^"\']+)["\'][^>]+properties=["\'][^"\']*cover-image',
+        re.IGNORECASE,
+    ),
+)
+
+
+def _epub_cover_bytes(fp: str) -> bytes | None:
+    """An image named for the cover, else the OPF's `cover-image`. No declared cover falls
+    through to the page render rather than promoting whichever figure comes first."""
+    with zipfile.ZipFile(fp) as zf:
+        namelist = zf.namelist()
+        named = next(
+            (n for n in namelist if n.lower().endswith(_COVER_EXTS) and "cover" in n.lower()),
+            None,
+        )
+        candidate = named or _opf_cover(zf, namelist)
+        return zf.read(candidate) if candidate else None
+
+
+def _opf_cover(zf: zipfile.ZipFile, namelist: list[str]) -> str | None:
+    for opf_name in (n for n in namelist if n.lower().endswith(".opf")):
+        try:
+            opf_content = zf.read(opf_name).decode("utf-8", errors="replace")
+        except Exception as opf_err:
+            logger.debug("OPF parse skipped: %s", opf_err)
+            continue
+        m_prop = _OPF_COVER[0].search(opf_content) or _OPF_COVER[1].search(opf_content)
+        if m_prop:
+            href = m_prop.group(1).lstrip("/")
+            base = str(Path(opf_name).parent)
+            resolved = f"{base}/{href}" if base and base != "." else href
+            if resolved in namelist:
+                return resolved
+    return None
 
 
 @router.get("/{document_id}/cover")
@@ -1279,7 +1278,7 @@ async def get_document_cover(document_id: str) -> Response:
         file_path = doc.file_path
 
         # 1. For EPUB, extract the real embedded cover image first
-        if doc_format == "epub" and file_path and Path(file_path).is_file():
+        if doc_format == "epub" and file_path and Path(file_path).exists():
             success = await asyncio.to_thread(
                 _extract_epub_cover_sync, file_path, str(cached_cover)
             )
@@ -1441,6 +1440,14 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
     )
 
 
+def _read_book_image_sync(book_path: str, clean_path: str) -> tuple[bytes, str] | None:
+    """An image of the book, by relative path or else by base name: from its stored bundle's
+    `assets/`, or its EPUB archive."""
+    if Path(book_path).is_dir():
+        return bundle_image(Path(book_path), clean_path)
+    return _read_epub_image_sync(book_path, clean_path)
+
+
 def _read_epub_image_sync(epub_path: str, clean_path: str) -> tuple[bytes, str] | None:
     """An image entry of an EPUB archive, by relative path or else by base name."""
     filename = clean_path.rsplit("/", maxsplit=1)[-1].lower()
@@ -1474,9 +1481,9 @@ async def get_document_asset(document_id: str, asset_path: str) -> Response:
 
     filename = clean_path.split("/")[-1]
 
-    if (doc.format or "").lower() == "epub" and doc.file_path and Path(doc.file_path).is_file():
+    if (doc.format or "").lower() == "epub" and doc.file_path and Path(doc.file_path).exists():
         try:
-            found = await asyncio.to_thread(_read_epub_image_sync, doc.file_path, clean_path)
+            found = await asyncio.to_thread(_read_book_image_sync, doc.file_path, clean_path)
         except (zipfile.BadZipFile, OSError) as exc:
             logger.warning("Failed to read asset %s from EPUB %s: %s", clean_path, document_id, exc)
             found = None
