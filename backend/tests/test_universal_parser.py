@@ -261,6 +261,26 @@ def test_bodyless_document_keeps_its_sections(tmp_path):
     assert _drop_bodyless(only_headings) == only_headings
 
 
+def test_an_empty_heading_stays_only_as_a_title_over_text(tmp_path):
+    """A heading over a deeper section with text is its title (#334); a nested contents entry
+    sits over another empty entry and is dropped with it."""
+    from app.services.universal_parser import _drop_bodyless
+    from app.types import Section
+
+    def sec(heading, level, text=""):
+        return Section(heading=heading, level=level, text=text, page_start=0, page_end=0)
+
+    sections = [
+        sec("PART I", 1),
+        sec("CHAPTER I", 2),
+        sec("PART I", 1),
+        sec("CHAPTER I", 2, "It begins."),
+    ]
+    kept = _drop_bodyless(sections)
+
+    assert [(s.heading, s.text) for s in kept] == [("PART I", ""), ("CHAPTER I", "It begins.")]
+
+
 def test_marker_recognises_numbered_chapter_openings():
     """Terminal punctuation alone does not make a line prose: "BOOK I." is a
     marker, a nine-word sentence ending in "?" is not."""

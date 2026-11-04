@@ -238,3 +238,48 @@ def test_an_epistolary_novel_s_letters_are_topics():
     tops = _pick_topic_sections([SimpleNamespace(heading=h, level=1) for h in headings])
 
     assert [t.heading for t in tops] == headings
+
+
+def test_one_letter_roman_chapters_are_topics_beside_longer_numerals():
+    """The Great Gatsby's "I" and "V" were dropped as list markers while "II".."IX" stayed
+    (#334); a document with no other roman headings keeps the list-marker rule."""
+    from types import SimpleNamespace
+
+    from app.services.topic_service import topic_content
+
+    def rows(*headings):
+        return [SimpleNamespace(heading=h, level=1) for h in headings]
+
+    gatsby = topic_content(rows("I", "II", "III", "IV", "V", "VI"))
+    lettered = topic_content(rows("A", "B", "I", "Results"))
+
+    assert [r.heading for r in gatsby] == ["I", "II", "III", "IV", "V", "VI"]
+    assert [r.heading for r in lettered] == ["Results"]
+
+
+def test_a_repeated_topic_title_is_named_by_its_part():
+    """Gulliver's four "CHAPTER I" topics could not be told apart (#334)."""
+    from types import SimpleNamespace
+
+    from app.services.topic_service import topic_titles
+
+    specs = [
+        ("PART I. LILLIPUT", 1, ""),
+        ("CHAPTER I", 2, "x"),
+        ("CHAPTER II", 2, "x"),
+        ("PART II. BROBDINGNAG", 1, ""),
+        ("CHAPTER I", 2, "x"),
+    ]
+    sections = [
+        SimpleNamespace(id=f"s{i}", heading=h, level=lv, text=t)
+        for i, (h, lv, t) in enumerate(specs)
+    ]
+    tops = [s for s in sections if s.text]
+
+    titles = topic_titles(sections, tops, {s.id for s in tops})
+
+    assert list(titles.values()) == [
+        "PART I. LILLIPUT — CHAPTER I",
+        "CHAPTER II",
+        "PART II. BROBDINGNAG — CHAPTER I",
+    ]

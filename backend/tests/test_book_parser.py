@@ -486,6 +486,12 @@ def _parse_text(tmp_path, text: str):
     return result.sections
 
 
+def _write(tmp_path, text: str) -> Path:
+    f = tmp_path / "book.txt"
+    f.write_text(text)
+    return f
+
+
 def _in_reading_order(sections, text: str) -> bool:
     flat = " ".join(text.split())
     starts = [flat.find(" ".join(s.text.split())[:60]) for s in sections]
@@ -529,8 +535,77 @@ def test_a_numbering_that_restarts_keeps_every_chapter_in_place(tmp_path):
     )
     sections = _parse_text(tmp_path, text)
 
-    assert [s.heading for s in sections] == ["CHAPTER I", "CHAPTER II", "CHAPTER III"] * 2
-    assert _in_reading_order(sections, text)
+    chapters = [("CHAPTER I", 2), ("CHAPTER II", 2), ("CHAPTER III", 2)]
+    assert [(s.heading, s.level) for s in sections] == [
+        ("PART I", 1),
+        *chapters,
+        ("PART II", 1),
+        *chapters,
+    ]
+    assert _in_reading_order([s for s in sections if s.text], text)
+
+
+def test_parts_are_kept_over_their_chapters(tmp_path):
+    """Gulliver's "PART I. A VOYAGE TO LILLIPUT" was a sibling of its chapters, so its empty
+    section read as a contents entry and was dropped with its name (#334)."""
+    text = "".join(
+        (f"PART {p}. A VOYAGE TO {place}\n\n" if c == "I" else "")
+        + f"CHAPTER {c}.\n\nPart {p} chapter {c}. {_PROSE}\n\n"
+        for p, place in (("I", "LILLIPUT"), ("II", "BROBDINGNAG"))
+        for c in ("I", "II", "III")
+    )
+    sections = DocumentParser().parse(_write(tmp_path, text), "txt").sections
+
+    assert [(s.heading, s.level) for s in sections if not s.text.strip()] == [
+        ("PART I. A VOYAGE TO LILLIPUT", 1),
+        ("PART II. A VOYAGE TO BROBDINGNAG", 1),
+    ]
+    assert {s.level for s in sections if s.heading.startswith("CHAPTER")} == {2}
+
+
+def test_a_chapter_title_over_numbered_parts_is_kept(tmp_path):
+    """Sherlock's first story is a title over its parts "I.", "II.", "III."; the empty title was
+    dropped as a contents entry, so the book had no "A SCANDAL IN BOHEMIA" (#334)."""
+    parts = "".join(f"{n}.\n\nPart {n}. {_PROSE}\n\n" for n in ("I", "II", "III"))
+    stories = "".join(
+        f"{n}. THE {t}\n\n{t} begins. {_PROSE}\n\n"
+        for n, t in (("II", "LEAGUE"), ("III", "IDENTITY"))
+    )
+    text = f"I. A SCANDAL IN BOHEMIA\n\n\n{parts}{stories}"
+    sections = DocumentParser().parse(_write(tmp_path, text), "txt").sections
+
+    assert [(s.heading, s.level) for s in sections] == [
+        ("I. A SCANDAL IN BOHEMIA", 1),
+        ("I", 2),
+        ("II", 2),
+        ("III", 2),
+        ("II. THE LEAGUE", 1),
+        ("III. THE IDENTITY", 1),
+    ]
+
+
+def test_a_letter_salutation_is_not_its_title(tmp_path):
+    """Frankenstein's "Letter 1" was titled by its salutation, "To Mrs. Saville, England" (#334)."""
+    text = "".join(
+        f"Letter {n}\n\n_To Mrs. Saville, England._\n\nLetter {n} begins. {_PROSE}\n\n"
+        for n in (1, 2, 3)
+    )
+    sections = _parse_text(tmp_path, text)
+
+    assert [s.heading for s in sections] == ["Letter 1", "Letter 2", "Letter 3"]
+    assert all(s.text.startswith("_To Mrs. Saville") for s in sections)
+
+
+def test_a_transcript_split_by_dividers_keeps_every_part(tmp_path):
+    """Divider-only headings have no name, so every part shared the base heading "" and the
+    twin merge folded a whole transcript into one section (#334)."""
+    rule = "=" * 69
+    text = "".join(f"{rule}\n\nSpeaker {n} talks. {_PROSE}\n\n" for n in range(1, 5))
+    sections = _parse_text(tmp_path, text)
+
+    assert len(sections) == 4
+    assert [s.heading for s in sections] == [""] * 4
+    assert all(f"Speaker {n} talks" in s.text for n, s in enumerate(sections, start=1))
 
 
 def test_a_divider_beside_chapters_is_a_scene_break(tmp_path):

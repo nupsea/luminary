@@ -129,11 +129,16 @@ def _drop_bodyless(sections: list[Section]) -> list[Section]:
     """Drop sections that carry a heading and no text.
 
     A contents page matches the same signature as the chapter openings, so each
-    chapter is found twice, once with nothing under it. Every section here is
-    level 1, so an empty one owns no subsections. Keeps everything when the
-    filter would empty the document.
+    chapter is found twice, once with nothing under it. A heading that opens a
+    deeper section with text is a title over it, not a contents entry, and stays:
+    Sherlock's "I. A SCANDAL IN BOHEMIA" over its parts, Gulliver's "PART I" over
+    its chapters (#334). Keeps everything when the filter would empty the document.
     """
-    kept = [s for s in sections if s.text.strip()]
+    kept = [
+        s
+        for s, after in zip(sections, [*sections[1:], None], strict=True)
+        if s.text.strip() or (after is not None and after.level > s.level and after.text.strip())
+    ]
     return kept or sections
 
 
