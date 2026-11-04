@@ -96,17 +96,20 @@ def _check_description(name: str, description: dict[str, Any]) -> None:
         raise ConnectorInstallFailed(
             f"describe names the connector {description.get('name')!r}, its entry point {name!r}"
         )
-    terms = description.get("terms") or {}
-    statement = str(terms.get("statement") or "").strip()
-    if not (statement and str(terms.get("url", "")).startswith("https://")):
-        raise ConnectorInstallFailed(f"{name} does not state its source's terms and where they are")
-    if statement == PLACEHOLDER_TERMS:
-        raise ConnectorInstallFailed(f"{name} still carries the template's placeholder terms")
+    _check_terms(name, description.get("terms") or {})
     for prefix in description.get("url_prefixes") or []:
         if not re.match(r"^https?://[^/\s]+/", str(prefix)):
             raise ConnectorInstallFailed(f"{name} claims {prefix!r}, which is not a URL prefix")
     _check_known(name, "writes", description.get("media") or ["text"], MEDIA)
     _check_known(name, "runs", description.get("tools") or [], TOOLS)
+
+
+def _check_terms(name: str, terms: dict[str, Any]) -> None:
+    statement = str(terms.get("statement") or "").strip()
+    if not (statement and str(terms.get("url", "")).startswith("https://")):
+        raise ConnectorInstallFailed(f"{name} does not state its source's terms and where they are")
+    if statement == PLACEHOLDER_TERMS:
+        raise ConnectorInstallFailed(f"{name} still carries the template's placeholder terms")
 
 
 def _check_known(name: str, verb: str, values: list, known: tuple[str, ...]) -> None:
