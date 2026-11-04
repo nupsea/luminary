@@ -37,6 +37,22 @@ async def test_generate_from_notes_raises_without_tag_or_ids():
 # API integration tests
 
 
+def _answers(concepts: str, cards: str) -> AsyncMock:
+    """`LLMService.generate` answered by which request it is, not by call order.
+
+    The app's enrichment worker starts with the test client and may pick up a job another test
+    left queued (a chapter_cards job writes through `generate`); a mock that answers in order
+    gave that job these replies, and the note generator wrote no card.
+    """
+    from app.services.flashcard_prompts import (
+        NOTES_CARD_FROM_CONCEPTS_SYSTEM,
+        notes_concept_extract_system,
+    )
+
+    replies = {notes_concept_extract_system(): concepts, NOTES_CARD_FROM_CONCEPTS_SYSTEM: cards}
+    return AsyncMock(side_effect=lambda *a, system=None, **kw: replies.get(system, ""))
+
+
 @pytest.fixture()
 def client():
     with TestClient(app) as c:
@@ -63,7 +79,6 @@ def test_generate_endpoint_201(client):
         r = client.post("/notes", json={"content": content, "tags": [tag]})
         assert r.status_code == 201
 
-    # Two-pass LLM: 1st call = concept extraction, 2nd call = card generation
     concept_resp = (
         '{"domain": "Wonderland", "concepts": '
         '[{"concept": "Cheshire Cat vanishing", "type": "concept"}]}'
@@ -73,7 +88,7 @@ def test_generate_endpoint_201(client):
         '"answer": "Vanish leaving its smile", '
         '"source_excerpt": "can vanish leaving only its smile"}]'
     )
-    mock_llm = AsyncMock(side_effect=[concept_resp, card_resp])
+    mock_llm = _answers(concept_resp, card_resp)
     with patch("app.services.llm.LLMService.generate", mock_llm):
         resp = client.post(
             "/notes/flashcards/generate",
@@ -99,7 +114,6 @@ def test_generate_from_notes_by_ids(client):
         assert r.status_code == 201
         note_ids.append(r.json()["id"])
 
-    # Two-pass LLM: 1st call = concept extraction, 2nd call = card generation
     concept_resp = (
         '{"domain": "Wonderland", "concepts": '
         '[{"concept": "White Rabbit punctuality", "type": "concept"}]}'
@@ -109,7 +123,7 @@ def test_generate_from_notes_by_ids(client):
         '"answer": "The White Rabbit", '
         '"source_excerpt": "The White Rabbit is always late"}]'
     )
-    mock_llm = AsyncMock(side_effect=[concept_resp, card_resp])
+    mock_llm = _answers(concept_resp, card_resp)
     with patch("app.services.llm.LLMService.generate", mock_llm):
         resp = client.post(
             "/notes/flashcards/generate",
@@ -141,12 +155,11 @@ def test_alice_notes_flashcards(all_books_ingested):
             assert r.status_code == 201
             note_ids.append(r.json()["id"])
 
-        # Two-pass LLM: 1st call = concept extraction, 2nd call = card generation
-        concept_resp = (
-            '{"domain": "Wonderland", "concepts": '
-            '[{"concept": "White Rabbit", "type": "character"}, '
-            '{"concept": "Cheshire Cat grin", "type": "concept"}]}'
-        )
+            concept_resp = (
+                '{"domain": "Wonderland", "concepts": '
+                '[{"concept": "White Rabbit", "type": "character"}, '
+                '{"concept": "Cheshire Cat grin", "type": "concept"}]}'
+            )
         card_resp = (
             '[{"question": "Who did Alice follow?", '
             '"answer": "The White Rabbit", '
@@ -154,7 +167,7 @@ def test_alice_notes_flashcards(all_books_ingested):
             '{"question": "What remains after the Cheshire Cat vanishes?", '
             '"answer": "Its grin", "source_excerpt": "can vanish leaving only its smile"}]'
         )
-        mock_llm = AsyncMock(side_effect=[concept_resp, card_resp])
+        mock_llm = _answers(concept_resp, card_resp)
         with patch("app.services.llm.LLMService.generate", mock_llm):
             resp = c.post(
                 "/notes/flashcards/generate",
