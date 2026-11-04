@@ -884,6 +884,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/connectors/catalogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Catalogue */
+        get: operations["list_catalogue_connectors_catalogue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/connectors/catalogue/{name}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install From Catalogue
+         * @description Server-sent events, as a component install streams: `downloading`, then `ready` or
+         *     `failed`. Only ever on the user's action.
+         */
+        post: operations["install_from_catalogue_connectors_catalogue__name__install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/connectors/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Uninstall Connector */
+        delete: operations["uninstall_connector_connectors__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/connectors/{name}/status": {
         parameters: {
             query?: never;
@@ -7234,6 +7289,35 @@ export interface components {
             stability: number;
             /** Due Date */
             due_date: string | null;
+        };
+        /**
+         * CatalogueItem
+         * @description A connector the app can install, shown with its licence and source terms before the
+         *     install starts. `installed_version` is what this machine has, if any.
+         */
+        CatalogueItem: {
+            /** Name */
+            name: string;
+            /** Label */
+            label: string;
+            /** Version */
+            version: string;
+            /** Summary */
+            summary: string;
+            /** Licence */
+            licence: string;
+            terms: components["schemas"]["ConnectorTerms"];
+            /** Repository */
+            repository: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Installed Version */
+            installed_version?: string | null;
+        };
+        /** CatalogueResponse */
+        CatalogueResponse: {
+            /** Connectors */
+            connectors: components["schemas"]["CatalogueItem"][];
         };
         /**
          * ChapterItem
@@ -13745,6 +13829,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConnectorListResponse"];
+                };
+            };
+        };
+    };
+    list_catalogue_connectors_catalogue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogueResponse"];
+                };
+            };
+        };
+    };
+    install_from_catalogue_connectors_catalogue__name__install_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    uninstall_connector_connectors__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

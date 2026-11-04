@@ -6,12 +6,13 @@ beside the download: whoever serves a bad archive can serve a matching checksum.
 """
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 import shutil
 import tarfile
 import zipfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import httpx
@@ -131,6 +132,21 @@ def _write(target: Path, reader, mode: int | None = None) -> None:
         target.chmod(mode)
 
 
+@contextlib.contextmanager
+def _tar_stream(archive: Path) -> Iterator[tarfile.TarFile]:
+    """A tar archive read front to back: `.tar.gz` (uv's releases) or `.tar.zst` (Ollama's)."""
+    if archive.name.endswith((".tar.gz", ".tgz")):
+        with tarfile.open(archive, mode="r|gz") as bundle:
+            yield bundle
+        return
+    # "r|": a zstd reader is not seekable.
+    import zstandard  # noqa: PLC0415
+
+    with archive.open("rb") as raw, zstandard.ZstdDecompressor().stream_reader(raw) as stream:
+        with tarfile.open(fileobj=stream, mode="r|") as bundle:
+            yield bundle
+
+
 def extract_prefix(archive: Path, member_prefix: str, into: Path) -> int:
     """Extract the members under `member_prefix`, stripping it. Blocking.
 
@@ -150,33 +166,28 @@ def extract_prefix(archive: Path, member_prefix: str, into: Path) -> int:
                 written += 1
         return written
 
-    # "r|": a zstd reader is not seekable.
-    import zstandard  # noqa: PLC0415
-
-    decompressor = zstandard.ZstdDecompressor()
     # Deferred: a symlink is stored before its target, which the copy fallback needs.
     links: list[tuple[Path, str]] = []
-    with archive.open("rb") as raw, decompressor.stream_reader(raw) as stream:
-        with tarfile.open(fileobj=stream, mode="r|") as bundle:
-            for member in bundle:
-                if not member.name.startswith(member_prefix):
-                    continue
-                relative = member.name[len(member_prefix) :]
-                if not relative or member.isdir():
-                    continue
-                target = _target_in(into, relative)
-                if member.issym():
-                    links.append((target, member.linkname))
-                    continue
-                if not member.isfile():
-                    logger.warning("skipped %s in %s (type %r)", member.name, archive, member.type)
-                    continue
-                reader = bundle.extractfile(member)
-                if reader is None:
-                    continue
-                # A runner without its executable bit does not load.
-                _write(target, reader, member.mode & 0o777)
-                written += 1
+    with _tar_stream(archive) as bundle:
+        for member in bundle:
+            if not member.name.startswith(member_prefix):
+                continue
+            relative = member.name[len(member_prefix) :]
+            if not relative or member.isdir():
+                continue
+            target = _target_in(into, relative)
+            if member.issym():
+                links.append((target, member.linkname))
+                continue
+            if not member.isfile():
+                logger.warning("skipped %s in %s (type %r)", member.name, archive, member.type)
+                continue
+            reader = bundle.extractfile(member)
+            if reader is None:
+                continue
+            # A runner without its executable bit does not load.
+            _write(target, reader, member.mode & 0o777)
+            written += 1
 
     for target, linkname in links:
         # The CUDA runner is mostly these soname links; dropping them breaks it.

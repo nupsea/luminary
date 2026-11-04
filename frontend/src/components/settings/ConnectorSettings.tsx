@@ -1,17 +1,25 @@
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { CheckCircle2, ExternalLink, Plug, Trash2 } from "lucide-react"
+import { CheckCircle2, Download, ExternalLink, Loader2, Plug, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { ConnectorConnectModal } from "@/components/library/ConnectorConnectModal"
 import {
+  CATALOGUE_KEY,
   CONNECTORS_KEY,
+  type CatalogueItem,
   type Connector,
   connectorStatus,
   disconnectConnector,
+  installFromCatalogue,
+  listCatalogue,
   listConnectors,
+  offeredFromCatalogue,
+  uninstallConnector,
 } from "@/lib/connectorsApi"
+import { formatBytes } from "@/lib/setupApi"
 
-/** One card per installed connector, each drawn from what the connector described. */
+/** The installed connectors, one card each drawn from what the connector described, then the
+ *  catalogue's, each showing its licence and its source's terms before an install. */
 export function ConnectorSettings() {
   const { data, isLoading, isError } = useQuery({ queryKey: CONNECTORS_KEY, queryFn: listConnectors })
   const [connecting, setConnecting] = useState<Connector | null>(null)
@@ -19,19 +27,17 @@ export function ConnectorSettings() {
 
   if (isLoading) return <div className="h-16 animate-pulse rounded-lg bg-muted" />
   if (isError) return <p className="text-xs text-red-500">Could not list the installed connectors.</p>
-  if (!data || data.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        No connectors installed. A connector brings in links from one source, such as YouTube; install
-        one from its folder with <code className="font-mono">python -m app.scripts.install_connector</code>.
-      </p>
-    )
-  }
   return (
     <div className="space-y-3">
-      {data.map((c) => (
+      {(data ?? []).length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          No connectors installed. A connector brings in links from one source, such as YouTube.
+        </p>
+      )}
+      {(data ?? []).map((c) => (
         <ConnectorCard key={c.name} connector={c} onConnect={() => setConnecting(c)} />
       ))}
+      <CatalogueSection />
       <ConnectorConnectModal
         connector={connecting}
         onClose={() => setConnecting(null)}
@@ -51,6 +57,16 @@ function ConnectorCard({ connector, onConnect }: { connector: Connector; onConne
     queryFn: () => connectorStatus(connector.name),
     enabled: signsIn && connector.connected,
   })
+
+  async function handleUninstall() {
+    try {
+      await uninstallConnector(connector.name)
+      await queryClient.invalidateQueries({ queryKey: CONNECTORS_KEY })
+      toast.success(`${connector.label} uninstalled. Its documents stay in your library.`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Could not uninstall ${connector.label}`)
+    }
+  }
 
   async function handleDisconnect() {
     setDisconnecting(true)
@@ -82,6 +98,13 @@ function ConnectorCard({ connector, onConnect }: { connector: Connector; onConne
             </p>
           </div>
         </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={() => void handleUninstall()}
+            className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
+          >
+            Uninstall
+          </button>
         {signsIn && (
           <div className="flex shrink-0 items-center gap-2">
             <button
@@ -103,6 +126,7 @@ function ConnectorCard({ connector, onConnect }: { connector: Connector; onConne
             )}
           </div>
         )}
+        </div>
       </div>
       <ConnectorStatusLine
         connector={connector}
@@ -140,5 +164,78 @@ function ConnectorStatusLine({
       <CheckCircle2 className="h-3.5 w-3.5" />
       Connected{status?.account ? ` as ${status.account}` : ""}
     </p>
+  )
+}
+
+function CatalogueSection() {
+  const { data, isLoading, isError } = useQuery({ queryKey: CATALOGUE_KEY, queryFn: listCatalogue })
+  if (isLoading) return <div className="h-12 animate-pulse rounded-lg bg-muted" />
+  if (isError) return <p className="text-xs text-red-500">Could not read the connector catalogue.</p>
+  const offered = offeredFromCatalogue(data ?? [])
+  if (offered.length === 0) return null
+  return (
+    <div className="space-y-2">
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Available</h4>
+      {offered.map((item) => (
+        <CatalogueCard key={item.name} item={item} />
+      ))}
+    </div>
+  )
+}
+
+function CatalogueCard({ item }: { item: CatalogueItem }) {
+  const queryClient = useQueryClient()
+  const [progress, setProgress] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleInstall() {
+    setError(null)
+    setProgress("Starting...")
+    try {
+      await installFromCatalogue(item.name, (event) => setProgress(event.detail ?? "Installing..."))
+      await queryClient.invalidateQueries({ queryKey: CONNECTORS_KEY })
+      toast.success(`${item.label} installed`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Could not install ${item.label}`)
+    } finally {
+      setProgress(null)
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-dashed border-border p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h4 className="text-sm font-medium text-foreground">
+            {item.label} <span className="font-normal text-muted-foreground">{item.version}</span>
+          </h4>
+          <p className="text-xs text-muted-foreground">{item.summary}</p>
+          <p className="text-xs text-muted-foreground">
+            {item.licence} · {formatBytes(item.size_bytes)} ·{" "}
+            <a href={item.repository} target="_blank" rel="noreferrer" className="hover:underline">
+              source code
+            </a>
+            {item.installed_version && ` · installed ${item.installed_version}`}
+          </p>
+        </div>
+        <button
+          onClick={() => void handleInstall()}
+          disabled={progress !== null}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          {progress !== null ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+          {item.installed_version ? "Update" : "Install"}
+        </button>
+      </div>
+      <div className="rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">
+        <p className="mb-1 font-medium text-foreground">The source's terms</p>
+        <p>{item.terms.statement}</p>
+        <a href={item.terms.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 hover:underline">
+          Read them in full <ExternalLink className="h-3 w-3" />
+        </a>
+      </div>
+      {progress && <p className="text-xs text-muted-foreground">{progress}</p>}
+      {error && <p className="text-xs text-red-500">{error}</p>}
+    </div>
   )
 }

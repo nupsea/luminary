@@ -83,3 +83,22 @@ class ConnectorIngestRequest(BaseModel):
         default_factory=dict,
         description="Values for the connector's inputs and preview choices, by field name",
     )
+
+
+class CatalogueItem(BaseModel):
+    """A connector the app can install, shown with its licence and source terms before the
+    install starts. `installed_version` is what this machine has, if any."""
+
+    name: str
+    label: str
+    version: str
+    summary: str
+    licence: str
+    terms: ConnectorTerms
+    repository: str
+    size_bytes: int
+    installed_version: str | None = None
+
+
+class CatalogueResponse(BaseModel):
+    connectors: list[CatalogueItem]

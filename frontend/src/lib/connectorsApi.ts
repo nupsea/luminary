@@ -1,4 +1,5 @@
 import { ApiError, apiDelete, apiGet, apiPost, apiPut, detailFromError } from "@/lib/apiClient"
+import { type InstallProgress, streamInstall } from "@/lib/setupApi"
 import type { components } from "@/types/api"
 
 export type Connector = components["schemas"]["ConnectorItem"]
@@ -6,11 +7,13 @@ export type ConnectorField = components["schemas"]["ConnectorField"]
 export type ConnectorStatus = components["schemas"]["ConnectorStatus"]
 export type ConnectorPreview = components["schemas"]["ConnectorPreview"]
 export type ConnectorChoice = components["schemas"]["ConnectorChoice"]
+export type CatalogueItem = components["schemas"]["CatalogueItem"]
 
 /** Picked option values, by choice field. */
 export type Picks = Record<string, string[]>
 
 export const CONNECTORS_KEY = ["connectors"] as const
+export const CATALOGUE_KEY = ["connectors", "catalogue"] as const
 
 /** The installed connector that claims `url`, by prefix and first by name: the rule the
  *  backend's `connector_for_url` applies, so the dialog routes a link where ingest will. */
@@ -119,3 +122,32 @@ export const ingestLink = async (
       input,
     })
   ).document_id
+
+export const listCatalogue = async (): Promise<CatalogueItem[]> =>
+  (await apiGet<{ connectors: CatalogueItem[] }>("/connectors/catalogue")).connectors
+
+/** Entries not installed, and installed ones the catalogue has a newer version of. */
+export function offeredFromCatalogue(items: CatalogueItem[]): CatalogueItem[] {
+  return items.filter((i) => i.installed_version !== i.version)
+}
+
+/** Install a catalogue connector, reporting progress; throws the failure a stream reports. */
+export async function installFromCatalogue(
+  name: string,
+  onProgress: (event: InstallProgress) => void,
+): Promise<void> {
+  let failure: string | null = null
+  await streamInstall(`/connectors/catalogue/${encodeURIComponent(name)}/install`, (event) => {
+    if (event.state === "failed") failure = event.detail ?? "Install failed"
+    else onProgress(event)
+  })
+  if (failure) throw new Error(failure)
+}
+
+export async function uninstallConnector(name: string): Promise<void> {
+  try {
+    await apiDelete(`/connectors/${encodeURIComponent(name)}`)
+  } catch (err) {
+    throw detailFromError(err, "Could not uninstall")
+  }
+}
