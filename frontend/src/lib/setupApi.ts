@@ -158,7 +158,16 @@ export async function installComponent(
   onProgress: (event: InstallProgress) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const resp = await fetch(`${API_BASE}/setup/components/${id}/install`, {
+  await streamInstall(`/setup/components/${id}/install`, onProgress, signal)
+}
+
+/** POST `path` and report each server-sent install event; a connector install streams the same. */
+export async function streamInstall(
+  path: string,
+  onProgress: (event: InstallProgress) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const resp = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     signal,
   })

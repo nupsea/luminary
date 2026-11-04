@@ -110,10 +110,11 @@ def _check_known(name: str, verb: str, values: list, known: tuple[str, ...]) -> 
             raise ConnectorInstallFailed(f"{name} {verb} {value!r}; this Luminary knows {known}")
 
 
-async def install_from_folder(folder: Path) -> InstalledConnector:
+async def install_from_folder(folder: Path, *, locked: bool = False) -> InstalledConnector:
     """Build the connector's own environment from its project, then record what it describes.
 
-    Re-installing a connector replaces its environment and keeps its credentials.
+    Re-installing a connector replaces its environment and keeps its credentials. `locked`
+    installs exactly the project's `uv.lock`, hashes included, as a catalogue install must.
     """
     folder = folder.resolve()
     name, entry = _entry_point(folder)
@@ -125,7 +126,7 @@ async def install_from_folder(folder: Path) -> InstalledConnector:
     if env.exists():
         shutil.rmtree(env)
     home.mkdir(parents=True, exist_ok=True)
-    await _uv_sync(uv, folder, env)
+    await _uv_sync(uv, folder, env, locked=locked)
 
     probe = InstalledConnector(name=name, python=str(_env_python(env)), entry=entry, description={})
     description = await call(probe, "describe")
@@ -140,9 +141,10 @@ async def install_from_folder(folder: Path) -> InstalledConnector:
     return installed
 
 
-async def _uv_sync(uv: str, folder: Path, env: Path) -> None:
+async def _uv_sync(uv: str, folder: Path, env: Path, *, locked: bool) -> None:
     proc = await asyncio.create_subprocess_exec(
         uv, "sync", "--project", str(folder), "--no-dev", "--python", sys.executable,
+        *(["--locked"] if locked else []),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         env=os.environ | {"UV_PROJECT_ENVIRONMENT": str(env)},
     )  # fmt: skip
@@ -232,6 +234,17 @@ async def connect(connector: InstalledConnector, values: dict[str, Any]) -> dict
         raise CredentialsRefused(f"{label_of(connector)}: {reason}", connector=connector.name)
     save_credentials(connector.name, values)
     return account
+
+
+def uninstall(name: str) -> None:
+    """Remove the connector's environment, source and record. Its sign-in stays, so a reinstall
+    is connected; the documents it imported stay readable, since the core holds their bundles."""
+    get_connector(name)
+    home = connectors_root() / name
+    (home / _RECORD).unlink(missing_ok=True)
+    for part in ("env", "source"):
+        shutil.rmtree(home / part, ignore_errors=True)
+    logger.info("Uninstalled connector %s", name)
 
 
 def delete_credentials(name: str) -> None:

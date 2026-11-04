@@ -7,6 +7,7 @@ import {
   connectorForUrl,
   fieldValues,
   defaultPicks,
+  offeredFromCatalogue,
   pickInput,
   signInRequiredFor,
   togglePick,
@@ -126,5 +127,24 @@ describe("fieldValues", () => {
   it("sends what was typed, trimmed, and names a required field left blank", () => {
     expect(fieldValues(fields, { cookies: "  a=b  ", note: "" })).toEqual({ values: { cookies: "a=b" }, missing: [] })
     expect(fieldValues(fields, { cookies: "   " })).toEqual({ values: {}, missing: ["Session cookies"] })
+  })
+})
+
+describe("offeredFromCatalogue", () => {
+  const item = (name: string, version: string, installed_version: string | null) => ({
+    name,
+    label: name,
+    version,
+    summary: "",
+    licence: "Apache-2.0",
+    terms: { statement: "s", url: "https://example.com/terms" },
+    repository: "https://example.com/repo",
+    size_bytes: 1,
+    installed_version,
+  })
+
+  it("offers what is not installed and what the catalogue has newer, never what is current", () => {
+    const offered = offeredFromCatalogue([item("a", "0.2.0", null), item("b", "0.2.0", "0.1.0"), item("c", "0.2.0", "0.2.0")])
+    expect(offered.map((i) => i.name)).toEqual(["a", "b"])
   })
 })

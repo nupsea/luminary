@@ -3,9 +3,14 @@ described itself as (`describe`), so a new connector needs no route or screen of
 
 from __future__ import annotations
 
+import json
+import logging
+
 from fastapi import APIRouter, Response
 
 from app.schemas.connectors import (
+    CatalogueItem,
+    CatalogueResponse,
     ConnectorIngestRequest,
     ConnectorItem,
     ConnectorListResponse,
@@ -14,16 +19,59 @@ from app.schemas.connectors import (
     ConnectorUrlRequest,
     ConnectRequest,
 )
+from app.services import connector_catalogue as catalogue
 from app.services import connectors as svc
 from app.services.connector_runner import InstalledConnector, call
+from app.streaming import StreamingResponse
 from app.workflows.connector_ingestion import start_claimed
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/connectors", tags=["connectors"])
 
 
 @router.get("", response_model=ConnectorListResponse)
 async def list_connectors() -> ConnectorListResponse:
     return ConnectorListResponse(connectors=[_item(c) for c in svc.installed_connectors()])
+
+
+# Literal segments before `/{name}/...`.
+@router.get("/catalogue", response_model=CatalogueResponse)
+async def list_catalogue() -> CatalogueResponse:
+    versions = {c.name: c.description.get("version") for c in svc.installed_connectors()}
+    return CatalogueResponse(
+        connectors=[
+            CatalogueItem(
+                name=e.name, label=e.label, version=e.version, summary=e.summary,
+                licence=e.licence, terms={"statement": e.terms_statement, "url": e.terms_url},
+                repository=e.repository, size_bytes=e.size_bytes,
+                installed_version=versions.get(e.name),
+            )
+            for e in catalogue.catalogue_entries()
+        ]
+    )  # fmt: skip
+
+
+@router.post("/catalogue/{name}/install")
+async def install_from_catalogue(name: str) -> StreamingResponse:
+    """Server-sent events, as a component install streams: `downloading`, then `ready` or
+    `failed`. Only ever on the user's action."""
+    catalogue.get_entry(name)
+
+    async def _stream():
+        try:
+            async for event in catalogue.install_entry(name):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as exc:
+            logger.exception("catalogue install of %s failed", name)
+            yield f"data: {json.dumps({'state': 'failed', 'detail': str(exc)})}\n\n"
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+@router.delete("/{name}", status_code=204)
+async def uninstall_connector(name: str) -> Response:
+    svc.uninstall(name)
+    return Response(status_code=204)
 
 
 @router.get("/{name}/status", response_model=ConnectorStatus)

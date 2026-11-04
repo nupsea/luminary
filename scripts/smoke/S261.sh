@@ -5,6 +5,7 @@
 #   1. GET /connectors answers 200 with a `connectors` list, each with the fields the
 #      settings card and the upload dialog read
 #   2. A connector that is not installed is 404 on status, preview and credentials
+#   1b. GET /connectors/catalogue lists entries, each with its licence and source terms
 #   3. A link no connector claims is refused by a connector's own routes (422), checked
 #      against the first installed connector, if any
 set -euo pipefail
@@ -36,6 +37,16 @@ print(items[0]["name"] if items else "")
 ')
 check "GET /connectors items carry the fields the UI reads" "ok" "$(echo "$SHAPE" | head -1)"
 FIRST=$(echo "$SHAPE" | sed -n 2p)
+
+# 1b. The catalogue, with what is shown before an install. Installing is the user's action.
+CAT=$(curl -s -w "\n%{http_code}" "$BASE/connectors/catalogue")
+check "GET /connectors/catalogue responds" "200" "$(echo "$CAT" | tail -1)"
+check "every catalogue entry shows its licence and its source's terms" "ok" "$(echo "$CAT" | sed '$d' | python3 -c '
+import json, sys
+items = json.load(sys.stdin)["connectors"]
+ok = items and all(i["licence"] and i["terms"]["statement"] and i["terms"]["url"].startswith("https://") for i in items)
+print("ok" if ok else "bad")
+')"
 
 # 2. An unknown connector
 MISSING="not-installed-smoke"

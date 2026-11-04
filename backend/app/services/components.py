@@ -46,13 +46,20 @@ from app.model_registry import (
     profile_for,
 )
 from app.paths import engine_source_path
-from app.services import model_prefetch, network_errors, python_extras, storage_errors
+from app.services import (
+    managed_tools,
+    model_prefetch,
+    network_errors,
+    python_extras,
+    storage_errors,
+)
 from app.services.component_download import install_archive_subset
 from app.storage import machine_root
 
 logger = logging.getLogger(__name__)
 
-# "ollama_model" | "python_extra" | "tool" | "engine_runner" | "hf_model" | "whisper_model"
+# "ollama_model" | "python_extra" | "tool" | "managed_tool" | "engine_runner" | "hf_model"
+# | "whisper_model"
 Kind = str
 
 
@@ -214,6 +221,7 @@ def catalogue() -> tuple[Component, ...]:
         ),
     )
     entries = (*entries, *_encoder_components())
+    entries = (*entries, *managed_tools.components())
     # Only where the stage recorded an archive, and only to an NVIDIA host.
     source = engine_source()
     if source is None:
@@ -427,10 +435,11 @@ def resolve_tool(name: str) -> str | None:
     install prefixes are searched last.
     """
     names = (name, f"{name}.exe") if sys.platform == "win32" else (name,)
-    for file_name in names:
-        candidate = tool_bin_dir() / file_name
-        if candidate.is_file():
-            return str(candidate)
+    for directory in (managed_tools.managed_tool_dir(name), tool_bin_dir()):
+        for file_name in names:
+            candidate = directory / file_name
+            if candidate.is_file():
+                return str(candidate)
     found = shutil.which(name)
     if found:
         return found
@@ -617,9 +626,14 @@ def _advice(comp: Component, host: _Host) -> dict:
             "recommended": True,
             "advice": "Recommended: this computer has an NVIDIA graphics card.",
         }
+    return {"offered": True, "recommended": False, "advice": _plain_advice(comp)}
+
+
+def _plain_advice(comp: Component) -> str:
+    """What an optional component with no host condition says about itself."""
     if comp.kind == "tool":
-        return {"offered": True, "recommended": False, "advice": tool_install_advice(comp.ref)}
-    return {"offered": True, "recommended": False, "advice": ""}
+        return tool_install_advice(comp.ref)
+    return {"managed_tool": "Needed to install a connector."}.get(comp.kind, "")
 
 
 def ffmpeg_install_command() -> str:
@@ -994,6 +1008,11 @@ async def install_component(component_id: str) -> AsyncIterator[dict]:
             yield event
         return
 
+    if comp.kind == "managed_tool":
+        async for event in managed_tools.install(comp.ref, comp.label):
+            yield event
+        return
+
     if comp.kind == "whisper_model":
         async for event in install_dictation_model(comp):
             yield event
@@ -1021,6 +1040,9 @@ async def remove_component(component_id: str) -> None:
         return
     if comp.kind == "whisper_model":
         await _remove_dictation_model(comp.ref)
+        return
+    if comp.kind == "managed_tool":
+        await asyncio.to_thread(shutil.rmtree, managed_tools.managed_tool_dir(comp.ref), True)
         return
     if comp.kind == "engine_runner":
         # Holds only what was unpacked into it.
