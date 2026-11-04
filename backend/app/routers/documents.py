@@ -86,6 +86,7 @@ from app.services.components import (
     get_component,
     running_in_container,
 )
+from app.services.connectors import connector_for_url
 from app.services.document_deletion_service import get_document_deletion_service
 from app.services.document_search import get_document_search_service
 from app.services.document_tagger import enrich_document_tags, prune_auto_entity_tags
@@ -139,6 +140,7 @@ from app.types import (
     document_kind,
 )
 from app.workflows import ingestion as _ingestion_module  # indirect: _run_pregenerate is patched
+from app.workflows.connector_ingestion import start_connector_ingestion
 from app.workflows.ingestion import (
     _background_tasks,
     run_ingestion,
@@ -736,6 +738,11 @@ async def ingest_url(
     settings: Settings = Depends(get_settings),
 ):
     """Ingest a YouTube URL, an O'Reilly book, a linked PDF, or a web article."""
+
+    # An installed connector that claims the link takes it before any built-in path.
+    claimed = connector_for_url(body.url)
+    if claimed is not None:
+        return await start_connector_ingestion(body.url, claimed)
 
     # 0. O'Reilly Learning book detection
     if is_oreilly_url(body.url):
@@ -1665,7 +1672,9 @@ def _is_web_article(doc: DocumentModel) -> bool:
     O'Reilly (`epub`), YouTube (`flac`) and a linked PDF also carry `source_url`;
     re-fetching them read the site's page as an article (#430).
     """
-    return bool(doc.source_url) and (doc.format or "").lower() in ("md", "markdown")
+    # A connector's text bundle is Markdown with a URL too, and is its own stored source.
+    is_markdown = (doc.format or "").lower() in ("md", "markdown")
+    return bool(doc.source_url) and is_markdown and not Path(doc.file_path).is_dir()
 
 
 def _replace_text_sync(path: Path, text: str) -> None:
