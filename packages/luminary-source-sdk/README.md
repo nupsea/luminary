@@ -81,6 +81,14 @@ Luminary names, and Luminary validates the bundle again when it stores it:
 `luminary_source_sdk.testing.run(entry, op, ...)` runs a request in-process, the same way, for
 a connector's own tests.
 
+## Conformance
+
+`python -m luminary_source_sdk.conformance package.module:Class truth.json --luminary <backend>`
+checks a fetch against a table of contents you wrote down from the source. It checks pages
+found, their order, empty sections, navigation text left in, the description, and an import
+through Luminary's own importer. `docs/connectors.md` in the Luminary repository has the
+ground-truth format and the catalogue's review checklist.
+
 ## Terms
 
 `describe` must state what the source's own terms say and where. Luminary shows it before the

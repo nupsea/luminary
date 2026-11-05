@@ -18,6 +18,7 @@ This file is a table of contents. The system of record is `docs/`.
 | a retrieval change | `docs/retrieval-funnel.md`, then the `retrieval-change` skill |
 | touching LLM routing, API keys or host support | `docs/engine-and-hosts.md` |
 | touching the reader's docked panel | `docs/reader-panel.md` |
+| a connector, the SDK or the bundle format | `docs/connectors.md` |
 | an eval change, or quoting an eval number | `docs/eval-coverage.md`, then the `eval-integrity` skill |
 | writing docs | the `project-docs` skill |
 | calling a major feature or branch done | `.claude/rules/common/clean-code.md` — a cleanup pass over its own diff |

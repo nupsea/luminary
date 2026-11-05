@@ -28,6 +28,7 @@ import keyring.backend
 import keyring.errors
 import pytest
 import pytest_asyncio
+from inherited_work import settle_inherited_work
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from task_drain import dispose_engine
 
@@ -220,6 +221,12 @@ def _reset_lancedb_singleton():
     import app.services.vector_store as _vs_module
 
     _vs_module._lancedb_service = None
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_work():
+    settle_inherited_work(Path(os.environ["DATA_DIR"]) / "luminary.db")
     yield
 
 

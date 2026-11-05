@@ -348,6 +348,9 @@ def _match(m: re.Match[str], pid: str, level: int | None) -> dict:
 
 
 _INLINE_TITLE_PATTERNS = frozenset({"P3", "P6a", "P6b", "P9"})
+# A letter's next line is its salutation ("To Mrs. Saville, England."), and a divider's is
+# the text it opens: neither is a title for the heading (#334).
+_NO_SUBTITLE = frozenset({"PL", "HR"})
 _BARE_NUMERAL_PATTERNS = frozenset({"P2", "P4"})
 
 
@@ -413,6 +416,23 @@ def _without_contents_runs(text: str, matches: list[dict]) -> list[dict]:
     return kept
 
 
+# Divisions above chapters: "PART I. A VOYAGE TO LILLIPUT".
+_PART_PATTERNS = frozenset({"P6a"})
+_UNRANKED_PATTERNS = frozenset({"ND", "HR"})
+
+
+def _nest_under_parts(matches: list[dict]) -> None:
+    """Put chapters a level below the parts they sit in. Every pattern defaults to level 1, so
+    Gulliver's PART and CHAPTER headings were siblings and an empty part read as a contents
+    entry (#334). Only when parts and another heading kind both occur."""
+    kinds = {m["pid"] for m in matches} - _UNRANKED_PATTERNS
+    if not kinds & _PART_PATTERNS or not kinds - _PART_PATTERNS:
+        return
+    for m in matches:
+        if m["pid"] not in _PART_PATTERNS:
+            m["level"] = max(m["level"], 2)
+
+
 def _merge_duplicate_sections(sections: list[Section]) -> list[Section]:
     """Merge consecutive sections that share a base heading: a PDF's running head
     ("Chapter 1: Title" on every page) opens one per page.
@@ -426,7 +446,8 @@ def _merge_duplicate_sections(sections: list[Section]) -> list[Section]:
     merged: list[Section] = [sections[0]]
     for s in sections[1:]:
         prev = merged[-1]
-        if _base_heading(s.heading) == _base_heading(prev.heading):
+        # Two sections without headings are not the same section: nothing names them (#334).
+        if s.heading and _base_heading(s.heading) == _base_heading(prev.heading):
             prev.text = prev.text + "\n\n" + s.text
             prev.page_end = max(prev.page_end, s.page_end)
         else:
@@ -696,6 +717,7 @@ class BookParser:
             if m["level"] is None:
                 near = [f["level"] for f in [*filtered[i::-1], *filtered[i:]] if f["level"]]
                 m["level"] = near[0] if near else 1
+        _nest_under_parts(filtered)
 
         sections: list[Section] = []
         front = text[: filtered[0]["start"]].strip()
@@ -713,7 +735,7 @@ class BookParser:
             lines = body_chunk.splitlines()
             subtitle = ""
             body_offset = 0
-            for li, line in enumerate(lines[:3]):
+            for li, line in enumerate(lines[:3] if m["pid"] not in _NO_SUBTITLE else []):
                 stripped = line.strip()
                 if stripped:
                     following = lines[li + 1] if li + 1 < len(lines) else ""
@@ -725,7 +747,8 @@ class BookParser:
                         subtitle = stripped
                         body_offset = li + 1
                     break
-            heading = _clean_heading(m["raw_heading"])
+            # A divider is where the source breaks its text, not a title it gave it (I-30).
+            heading = "" if m["pid"] == "HR" else _clean_heading(m["raw_heading"])
             if subtitle and subtitle.upper() != subtitle:
                 heading = f"{heading} — {subtitle}"
             elif subtitle:

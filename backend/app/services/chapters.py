@@ -24,10 +24,20 @@ _CHAPTER_MARK = re.compile(
     r"|[A-Z][A-Za-z]+\s+No\.\s*\d+\b)",
     re.I,
 )
-# "Part II. Distributed Data", "Book 3".
-_PART_MARK = re.compile(rf"^\W*(?:part|book)\s+(?:{_NUMERAL})\b", re.I)
-# "IX The Morlocks", "I. THE DISTRESS OF ARJUNA", "4 — Time Travelling"; not "1.1 Processors".
-_NUMBERED = re.compile(rf"^\W*({_NUMERAL})(?:\.|\s+[—–-]|\s)\s*[A-Za-z]")
+_ORDINAL = (
+    r"first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth"
+    r"|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth"
+)
+# "Part II. Distributed Data", "Book 3", and Meditations' "THE FIRST BOOK" as the whole
+# heading (#334): the Bible's "The First Book of Moses" names a book, not a part.
+_PART_MARK = re.compile(
+    rf"^\W*(?:(?:part|book)\s+(?:{_NUMERAL})\b|(?:the\s+)?(?:{_ORDINAL})\s+book\W*$)", re.I
+)
+# "IX The Morlocks", "I. THE DISTRESS OF ARJUNA", "4 — Time Travelling", and Gatsby's bare
+# "II" (#334, roman only: a bare "2" is as often a list item); not "1.1 Processors".
+_NUMBERED = re.compile(
+    rf"^\W*(?:({_NUMERAL})(?:\.|\s+[—–-]|\s)\s*[A-Za-z]|([{_ROMAN}]{{1,7}})\W*$)"
+)
 # Ends the chapter it appears in and is never practised.
 _BACK_MATTER = re.compile(
     r"^\W*(?:index|colophon|about the authors?|bibliography|references|works cited)\W*$", re.I
@@ -87,6 +97,28 @@ class SectionExtent:
     page_start: int = 0
     page_end: int = 0
     level: int = 1
+    # The title of the empty, shallower heading this section sits under: "PART II. A VOYAGE
+    # TO BROBDINGNAG" over its chapters (#334).
+    part: str = ""
+
+
+def with_parts(sections: Sequence[tuple[str, int, bool]]) -> list[str]:
+    """For (heading, level, has text) in reading order, the part each sits under, or "": the
+    nearest earlier heading with no text of its own at a shallower level. A run of them at one
+    level is a contents list, not a part: a stored Time Machine's entries over its chapters."""
+    parts: list[str] = []
+    part, part_level = "", 0
+    for k, (heading, level, has_text) in enumerate(sections):
+        if not has_text:
+            near = [sections[j] for j in (k - 1, k + 1) if 0 <= j < len(sections)]
+            listed = any(not text and lv == level for _, lv, text in near)
+            part, part_level = ("", 0) if listed else (heading.strip(), level)
+            parts.append("")
+            continue
+        if part and level <= part_level:
+            part = ""
+        parts.append(part)
+    return parts
 
 
 @dataclass
@@ -114,13 +146,39 @@ def _numeral(token: str) -> int:
 
 
 def _counts_up(sections: Sequence[SectionExtent], found: list[int]) -> bool:
-    numbers = [_numeral(_NUMBERED.match(sections[i].heading).group(1)) for i in found]  # type: ignore[union-attr]
+    matches = [_NUMBERED.match(sections[i].heading) for i in found]
+    numbers = [_numeral(m.group(1) or m.group(2)) for m in matches if m]
     steps = list(pairwise(numbers))
     return sum(b > a for a, b in steps) >= MIN_ASCENDING_SHARE * len(steps)
 
 
 def _matching(sections: Sequence[SectionExtent], mark: re.Pattern[str]) -> list[int]:
     return [i for i, s in enumerate(sections) if mark.match(s.heading)]
+
+
+def _bare_numeral(heading: str) -> bool:
+    m = _NUMBERED.match(heading)
+    return bool(m and m.group(2))
+
+
+def _opens_numbered_part(s: SectionExtent) -> bool:
+    return _bare_numeral(s.heading) and bool(_NUMBERED.match(s.part))
+
+
+def _numbered(sections: Sequence[SectionExtent]) -> list[int]:
+    """Numbered headings that open a chapter. A bare numeral ("II") opens one in a book numbered
+    only that way (Gatsby), else only as the first part under a numbered title: Sherlock's
+    "I. A SCANDAL IN BOHEMIA" over "I", "II", "III" (#334). Beside titled numbers, a bare one
+    with no such title is a part of the chapter it sits in."""
+    found = _matching(sections, _NUMBERED)
+    if all(_bare_numeral(sections[i].heading) for i in found):
+        return found
+    return [i for i in found if not _bare_numeral(sections[i].heading) or _first_part(sections, i)]
+
+
+def _first_part(sections: Sequence[SectionExtent], i: int) -> bool:
+    s = sections[i]
+    return _opens_numbered_part(s) and (i == 0 or sections[i - 1].part != s.part)
 
 
 def _boundaries(sections: Sequence[SectionExtent]) -> list[int] | None:
@@ -132,7 +190,7 @@ def _boundaries(sections: Sequence[SectionExtent]) -> list[int] | None:
         return sorted(set(chapters) | {i for i in parts if i > chapters[0]})
     if len(parts) >= MIN_MARKED_CHAPTERS:
         return parts
-    numbered = _matching(sections, _NUMBERED)
+    numbered = _numbered(sections)
     if len(numbered) >= MIN_NUMBERED_CHAPTERS and _counts_up(sections, numbered):
         return numbered
     return None
@@ -214,9 +272,11 @@ async def document_extents(document_id: str, session: AsyncSession) -> list[Sect
 
     repo = DocumentRepo(session)
     extents = await repo.section_extents(document_id)
+    sections = await repo.sections_for_document(document_id)
+    parts = with_parts([(s.heading, s.level or 1, s.id in extents) for s in sections])
     return [
-        SectionExtent(s.id, s.heading, *extents[s.id], level=s.level or 1)
-        for s in await repo.sections_for_document(document_id)
+        SectionExtent(s.id, s.heading, *extents[s.id], level=s.level or 1, part=part)
+        for s, part in zip(sections, parts, strict=True)
         if s.id in extents
     ]
 
@@ -261,11 +321,38 @@ def detect_chapters(sections: Sequence[SectionExtent], document_title: str) -> l
     for n, (start, end) in enumerate(zip(starts, ends, strict=True)):
         members = _without_back_matter(list(ordered[start:end]))
         if marked:
-            title: str | None = members[0].heading.strip()
+            title: str | None = _marked_title(members[0])
         else:
             title = document_title if len(starts) == 1 else None
         chapters.append(_chapter(members, n, title))
+    return _named_by_part(chapters, {s.id: s.part for s in ordered})
+
+
+def _marked_title(first: SectionExtent) -> str:
+    return (first.part if _opens_numbered_part(first) else first.heading).strip()
+
+
+def _named_by_part(chapters: list[Chapter], parts: dict[str, str]) -> list[Chapter]:
+    """A title that repeats ("CHAPTER I" in each of Gulliver's four parts) is named with its
+    part, so the chapters can be told apart (#334)."""
+    seen: dict[str, int] = {}
+    for c in chapters:
+        seen[c.title] = seen.get(c.title, 0) + 1
+    for c in chapters:
+        if seen[c.title] > 1 and parts.get(c.id):
+            c.title = f"{parts[c.id]} — {c.title}"
     return chapters
+
+
+def stored_home(chapters: Sequence[Chapter], stored_ids: set[str]) -> dict[str, str]:
+    """{stored chapter id: the id of the chapter that now holds that section}.
+
+    Cards and written-chapter runs store a chapter's first section id, and chapters are detected
+    again on every read, so a change to detection moves starts under them (#480). An id whose
+    section is in no chapter keeps itself.
+    """
+    holder = {sid: c.id for c in chapters for sid in c.section_ids}
+    return {i: holder.get(i, i) for i in stored_ids}
 
 
 async def chapters_for_document(

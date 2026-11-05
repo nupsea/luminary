@@ -6,7 +6,7 @@ import logging
 import re
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database import make_engine
@@ -67,13 +67,18 @@ async def test_disconnect_mid_query_returns_the_connection(tmp_path, caplog):
             count = (await session.execute(text(SLOW_QUERY))).scalar()
         yield f"data: {count}\n\n"
 
-    # Collected first, so a connection an earlier test leaked is not charged to this one (#465).
+    # Only this engine's connections count: a connection another test leaked can be collected
+    # inside this window on any run, and its warning is not this route's fault (#465).
+    ours: set[str] = set()
+    event.listen(engine.sync_engine, "connect", lambda conn, _record: ours.add(repr(conn)))
     gc.collect()
     with caplog.at_level(logging.ERROR, logger="sqlalchemy.pool"):
         await _serve(StreamingResponse(gen(), media_type="text/event-stream"), [])
         gc.collect()
 
-    assert [r.getMessage() for r in caplog.records if r.name.startswith("sqlalchemy.pool")] == []
+    pool_messages = [r.getMessage() for r in caplog.records if r.name.startswith("sqlalchemy.pool")]
+    assert ours, "the query never opened a connection, so nothing here was tested"
+    assert [m for m in pool_messages if any(c in m for c in ours)] == []
     assert engine.pool.checkedout() == 0
     await engine.dispose()
 
