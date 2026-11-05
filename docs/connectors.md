@@ -154,3 +154,18 @@ A connector is listed in the catalogue only when every item holds:
    browser profile or a file the user did not hand over in the sign-in form.
 6. **A pinned archive.** The entry names a commit, the archive's sha256 and size, and a
    `uv.lock` that `uv sync --locked` accepts.
+
+## Releasing the SDK
+
+`luminary-source-sdk` is published to PyPI by `.github/workflows/release-sdk.yml`, through trusted
+publishing: GitHub proves the workflow's identity to PyPI, so no token is stored.
+
+- **Once, on PyPI:** add a pending publisher (pypi.org/manage/account/publishing) for project
+  `luminary-source-sdk`, owner `nupsea`, repository `luminary`, workflow `release-sdk.yml`,
+  environment `pypi`. In this repository, create the `pypi` environment. A required reviewer on it
+  makes each release wait for approval.
+- **Each release:** set `version` in `packages/luminary-source-sdk/pyproject.toml`, merge, then
+  push the tag `sdk-v<version>` on master. The job refuses a tag that does not match the
+  version. It checks that the wheel installs alone and carries its schema before publishing.
+
+Until the first release, connectors pin the SDK by a GitHub archive of this repository.
