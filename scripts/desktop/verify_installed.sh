@@ -256,7 +256,8 @@ else
     fi
 fi
 
-[ -n "$RENDER_SERVER" ] && kill "$RENDER_SERVER" 2>/dev/null
+# Waited on, so bash does not report the killed job, with its source, in the log.
+[ -n "$RENDER_SERVER" ] && { kill "$RENDER_SERVER" 2>/dev/null; wait "$RENDER_SERVER" 2>/dev/null; }
 
 _step "This launch's log"
 this_launch | tail -60 | sed 's/^/    /'
