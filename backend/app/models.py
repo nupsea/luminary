@@ -54,9 +54,9 @@ class DocumentModel(Base):
     # Original URL for YouTube-ingested documents (e.g. https://www.youtube.com/watch?v=...).
     # Null for locally uploaded files.
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Human-readable title returned by yt-dlp metadata (YouTube video title).
+    # The video's own title, from the source (a YouTube bundle's manifest).
     video_title: Mapped[str | None] = mapped_column(String, nullable=True)
-    # YouTube channel/uploader name returned by yt-dlp metadata.
+    # The channel or uploader name, from the source.
     channel_name: Mapped[str | None] = mapped_column(String, nullable=True)
     # Canonical YouTube video URL -- set during YouTube ingestion, same value as source_url.
     # Separate field so API consumers can identify YouTube docs without heuristic URL parsing.

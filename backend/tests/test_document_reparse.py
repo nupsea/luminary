@@ -213,16 +213,18 @@ async def test_an_oreilly_book_is_reparsed_from_its_stored_source_offline(
 ):
     """#430: the book URL sent re-import through the article extractor, fetching oreilly.com.
     A book stored before connectors keeps its EPUB (#433), one after keeps its bundle."""
-    from app.services.oreilly_service import download_oreilly_book_to_epub
     from app.services.source_bundle import store_bundle
     from app.workflows.ingestion_nodes.parse import parse_node
-    from tests.oreilly_book import BOOK_ID, BOOK_URL, FixtureBookClient, write_book_bundle
+    from tests.oreilly_book import (
+        BOOK_URL,
+        FixtureBookClient,
+        write_book_bundle,
+        write_book_epub,
+    )
 
     _, factory, tmp_path = test_db
     if era == "epub":
-        epub_path, _ = download_oreilly_book_to_epub(
-            BOOK_ID, tmp_path / "book.epub", FixtureBookClient()
-        )
+        epub_path = write_book_epub(tmp_path / "book.epub", FixtureBookClient())
     else:
         epub_path = tmp_path / "raw" / "book.bundle"
         epub_path.parent.mkdir(exist_ok=True)

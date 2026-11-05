@@ -2,7 +2,6 @@
   "long_functions": [
     "app/main.py::lifespan",
     "app/routers/documents.py::ingest_document",
-    "app/routers/documents.py::ingest_url",
     "app/runtime/chat_nodes/comparative.py::comparative_node",
     "app/runtime/chat_nodes/search.py::search_node",
     "app/runtime/chat_nodes/synthesize.py::synthesize_node",
@@ -39,7 +38,6 @@
     "app/repos/study_repo.py::StudyRepo.purge_runs_without_live_cards",
     "app/routers/blog.py::create_draft",
     "app/routers/documents.py::get_document_cover",
-    "app/routers/documents.py::ingest_url",
     "app/routers/evals.py::_run_eval_subprocess",
     "app/routers/evals.py::_run_generated_eval_subprocess",
     "app/routers/study.py::get_study_stats",
@@ -67,7 +65,6 @@
     "app/services/ner.py::EntityExtractor.extract",
     "app/services/ner.py::_is_valid_entity",
     "app/services/okf_context.py::OkfContextService.build_concept_context",
-    "app/services/oreilly_service.py::OreillyClient.fetch_book_metadata",
     "app/services/parser.py::DocumentParser._parse_pdf",
     "app/services/parser.py::_epub_html_to_markdown",
     "app/services/retriever.py::HybridRetriever.retrieve",
@@ -79,7 +76,7 @@
     "app/workflows/ingestion_nodes/chunk.py::_chunk_book",
     "app/workflows/ingestion_nodes/chunk.py::_chunk_tech_book"
   ],
-  "complexity_over_10": 202,
+  "complexity_over_10": 197,
   "maintainability_below_a": [
     "app/routers/documents.py",
     "app/routers/evals.py",

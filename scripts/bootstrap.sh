@@ -198,8 +198,8 @@ _info "uv $("$UV" --version 2>/dev/null | awk '{print $2}')"
 
 _info "Installing dependencies (this pulls Python 3.13 and ~1.6GB of packages)..."
 # Both flags are load-bearing. --no-default-groups drops dev/media (Phoenix,
-# pytest, whisper); --group full adds back yt-dlp and the tree-sitter grammars,
-# without which YouTube and code ingestion refuse everything offered to them.
+# pytest, whisper); --group full adds back the tree-sitter grammars, without
+# which code ingestion refuses everything offered to it.
 # Keep in step with install_shipping_dependencies in scripts/desktop/lib.sh,
 # which builds the same profile for every desktop installer.
 (

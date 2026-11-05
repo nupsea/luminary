@@ -441,7 +441,7 @@ if ($visionModel -and (Test-CommandExists "ollama")) {
 # Backend sync
 Write-Host "[install] Installing backend dependencies..." -ForegroundColor Yellow
 Set-Location -Path "$RepoRoot\backend"
-# `full` adds yt-dlp and the tree-sitter grammars. The article path
+# `full` adds the tree-sitter grammars. The article path
 # (trafilatura, cloudscraper) moved to base dependencies, because web_ingest is
 # a `public` surface and the Docker image installs base only -- it was shipping
 # without the libraries its own manifest advertised.

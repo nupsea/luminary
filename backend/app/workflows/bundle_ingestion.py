@@ -57,7 +57,7 @@ def _media_fields(
     fields: dict[str, Any] = {"file_path": str(audio), "format": audio.suffix.lower().lstrip(".")}
     if isinstance(media, YoutubeMedia):
         channel = manifest.authors[0] if manifest.authors else None
-        # The shape of yt-dlp's metadata, which the built-in download primes Whisper from.
+        # The metadata shape `vocabulary_from_metadata` reads (I-66).
         meta = {
             "title": manifest.title,
             "uploader": channel,

@@ -210,7 +210,7 @@ def catalogue() -> tuple[Component, ...]:
         Component(
             id="ffmpeg",
             label="Audio and video support",
-            description="Required to ingest MP4 video and to transcribe YouTube audio.",
+            description="Required to ingest MP4 video, and by connectors that download audio.",
             kind="tool",
             ref="ffmpeg",
             size_bytes=80 * _MB,
@@ -659,14 +659,13 @@ async def capabilities() -> dict:
     """What this install can actually ingest right now.
 
     Derived here rather than in the UI so that the mapping from component to
-    feature lives in one place: video needs both a transcriber and ffmpeg, a
-    YouTube URL needs yt-dlp on top of those, and none of that is obvious from
-    a component list.
+    feature lives in one place: video needs both a transcriber and ffmpeg, which
+    is not obvious from a component list. A connector's link checks its own
+    components (`connectors.missing_components`).
     """
     status = {c["id"]: c["installed"] for c in await component_status()}
     transcribe = status.get("transcription", False)
     ffmpeg = status.get("ffmpeg", False)
-    ytdlp = resolve_tool("yt-dlp") is not None
     article = importlib.util.find_spec("trafilatura") is not None
 
     def cap(available: bool, needs: tuple[str, ...]) -> dict:
@@ -683,7 +682,6 @@ async def capabilities() -> dict:
         # does not have to know which component happens to back it.
         "dictation": cap(transcribe, ("transcription",)),
         "video_ingest": cap(transcribe and ffmpeg, missing_media),
-        "youtube_ingest": cap(transcribe and ffmpeg and ytdlp, missing_media),
         "web_ingest": cap(article, ()),
         "vision": cap(status.get("vision_model", False), ("vision_model",)),
         "chat": cap(status.get("chat_model", False), ("chat_model",)),

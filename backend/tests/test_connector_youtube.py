@@ -13,7 +13,8 @@ from app.main import app
 from app.models import DocumentModel
 from app.services import connectors
 from app.services.ingestion_jobs import get_ingestion_jobs
-from tests.connector_fixture import AUDIO, TALK, VTT, install
+from app.services.transcript_vocabulary import hotwords, vocabulary_from_metadata
+from tests.connector_fixture import AUDIO, TALK, install
 
 URL = "https://www.youtube.com/watch?v=t1"
 FFMPEG = "/opt/fixture/bin/ffmpeg"
@@ -88,29 +89,6 @@ async def _post(url: str):
     return resp
 
 
-async def _built_in(url: str, captions: bool, factory) -> DocumentModel:
-    async def _download(url, dest_stem, on_progress=None):
-        dest_stem.with_suffix(".flac").write_bytes(AUDIO)
-
-    async def _captions(url, dest, track):
-        dest.write_text(VTT, encoding="utf-8")
-        return True
-
-    meta = {**TALK, "id": "t1", "language": "en", "subtitles": {"en": []} if captions else {}}
-    with (
-        patch("app.services.youtube_downloader.check_ytdlp_available", return_value=True),
-        patch("app.services.youtube_downloader.check_ffmpeg_available", return_value=True),
-        patch("app.services.youtube_downloader.fetch_metadata", new=AsyncMock(return_value=meta)),
-        patch("app.services.youtube_downloader.download_audio", new=_download),
-        patch("app.services.youtube_downloader.download_captions", new=_captions),
-        patch("app.workflows.youtube_ingestion.run_ingestion", new=AsyncMock()),
-    ):
-        resp = await _post(url)
-    assert resp.status_code == 200, resp.text
-    async with factory() as session:
-        return await session.get(DocumentModel, resp.json()["document_id"])
-
-
 async def _through_connector(url: str, factory) -> DocumentModel:
     ingested = AsyncMock()
     with patch("app.workflows.connector_ingestion.run_ingestion", new=ingested):
@@ -123,29 +101,35 @@ async def _through_connector(url: str, factory) -> DocumentModel:
     return doc
 
 
-_SAME = ("format", "title", "video_title", "channel_name", "youtube_url", "source_url",
-         "transcript_vocabulary")  # fmt: skip
+# What the built-in download produced for this talk before #467 removed it (#434 compared
+# the two directly): yt-dlp's metadata through the same vocabulary rule, and the cue times.
+_CUES = [(1.0, 3.5, "We store vectors in LanceDB"), (65.25, 67.0, "R&D on Kimi K3")]
+_SPEECH = [(2.0, 6.0, "we store vectors in lance db")]
 
 
 @pytest.mark.parametrize("captions", [True, False], ids=["captions", "speech"])
-async def test_a_youtube_link_reads_the_same_through_the_connector(
+async def test_a_youtube_link_reads_through_the_connector_as_the_download_did(
     test_db, video_root, monkeypatch, captions
 ):
     _, factory, tmp_path = test_db
     url = URL if captions else f"{URL}&nocaps"
-    with monkeypatch.context() as mp:
-        mp.setattr(connectors, "connectors_root", lambda: tmp_path / "no-connectors")
-        built_in = await _built_in(url, captions, factory)
     via_connector = await _through_connector(url, factory)
 
-    assert {f: getattr(via_connector, f) for f in _SAME} == {f: getattr(built_in, f) for f in _SAME}
-    assert via_connector.transcript_vocabulary[:2] == [TALK["title"], TALK["uploader"]]
+    vocabulary = vocabulary_from_metadata(TALK)
+    assert (
+        via_connector.format, via_connector.title, via_connector.video_title,
+        via_connector.channel_name, via_connector.youtube_url, via_connector.source_url,
+        via_connector.transcript_vocabulary,
+    ) == ("flac", TALK["title"], TALK["title"], TALK["uploader"], url, url, vocabulary)  # fmt: skip
+    assert vocabulary[:2] == [TALK["title"], TALK["uploader"]]
     stored = tmp_path / "raw" / f"{via_connector.id}.bundle"
     assert Path(via_connector.file_path).parent == stored / "assets"
     # Transcript, timestamps (where a citation seeks the player) and Whisper's priming.
-    chunks, hotwords = await _transcribe(via_connector)
-    assert (chunks, hotwords) == await _transcribe(built_in)
-    assert (hotwords == []) == captions and len(chunks) == (2 if captions else 1)
+    chunks, primed = await _transcribe(via_connector)
+    if captions:
+        assert (chunks, primed) == (_CUES, [])
+    else:
+        assert (chunks, primed) == (_SPEECH, [hotwords(vocabulary)])
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         played = await client.get(f"/documents/{via_connector.id}/audio")
     assert (played.status_code, played.content) == (200, AUDIO)

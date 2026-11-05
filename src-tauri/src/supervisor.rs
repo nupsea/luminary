@@ -29,7 +29,7 @@ const RUNTIME_FILE: &str = ".runtime.json";
 /// is wedged rather than listening may not add seconds to closing the window.
 const ASK_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Where the staged interpreter keeps its console scripts (yt-dlp).
+/// Where the staged interpreter keeps its console scripts.
 #[cfg(windows)]
 const SCRIPTS_DIR: &str = "python/Scripts";
 #[cfg(not(windows))]
@@ -639,7 +639,7 @@ pub fn spawn_backend(
     Ok(())
 }
 
-/// Console scripts the backend spawns by name (yt-dlp) plus the system minimum.
+/// Console scripts the backend spawns by name, plus the system minimum.
 fn bundled_path(stage: &Path) -> String {
     let mut parts: Vec<PathBuf> = vec![stage.join(SCRIPTS_DIR)];
     parts.extend(SYSTEM_PATH.iter().map(PathBuf::from));

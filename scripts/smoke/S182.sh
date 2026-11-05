@@ -42,7 +42,7 @@ check() {
 
 # -----------------------------------------------------------------------
 # 1. Create a document via POST /documents (plain text upload simulation)
-#    We can't do a real YouTube ingest without yt-dlp, so create a doc
+#    A real YouTube ingest needs the YouTube connector, so rather than create a doc
 #    directly and add chunks via the DB, then test the endpoint.
 #    Instead: test that the endpoint returns 404 for nonexistent doc.
 # -----------------------------------------------------------------------

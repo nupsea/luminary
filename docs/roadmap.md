@@ -887,9 +887,8 @@ beside 0.17.0, rather than after it:
 
 **A connector fetches; the core ingests.** A connector turns a locator and credentials into a source
 bundle. Parsing, chunking, embedding, citations and cards stay in the core, so a connector cannot
-change what grounding means. O'Reilly and YouTube already split this way: each fetches a file (an
-EPUB in `oreilly_ingestion.py`, audio and captions in `youtube_ingestion.py`) and calls
-`run_ingestion`.
+change what grounding means. YouTube (public) and O'Reilly (private) are connectors; the core no
+longer imports either itself (#467).
 
 | Decision | What forces it |
 |---|---|
@@ -908,11 +907,11 @@ EPUB in `oreilly_ingestion.py`, audio and captions in `youtube_ingestion.py`) an
 |---|---|---|---|---|
 | A | 0 | #431 | **Done.** Characterization tests over O'Reilly and YouTube ingestion | Nothing |
 | A | 1 | #432 | **Done.** The bundle format (one JSON Schema) and the one importer | Nothing |
-| B | 2 | #435 | The SDK, the process protocol and runner; install a connector from a folder; a pasted link goes to the installed connector that claims it | Nothing |
-| B | 3 | #434 | The YouTube connector, in `luminary-connectors`, writing a bundle; stage 0's YouTube tests become its conformance tests | Nothing yet |
-| B | 3 | #433 | The O'Reilly connector, in the private repo, writing a bundle; existing O'Reilly documents keep their EPUB | Nothing (the maintainer's library) |
-| B | 4 | #436 | Settings, inputs and the connect modal drawn from each connector's `describe`; `/oreilly/*` becomes `/connectors/{name}/*` | One generic connector UI |
-| C | 5 | #437 | A catalogue of `luminary-connectors`, and install into a per-connector environment, shown with its licence and the source's terms first. The private repo is never listed | Installable connectors |
+| B | 2 | #435 | **Done (#469).** The SDK, the process protocol and runner; install a connector from a folder; a pasted link goes to the installed connector that claims it | Nothing |
+| B | 3 | #434 | **Done (#470, luminary-connectors#1).** The YouTube connector, in `luminary-connectors`, writing a bundle; stage 0's YouTube tests become its conformance tests | Nothing yet |
+| B | 3 | #433 | **Done (#471).** The O'Reilly connector, in the private repo, writing a bundle; existing O'Reilly documents keep their EPUB | Nothing (the maintainer's library) |
+| B | 4 | #436 | **Built (#473); its desktop-shell manual pass is Checkpoint C's.** Settings, inputs and the connect modal drawn from each connector's `describe`; `/oreilly/*` becomes `/connectors/{name}/*` | One generic connector UI |
+| C | 5 | #437 | **Built (#474); the bundled-app install is Checkpoint C's.** A catalogue of `luminary-connectors`, and install into a per-connector environment, shown with its licence and the source's terms first. The private repo is never listed | Installable connectors |
 | C | 6 | #467 | The core drops its built-in O'Reilly and YouTube import, `yt-dlp` and `curl_cffi`; a link no installed connector claims says what to install | YouTube is a connector you install |
 | C | 7 | #438 | Publish the SDK; conformance kit, template repo, review checklist, `docs/connectors.md`; #348 as the second reference connector in `luminary-connectors` (MediaWiki if #348 drops) | Open to contributors |
 

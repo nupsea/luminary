@@ -257,15 +257,10 @@ def uninstall(name: str) -> None:
 
 def delete_credentials(name: str) -> None:
     (connectors_root() / name / _CREDENTIALS).unlink(missing_ok=True)
-    if name == "oreilly":
-        # The built-in path's cookie file is the same login: disconnecting removes both.
-        from app.services.oreilly_service import delete_oreilly_cookies  # noqa: PLC0415
-
-        delete_oreilly_cookies()
 
 
 def save_credentials(name: str, credentials: dict[str, Any]) -> None:
-    """Owner-only, as the O'Reilly cookie file is: these are a login."""
+    """Owner-only: these are a login."""
     path = connectors_root() / name / _CREDENTIALS
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -282,12 +277,6 @@ def load_credentials(name: str) -> dict[str, Any]:
             return dict(json.loads(path.read_text(encoding="utf-8")))
         except ValueError:
             logger.warning("Unreadable credentials for connector %s", name)
-    if name == "oreilly":
-        # The cookie file the built-in path saved stays where it is until #467.
-        from app.services.oreilly_service import get_oreilly_cookies  # noqa: PLC0415
-
-        cookies = get_oreilly_cookies()
-        return {"cookies": cookies} if cookies else {}
     return {}
 
 

@@ -99,7 +99,6 @@ export type CapabilityKey =
   | "audio_ingest"
   | "dictation"
   | "video_ingest"
-  | "youtube_ingest"
   | "web_ingest"
   | "vision"
   | "chat"

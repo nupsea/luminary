@@ -15,12 +15,17 @@ from app.models import DocumentModel
 from app.schemas.source_bundle import BUNDLE_VERSION, BundleManifest
 from app.services import source_bundle
 from app.services.documents_service import delete_raw_file
-from app.services.oreilly_service import download_oreilly_book_to_epub, process_chapter_html
 from app.services.parser import DocumentParser
 from app.services.source_bundle import BundleRefused, read_manifest, store_bundle
 from app.workflows.bundle_ingestion import ingest_bundle
 from tests.factories import make_document
-from tests.oreilly_book import BOOK_ID, CHAPTERS, FixtureBookClient
+from tests.oreilly_book import (
+    BOOK_ID,
+    CHAPTERS,
+    FixtureBookClient,
+    process_chapter_html,
+    write_book_epub,
+)
 from tools.dump_bundle_schema import SCHEMA_PATH, render
 
 
@@ -80,9 +85,7 @@ def _text_bundle(root: Path, text: bytes = b"<h1>One</h1><p>" + b"word " * 20 + 
 
 
 def test_a_bundle_parses_to_the_sections_its_epub_twin_does(tmp_path: Path):
-    epub_path, _ = download_oreilly_book_to_epub(
-        BOOK_ID, tmp_path / "book.epub", FixtureBookClient()
-    )
+    epub_path = write_book_epub(tmp_path / "book.epub", FixtureBookClient())
     from_epub = DocumentParser().parse(epub_path, "epub")
     stored = tmp_path / "raw" / "doc.bundle"
     store_bundle(_fixture_book_bundle(tmp_path / "out"), stored)
@@ -106,9 +109,7 @@ async def test_a_bundle_chunks_as_its_epub_twin_does(test_db, tmp_path: Path):
     from app.workflows.ingestion_nodes.parse import parse_node
 
     _, factory, _ = test_db
-    epub_path, _ = download_oreilly_book_to_epub(
-        BOOK_ID, tmp_path / "book.epub", FixtureBookClient()
-    )
+    epub_path = write_book_epub(tmp_path / "book.epub", FixtureBookClient())
     stored = tmp_path / "raw" / "twin.bundle"
     store_bundle(_fixture_book_bundle(tmp_path / "out"), stored)
 

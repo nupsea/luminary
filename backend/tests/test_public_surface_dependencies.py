@@ -1,8 +1,8 @@
 """A `public` surface must be able to run in the image that serves public mode.
 
 Three of them could not. The Docker image installs base dependencies only
-(`uv sync --no-default-groups`), while `web_ingest`, `youtube_ingest` and
-`audio_transcribe` are all declared `mode: public` and every one of their
+(`uv sync --no-default-groups`), while `web_ingest`, the YouTube ingest the core had
+then, and `audio_transcribe` were all declared `mode: public` and every one of their
 libraries sat in a group that install drops. `web_ingest`'s own manifest
 description said "requires the full dependency group" -- the contradiction was
 written down and still shipped.
@@ -17,14 +17,13 @@ from dependency_groups import BASE, GROUPS
 # The distributions each public ingest surface cannot run without.
 PUBLIC_SURFACE_DISTRIBUTIONS = {
     "web_ingest": ("trafilatura", "cloudscraper"),
-    "youtube_ingest": ("yt-dlp",),
     "audio_transcribe": ("faster-whisper",),
 }
 
 # Public surfaces whose dependencies carry GPL-2.0-or-later components, which
 # may not travel inside anything Luminary distributes. These are opt-in at
 # build time (WITH_MEDIA=1) instead of shipping by default.
-GPL_GATED = {"youtube_ingest", "audio_transcribe"}
+GPL_GATED = {"audio_transcribe"}
 
 
 @pytest.mark.parametrize("surface", sorted(set(PUBLIC_SURFACE_DISTRIBUTIONS) - GPL_GATED))
@@ -45,15 +44,6 @@ def test_a_gpl_gated_surface_is_reachable_through_the_media_opt_in(surface):
     reachable = BASE | GROUPS["media"]
     missing = [d for d in PUBLIC_SURFACE_DISTRIBUTIONS[surface] if d not in reachable]
     assert not missing, f"{surface} needs {missing}, which WITH_MEDIA=1 does not install"
-
-
-def test_only_a_real_licence_constraint_keeps_a_library_out_of_the_image():
-    """yt-dlp is Unlicense. Holding it back put a permissive 3MB package behind
-    a "not bundled for licensing reasons" dialog naming a constraint that does
-    not exist, and moved the user from the ffmpeg wall to a second one."""
-    assert "yt-dlp" in BASE, "nothing licences yt-dlp out of the public image"
-    # faster-whisper carries PyAV's GPL binaries, so it stays gated.
-    assert "faster-whisper" not in BASE
 
 
 def test_the_memory_guard_can_actually_read_memory_where_the_app_ships():

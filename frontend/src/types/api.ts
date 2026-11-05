@@ -1319,7 +1319,8 @@ export interface paths {
         put?: never;
         /**
          * Ingest Url
-         * @description Ingest a YouTube URL, an O'Reilly book, a linked PDF, or a web article.
+         * @description Ingest a link: through the installed connector that claims it, else a linked file
+         *     (a PDF) when the URL resolves to one, else a web article.
          */
         post: operations["ingest_url_documents_ingest_url_post"];
         delete?: never;
