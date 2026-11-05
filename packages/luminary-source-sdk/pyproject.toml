@@ -2,12 +2,18 @@
 name = "luminary-source-sdk"
 version = "0.1.0"
 description = "Write connectors that fetch content into Luminary source bundles."
+readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 # Standard library only: a connector's own dependencies are its business, and the SDK must
 # never bring Luminary's (or an AGPL package) into a connector's environment.
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/nupsea/luminary"
+Documentation = "https://github.com/nupsea/luminary/blob/master/docs/connectors.md"
+Source = "https://github.com/nupsea/luminary/tree/master/packages/luminary-source-sdk"
 
 [build-system]
 requires = ["hatchling"]

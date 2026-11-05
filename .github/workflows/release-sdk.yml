@@ -1,0 +1,62 @@
+name: Release SDK
+
+# Publishes packages/luminary-source-sdk to PyPI through trusted publishing: no token is stored.
+# Release by pushing a tag `sdk-vX.Y.Z` on master; it must match the package's version.
+# One-time setup on PyPI (pypi.org/manage/account/publishing): a pending publisher for project
+# `luminary-source-sdk`, owner `nupsea`, repository `luminary`, workflow `release-sdk.yml`,
+# environment `pypi`. docs/connectors.md has the steps.
+
+on:
+  push:
+    tags: ["sdk-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - name: The tag names the package's version
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' packages/luminary-source-sdk/pyproject.toml)"
+          if [ "$GITHUB_REF_NAME" != "sdk-v$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match the package version $version"
+            exit 1
+          fi
+
+      - name: Build the sdist and wheel
+        run: uv build packages/luminary-source-sdk --out-dir dist
+
+      # Outside the checkout, so the import can only come from the wheel.
+      - name: The wheel installs alone and carries its schema
+        working-directory: ${{ runner.temp }}
+        run: |
+          wheel="$(ls "$GITHUB_WORKSPACE"/dist/*.whl)"
+          uv run --no-project -p 3.11 --with "$wheel" python -I -c "
+          import importlib.resources as r, luminary_source_sdk
+          assert (r.files('luminary_source_sdk') / 'source-bundle.schema.json').is_file()
+          import luminary_source_sdk.conformance
+          "
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # The environment is what the PyPI publisher names; its protection rules can require approval.
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
