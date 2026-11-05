@@ -1,6 +1,7 @@
 import logging
 import re
 from collections import Counter
+from itertools import pairwise
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -581,6 +582,22 @@ def _heading_is_prose(heading: str) -> bool:
     return bool(m and m.group(1)[:1].islower())
 
 
+def _pages_as_sections(section: Section) -> list[Section]:
+    """A PDF with no headings as one untitled section per page (#491).
+
+    The source names no part of it, so no heading is invented (I-30). Chapters window whole
+    sections, so one section the size of the book became one chapter labelled with its first page.
+    """
+    bounds = [0, *section.page_breaks, len(section.text)]
+    pages = []
+    for n, (start, end) in enumerate(pairwise(bounds)):
+        text = section.text[start:end].strip()
+        if text:
+            page = section.page_start + n
+            pages.append(Section(heading="", level=1, text=text, page_start=page, page_end=page))
+    return pages or [section]
+
+
 def _sections_plausible(sections: list[Section]) -> bool:
     """Reject a segmentation whose headings are mostly prose fragments."""
     if not sections:
@@ -864,6 +881,7 @@ class DocumentParser:
         current_level = 1
         current_page_start = 1
         current_texts: list[str] = []
+        found_heading = False
         # Index into `current_texts` at which each later page of the current
         # section begins. One entry per page even when a page contributes no
         # lines, so counting entries below a position always yields the right
@@ -925,6 +943,7 @@ class DocumentParser:
                     ):
                         level = 1 if max_size >= h1_min else 2
                         flush_section(line_text, level, page_num + 1)
+                        found_heading = True
                         continues_block = False
                     else:
                         _append_body_line(
@@ -934,6 +953,8 @@ class DocumentParser:
 
         flush_section("_end", 0, total_pages + 1)
         raw_text = "\n".join(raw_parts)
+        if not found_heading and len(sections) == 1 and sections[0].page_breaks:
+            sections = _pages_as_sections(sections[0])
 
         # Font metrics are the structural signal for PDFs. Fall back to the
         # chapter-regex BookParser only when the font scan finds no plausible
