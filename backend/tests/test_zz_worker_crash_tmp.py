@@ -1,4 +1,4 @@
-"""TEMPORARY: crashes one Windows worker so the crash-record step can be read once. Removed next commit."""
+"""TEMPORARY: crashes one Windows worker so the crash-record step is read once."""
 
 import ctypes
 import sys
