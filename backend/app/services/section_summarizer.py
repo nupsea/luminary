@@ -196,6 +196,9 @@ class SectionSummarizerService:
         rather than colliding on 0.
         """
         semaphore = asyncio.Semaphore(concurrency)
+        # SQLite takes one writer: units racing for it wait in its busy handler and can run
+        # out busy_timeout behind each other's commits. Queued here they wait without a limit.
+        write_turn = asyncio.Lock()
         total_inserted = 0
 
         async def _summarize_unit(unit_index: int, unit: dict) -> None:
@@ -231,7 +234,7 @@ class SectionSummarizerService:
                     unit_index=unit_index,
                     created_at=datetime.now(UTC),
                 )
-                async with get_session_factory()() as session:
+                async with write_turn, get_session_factory()() as session:
                     session.add(row)
                     await session.commit()
 

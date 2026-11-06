@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from app.main import app
 from app.models import SectionModel, SectionSummaryModel
@@ -75,6 +75,45 @@ async def test_grouping_caps_at_100_units(test_db):
         db_count = len(list(rows.scalars().all()))
 
     assert db_count <= 100, f"Expected <= 100 units, got {db_count}"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_units_write_one_at_a_time(test_db):
+    """SQLite takes one writer; ten units racing for it waited out busy_timeout on CI (#211)."""
+    engine, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_document(factory, doc_id)
+    await _insert_sections(factory, doc_id, count=300, preview_len=300)
+
+    writing: set[int] = set()
+    most = 0
+
+    def on_execute(conn, cursor, statement, params, context, executemany):
+        nonlocal most
+        if statement.startswith("INSERT INTO section_summaries"):
+            writing.add(id(conn.connection))
+            most = max(most, len(writing))
+
+    def on_end(conn):
+        writing.discard(id(conn.connection))
+
+    sync = engine.sync_engine
+    event.listen(sync, "before_cursor_execute", on_execute)
+    event.listen(sync, "commit", on_end)
+    event.listen(sync, "rollback", on_end)
+    try:
+        mock_response = AsyncMock()
+        mock_response.choices = [AsyncMock()]
+        mock_response.choices[0].message.content = "Summary text."
+        with patch("litellm.acompletion", return_value=mock_response):
+            stored = await SectionSummarizerService().generate(doc_id, concurrency=10)
+    finally:
+        event.remove(sync, "before_cursor_execute", on_execute)
+        event.remove(sync, "commit", on_end)
+        event.remove(sync, "rollback", on_end)
+
+    assert stored > 1
+    assert most == 1
 
 
 @pytest.mark.asyncio
