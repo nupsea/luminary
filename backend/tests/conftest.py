@@ -225,6 +225,15 @@ def _reset_lancedb_singleton():
 
 
 @pytest.fixture(autouse=True)
+def _settings_from_this_tests_env():
+    """A task reading settings late in one test's teardown caches that test's DATA_DIR (#211)."""
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _no_inherited_work():
     settle_inherited_work(Path(os.environ["DATA_DIR"]) / "luminary.db")
     yield
