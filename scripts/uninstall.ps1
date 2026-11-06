@@ -53,9 +53,13 @@ function Get-SizeText($Path) {
 }
 
 # Deleting the venv under a running backend leaves it half-dead holding the DB.
+# Ask for the listener rather than time a connect: a loaded host missed a 1 s connect deadline.
 function Test-Listening {
+    if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
+        return [bool](Get-NetTCPConnection -LocalPort $BackendPort -State Listen -ErrorAction SilentlyContinue)
+    }
     $client = New-Object System.Net.Sockets.TcpClient
-    try { return $client.ConnectAsync("127.0.0.1", $BackendPort).Wait(1000) } catch { return $false } finally { $client.Close() }
+    try { return $client.ConnectAsync("127.0.0.1", $BackendPort).Wait(5000) } catch { return $false } finally { $client.Close() }
 }
 if (Test-Listening) {
     Write-Host "[uninstall] Something is listening on :$BackendPort -- stop Luminary first, then re-run." -ForegroundColor Red
