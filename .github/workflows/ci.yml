@@ -221,6 +221,21 @@ jobs:
       - name: Full backend suite, on the platform it got wrong
         run: uv run --with pytest-xdist==3.8.0 pytest -n logical --dist loadfile --max-worker-restart=0
 
+      # A crashed xdist worker leaves only "node down: Not properly terminated" (#211). Windows
+      # records a native crash (1000/1001) and a low-memory diagnosis (2004); neither means killed.
+      - name: How a crashed worker died
+        if: failure()
+        shell: pwsh
+        run: |
+          $since = (Get-Date).AddHours(-2)
+          $os = Get-CimInstance Win32_OperatingSystem
+          "free RAM {0:N0} MB of {1:N0} MB; free commit {2:N0} MB" -f ($os.FreePhysicalMemory / 1KB), ($os.TotalVisibleMemorySize / 1KB), ($os.FreeVirtualMemory / 1KB)
+          $crashes = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000, 1001; StartTime = $since } -ErrorAction SilentlyContinue |
+            Where-Object { $_.Message -match 'python' }
+          $lowMemory = Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 2004; StartTime = $since } -ErrorAction SilentlyContinue
+          "python crash records: $(@($crashes).Count); low-memory records: $(@($lowMemory).Count)"
+          foreach ($e in @($crashes) + @($lowMemory)) { "---- $($e.TimeCreated) id=$($e.Id)"; $e.Message }
+
       - name: Manifest schema
         run: uv run python ../scripts/check_manifest_schema.py
 
