@@ -4,6 +4,7 @@ import asyncio
 import uuid
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy import select
 
 import app.runtime.library_work as library_work
@@ -19,6 +20,16 @@ from tests.factories import make_document, make_note
 from tests.test_library_context import _close, two_libraries  # noqa: F401
 
 LIBRARIES = ("first", "second")
+
+
+@pytest.fixture(autouse=True)
+def _workers_of_these_libraries_only(monkeypatch):
+    """Requeue walks every library with a registered worker. An earlier test that ran ingestion
+    without the app (`finalize` registers the default library's worker) left one behind, and
+    this file's `DATA_DIR` has no schema for it: "no such table: enrichment_jobs" on CI."""
+    import app.services.enrichment_worker as enrichment_worker
+
+    monkeypatch.setattr(enrichment_worker, "_workers", {})
 
 
 async def _queue(library: str, status: str = "pending") -> str:
