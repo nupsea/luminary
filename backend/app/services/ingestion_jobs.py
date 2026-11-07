@@ -102,6 +102,11 @@ class IngestionJobRegistry:
         task = self._tasks.get(document_id)
         return task is not None and not task.done()
 
+    def has_work(self, document_id: str) -> bool:
+        """Its ingestion or post-ingest work (deferred summaries, tags) is still running."""
+        followups = self._followups.get(document_id, ())
+        return self.is_running(document_id) or any(not t.done() for t in followups)
+
     def active_document_ids(self) -> list[str]:
         return [did for did, t in self._tasks.items() if not t.done()]
 

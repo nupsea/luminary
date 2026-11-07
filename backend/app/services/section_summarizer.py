@@ -16,6 +16,7 @@ from app.models import SectionModel, SectionSummaryModel
 from app.repos.document_repo import DocumentRepo
 from app.repos.enrichment_repo import EnrichmentRepo
 from app.repos.summary_repo import SummaryRepo
+from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -497,6 +498,10 @@ async def resummarize_documents_missing_summaries(limit: int = 20) -> int:
     for doc_id in doc_ids:
         if repaired >= limit:
             break
+        # Complete is not finished: a deferred pass is still writing, and resuming it
+        # alongside summarised every section twice.
+        if get_ingestion_jobs().has_work(doc_id):
+            continue
         try:
             if await get_section_summarizer_service().resume(doc_id):
                 repaired += 1
