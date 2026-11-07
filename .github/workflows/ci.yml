@@ -218,23 +218,26 @@ jobs:
       # `logical`, not `auto`: auto counts physical cores, 2 of the runner's 4 vCPUs.
       # No worker restarts: under loadfile, xdist 3.8.0 never finishes after replacing a
       # crashed worker, so one crash ran to the 50-minute limit with no test named.
+      # A crashed xdist worker leaves only "node down: Not properly terminated" (#211), with no
+      # faulthandler output even for a native fail-fast crash. Its exit status names the cause.
+      - name: Record python exits with a non-zero status
+        shell: pwsh
+        run: |
+          Start-Process pwsh -WindowStyle Hidden -ArgumentList '-NoProfile', '-File', "${{ github.workspace }}\scripts\watch_process_exits.ps1", '-Out', "${{ runner.temp }}\python-exits.log"
+          Start-Sleep -Seconds 5
+
       - name: Full backend suite, on the platform it got wrong
         run: uv run --with pytest-xdist==3.8.0 pytest -n logical --dist loadfile --max-worker-restart=0
 
-      # A crashed xdist worker leaves only "node down: Not properly terminated" (#211). Windows
-      # records a native crash (1000/1001) and a low-memory diagnosis (2004); neither means killed.
+      # 0xC0000409 fail-fast or buffer overrun, 0xC0000374 heap corruption, 0xC0000005 access
+      # violation; a small status is an exit or a terminate. Tests' own subprocesses appear too.
       - name: How a crashed worker died
         if: failure()
         shell: pwsh
         run: |
-          $since = (Get-Date).AddHours(-2)
           $os = Get-CimInstance Win32_OperatingSystem
           "free RAM {0:N0} MB of {1:N0} MB; free commit {2:N0} MB" -f ($os.FreePhysicalMemory / 1KB), ($os.TotalVisibleMemorySize / 1KB), ($os.FreeVirtualMemory / 1KB)
-          $crashes = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000, 1001; StartTime = $since } -ErrorAction SilentlyContinue |
-            Where-Object { $_.Message -match 'python' }
-          $lowMemory = Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 2004; StartTime = $since } -ErrorAction SilentlyContinue
-          "python crash records: $(@($crashes).Count); low-memory records: $(@($lowMemory).Count)"
-          foreach ($e in @($crashes) + @($lowMemory)) { "---- $($e.TimeCreated) id=$($e.Id)"; $e.Message }
+          Get-Content "${{ runner.temp }}\python-exits.log" -ErrorAction Continue
 
       - name: Manifest schema
         run: uv run python ../scripts/check_manifest_schema.py
