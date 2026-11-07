@@ -223,8 +223,16 @@ jobs:
       - name: Record python exits with a non-zero status
         shell: pwsh
         run: |
-          Start-Process pwsh -WindowStyle Hidden -ArgumentList '-NoProfile', '-File', "${{ github.workspace }}\scripts\watch_process_exits.ps1", '-Out', "${{ runner.temp }}\python-exits.log"
-          Start-Sleep -Seconds 5
+          $log = "${{ runner.temp }}\python-exits.log"
+          $watcher = Start-Process pwsh -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile', '-File', "${{ github.workspace }}\scripts\watch_process_exits.ps1", '-Out', $log
+          $watcher.Id | Set-Content "${{ runner.temp }}\python-exits.pid"
+          Start-Sleep -Seconds 10
+          # The watcher is only worth reading if it sees an exit: give it one to see.
+          uv run python -c "import sys; sys.exit(3)"
+          Start-Sleep -Seconds 10
+          $seen = Select-String -Path $log -Pattern 'exit=0x00000003' -Quiet
+          "watcher pid $($watcher.Id) recorded the canary exit: $seen"
+          $global:LASTEXITCODE = 0
 
       - name: Full backend suite, on the platform it got wrong
         run: uv run --with pytest-xdist==3.8.0 pytest -n logical --dist loadfile --max-worker-restart=0
@@ -237,6 +245,8 @@ jobs:
         run: |
           $os = Get-CimInstance Win32_OperatingSystem
           "free RAM {0:N0} MB of {1:N0} MB; free commit {2:N0} MB" -f ($os.FreePhysicalMemory / 1KB), ($os.TotalVisibleMemorySize / 1KB), ($os.FreeVirtualMemory / 1KB)
+          $watcher = Get-Content "${{ runner.temp }}\python-exits.pid" -ErrorAction Continue
+          "watcher still running: $([bool](Get-Process -Id $watcher -ErrorAction SilentlyContinue))"
           Get-Content "${{ runner.temp }}\python-exits.log" -ErrorAction Continue
 
       - name: Manifest schema
