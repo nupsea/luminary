@@ -25,12 +25,8 @@ import itertools
 import re
 from collections import defaultdict
 
+from app.services.source_text import gutenberg_body
 from app.types import AUDIO_EXTENSIONS
-
-# Gutenberg wraps every text in a licence. The markers are stable across the
-# corpus and are the only reliable way to find where the actual work starts.
-_GUTENBERG_START = re.compile(r"\*\*\*\s*START OF (?:THE|THIS) PROJECT GUTENBERG.*?\*\*\*", re.I)
-_GUTENBERG_END = re.compile(r"\*\*\*\s*END OF (?:THE|THIS) PROJECT GUTENBERG.*?\*\*\*", re.I)
 
 # A real Kindle clipping carries its own header, not just a rule of equals
 # signs -- a design-review fixture using `=====` as a divider was classified as
@@ -136,12 +132,7 @@ _SPEAKER_SHARE_FLOOR = 0.10
 
 def strip_boilerplate(raw_text: str) -> str:
     """Return the work, without a Gutenberg licence wrapped around it."""
-    start = _GUTENBERG_START.search(raw_text)
-    body = raw_text[start.end() :] if start else raw_text
-    end = _GUTENBERG_END.search(body)
-    if end:
-        body = body[: end.start()]
-    return body.strip() or raw_text
+    return gutenberg_body(raw_text).strip() or raw_text
 
 
 def sample_body(raw_text: str, window: int = 6000) -> str:
