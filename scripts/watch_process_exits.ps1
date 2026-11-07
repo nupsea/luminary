@@ -4,8 +4,8 @@
 param([Parameter(Mandatory)][string]$Out)
 
 New-Item -ItemType File -Force -Path $Out | Out-Null
-Register-CimIndicationEvent -ClassName Win32_ProcessStopTrace -SourceIdentifier ProcessExits `
-    -Filter "ProcessName = 'python.exe'" | Out-Null
+Register-CimIndicationEvent -SourceIdentifier ProcessExits -ErrorAction Stop `
+    -Query "SELECT * FROM Win32_ProcessStopTrace WHERE ProcessName = 'python.exe'" | Out-Null
 while ($true) {
     $e = Wait-Event -SourceIdentifier ProcessExits -Timeout 5
     if (-not $e) { continue }
