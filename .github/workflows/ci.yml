@@ -220,24 +220,23 @@ jobs:
       # crashed worker, so one crash ran to the 50-minute limit with no test named.
       # A crashed xdist worker leaves only "node down: Not properly terminated" (#211), with no
       # faulthandler output even for a native fail-fast crash. Its exit status names the cause.
-      - name: Record python exits with a non-zero status
+      # The runner kills a step's leftover processes when it ends, so the watcher runs in this one.
+      - name: Full backend suite, on the platform it got wrong
         shell: pwsh
         run: |
           $log = "${{ runner.temp }}\python-exits.log"
-          $watcher = Start-Process pwsh -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile', '-File', "${{ github.workspace }}\scripts\watch_process_exits.ps1", '-Out', $log `
+          Start-Process pwsh -WindowStyle Hidden -ArgumentList '-NoProfile', '-File', "${{ github.workspace }}\scripts\watch_process_exits.ps1", '-Out', $log `
             -RedirectStandardError "$log.err" -RedirectStandardOutput "$log.out"
-          $watcher.Id | Set-Content "${{ runner.temp }}\python-exits.pid"
           Start-Sleep -Seconds 10
           # The watcher is only worth reading if it sees an exit: give it one to see.
           uv run python -c "import sys; sys.exit(3)"
           Start-Sleep -Seconds 10
-          $seen = Select-String -Path $log -Pattern 'exit=0x00000003' -Quiet
-          "watcher pid $($watcher.Id) recorded the canary exit: $seen"
-          Get-Content "$log.err", "$log.out" -ErrorAction Continue
-          $global:LASTEXITCODE = 0
-
-      - name: Full backend suite, on the platform it got wrong
-        run: uv run --with pytest-xdist==3.8.0 pytest -n logical --dist loadfile --max-worker-restart=0
+          "the watcher recorded the canary exit: $(Select-String -Path $log -Pattern 'exit=0x00000003' -Quiet)"
+          Get-Content "$log.err" -ErrorAction Continue
+          uv run --with pytest-xdist==3.8.0 pytest -n logical --dist loadfile --max-worker-restart=0
+          $suite = $LASTEXITCODE
+          Start-Sleep -Seconds 10
+          exit $suite
 
       # 0xC0000409 fail-fast or buffer overrun, 0xC0000374 heap corruption, 0xC0000005 access
       # violation; a small status is an exit or a terminate. Tests' own subprocesses appear too.
@@ -247,8 +246,6 @@ jobs:
         run: |
           $os = Get-CimInstance Win32_OperatingSystem
           "free RAM {0:N0} MB of {1:N0} MB; free commit {2:N0} MB" -f ($os.FreePhysicalMemory / 1KB), ($os.TotalVisibleMemorySize / 1KB), ($os.FreeVirtualMemory / 1KB)
-          $watcher = Get-Content "${{ runner.temp }}\python-exits.pid" -ErrorAction Continue
-          "watcher still running: $([bool](Get-Process -Id $watcher -ErrorAction SilentlyContinue))"
           Get-Content "${{ runner.temp }}\python-exits.log" -ErrorAction Continue
 
       - name: Manifest schema
