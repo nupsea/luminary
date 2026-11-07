@@ -224,7 +224,8 @@ jobs:
         shell: pwsh
         run: |
           $log = "${{ runner.temp }}\python-exits.log"
-          $watcher = Start-Process pwsh -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile', '-File', "${{ github.workspace }}\scripts\watch_process_exits.ps1", '-Out', $log
+          $watcher = Start-Process pwsh -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile', '-File', "${{ github.workspace }}\scripts\watch_process_exits.ps1", '-Out', $log `
+            -RedirectStandardError "$log.err" -RedirectStandardOutput "$log.out"
           $watcher.Id | Set-Content "${{ runner.temp }}\python-exits.pid"
           Start-Sleep -Seconds 10
           # The watcher is only worth reading if it sees an exit: give it one to see.
@@ -232,6 +233,7 @@ jobs:
           Start-Sleep -Seconds 10
           $seen = Select-String -Path $log -Pattern 'exit=0x00000003' -Quiet
           "watcher pid $($watcher.Id) recorded the canary exit: $seen"
+          Get-Content "$log.err", "$log.out" -ErrorAction Continue
           $global:LASTEXITCODE = 0
 
       - name: Full backend suite, on the platform it got wrong
