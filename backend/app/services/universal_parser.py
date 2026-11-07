@@ -15,19 +15,16 @@ from itertools import pairwise
 from pathlib import Path
 
 from app.services.source_bundle import parse_bundle
+from app.services.source_text import (
+    GUTENBERG_END,
+    GUTENBERG_START,
+    is_speaker_label,
+    read_source_text,
+)
 from app.services.source_text import is_nav_line as _is_nav_line
-from app.services.source_text import is_speaker_label, read_source_text
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
-
-# Metadata/Boilerplate constants
-_RE_PG_START = re.compile(
-    r"\*\*\* START OF (?:THE|THIS) PROJECT GUTENBERG EBOOK[^*]* \*\*\*", re.IGNORECASE
-)
-_RE_PG_END = re.compile(
-    r"\*\*\* END OF (?:THE|THIS) PROJECT GUTENBERG EBOOK[^*]* \*\*\*", re.IGNORECASE
-)
 
 # Headers that often look like chat names but are just document metadata
 _METADATA_HEADERS = {
@@ -369,11 +366,11 @@ class UniversalParser:
         start_offset = 0
         end_offset = len(text)
 
-        m_start = _RE_PG_START.search(text)
+        m_start = GUTENBERG_START.search(text)
         if m_start:
             start_offset = m_start.end()
 
-        m_end = _RE_PG_END.search(text)
+        m_end = GUTENBERG_END.search(text)
         if m_end:
             end_offset = m_end.start()
 
