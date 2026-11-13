@@ -6,11 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A note's pasted snapshot can be annotated.** Click the image, or the highlighter on its block in the live editor, to highlight, draw, add arrows or text over it in Excalidraw. It keeps its display size, and the original stays in the scene, so annotations reopen for editing.
+
 ### Changed
 - **YouTube is a connector you install, and O'Reilly is no longer built in.** Settings → Connectors installs the YouTube connector from the catalogue in one click (its licence and YouTube's terms shown first); without it, a pasted YouTube link says so, or import the talk's audio or video file. Videos and books already in the library open, cite and re-import as before. The core no longer ships yt-dlp or curl_cffi (#467).
 - **A connector's sign-in, choices and settings come from the connector itself** (#436), and connectors install from a catalogue pinned by checksum, fetching their installer on request (#437).
 
 ### Fixed
+- **Pressing Escape in the diagram editor threw the drawing away.** Excalidraw uses Escape to finish a text box; the dialog now closes only on Cancel or its close button.
 - **The installers shipped AGPL-3.0 PyMuPDF and ebooklib as an Apache-2.0 app, with no third-party notices.** Every bundled package's licence now ships in `licenses/THIRD-PARTY-LICENSES.txt`, builds are stated as AGPL-3.0, and About links to the running version's source; staging fails on a package without a notice (#378).
 - **The notices left out the shell's Rust crates, the C libraries inside the bundled Python, and the Go modules inside Ollama.** All three are now listed with their texts, and llama.cpp's licence is taken at the version Ollama builds rather than its latest (#378).
 - **On Windows, the first start downloaded a tokenizer file from OpenAI's servers, and could not start offline.** litellm's Windows package ships the file with Windows line endings, so its checksum failed; the installer now ships the exact file the tokenizer expects.

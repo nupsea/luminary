@@ -6,6 +6,8 @@
  * the rendering.
  */
 
+import { isAnnotatedImage, soleBlockDiagram } from "@/lib/noteDiagrams"
+
 export interface TextRange {
   from: number
   to: number
@@ -90,6 +92,13 @@ export function hidesBlock(name: string): boolean {
 /** A paragraph that is nothing but an image is a block, whatever the parser calls it. */
 export function isImageOnlyParagraph(source: string): boolean {
   return /^!\[[^\]]*\]\([^)\s]+\)$/.test(source.trim())
+}
+
+/** An image-only paragraph, or an annotated image with its scene comment: both render as one image. */
+export function isImageBlock(source: string): boolean {
+  if (isImageOnlyParagraph(source)) return true
+  const diagram = soleBlockDiagram(source)
+  return diagram !== null && isAnnotatedImage(diagram)
 }
 
 /**
