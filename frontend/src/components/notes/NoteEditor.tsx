@@ -44,9 +44,7 @@ export function NoteEditor({
   const internalEditorRef = useRef<MarkdownEditorHandle | null>(null)
   const editorRef = externalEditorRef ?? internalEditorRef
   const [diagramOpen, setDiagramOpen] = useState(false)
-  const [editingDiagramRef, setEditingDiagramRef] = useState<
-    AnnotationTarget | null
-  >(null)
+  const [editingDiagramRef, setEditingDiagramRef] = useState<AnnotationTarget | null>(null)
 
   const contentRef = useRef(content)
   contentRef.current = content

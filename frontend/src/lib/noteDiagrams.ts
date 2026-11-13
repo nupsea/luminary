@@ -14,7 +14,7 @@ export interface ExcalidrawNoteDiagramRef {
 }
 
 /** A plain note image about to be annotated; saving replaces it with a diagram. */
-export interface NoteImageRef {
+interface NoteImageRef {
   imagePath: string
   size: ImageSize | null
   start: number

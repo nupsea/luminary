@@ -97,7 +97,7 @@ export interface MarkdownCodeEditorProps {
   live?: boolean
   /** Live rendering only: the edit button on a drawn diagram. */
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
-  /** Live rendering only: annotate a note image. */
+  /** Live rendering only: open a note image or drawing in the Excalidraw editor. */
   onAnnotateImage?: (target: AnnotationTarget) => void
   /** Opens the keyboard shortcuts info modal. */
   onOpenShortcuts?: () => void
