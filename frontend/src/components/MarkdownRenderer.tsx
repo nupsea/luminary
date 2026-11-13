@@ -10,7 +10,7 @@ import {
   useState,
 } from "react"
 import type { Root, RootContent } from "hast"
-import { FileText, Pencil } from "lucide-react"
+import { FileText, Highlighter, Pencil } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
@@ -21,12 +21,18 @@ import type { PluggableList } from "unified"
 import "katex/dist/katex.min.css"
 import { bracketMathToDollars } from "@/lib/bracketMath"
 import { API_BASE } from "@/lib/config"
-import { findExcalidrawDiagrams, type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
+import {
+  findExcalidrawDiagrams,
+  isAnnotatedImage,
+  parseImageAlt,
+  type ExcalidrawNoteDiagramRef,
+  type ImageSize,
+} from "@/lib/noteDiagrams"
 import { resolveLuminaryAssetUrl } from "@/lib/noteAssets"
 import { SOURCE_LINE_ATTR, lineOffsetAt, rehypeSourceLine } from "@/lib/rehypeSourceLine"
 import { cn } from "@/lib/utils"
 
-export type ImageSize = "small" | "medium" | "large"
+export type { ImageSize }
 
 export interface MarkdownRendererProps {
   children: string
@@ -44,6 +50,8 @@ export interface MarkdownRendererProps {
   /** When set, clicking an image opens a small size picker that writes the
    * |small/medium/large alt pipe back into the source markdown. */
   onSetImageSize?: (src: string, size: ImageSize) => void
+  /** When set, the same picker offers to annotate a note image (by its rendered src). */
+  onAnnotateImage?: (src: string) => void
   /** Stamp rendered blocks with their markdown line so a split editor can
    * scroll-sync against them. Off by default — only the editors need it. */
   trackSourceLines?: boolean
@@ -82,23 +90,6 @@ function preprocessLinks(content: string): string {
   // Resolve local mirrored images: __LUMINARY_IMG__/doc_id/filename -> API_BASE/images/local/doc_id/filename
   text = text.replace(/__LUMINARY_IMG__\//g, `${API_BASE}/images/local/`)
   return text
-}
-
-function parseImageAlt(alt?: string): { alt: string; size?: ImageSize } {
-  if (!alt) return { alt: "" }
-
-  const parts = alt.split("|")
-  if (parts.length < 2) return { alt }
-
-  const potentialSize = parts.at(-1)?.trim().toLowerCase()
-  if (potentialSize === "small" || potentialSize === "medium" || potentialSize === "large") {
-    return {
-      alt: parts.slice(0, -1).join("|").trim(),
-      size: potentialSize,
-    }
-  }
-
-  return { alt }
 }
 
 function MermaidBlock({ chart }: { chart: string }) {
@@ -257,6 +248,7 @@ interface MarkdownRendererContextValue {
   documentId?: string
   imageSize: ImageSize
   onSetImageSize?: (src: string, size: ImageSize) => void
+  onAnnotateImage?: (src: string) => void
   onOpenMenu: (menu: { src: string; x: number; y: number }) => void
   onImageLoad?: () => void
   validNoteIds?: Set<string>
@@ -264,6 +256,17 @@ interface MarkdownRendererContextValue {
 }
 
 const MarkdownRendererContext = createContext<MarkdownRendererContextValue | null>(null)
+
+function isAnnotatableSrc(src: string): boolean {
+  return src.startsWith(`${API_BASE}/images/local/`)
+}
+
+function imageMenuTitle(ctx: MarkdownRendererContextValue | null, src: string): string {
+  const canAnnotate = Boolean(ctx?.onAnnotateImage) && isAnnotatableSrc(src)
+  if (ctx?.onSetImageSize && canAnnotate) return "Click to resize or annotate"
+  if (canAnnotate) return "Click to annotate"
+  return "Click to set display size"
+}
 
 const MarkdownImage = memo(function MarkdownImage({
   src,
@@ -276,7 +279,7 @@ const MarkdownImage = memo(function MarkdownImage({
   const parsed = parseImageAlt(alt)
   const size = parsed.size ?? ctx?.imageSize ?? "medium"
   const resolvedSrc = resolveImageUrl(src, ctx?.documentId)
-  const onSetImageSize = ctx?.onSetImageSize
+  const hasMenu = Boolean(ctx?.onSetImageSize || ctx?.onAnnotateImage)
   const onOpenMenu = ctx?.onOpenMenu
   const onImageLoad = ctx?.onImageLoad
 
@@ -287,14 +290,14 @@ const MarkdownImage = memo(function MarkdownImage({
       decoding="async"
       onLoad={onImageLoad}
       onClick={
-        onSetImageSize && resolvedSrc && onOpenMenu
+        hasMenu && resolvedSrc && onOpenMenu
           ? (e) => onOpenMenu({ src: resolvedSrc, x: e.clientX, y: e.clientY })
           : undefined
       }
-      title={onSetImageSize ? "Click to set display size" : undefined}
+      title={hasMenu ? imageMenuTitle(ctx, resolvedSrc) : undefined}
       className={cn(
         "rounded-lg shadow-md mx-auto my-4 block transition-opacity duration-150",
-        onSetImageSize && "cursor-pointer",
+        hasMenu && "cursor-pointer",
         size === "small" && "max-w-[240px] max-h-[200px] object-contain",
         size === "medium" && "max-w-[480px] max-h-[360px] object-contain",
         size === "large" && "max-w-[800px] max-h-[600px] object-contain",
@@ -380,6 +383,7 @@ function MarkdownBody({
   reading = false,
   onNoteLinkClick,
   onSetImageSize,
+  onAnnotateImage,
   trackSourceLines = false,
   sourceLineOffset = 0,
   documentId,
@@ -406,10 +410,11 @@ function MarkdownBody({
       validNoteIds,
       onNoteLinkClick,
       onSetImageSize,
+      onAnnotateImage,
       onImageLoad,
       onOpenMenu: setSizeMenu,
     }),
-    [documentId, imageSize, validNoteIds, onNoteLinkClick, onSetImageSize, onImageLoad],
+    [documentId, imageSize, validNoteIds, onNoteLinkClick, onSetImageSize, onAnnotateImage, onImageLoad],
   )
 
   return (
@@ -432,14 +437,14 @@ function MarkdownBody({
         >
           {processed}
         </ReactMarkdown>
-        {sizeMenu && onSetImageSize && (
+        {sizeMenu && (onSetImageSize || onAnnotateImage) && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setSizeMenu(null)} />
             <div
               className="fixed z-50 flex gap-1 rounded-md border border-border bg-popover p-1 shadow-md not-prose"
               style={{ left: sizeMenu.x, top: sizeMenu.y }}
             >
-              {(["small", "medium", "large"] as const).map((s) => (
+              {onSetImageSize && (["small", "medium", "large"] as const).map((s) => (
                 <button
                   key={s}
                   type="button"
@@ -452,6 +457,19 @@ function MarkdownBody({
                   {s}
                 </button>
               ))}
+              {onAnnotateImage && isAnnotatableSrc(sizeMenu.src) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onAnnotateImage(sizeMenu.src)
+                    setSizeMenu(null)
+                  }}
+                  className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-foreground hover:bg-accent"
+                >
+                  <Highlighter size={11} />
+                  Annotate
+                </button>
+              )}
             </div>
           </>
         )}
@@ -469,12 +487,17 @@ export function MarkdownRenderer({
   onEditExcalidrawDiagram,
   onNoteLinkClick,
   onSetImageSize,
+  onAnnotateImage,
   trackSourceLines = false,
   documentId,
   onImageLoad,
   bracketMath = true,
 }: MarkdownRendererProps) {
-  const diagrams = useMemo(() => findExcalidrawDiagrams(children), [children])
+  // An annotated image stays an image (same size, same click menu); only a diagram becomes a figure.
+  const diagrams = useMemo(
+    () => findExcalidrawDiagrams(children).filter((diagram) => !isAnnotatedImage(diagram)),
+    [children],
+  )
 
   if (diagrams.length === 0) {
     return (
@@ -485,6 +508,7 @@ export function MarkdownRenderer({
         reading={reading}
         onNoteLinkClick={onNoteLinkClick}
         onSetImageSize={onSetImageSize}
+        onAnnotateImage={onAnnotateImage}
         trackSourceLines={trackSourceLines}
         documentId={documentId}
         onImageLoad={onImageLoad}
@@ -512,6 +536,7 @@ export function MarkdownRenderer({
                 reading={reading}
                 onNoteLinkClick={onNoteLinkClick}
                 onSetImageSize={onSetImageSize}
+                onAnnotateImage={onAnnotateImage}
                 trackSourceLines={trackSourceLines}
                 sourceLineOffset={lineOffset}
                 documentId={documentId}
@@ -540,6 +565,7 @@ export function MarkdownRenderer({
           reading={reading}
           onNoteLinkClick={onNoteLinkClick}
           onSetImageSize={onSetImageSize}
+          onAnnotateImage={onAnnotateImage}
           trackSourceLines={trackSourceLines}
           sourceLineOffset={lineOffsetAt(children, lastEnd)}
           documentId={documentId}

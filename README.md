@@ -158,7 +158,7 @@ serves it, and whether it runs on this machine.
 | **Ingest** | PDF, EPUB, docx, Markdown, txt, audio, video, web articles, YouTube, Kindle highlights |
 | **Ask** | Hybrid retrieval (vector + keyword + graph), Socratic mode, teach-back |
 | **Study** | Regular, cloze and code-trace cards; FSRS; prediction calibration |
-| **Notes** | Markdown with live preview, wiki-links, backlinks, Mermaid and Excalidraw |
+| **Notes** | Markdown with live preview, wiki-links, backlinks, Mermaid and Excalidraw, annotated snapshots |
 | **Dictate** | Speak into a note, answer or question, transcribed on your machine |
 | **Figures** | Diagrams and charts from PDFs, described by a vision model so answers can use them |
 | **Export** | Markdown vault (Obsidian-compatible), Anki `.apkg`, CSV |

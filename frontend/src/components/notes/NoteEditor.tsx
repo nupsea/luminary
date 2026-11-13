@@ -11,10 +11,7 @@ import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkComple
 import { type SlashCommandConfig } from "@/components/notes/slashCommands"
 import { API_BASE } from "@/lib/config"
 import { uploadNoteAsset } from "@/lib/noteAssets"
-import {
-  replaceExcalidrawDiagram,
-  type ExcalidrawNoteDiagramRef,
-} from "@/lib/noteDiagrams"
+import { annotationTarget, isAnnotatedImage, replaceExcalidrawDiagram, type AnnotationTarget } from "@/lib/noteDiagrams"
 
 export type NoteEditorLayout = MarkdownSplitLayout
 
@@ -47,7 +44,9 @@ export function NoteEditor({
   const internalEditorRef = useRef<MarkdownEditorHandle | null>(null)
   const editorRef = externalEditorRef ?? internalEditorRef
   const [diagramOpen, setDiagramOpen] = useState(false)
-  const [editingDiagramRef, setEditingDiagramRef] = useState<ExcalidrawNoteDiagramRef | null>(null)
+  const [editingDiagramRef, setEditingDiagramRef] = useState<
+    AnnotationTarget | null
+  >(null)
 
   const contentRef = useRef(content)
   contentRef.current = content
@@ -72,9 +71,14 @@ export function NoteEditor({
     editorRef.current?.insertBlock(markdown)
   }
 
-  function openDiagramEditor(ref: ExcalidrawNoteDiagramRef) {
+  function openDiagramEditor(ref: AnnotationTarget) {
     setEditingDiagramRef(ref)
     setDiagramOpen(true)
+  }
+
+  function handleAnnotateImage(src: string) {
+    const ref = annotationTarget(contentRef.current, src, API_BASE)
+    if (ref) openDiagramEditor(ref)
   }
 
   const slashCommands = useMemo<SlashCommandConfig>(
@@ -105,6 +109,7 @@ export function NoteEditor({
           linkCompletion={linkCompletion}
           slashCommands={slashCommands}
           onEditDiagram={openDiagramEditor}
+          onAnnotateImage={openDiagramEditor}
           onOpenShortcuts={onOpenShortcuts}
           onNoteLinkClick={onNoteLinkClick}
           preview={
@@ -116,6 +121,7 @@ export function NoteEditor({
                 onNoteLinkClick={onNoteLinkClick}
                 onEditExcalidrawDiagram={openDiagramEditor}
                 onSetImageSize={handleSetImageSize}
+                onAnnotateImage={handleAnnotateImage}
               >
                 {previewContent}
               </MarkdownRenderer>
@@ -129,7 +135,13 @@ export function NoteEditor({
       <NoteDiagramDialog
         open={diagramOpen}
         onOpenChange={setDiagramOpen}
-        scenePath={editingDiagramRef?.scenePath}
+        scenePath={editingDiagramRef && "scenePath" in editingDiagramRef ? editingDiagramRef.scenePath : null}
+        imagePath={editingDiagramRef && "imagePath" in editingDiagramRef ? editingDiagramRef.imagePath : null}
+        annotated={
+          editingDiagramRef !== null &&
+          ("imagePath" in editingDiagramRef || isAnnotatedImage(editingDiagramRef))
+        }
+        size={editingDiagramRef?.size}
         onSaved={handleDiagramSaved}
       />
     </>

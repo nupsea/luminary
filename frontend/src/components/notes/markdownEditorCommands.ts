@@ -1,5 +1,6 @@
 import { syntaxTree } from "@codemirror/language"
 import type { EditorState, TransactionSpec } from "@codemirror/state"
+import { findMarkdownImage } from "@/lib/noteDiagrams"
 import { isImageOnlyParagraph } from "./liveMarkdownRules"
 
 // Mirrors the old insertAtTextareaCursor semantics: the block lands in its own
@@ -119,29 +120,16 @@ export function replaceSelectionSpec(
 }
 
 // Rewrite the |size pipe of the image whose URL matches the rendered src.
-// Mirrored images render as <apiBase>/images/local/... but are authored as
-// __LUMINARY_IMG__/..., so both spellings are tried.
 export function setImageSizeInMarkdown(
   content: string,
   src: string,
   size: string,
   apiBase?: string,
 ): string {
-  const candidates = [src]
-  if (apiBase && src.startsWith(`${apiBase}/images/local/`)) {
-    candidates.push(src.replace(`${apiBase}/images/local/`, "__LUMINARY_IMG__/"))
-  }
-  for (const url of candidates) {
-    const closeIdx = content.indexOf(`](${url})`)
-    if (closeIdx === -1) continue
-    const openIdx = content.lastIndexOf("![", closeIdx)
-    if (openIdx === -1) continue
-    const alt = content.slice(openIdx + 2, closeIdx)
-    const base = alt.split("|")[0].trim() || "Image"
-    const end = closeIdx + 2 + url.length + 1
-    return `${content.slice(0, openIdx)}![${base}|${size}](${url})${content.slice(end)}`
-  }
-  return content
+  const image = findMarkdownImage(content, src, apiBase)
+  if (!image) return content
+  const base = image.alt.split("|")[0].trim() || "Image"
+  return `${content.slice(0, image.start)}![${base}|${size}](${image.url})${content.slice(image.end)}`
 }
 
 // Toggle **strong** / *emphasis* markers around the selection. An empty

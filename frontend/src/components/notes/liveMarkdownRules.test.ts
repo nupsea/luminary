@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 
+import { ANNOTATED_IMAGE_LABEL, buildExcalidrawDiagramMarkdown } from "@/lib/noteDiagrams"
+
 import {
   caretInTableRow,
   clickedSourceLine,
@@ -8,6 +10,7 @@ import {
   hidesBlock,
   isDelimitedBlock,
   hidesMark,
+  isImageBlock,
   isImageOnlyParagraph,
   lineIsBeingEdited,
   inlineMathRanges,
@@ -87,6 +90,20 @@ describe("isImageOnlyParagraph", () => {
     expect(isImageOnlyParagraph("see ![](x.png)")).toBe(false)
     expect(isImageOnlyParagraph("![](x.png) and more")).toBe(false)
     expect(isImageOnlyParagraph("a plain paragraph")).toBe(false)
+  })
+})
+
+describe("isImageBlock", () => {
+  const svg = "__LUMINARY_IMG__/notes/a.svg"
+  const scene = "__LUMINARY_IMG__/notes/a.excalidraw.json"
+
+  it("treats an annotated image and its scene comment as one image", () => {
+    expect(isImageBlock(buildExcalidrawDiagramMarkdown(svg, scene, ANNOTATED_IMAGE_LABEL, "medium"))).toBe(true)
+    expect(isImageBlock("![](x.png)")).toBe(true)
+  })
+
+  it("leaves a diagram a figure", () => {
+    expect(isImageBlock(buildExcalidrawDiagramMarkdown(svg, scene))).toBe(false)
   })
 })
 

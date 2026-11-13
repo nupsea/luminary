@@ -41,7 +41,7 @@ import {
 } from "./noteLinkCompletion"
 import { liveMarkdown } from "./liveMarkdown"
 import { mathSource } from "./mathSource"
-import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
+import { type AnnotationTarget, type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { slashCommandSource, type SlashCommandConfig } from "./slashCommands"
 import { toast } from "sonner"
 import { logger } from "@/lib/logger"
@@ -97,6 +97,8 @@ export interface MarkdownCodeEditorProps {
   live?: boolean
   /** Live rendering only: the edit button on a drawn diagram. */
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
+  /** Live rendering only: annotate a note image. */
+  onAnnotateImage?: (target: AnnotationTarget) => void
   /** Opens the keyboard shortcuts info modal. */
   onOpenShortcuts?: () => void
   /** Handler when clicking a note link widget or pill. */
@@ -536,7 +538,7 @@ export function noteEditorKeymaps(latest: {
 
 export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeEditorProps>(
   function MarkdownCodeEditor(
-    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live, onEditDiagram, onOpenShortcuts, onNoteLinkClick },
+    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live, onEditDiagram, onAnnotateImage, onOpenShortcuts, onNoteLinkClick },
     ref,
   ) {
     const hostRef = useRef<HTMLDivElement>(null)
@@ -548,12 +550,13 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
     // The preview pane is a toggle, so live rendering has to be switchable on a
     // view that is already built.
     const liveRoom = useRef(new Compartment()).current
-    const latest = useRef({ onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onOpenShortcuts, onNoteLinkClick })
-    latest.current = { onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onOpenShortcuts, onNoteLinkClick }
+    const latest = useRef({ onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onAnnotateImage, onOpenShortcuts, onNoteLinkClick })
+    latest.current = { onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onAnnotateImage, onOpenShortcuts, onNoteLinkClick }
     const liveExtension = useCallback(
       () =>
         liveMarkdown({
           onEditDiagram: (d) => latest.current.onEditDiagram?.(d),
+          onAnnotateImage: (target) => latest.current.onAnnotateImage?.(target),
           onNoteLinkClick: (id) => latest.current.onNoteLinkClick?.(id),
         }),
       [],

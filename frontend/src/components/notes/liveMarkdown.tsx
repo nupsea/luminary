@@ -15,11 +15,17 @@ import { syntaxTree } from "@codemirror/language"
 import { Prec, StateField, type EditorState, type Extension, type Range } from "@codemirror/state"
 import { Decoration, EditorView, WidgetType, keymap, type DecorationSet } from "@codemirror/view"
 import katex from "katex"
-import { Check, ChevronDown, ChevronUp, Copy, Pencil, Trash2 } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, Copy, Highlighter, Pencil, PenTool, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
+import {
+  annotationTarget,
+  isAnnotatedImage,
+  soleBlockImageSrc,
+  type AnnotationTarget,
+  type ExcalidrawNoteDiagramRef,
+} from "@/lib/noteDiagrams"
 import { mathRanges } from "./mathSource"
 import { moveBlockOrLineSpec, setImageSizeInMarkdown } from "./markdownEditorCommands"
 import { API_BASE } from "@/lib/config"
@@ -33,6 +39,7 @@ import {
   hidesBlock,
   hidesMark,
   isDelimitedBlock,
+  isImageBlock,
   isImageOnlyParagraph,
   lineIsBeingEdited,
   rendersAsBlock,
@@ -123,6 +130,8 @@ const EXCALIDRAW_COMMENT = /^<!-- luminary:excalidraw=.+ -->$/
 export interface LiveMarkdownOptions {
   /** Gives a rendered diagram the same edit button the preview has. */
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
+  /** Opens a note image, annotated or not, or a diagram in the Excalidraw editor. */
+  onAnnotateImage?: (target: AnnotationTarget) => void
   /** Handler to open a linked note when clicked. */
   onNoteLinkClick?: (noteId: string) => void
 }
@@ -229,6 +238,7 @@ function RenderedBlockContent({
   view,
   host,
   onEditDiagram,
+  onAnnotateImage,
   onNoteLinkClick,
 }: {
   source: string
@@ -236,6 +246,7 @@ function RenderedBlockContent({
   view: EditorView
   host: HTMLElement
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
+  onAnnotateImage?: (target: AnnotationTarget) => void
   onNoteLinkClick?: (noteId: string) => void
 }) {
   const [copied, setCopied] = useState(false)
@@ -262,7 +273,7 @@ function RenderedBlockContent({
   const handleEdit = () => {
     const blockPos = view.posAtDOM(host)
     const line = view.state.doc.lineAt(blockPos)
-    if (isImageOnlyParagraph(source)) {
+    if (isImageBlock(source)) {
       view.dispatch({ selection: { anchor: Math.min(line.from + 2, line.to) } })
     } else {
       const offset = firstEditableLine(delimited)
@@ -271,6 +282,24 @@ function RenderedBlockContent({
     }
     view.focus()
   }
+
+  const annotateImage = (src: string) => {
+    const target = onAnnotateImage && annotationTarget(source, src, API_BASE)
+    if (!target) return
+    const base = view.posAtDOM(host)
+    onAnnotateImage({ ...target, start: target.start + base, end: target.end + base })
+  }
+  // The block's own image gets its drawing action in this toolbar, so the figure needs no Edit button.
+  const blockSrc = onAnnotateImage ? soleBlockImageSrc(source) : null
+  const blockTarget = blockSrc ? annotationTarget(source, blockSrc) : null
+  const blockAction =
+    blockTarget === null
+      ? null
+      : !("scenePath" in blockTarget)
+        ? { title: "Annotate image", Icon: Highlighter }
+        : isAnnotatedImage(blockTarget)
+          ? { title: "Edit annotations", Icon: Highlighter }
+          : { title: "Edit diagram", Icon: PenTool }
 
   const handleCopy = () => {
     void navigator.clipboard.writeText(source)
@@ -334,6 +363,16 @@ function RenderedBlockContent({
         >
           <Pencil size={12} />
         </button>
+        {blockSrc && blockAction && (
+          <button
+            type="button"
+            onClick={() => annotateImage(blockSrc)}
+            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            title={blockAction.title}
+          >
+            <blockAction.Icon size={12} />
+          </button>
+        )}
         <button
           type="button"
           onClick={handleCopy}
@@ -361,12 +400,14 @@ function RenderedBlockContent({
           forceEditorMeasure(view)
         }}
         onEditExcalidrawDiagram={
-          onEditDiagram &&
-          ((diagram) => {
-            const base = view.posAtDOM(host)
-            onEditDiagram({ ...diagram, start: diagram.start + base, end: diagram.end + base })
-          })
+          onEditDiagram && !blockAction
+            ? (diagram) => {
+                const base = view.posAtDOM(host)
+                onEditDiagram({ ...diagram, start: diagram.start + base, end: diagram.end + base })
+              }
+            : undefined
         }
+        onAnnotateImage={onAnnotateImage && annotateImage}
         onSetImageSize={(src, size) => {
           const blockPos = view.posAtDOM(host)
           const startLine = view.state.doc.lineAt(blockPos)
@@ -394,20 +435,13 @@ class RenderedBlock extends WidgetType {
   private observer: ResizeObserver | null = null
   readonly source: string
   readonly delimited: boolean
-  private readonly onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
-  private readonly onNoteLinkClick?: (noteId: string) => void
+  private readonly options: LiveMarkdownOptions
 
-  constructor(
-    source: string,
-    delimited: boolean,
-    onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void,
-    onNoteLinkClick?: (noteId: string) => void,
-  ) {
+  constructor(source: string, delimited: boolean, options: LiveMarkdownOptions = {}) {
     super()
     this.source = source
     this.delimited = delimited
-    this.onEditDiagram = onEditDiagram
-    this.onNoteLinkClick = onNoteLinkClick
+    this.options = options
   }
 
   get estimatedHeight(): number {
@@ -432,8 +466,7 @@ class RenderedBlock extends WidgetType {
         delimited={this.delimited}
         view={view}
         host={host}
-        onEditDiagram={this.onEditDiagram}
-        onNoteLinkClick={this.onNoteLinkClick}
+        {...this.options}
       />,
     )
     // The renderer paints after this returns, and an image finishes later
@@ -459,7 +492,7 @@ class RenderedBlock extends WidgetType {
       const endLine = view.state.doc.line(Math.min(firstLine.number + lines - 1, view.state.doc.lines))
 
       // If clicking an image block: select the entire block as a unit so user can delete or navigate smoothly!
-      if (isImageOnlyParagraph(this.source)) {
+      if (isImageBlock(this.source)) {
         event.preventDefault()
         view.focus()
         if (event.shiftKey) {
@@ -489,7 +522,7 @@ class RenderedBlock extends WidgetType {
     host.addEventListener("dblclick", (event) => {
       const target = event.target as HTMLElement | null
       if (target?.closest("button, a, input, select, textarea")) return
-      if (isImageOnlyParagraph(this.source)) {
+      if (isImageBlock(this.source)) {
         event.preventDefault()
         const from = view.posAtDOM(host)
         const firstLine = view.state.doc.lineAt(from)
@@ -550,7 +583,7 @@ class RenderedBlock extends WidgetType {
           delimited={this.delimited}
           view={view}
           host={dom}
-          onEditDiagram={this.onEditDiagram}
+          {...this.options}
         />,
       )
       return true
@@ -677,8 +710,7 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
         widget: new RenderedBlock(
           state.doc.sliceString(range.from, range.to),
           delimited,
-          options.onEditDiagram,
-          options.onNoteLinkClick,
+          options,
         ),
       }).range(range.from, range.to),
     )
@@ -1146,7 +1178,7 @@ export function stepInto(view: EditorView, field: StateField<DecorationSet>, dir
       const widgetSource = (widget as { source: string }).source
       const widgetDelimited = Boolean((widget as { delimited?: boolean }).delimited)
 
-      if (isImageOnlyParagraph(widgetSource)) {
+      if (isImageBlock(widgetSource)) {
         const blockLineFrom = doc.lineAt(from).number
         const blockLineTo = doc.lineAt(to).number
         const nextNum = dir === 1 ? blockLineTo + 1 : blockLineFrom - 1
