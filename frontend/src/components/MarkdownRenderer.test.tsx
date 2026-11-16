@@ -77,7 +77,8 @@ Paragraph two text.`
     const html = renderToStaticMarkup(<MarkdownRenderer>{md}</MarkdownRenderer>)
 
     expect(html).toContain("Attention Mechanism")
-    expect(html).not.toContain("d67a222c-e161-45d6-9b65-90a6bb1015c")
+    // The id rides only in the copy-source attribute, never in visible text.
+    expect(html.replace(/<[^>]*>/g, "")).not.toContain("d67a222c-e161-45d6-9b65-90a6bb1015c")
   })
 })
 

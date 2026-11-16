@@ -2,6 +2,7 @@ import { syntaxTree } from "@codemirror/language"
 import type { EditorState, TransactionSpec } from "@codemirror/state"
 import { findMarkdownImage } from "@/lib/noteDiagrams"
 import { isImageOnlyParagraph } from "./liveMarkdownRules"
+import type { PastedMarkdown } from "./pasteMarkdown"
 
 // Mirrors the old insertAtTextareaCursor semantics: the block lands in its own
 // paragraph with blank lines around it (mermaid/excalidraw insertions).
@@ -43,6 +44,21 @@ function enclosing(state: EditorState, pos: number, names: readonly string[]) {
     if (!node.parent) return null
     node = node.parent
   }
+}
+
+/**
+ * Clipboard formatting as markdown at the caret, or null to let the plain text paste.
+ * Inside code the plain text is what the user means; a table keeps its rows whole.
+ */
+export function pasteMarkdownSpec(state: EditorState, pasted: PastedMarkdown): TransactionSpec | null {
+  const { from } = state.selection.main
+  if (enclosing(state, from, ["FencedCode", "CodeBlock", "InlineCode"])) return null
+  const table = enclosing(state, from, ["Table"])
+  if (table && pasted.block) {
+    return insertBlockSpec(state.update({ selection: { anchor: table.to } }).state, pasted.markdown)
+  }
+  if (pasted.block) return insertBlockSpec(state, pasted.markdown)
+  return insertInlineSpec(state, table ? pasted.markdown.replace(/(?<!\\)\|/g, "\\|") : pasted.markdown)
 }
 
 /**

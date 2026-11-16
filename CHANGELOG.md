@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A connector's sign-in, choices and settings come from the connector itself** (#436), and connectors install from a catalogue pinned by checksum, fetching their installer on request (#437).
 
 ### Fixed
+- **Pasting into a note lost its formatting: a web table arrived as tab-separated text.** Pasted HTML now becomes markdown (tables, lists and tasks, headings, code with its language, links, math, Google Docs bold and italic), and what is copied from a rendered note, including formulas, diagrams and note links, pastes back as its source.
 - **Pressing Escape in the diagram editor threw the drawing away.** Excalidraw uses Escape to finish a text box; the dialog now closes only on Cancel or its close button.
 - **The installers shipped AGPL-3.0 PyMuPDF and ebooklib as an Apache-2.0 app, with no third-party notices.** Every bundled package's licence now ships in `licenses/THIRD-PARTY-LICENSES.txt`, builds are stated as AGPL-3.0, and About links to the running version's source; staging fails on a package without a notice (#378).
 - **The notices left out the shell's Rust crates, the C libraries inside the bundled Python, and the Go modules inside Ollama.** All three are now listed with their texts, and llama.cpp's licence is taken at the version Ollama builds rather than its latest (#378).
