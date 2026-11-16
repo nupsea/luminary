@@ -20,6 +20,7 @@ import rehypeRaw from "rehype-raw"
 import type { PluggableList } from "unified"
 import "katex/dist/katex.min.css"
 import { bracketMathToDollars } from "@/lib/bracketMath"
+import { copySource, rehypeMathCopySource } from "@/lib/copySource"
 import { API_BASE } from "@/lib/config"
 import {
   findExcalidrawDiagrams,
@@ -126,10 +127,11 @@ function MermaidBlock({ chart }: { chart: string }) {
     }
   }, [chart, generatedId])
   const svgHtml = useMemo(() => ({ __html: svg }), [svg])
+  const source = copySource("```mermaid\n" + chart + "\n```")
 
   if (error) {
     return (
-      <pre className="not-prose overflow-auto rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
+      <pre {...source} className="not-prose overflow-auto rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
         <code>{error}</code>
       </pre>
     )
@@ -137,7 +139,7 @@ function MermaidBlock({ chart }: { chart: string }) {
 
   if (!svg) {
     return (
-      <div className="not-prose rounded border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+      <div {...source} className="not-prose rounded border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
         Rendering diagram...
       </div>
     )
@@ -145,6 +147,7 @@ function MermaidBlock({ chart }: { chart: string }) {
 
   return (
     <div
+      {...source}
       className="not-prose my-4 overflow-auto rounded border border-border bg-background p-3"
       dangerouslySetInnerHTML={svgHtml}
     />
@@ -153,12 +156,14 @@ function MermaidBlock({ chart }: { chart: string }) {
 
 const ExcalidrawDiagramPreview = memo(function ExcalidrawDiagramPreview({
   diagram,
+  source,
   index,
   onEdit,
   sourceLine,
   onImageLoad,
 }: {
   diagram: ExcalidrawNoteDiagramRef
+  source: string
   index: number
   onEdit?: (diagram: ExcalidrawNoteDiagramRef) => void
   sourceLine?: number
@@ -167,6 +172,7 @@ const ExcalidrawDiagramPreview = memo(function ExcalidrawDiagramPreview({
   return (
     <figure
       {...(sourceLine != null ? { [SOURCE_LINE_ATTR]: String(sourceLine) } : {})}
+      {...copySource(source)}
       className="not-prose my-5 overflow-hidden rounded-lg border border-border bg-background shadow-sm"
     >
       <div className="flex items-center justify-between border-b border-border bg-muted/35 px-3 py-2">
@@ -282,9 +288,13 @@ const MarkdownImage = memo(function MarkdownImage({
   const hasMenu = Boolean(ctx?.onSetImageSize || ctx?.onAnnotateImage)
   const onOpenMenu = ctx?.onOpenMenu
   const onImageLoad = ctx?.onImageLoad
+  const localPrefix = `${API_BASE}/images/local/`
+  const sourceUrl = src?.startsWith(localPrefix) ? "__LUMINARY_IMG__/" + src.slice(localPrefix.length) : resolvedSrc
+  const source = copySource(`![${parsed.alt}${parsed.size ? `|${parsed.size}` : ""}](${sourceUrl})`)
 
   return (
     <img
+      {...source}
       src={resolvedSrc}
       alt={parsed.alt}
       decoding="async"
@@ -337,10 +347,11 @@ const MarkdownCode = memo(function MarkdownCode({
   const m = text.match(/^\[note:([a-f0-9-]+)\|(.+)\]$/)
   if (m) {
     const [, id, label] = m
+    const source = copySource(`[[${id}|${label}]]`)
     const isBroken = ctx?.validNoteIds !== undefined && !ctx.validNoteIds.has(id)
     if (isBroken) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-500 dark:bg-red-950 dark:text-red-400 line-through not-prose">
+        <span {...source} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-500 dark:bg-red-950 dark:text-red-400 line-through not-prose">
           <FileText size={11} className="shrink-0" />
           <span>{label}</span>
         </span>
@@ -349,6 +360,7 @@ const MarkdownCode = memo(function MarkdownCode({
     if (ctx?.onNoteLinkClick) {
       return (
         <button
+          {...source}
           type="button"
           onClick={() => ctx.onNoteLinkClick!(id)}
           className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs bg-primary/10 text-primary hover:bg-primary/20 dark:bg-primary/20 dark:text-primary font-medium not-prose cursor-pointer transition-colors border border-primary/25 shadow-xs"
@@ -360,7 +372,7 @@ const MarkdownCode = memo(function MarkdownCode({
       )
     }
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary font-medium not-prose border border-primary/20">
+      <span {...source} className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary font-medium not-prose border border-primary/20">
         <FileText size={11} className="shrink-0 opacity-80" />
         <span className="truncate max-w-[280px]">{label}</span>
       </span>
@@ -398,8 +410,8 @@ function MarkdownBody({
   const rehypePlugins: PluggableList = useMemo(
     () =>
       trackSourceLines
-        ? [rehypeCleanTableWhitespace, rehypeHighlight, rehypeKatex, rehypeRaw, [rehypeSourceLine, sourceLineOffset]]
-        : [rehypeCleanTableWhitespace, rehypeHighlight, rehypeKatex, rehypeRaw],
+        ? [rehypeCleanTableWhitespace, rehypeHighlight, rehypeKatex, rehypeMathCopySource, rehypeRaw, [rehypeSourceLine, sourceLineOffset]]
+        : [rehypeCleanTableWhitespace, rehypeHighlight, rehypeKatex, rehypeMathCopySource, rehypeRaw],
     [trackSourceLines, sourceLineOffset],
   )
 
@@ -548,6 +560,7 @@ export function MarkdownRenderer({
             )}
             <ExcalidrawDiagramPreview
               diagram={diagram}
+              source={children.substring(diagram.start, diagram.end)}
               index={index}
               onEdit={onEditExcalidrawDiagram}
               onImageLoad={onImageLoad}

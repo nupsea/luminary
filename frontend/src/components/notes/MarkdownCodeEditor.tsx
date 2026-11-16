@@ -26,6 +26,7 @@ import {
   insertDictationSpec,
   insertInlineSpec,
   moveBlockOrLineSpec,
+  pasteMarkdownSpec,
   replaceSelectionSpec,
   smartBackspaceSpec,
   smartDeleteSpec,
@@ -41,6 +42,7 @@ import {
 } from "./noteLinkCompletion"
 import { liveMarkdown } from "./liveMarkdown"
 import { mathSource } from "./mathSource"
+import { clipboardToMarkdown } from "./pasteMarkdown"
 import { type AnnotationTarget, type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { slashCommandSource, type SlashCommandConfig } from "./slashCommands"
 import { toast } from "sonner"
@@ -640,20 +642,26 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
               },
               paste: (event, v) => {
                 const handler = latest.current.onPasteImage
-                if (!handler) return false
+                const file = handler ? extractImageFile(event.clipboardData) : null
+                if (handler && (file || isWithheldImage(event.clipboardData))) {
+                  event.preventDefault()
+                  ;(file ? Promise.resolve(file) : readShellClipboardImage())
+                    .then((image) => (image ? handler(image) : Promise.reject(new Error("no image"))))
+                    .then((md) => {
+                      v.dispatch(insertBlockSpec(v.state, md))
+                    })
+                    .catch((err) => {
+                      toast.error("Failed to paste image")
+                      logger.warn("Failed to paste image", err)
+                    })
+                  return true
+                }
 
-                const file = extractImageFile(event.clipboardData)
-                if (!file && !isWithheldImage(event.clipboardData)) return false
+                const pasted = clipboardToMarkdown(event.clipboardData)
+                const spec = pasted && pasteMarkdownSpec(v.state, pasted)
+                if (!spec) return false
                 event.preventDefault()
-                ;(file ? Promise.resolve(file) : readShellClipboardImage())
-                  .then((image) => (image ? handler(image) : Promise.reject(new Error("no image"))))
-                  .then((md) => {
-                    v.dispatch(insertBlockSpec(v.state, md))
-                  })
-                  .catch((err) => {
-                    toast.error("Failed to paste image")
-                    logger.warn("Failed to paste image", err)
-                  })
+                v.dispatch({ ...spec, userEvent: "input.paste" })
                 return true
               },
               drop: (event, v) => {
