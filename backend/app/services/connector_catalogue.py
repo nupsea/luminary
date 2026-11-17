@@ -49,6 +49,28 @@ _YOUTUBE_TERMS = (
     "between you and YouTube."
 )
 
+# html-book and confluence (#348), reviewed at this commit; youtube/ is identical in both.
+_BOOKS_COMMIT = "d2ae78a1f11382cfc835888363dc3aa4ee8d1b20"
+_BOOKS_SHA256 = "c09b6e41feef36a0d3b0a947c20f80993a134c9461a58daadff660030a7473fb"
+_BOOKS_SIZE = 55842
+_HTML_BOOK_TERMS = (
+    "Each book this connector takes is published under a licence that allows copying it. "
+    'The Rust project: "the Rust Programming Language and all other official projects, '
+    'including this website, are generally dual-licensed" under Apache-2.0 and MIT, and '
+    "doc.rust-lang.org's robots.txt allows /book/. The Python documentation: \"This page is "
+    'licensed under the Python Software Foundation License Version 2" '
+    "(https://docs.python.org/3/copyright.html), and docs.python.org's robots.txt allows "
+    "/3/. Neither site's terms say anything about automated download or use as model input."
+)
+_CONFLUENCE_TERMS = (
+    "The Linux Foundation's Terms of Use (revised November 16, 2020), which cover its "
+    'project wikis: "Except as otherwise provided, Content on this site is licensed under a '
+    'Creative Commons Attribution 3.0 License", and non-code submissions including wikis '
+    '"will be governed by the Creative Commons Attribution 3.0". lf-hyperledger.atlassian.net '
+    "allows /wiki/ in robots.txt with a crawl delay of 1 second. The terms say nothing about "
+    "automated download or use as model input."
+)
+
 _ENTRIES = (
     CatalogueEntry(
         name="youtube",
@@ -64,6 +86,35 @@ _ENTRIES = (
         sha256="73e430a944d292ee941b61fb127b854385f4426a45ff046c3fee80003ad3de80",
         size_bytes=30547,
         member_prefix=f"luminary-connectors-{_CONNECTORS_COMMIT}/youtube/",
+    ),
+    CatalogueEntry(
+        name="html-book",
+        label="HTML book",
+        version="0.1.0",
+        summary="A book published as web pages (the Rust book, the Python tutorial), each page "
+        "a section in reading order.",
+        licence="Apache-2.0",
+        terms_statement=_HTML_BOOK_TERMS,
+        terms_url="https://www.rust-lang.org/policies/licenses",
+        repository="https://github.com/nupsea/luminary-connectors",
+        archive_url=f"https://github.com/nupsea/luminary-connectors/archive/{_BOOKS_COMMIT}.tar.gz",
+        sha256=_BOOKS_SHA256,
+        size_bytes=_BOOKS_SIZE,
+        member_prefix=f"luminary-connectors-{_BOOKS_COMMIT}/html-book/",
+    ),
+    CatalogueEntry(
+        name="confluence",
+        label="Confluence",
+        version="0.1.0",
+        summary="A public Confluence page and every page under it, each a section in tree order.",
+        licence="Apache-2.0",
+        terms_statement=_CONFLUENCE_TERMS,
+        terms_url="https://www.linuxfoundation.org/legal/terms",
+        repository="https://github.com/nupsea/luminary-connectors",
+        archive_url=f"https://github.com/nupsea/luminary-connectors/archive/{_BOOKS_COMMIT}.tar.gz",
+        sha256=_BOOKS_SHA256,
+        size_bytes=_BOOKS_SIZE,
+        member_prefix=f"luminary-connectors-{_BOOKS_COMMIT}/confluence/",
     ),
 )
 
