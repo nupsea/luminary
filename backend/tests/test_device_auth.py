@@ -11,7 +11,12 @@ from sqlalchemy import select, text
 import app.services.devices as devices
 from app.main import app
 from app.models import DeviceModel, SettingsModel
-from app.runtime.request_auth import DEV_APP_ORIGINS, needs_token
+from app.runtime.request_auth import (
+    DEV_APP_ORIGINS,
+    RequestAuthMiddleware,
+    is_loopback,
+    needs_token,
+)
 
 OWN = "http://127.0.0.1:7820"
 EVIL = {"Origin": "https://evil.example"}
@@ -174,3 +179,60 @@ def test_the_origin_rule():
     assert needs_token(None, "cross-site", own, frozenset())
     assert not needs_token(None, "same-site", own, frozenset())
     assert not needs_token(None, None, own, frozenset())
+
+
+# A server that answers beyond loopback (#511): the headers above are evidence only there.
+REMOTE_CLIENT = ("203.0.113.7", 51000)
+
+
+@pytest.fixture
+async def remote(memory_db):
+    served = RequestAuthMiddleware(
+        app,
+        api_prefix="",
+        app_origins=frozenset(),
+        pair_path="/devices/pair",
+        remote_needs_token=True,
+    )
+    transport = ASGITransport(app=served, client=REMOTE_CLIENT)
+    async with AsyncClient(transport=transport, base_url="http://luminary.lan:7820") as c:
+        yield c
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},  # curl, a script: what loopback trusts as the shell
+        {"Host": "127.0.0.1:7820"},  # a direct client names loopback itself
+        {"Origin": "http://luminary.lan:7820"},  # the server's own origin
+        {"Sec-Fetch-Site": "same-origin"},
+    ],
+)
+async def test_a_client_beyond_loopback_needs_a_token(remote, memory_db, headers):
+    resp = await remote.patch("/settings", json={"planted": "yes"}, headers=headers)
+
+    assert resp.status_code == 401
+    assert resp.headers["www-authenticate"] == "Bearer"
+    async with memory_db.factory() as session:
+        assert await session.get(SettingsModel, "planted") is None
+
+
+async def test_a_client_beyond_loopback_is_admitted_with_a_token(client, remote):
+    _, token = await _pair(client)
+
+    assert (
+        await remote.get("/tags", headers={"Authorization": f"Bearer {token}"})
+    ).status_code == 200
+    assert (await remote.post("/devices/pairing-code")).status_code == 401
+
+
+async def test_a_client_beyond_loopback_can_pair(client, remote):
+    code = (await client.post("/devices/pairing-code")).json()["code"]
+    resp = await remote.post("/devices/pair", json={"code": code, "name": "phone"})
+    assert resp.status_code == 201
+
+
+def test_only_a_loopback_address_is_loopback():
+    assert is_loopback(("127.0.0.1", 1)) and is_loopback(("::1", 1))
+    assert not is_loopback(("172.17.0.1", 1))  # Docker's gateway: the published port's view
+    assert not is_loopback(("testclient", 1)) and not is_loopback(None)

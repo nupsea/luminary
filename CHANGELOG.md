@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **A note's pasted snapshot can be annotated.** Click the image, or the highlighter on its block in the live editor, to highlight, draw, add arrows or text over it in Excalidraw. It keeps its display size, and the original stays in the scene, so annotations reopen for editing.
-
+- **A server can answer other machines, behind device tokens.** Set `LUMINARY_ALLOWED_HOSTS` to the names it serves, and every API request from another machine needs a paired device's token, whatever its headers say; mint a code with `docker exec <container> python -m app.scripts.pairing_code`. Unset, the server stays loopback-only (#511).
 - **Books published as web pages, and public Confluence wikis, import as one document each.** The catalogue lists two more connectors: HTML book (the Rust book, the Python tutorial: each page a section, in reading order) and Confluence (a page and every page under it, in tree order). Each lists only sites whose terms were read (#348).
 
 ### Changed

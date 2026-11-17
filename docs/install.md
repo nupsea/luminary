@@ -120,6 +120,23 @@ make docker-down              # also remove containers and the network
 A container has no OS keyring, so an API key saved in Settings is stored in the library database
 in plain text. Pass it in `.env` beside the compose file instead.
 
+### Reaching it from another machine
+
+Compose binds `127.0.0.1`, and the server answers only to loopback names. To serve other machines,
+set `LUMINARY_ALLOWED_HOSTS` to the names they will use (`luminary.lan,192.168.1.20`) and publish
+the port beyond loopback. Every API request from another machine then needs a paired device's
+token, whatever its headers say. Mint a code from inside the container, which is the only place
+allowed to:
+
+```bash
+docker exec <container> python -m app.scripts.pairing_code
+```
+
+The device sends the code to `POST /api/devices/pair` and gets back the token to send as
+`Authorization: Bearer <token>`. A browser cannot pair yet, so the app's pages are usable only on
+the server itself. Publishing the port beyond loopback without the setting leaves it guarded only
+by the `Host` header, which any client other than a browser can set to `127.0.0.1`.
+
 ## Memory
 
 Read off a running instance with `scripts/model_footprint.py` (Ollama's `/api/ps`, not process
@@ -181,6 +198,7 @@ every key.
 | `LUMINARY_HOST_SUPPORTED` | *(unset)* | `1` skips every host refusal, for a host you know is fine |
 | `PDF_VECTOR_FIGURES` | `true` | Rasterize vector-drawn PDF figures; each costs a vision call |
 | `LUMINARY_MODE` | `full` | `full` = every feature; `public` = learner surfaces, SPA and API on one port |
+| `LUMINARY_ALLOWED_HOSTS` | *(empty)* | Names the server answers to beyond loopback; set, other machines need a device token |
 | `GLINER_ENABLED` | `true` | Entity extraction |
 | `DATA_DIR` | `.luminary` | Where the library lives |
 
