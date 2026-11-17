@@ -61,11 +61,20 @@ async def _maybe_rewrite_query(
             prompt = f"Prior exchange:\n{prior_context}\n\n{prompt}"
         result = await llm.generate(prompt, system=_REWRITE_SYSTEM, stream=False)
         rewritten = str(result).strip()
-        if rewritten:
+        if rewritten and _keeps_the_question(question, rewritten):
             return rewritten
     except Exception:
         logger.warning("_maybe_rewrite_query: LLM rewrite failed", exc_info=True)
     return question
+
+
+def _keeps_the_question(question: str, rewritten: str) -> bool:
+    """A rewrite only swaps vague references for names; one that drops any other content word
+    asks a different question ("what problem do they prevent" lost "lifetimes", #490)."""
+    kept = _content_tokens(VAGUE_REF_RE.sub(" ", question)) <= _content_tokens(rewritten)
+    if not kept:
+        logger.info("_maybe_rewrite_query: rewrite %r dropped the question's words", rewritten[:80])
+    return kept
 
 
 async def _fill_citation_locations(citations: list[dict]) -> None:

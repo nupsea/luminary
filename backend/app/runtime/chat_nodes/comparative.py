@@ -168,10 +168,14 @@ async def comparative_node(state: ChatState) -> dict:
         # already ranked; it does not deepen the rerank candidate pool.
         fetch_k = min(k_per_side * 3, 20)
 
+        doc_sets = [frozenset(docs) for docs in resolved]
+
         async def _retrieve_for_side(side: str, side_docs: list[str]) -> list[dict]:
-            # If no docs resolved for this side, widen the query to include the
-            # subject name so unfiltered retrieval still finds relevant passages.
-            query = topic if side_docs else f"{side} {topic}"
+            # The topic alone only when the side's documents set it apart (two works, two
+            # authors). Concepts inside one book all resolve to that book, and "difference"
+            # alone retrieved nothing about String or &str (#490).
+            own = frozenset(side_docs)
+            query = topic if own and doc_sets.count(own) == 1 else f"{side} {topic}"
             filter_ids = side_docs or effective_doc_ids
             try:
                 chunks = await retriever.retrieve(query, filter_ids, k=fetch_k, rerank=rerank)
