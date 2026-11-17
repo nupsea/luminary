@@ -252,9 +252,10 @@ async def get_llm_settings(db: AsyncSession) -> dict:
         "model": prefs["cloud_model"],
         "local_chat_model": get_local_chat_model(),
         "vision_model": get_vision_model(),
-        "has_openai_key": bool(_cache["openai_api_key"]),
-        "has_anthropic_key": bool(_cache["anthropic_api_key"]),
-        "has_google_key": bool(_cache["google_api_key"]),
+        # The key a call would send, so an environment key (Docker's `.env`) counts too.
+        "has_openai_key": bool(resolve_provider_api_key("openai")),
+        "has_anthropic_key": bool(resolve_provider_api_key("anthropic")),
+        "has_google_key": bool(resolve_provider_api_key("gemini")),
         "mode_chosen": library_root() in _mode_chosen,
         "keyring_available": keyring_available(),
         "offer_dismissed": bool(prefs["llm_offer_dismissed"]),
