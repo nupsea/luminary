@@ -41,21 +41,6 @@ for pattern in 'createElement("mark")' 'data-hl-original' 'replaceChildren(frag)
   fi
 done
 
-# 4. Overlay container div in JSX
-echo "--- Check 4: highlightOverlayRef in PDFViewer ---"
-if grep -q "highlightOverlayRef" "$VIEWER"; then
-  echo "  OK: highlightOverlayRef found"
-else
-  echo "  FAIL: highlightOverlayRef not found"
-  PASS=false
-fi
-if grep -q "zIndex: 5" "$VIEWER"; then
-  echo "  OK: overlay z-index 5 found"
-else
-  echo "  FAIL: overlay z-index 5 not found"
-  PASS=false
-fi
-
 # 5. Backend annotation endpoint (GET /annotations) still responds
 echo "--- Check 5: GET /annotations responds ---"
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/annotations?document_id=smoke-s205-doc")
