@@ -26,6 +26,7 @@ import {
   insertDictationSpec,
   insertInlineSpec,
   moveBlockOrLineSpec,
+  pasteMarkdownSpec,
   replaceSelectionSpec,
   smartBackspaceSpec,
   smartDeleteSpec,
@@ -41,7 +42,8 @@ import {
 } from "./noteLinkCompletion"
 import { liveMarkdown } from "./liveMarkdown"
 import { mathSource } from "./mathSource"
-import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
+import { clipboardToMarkdown } from "./pasteMarkdown"
+import { type AnnotationTarget, type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { slashCommandSource, type SlashCommandConfig } from "./slashCommands"
 import { toast } from "sonner"
 import { logger } from "@/lib/logger"
@@ -97,6 +99,8 @@ export interface MarkdownCodeEditorProps {
   live?: boolean
   /** Live rendering only: the edit button on a drawn diagram. */
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
+  /** Live rendering only: open a note image or drawing in the Excalidraw editor. */
+  onAnnotateImage?: (target: AnnotationTarget) => void
   /** Opens the keyboard shortcuts info modal. */
   onOpenShortcuts?: () => void
   /** Handler when clicking a note link widget or pill. */
@@ -536,7 +540,7 @@ export function noteEditorKeymaps(latest: {
 
 export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeEditorProps>(
   function MarkdownCodeEditor(
-    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live, onEditDiagram, onOpenShortcuts, onNoteLinkClick },
+    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live, onEditDiagram, onAnnotateImage, onOpenShortcuts, onNoteLinkClick },
     ref,
   ) {
     const hostRef = useRef<HTMLDivElement>(null)
@@ -548,12 +552,13 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
     // The preview pane is a toggle, so live rendering has to be switchable on a
     // view that is already built.
     const liveRoom = useRef(new Compartment()).current
-    const latest = useRef({ onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onOpenShortcuts, onNoteLinkClick })
-    latest.current = { onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onOpenShortcuts, onNoteLinkClick }
+    const latest = useRef({ onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onAnnotateImage, onOpenShortcuts, onNoteLinkClick })
+    latest.current = { onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram, onAnnotateImage, onOpenShortcuts, onNoteLinkClick }
     const liveExtension = useCallback(
       () =>
         liveMarkdown({
           onEditDiagram: (d) => latest.current.onEditDiagram?.(d),
+          onAnnotateImage: (target) => latest.current.onAnnotateImage?.(target),
           onNoteLinkClick: (id) => latest.current.onNoteLinkClick?.(id),
         }),
       [],
@@ -637,20 +642,26 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
               },
               paste: (event, v) => {
                 const handler = latest.current.onPasteImage
-                if (!handler) return false
+                const file = handler ? extractImageFile(event.clipboardData) : null
+                if (handler && (file || isWithheldImage(event.clipboardData))) {
+                  event.preventDefault()
+                  ;(file ? Promise.resolve(file) : readShellClipboardImage())
+                    .then((image) => (image ? handler(image) : Promise.reject(new Error("no image"))))
+                    .then((md) => {
+                      v.dispatch(insertBlockSpec(v.state, md))
+                    })
+                    .catch((err) => {
+                      toast.error("Failed to paste image")
+                      logger.warn("Failed to paste image", err)
+                    })
+                  return true
+                }
 
-                const file = extractImageFile(event.clipboardData)
-                if (!file && !isWithheldImage(event.clipboardData)) return false
+                const pasted = clipboardToMarkdown(event.clipboardData)
+                const spec = pasted && pasteMarkdownSpec(v.state, pasted)
+                if (!spec) return false
                 event.preventDefault()
-                ;(file ? Promise.resolve(file) : readShellClipboardImage())
-                  .then((image) => (image ? handler(image) : Promise.reject(new Error("no image"))))
-                  .then((md) => {
-                    v.dispatch(insertBlockSpec(v.state, md))
-                  })
-                  .catch((err) => {
-                    toast.error("Failed to paste image")
-                    logger.warn("Failed to paste image", err)
-                  })
+                v.dispatch({ ...spec, userEvent: "input.paste" })
                 return true
               },
               drop: (event, v) => {

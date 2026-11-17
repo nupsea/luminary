@@ -35,34 +35,11 @@ from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
 from app.services import pdf_furniture, pdf_hyphens
-from app.services.source_text import is_speaker_label, read_source_text
+from app.services.source_text import gutenberg_body, is_speaker_label, read_source_text
 from app.services.universal_parser import _drop_bodyless, _is_nav_line, is_stanza_run
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
-
-# Gutenberg delimiters
-_RE_PG_START = re.compile(
-    r"\*{3}\s*START OF (?:THE |THIS )?PROJECT GUTENBERG EBOOK[^\n]*\*{3}",
-    re.IGNORECASE,
-)
-_RE_PG_END = re.compile(
-    r"\*{3}\s*END OF (?:THE |THIS )?PROJECT GUTENBERG EBOOK[^\n]*\*{3}",
-    re.IGNORECASE,
-)
-
-
-def gutenberg_body(text: str) -> str:
-    """The text between Project Gutenberg's START and END lines; all of it when they are absent."""
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    m_start = _RE_PG_START.search(text)
-    if m_start:
-        text = text[m_start.end() :]
-    m_end = _RE_PG_END.search(text)
-    if m_end:
-        text = text[: m_end.start()]
-    return text
-
 
 # Roman numeral helper (I–MMMCMXCIX)
 _ROMAN = (

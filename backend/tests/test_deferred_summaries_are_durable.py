@@ -11,6 +11,7 @@ are not now:
   later run would notice a document that was complete and had none.
 """
 
+import asyncio
 import inspect
 from unittest.mock import AsyncMock, patch
 
@@ -19,6 +20,7 @@ from sqlalchemy import select
 from app.models import SectionSummaryModel
 from app.runtime import library_work
 from app.services import section_summarizer
+from app.services.ingestion_jobs import get_ingestion_jobs
 from tests.test_document_summary_fast_path import (
     _insert_document,
     _insert_section_summaries,
@@ -132,3 +134,26 @@ async def test_the_repair_leaves_a_grouped_document_alone(test_db):
     mock_llm = AsyncMock()
     assert await _repair(mock_llm) == 0
     mock_llm.complete.assert_not_awaited()
+
+
+async def test_the_repair_leaves_a_document_whose_deferred_pass_is_still_running(test_db):
+    """A re-import that completed after boot was summarised twice: the deferred pass
+    and the repair each wrote every section, 2 rows per section."""
+    _engine, factory, _ = test_db
+    await _insert_document(factory, "doc-live")
+    await _insert_sections(factory, "doc-live", count=4)
+    mock_llm = AsyncMock()
+    mock_llm.complete = AsyncMock(return_value="A summary.")
+    mock_llm.generate = AsyncMock(return_value="Key points.")
+
+    deferred_pass = asyncio.create_task(asyncio.Event().wait())
+    get_ingestion_jobs().track_followup("doc-live", deferred_pass)
+    try:
+        assert await _repair(mock_llm) == 0
+        mock_llm.complete.assert_not_awaited()
+    finally:
+        deferred_pass.cancel()
+        await asyncio.gather(deferred_pass, return_exceptions=True)
+
+    assert await _repair(mock_llm) == 1, "a finished pass must not keep the repair away"
+    assert len(await _section_summary_rows(factory, "doc-live")) == 4

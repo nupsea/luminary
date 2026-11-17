@@ -11,7 +11,7 @@ import {
   offsetToLine,
   type SourceAnchor,
 } from "@/components/notes/scrollSync"
-import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
+import { type AnnotationTarget, type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { SOURCE_LINE_ATTR } from "@/lib/rehypeSourceLine"
 import { usePanelZoomStore } from "@/store/panelZoomStore"
 import { PanelZoomResetButton } from "@/components/PanelZoomResetButton"
@@ -29,6 +29,8 @@ export interface MarkdownSplitEditorProps {
   slashCommands?: SlashCommandConfig
   /** Live rendering only: the edit button on a drawn diagram. */
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
+  /** Live rendering only: annotate a note image. */
+  onAnnotateImage?: (target: AnnotationTarget) => void
   placeholder?: string
   autoFocus?: boolean
   editorLabel?: string
@@ -59,6 +61,7 @@ export function MarkdownSplitEditor({
   linkCompletion,
   slashCommands,
   onEditDiagram,
+  onAnnotateImage,
   placeholder = "Write your note in Markdown...",
   autoFocus,
   editorLabel = "Editor",
@@ -243,6 +246,7 @@ export function MarkdownSplitEditor({
         // so the editor is the rendering.
         live={layout === "editor"}
         onEditDiagram={onEditDiagram}
+        onAnnotateImage={onAnnotateImage}
         onOpenShortcuts={onOpenShortcuts}
         onNoteLinkClick={onNoteLinkClick}
         className={editorClassName ?? DEFAULT_EDITOR_CLASS}

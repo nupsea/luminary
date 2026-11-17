@@ -6,16 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A note's pasted snapshot can be annotated.** Click the image, or the highlighter on its block in the live editor, to highlight, draw, add arrows or text over it in Excalidraw. It keeps its display size, and the original stays in the scene, so annotations reopen for editing.
+
 ### Changed
 - **YouTube is a connector you install, and O'Reilly is no longer built in.** Settings → Connectors installs the YouTube connector from the catalogue in one click (its licence and YouTube's terms shown first); without it, a pasted YouTube link says so, or import the talk's audio or video file. Videos and books already in the library open, cite and re-import as before. The core no longer ships yt-dlp or curl_cffi (#467).
 - **A connector's sign-in, choices and settings come from the connector itself** (#436), and connectors install from a catalogue pinned by checksum, fetching their installer on request (#437).
 
 ### Fixed
+- **Pasting into a note lost its formatting: a web table arrived as tab-separated text.** Pasted HTML now becomes markdown (tables, lists and tasks, headings, code with its language, links, math, Google Docs bold and italic), and what is copied from a rendered note, including formulas, diagrams and note links, pastes back as its source.
+- **Pressing Escape in the diagram editor threw the drawing away.** Excalidraw uses Escape to finish a text box; the dialog now closes only on Cancel or its close button.
 - **The installers shipped AGPL-3.0 PyMuPDF and ebooklib as an Apache-2.0 app, with no third-party notices.** Every bundled package's licence now ships in `licenses/THIRD-PARTY-LICENSES.txt`, builds are stated as AGPL-3.0, and About links to the running version's source; staging fails on a package without a notice (#378).
 - **The notices left out the shell's Rust crates, the C libraries inside the bundled Python, and the Go modules inside Ollama.** All three are now listed with their texts, and llama.cpp's licence is taken at the version Ollama builds rather than its latest (#378).
 - **On Windows, the first start downloaded a tokenizer file from OpenAI's servers, and could not start offline.** litellm's Windows package ships the file with Windows line endings, so its checksum failed; the installer now ships the exact file the tokenizer expects.
 - **A Project Gutenberg text without chapters kept the site's licence as part of the book.** On *The Fall of the House of Usher*, 60 of 118 stored paragraphs were Gutenberg's header and licence, searchable and open to card writing; text outside the START and END lines is now dropped on every path.
+- **A Gutenberg book whose START or END line wraps onto a second line kept its licence.** *The Adventures of Sherlock Holmes* stored 17,676 characters of licence in its last story and the header as an untitled first section. A marker now runs to its closing `***`, but never past a blank line.
 - **Plain-text books lost part titles and chapters.** Gulliver's chapters read "CHAPTER I" four times with no voyage named, Sherlock's first story was missing, and Meditations and Gatsby were cut into fixed-size windows instead of their Books and chapters. Part titles are kept and name repeated chapters, "THE FIRST BOOK" and a bare "II" are chapter marks, and transcripts split by divider lines keep their parts (#334). Documents already stored pick up the parsing fixes when reprocessed.
+- **A document finished within a few minutes of starting the app could be summarised twice.** The startup repair took its deferred summaries, still being written, as lost and wrote every section again; it now leaves a document whose own pass is running.
+- **On a busy machine, a document's section summaries could fail with "database is locked".** Ten summaries wrote at once and waited out SQLite's lock timeout behind each other; they now write in turn.
 - **On a busy Windows machine, `uninstall.ps1` could miss a running backend and delete its venv.** It timed a 1 s connect to :7820; it now asks Windows for a listener on the port, as `uninstall.sh` does with `lsof`.
 - **A chapter's cards could vanish from it, and be written a second time, when chapter detection changed.** Cards and written chapters are stored by a chapter's first section, and chapters are found again on every read. A stored id now finds the chapter that holds its section, for the chapter list, practice, and what is left to write (#480).
 

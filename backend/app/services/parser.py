@@ -10,8 +10,8 @@ from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
 from app.services import pdf_furniture, pdf_hyphens
-from app.services.book_parser import BookParser, gutenberg_body
-from app.services.source_text import read_source_text
+from app.services.book_parser import BookParser
+from app.services.source_text import gutenberg_body, read_source_text
 from app.services.universal_parser import UniversalParser
 from app.types import ParsedDocument, Section
 

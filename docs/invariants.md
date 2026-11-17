@@ -413,6 +413,14 @@ the import fails. `repair_tiktoken_cache.py` converts a file only when the LF fo
 hash, and fails the stage otherwise. `test_repair_tiktoken_cache.py` guards it, and a file it
 misses fails step 7 (8 on macOS) of `verify_stage.sh`, which watches every step that runs staged code.
 
+**I-77. Anything the renderer draws without its markdown carries that markdown in `data-luminary-md`.**
+A copy keeps only what is in the selected DOM, and Chrome drops KaTeX's `<annotation>` from it:
+a formula, Mermaid diagram, Excalidraw figure, note-link chip or note image copied from a rendered
+note otherwise pastes back as glyphs, or nothing. A paste restores only the shapes
+`isCopySource` (`lib/copySource.ts`) accepts, so a web page cannot plant hidden text in a note.
+`pasteMarkdown.test.ts` fails CI if a note with every format, rendered and stripped of annotations,
+does not paste back as its source.
+
 ## Retired numbers
 
 Kept so existing references resolve.

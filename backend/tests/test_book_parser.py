@@ -15,6 +15,7 @@ import pytest
 
 from app.services.book_parser import BookParser
 from app.services.parser import DocumentParser
+from app.services.source_text import gutenberg_body
 
 # Helpers
 
@@ -336,6 +337,45 @@ class TestStripGutenberg:
         assert len(result.sections) == 2
         assert result.sections[0].heading is not None
         assert len(result.sections[0].text) > 20
+
+    def test_a_marker_wrapped_over_two_lines_is_still_a_marker(self, tmp_path):
+        """Sherlock Holmes's markers wrap after "SHERLOCK"; its licence was stored as a story."""
+        sample = textwrap.dedent("""\
+            The Project Gutenberg eBook of The Adventures of Sherlock Holmes
+
+            *** START OF THE PROJECT GUTENBERG EBOOK THE ADVENTURES OF SHERLOCK
+            HOLMES ***
+
+            CHAPTER I.
+
+            The actual content starts here with real prose.
+
+            CHAPTER II.
+
+            The second chapter starts here, with enough prose.
+
+            *** END OF THE PROJECT GUTENBERG EBOOK THE ADVENTURES OF SHERLOCK
+            HOLMES ***
+
+            Updated editions will replace the previous one.
+        """)
+        f = tmp_path / "wrapped_marker.txt"
+        f.write_text(sample)
+        result = bp.parse(f, "txt")
+        assert result is not None
+        full_text = " ".join(s.text for s in result.sections)
+        assert "Project Gutenberg" not in full_text
+        assert "Updated editions" not in full_text
+        assert "HOLMES ***" not in full_text
+        assert "second chapter" in full_text
+
+    def test_a_marker_never_runs_past_a_blank_line(self):
+        """Without its closing stars a marker is not one, however far the next "***" is."""
+        text = (
+            "*** START OF THE PROJECT GUTENBERG EBOOK NO CLOSE\n\n"
+            "The book itself.\n\n***\n\nMore of the book."
+        )
+        assert gutenberg_body(text) == text
 
 
 def test_alice_chapter_xi_subtitle():

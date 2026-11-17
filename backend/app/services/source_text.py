@@ -58,6 +58,29 @@ import chardet
 
 logger = logging.getLogger(__name__)
 
+# A long title wraps Gutenberg's marker over lines, but a marker is one paragraph:
+# a blank line ends it, so a missing closing "***" cannot run on into the book.
+_MARKER_REST = r"(?:[^*\n]|\n(?![ \t\r]*\n))*?\*{3}"
+GUTENBERG_START = re.compile(
+    r"\*{3}\s*START OF (?:THE |THIS )?PROJECT GUTENBERG" + _MARKER_REST, re.IGNORECASE
+)
+GUTENBERG_END = re.compile(
+    r"\*{3}\s*END OF (?:THE |THIS )?PROJECT GUTENBERG" + _MARKER_REST, re.IGNORECASE
+)
+
+
+def gutenberg_body(text: str) -> str:
+    """The text between Project Gutenberg's START and END lines; all of it when they are absent."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    m_start = GUTENBERG_START.search(text)
+    if m_start:
+        text = text[m_start.end() :]
+    m_end = GUTENBERG_END.search(text)
+    if m_end:
+        text = text[: m_end.start()]
+    return text
+
+
 # A line must recur at least this often to count as furniture at all.
 _MIN_REPEATS = 3
 # ...and that many must sit consecutively. One repeated line is a refrain; a

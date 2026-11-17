@@ -86,7 +86,7 @@ jobs:
   # here bricks startup for every DMG user. It cannot be built on ubuntu, so
   # without this job it had no automated coverage at all.
   desktop-shell:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 20
     needs: [branch-check, changes]
     if: always() && needs.changes.outputs.shell == 'true' && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master')

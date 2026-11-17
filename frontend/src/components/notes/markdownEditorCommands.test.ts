@@ -15,6 +15,7 @@ import {
   insertDictationSpec,
   insertInlineSpec,
   moveBlockOrLineSpec,
+  pasteMarkdownSpec,
   replaceSelectionSpec,
   smartBackspaceSpec,
   smartDeleteSpec,
@@ -730,3 +731,37 @@ describe("toggleCheckboxSpec", () => {
   })
 })
 
+
+describe("pasteMarkdownSpec", () => {
+  const table = { markdown: "| a | b |\n| - | - |\n| 1 | 2 |", block: true }
+  function paste(doc: string, cursor: number, pasted: { markdown: string; block: boolean }): string | null {
+    const state = mdState(doc, cursor)
+    const spec = pasteMarkdownSpec(state, pasted)
+    return spec ? apply(state, spec).doc.toString() : null
+  }
+
+  it("puts a block on its own lines", () => {
+    expect(paste("Intro text", "Intro".length, table)).toBe("Intro\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n text")
+  })
+
+  it("keeps a single paragraph on the caret's line", () => {
+    expect(paste("See here.", "See ".length, { markdown: "**this**", block: false })).toBe("See **this**here.")
+  })
+
+  it("defers to the plain text inside code", () => {
+    expect(paste("```\ncode\n```", "```\nco".length, table)).toBeNull()
+    expect(paste("run `ma` now", "run `ma".length, { markdown: "**x**", block: false })).toBeNull()
+  })
+
+  it("lands a block after a table instead of splitting its rows", () => {
+    const doc = "| x | y |\n| - | - |\n| 3 | 4 |\n\nAfter"
+    expect(paste(doc, "| x".length, table)).toBe(
+      "| x | y |\n| - | - |\n| 3 | 4 |\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nAfter",
+    )
+  })
+
+  it("escapes pipes pasted inline into a table cell", () => {
+    const doc = "| x | y |\n| - | - |\n| 3 | 4 |"
+    expect(paste(doc, doc.length - 3, { markdown: "a | b", block: false })).toBe("| x | y |\n| - | - |\n| 3 | a \\| b4 |")
+  })
+})

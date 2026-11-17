@@ -11,7 +11,7 @@ artifacts to the same GitHub release:
 | Workflow | Runner | Produces | Time |
 |---|---|---|---|
 | `release.yml` | ubuntu | source tarball for `bootstrap.sh` / headless installs | ~20 min |
-| `release-macos-app.yml` | macos-14 | signed, notarized `Luminary_<v>_aarch64.dmg` | 45–80 min |
+| `release-macos-app.yml` | macos-15 | signed, notarized `Luminary_<v>_aarch64.dmg` | 45–80 min |
 | `desktop-installers.yml` | ubuntu-22.04, windows | `.deb`, AppImage, unsigned `_x64-setup.exe`, each installed and launched first | about an hour |
 
 Whichever finishes first creates the release; the others upload into it. Order
