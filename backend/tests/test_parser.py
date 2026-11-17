@@ -315,12 +315,12 @@ class TestEpubDocumentSplitting:
             "</body></html>"
         )
         out = _split_epub_document(html_doc, "fallback")
-        assert [h for h, _ in out] == [
+        assert [h for h, _, _ in out] == [
             "CHAPTER 1. Loomings.",
             "CHAPTER 2. The Carpet-Bag.",
             "CHAPTER 3. The Spouter-Inn.",
         ]
-        assert out[0][1] == "Call me Ishmael."
+        assert out[0][2] == "Call me Ishmael."
 
     def test_paragraph_breaks_survive(self):
         from app.services.parser import _epub_text
@@ -340,14 +340,14 @@ class TestEpubDocumentSplitting:
 
         doc = "<p>Front matter.</p><h1>Chapter One</h1><p>Body.</p>"
         out = _split_epub_document(doc, "Preface")
-        assert out[0] == ("Preface", "Front matter.")
-        assert out[1] == ("Chapter One", "Body.")
+        assert out[0] == ("Preface", 1, "Front matter.")
+        assert out[1] == ("Chapter One", 1, "Body.")
 
     def test_a_document_without_headings_yields_one_section(self):
         from app.services.parser import _split_epub_document
 
         out = _split_epub_document("<p>Only prose here.</p>", "Chapter File")
-        assert out == [("Chapter File", "Only prose here.")]
+        assert out == [("Chapter File", 1, "Only prose here.")]
 
     def test_figure_caption_and_alt_text_survive(self):
         from app.services.parser import _epub_text
@@ -389,3 +389,77 @@ class TestEpubDocumentSplitting:
         raw = "<p>See below.</p><img src='fig.png' alt='Line one\n\nLine two' />"
         text = _epub_text(raw)
         assert "![Line one Line two](fig.png)" in text
+
+
+class TestEpubSectionLevels:
+    """A book's section tree comes from its structure: before, every EPUB and bundle section was
+    level 1, so Parts held nothing and a "Note" box became a section of its own."""
+
+    HTMLBOOK = (
+        '<section data-type="chapter"><h1>Chapter 2. Models</h1><p>Opening of the chapter.</p>'
+        '<section data-type="sect1"><h1>Part 1: Basics</h1><p>What this part covers.</p>'
+        '<section data-type="sect2"><h2>Tokens</h2><p>Text is cut into tokens first.</p>'
+        '<div data-type="note"><h6>Note</h6><p>Tokens are not words.</p></div>'
+        '<section data-type="sect3"><h3>Vocabulary</h3><p>The set of known tokens.</p>'
+        "</section></section>"
+        '<div class="sidebar"><h1>Helper Functions</h1><p>Code used throughout.</p></div>'
+        "<aside><h2>Aside</h2><p>A side remark.</p></aside>"
+        "<figure><h6>Figure 2-1. A token</h6></figure>"
+        "</section></section>"
+    )
+
+    def test_structural_sections_nest_and_boxes_stay_in_their_section(self):
+        from app.services.parser import _split_epub_document
+
+        out = _split_epub_document(self.HTMLBOOK, "fallback")
+        assert [(h, lv) for h, lv, _ in out] == [
+            ("Chapter 2. Models", 1),
+            ("Part 1: Basics", 2),
+            ("Tokens", 3),
+            ("Vocabulary", 4),
+        ]
+        tokens, vocabulary = out[2][2], out[3][2]
+        assert "Tokens are not words." in tokens  # the note stays where it was written
+        assert "Helper Functions" in vocabulary and "A side remark." in vocabulary
+
+    def test_without_structural_sections_the_tags_decide(self):
+        from app.services.parser import _split_epub_document
+
+        out = _split_epub_document("<h2>Ch</h2><p>a</p><h3>Sub</h3><p>b</p>", "f")
+        assert [(h, lv) for h, lv, _ in out] == [("Ch", 2), ("Sub", 3)]
+
+    def test_an_epub_is_renumbered_as_one_book_not_per_file(self, tmp_path):
+        """Moby Dick's first file has the title's <h1> over chapter <h2>s and every later file
+        only <h2>s; renumbering each file put the same kind of heading on two levels."""
+        from ebooklib import epub
+
+        from app.services.parser import DocumentParser
+
+        book = epub.EpubBook()
+        book.set_title("Two Files")
+        body = "<p>" + "Enough prose to keep this section. " * 3 + "</p>"
+        first = epub.EpubHtml(title="a", file_name="a.xhtml")
+        first.content = f"<h1>The Book</h1>{body}<h2>CHAPTER 1.</h2>{body}"
+        second = epub.EpubHtml(title="b", file_name="b.xhtml")
+        second.content = f"<h2>CHAPTER 2.</h2>{body}"
+        for item in (first, second):
+            book.add_item(item)
+        book.spine = [first, second]
+        book.add_item(epub.EpubNcx())
+        book.add_item(epub.EpubNav())
+        path = tmp_path / "two.epub"
+        epub.write_epub(str(path), book)
+
+        parsed = DocumentParser().parse(path, "epub")
+        levels = {s.heading: s.level for s in parsed.sections}
+        assert levels["The Book"] == 1
+        assert levels["CHAPTER 1."] == levels["CHAPTER 2."] == 2
+
+    def test_a_bundle_page_nests_under_its_manifest_level_with_an_empty_title(self):
+        """The Python tutorial's chapter pages open with an <h1> that has no text of its own;
+        its subsections must still sit one level under the page, not take its place."""
+        from app.services.parser import epub_chapter_sections
+
+        page = "<h1>2. Using the Interpreter</h1><h2>2.1. Invoking</h2><p>" + "x " * 40 + "</p>"
+        sections = epub_chapter_sections(page, "2. Using the Interpreter", top_level=1)
+        assert [(s.heading, s.level) for s in sections] == [("2.1. Invoking", 2)]

@@ -64,6 +64,7 @@ _CONTAINS_JUNK = (
 _GOOD_MIN = 5
 _GOOD_MAX = 40
 _SMALL_DOC = 12  # for a small doc, its few top headings ARE its chapters
+_DOMINANT_SHARE = 0.9
 
 
 def _norm(heading: str) -> str:
@@ -131,6 +132,12 @@ def _pick_topic_sections(content: list) -> list | None:
         flat = by_level[substantive[0]]
         if len(flat) >= 3:
             return flat
+    # A level holding nearly every heading is a flat book with a few stray deeper ones: Moby
+    # Dick's chapters are 96% of its headings, where Building AI Agent Platforms' deepest level,
+    # 79%, sits under the 9 sections that are its topics.
+    dominant = max(by_level.values(), key=len)
+    if len(dominant) >= 3 and len(dominant) >= _DOMINANT_SHARE * len(content):
+        return dominant
 
     for level in sorted(by_level):
         if _GOOD_MIN <= len(by_level[level]) <= _GOOD_MAX:

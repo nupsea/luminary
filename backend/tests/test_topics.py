@@ -9,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 import app.services.graph as graph_module
 from app.main import app
-from app.services.topic_service import is_junk_heading
+from app.services.topic_service import _pick_topic_sections, is_junk_heading
 from tests.factories import make_card, make_chunk, make_document, make_section
 
 
@@ -283,3 +283,26 @@ def test_a_repeated_topic_title_is_named_by_its_part():
         "CHAPTER II",
         "PART II. BROBDINGNAG — CHAPTER I",
     ]
+
+
+def test_a_flat_book_with_a_few_deeper_headings_keeps_its_chapters():
+    """Moby Dick: 135 chapters at one level and five stray deeper headings. The 5-40 rule picked
+    the five; a level holding nearly every heading is the list."""
+    from types import SimpleNamespace
+
+    chapters = [SimpleNamespace(heading=f"CHAPTER {n}. Title", level=1) for n in range(1, 136)]
+    stray = [SimpleNamespace(heading=f"Extract {n}", level=2) for n in range(5)]
+    picked = _pick_topic_sections(chapters[:3] + stray + chapters[3:])
+    assert picked is not None and len(picked) == 135 and picked[0].heading.startswith("CHAPTER")
+
+
+def test_a_book_whose_deepest_level_is_most_headings_keeps_its_sections():
+    """Building AI Agent Platforms: 9 sections over 38 subsections (79%): the 9 are the topics."""
+    from types import SimpleNamespace
+
+    secs = [SimpleNamespace(heading="Chapter 1", level=1)]
+    for n in range(9):
+        secs.append(SimpleNamespace(heading=f"Section {n}", level=2))
+        secs += [SimpleNamespace(heading=f"Sub {n}.{k}", level=3) for k in range(4 + (n < 2))]
+    picked = _pick_topic_sections(secs)
+    assert [s.heading for s in picked] == [f"Section {n}" for n in range(9)]
