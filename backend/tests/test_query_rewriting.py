@@ -122,3 +122,23 @@ async def test_llm_failure_returns_original():
 
     assert result == question
     mock_llm.generate.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_a_rewrite_that_drops_the_subject_is_refused():
+    """ "they" refers back to "lifetimes"; the model swapped the subject for names from the list
+    and dropped "lifetimes", so search ran on async passages (#490, seen live on qwen3.5:4b)."""
+    question = "What are lifetimes for, and what problem do they prevent?"
+    mock_graph = _make_graph_service(["future", "user", "Pin"])
+    mock_llm = _make_llm_service(
+        "What roles does the `future` play in preventing data races between the `user`, `"
+    )
+
+    with (
+        patch("app.services.qa.get_graph_service", return_value=mock_graph),
+        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+    ):
+        result = await _maybe_rewrite_query(question, ["doc-1"])
+
+    assert result == question
+    mock_llm.generate.assert_called_once()
