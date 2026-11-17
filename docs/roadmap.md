@@ -101,7 +101,7 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | | 0.15.0 | Stores that agree, output you can measure. **Checkpoint B** | #65, #63, #97, #158, #159, #161, #185, #186, #187, #188, #189, #191, #204, #205; #100 moved to 0.17.0, #66 to 0.18.0 | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number; no shipped default changes what a user receives without a number behind it; zero open `bug` issues milestoned to Phase I or II |
 | III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement; chapter practice — **0.16.2 released; pairing merged (#260); chunking reads the measured form (#223, wire and column open); chapter card quality passed its gate (#305); the Practice panel's cards have not (#330)** | #160, #195, #221, #222, #226, #227, #229; #223 moved to 0.17.0, #162 to 0.18.0 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail — **0.17.0 released 2026-10-28: the library root (#388), snapshot and the resumable re-embed (#390), and per-library preferences with the shared-resource audit (#389) are built; a key per principal is deferred to the hosted work. Carried to 0.17.1: #211, and #231's page-range windows and macOS shell check.** No SQL is left outside `repos/` (79 statements to 0, #337 to #339), and every `DATA_DIR` join goes through `app/storage.py`. Closed with numbers: #100; #307 (topic F1 1.0 on d2l, 21/21 against thinkpython2's PDF bookmarks); #252 (thinkpython2's chapter cards drawn from pp. 1–22: 10 of 14 before, 0 of 14 and 0 of 17 on two fresh runs); #332 and #333 (1,040 misplaced paragraphs across 41 local books, now 0; the Federalist Papers 8 sections to 85); #286 (Usher stored as narrative on 5 of 5 fresh ingests). Open: #211, a `notes_fts` insert refused within milliseconds although `busy_timeout` is 5 s. SQLite refuses at once only when the refused connection already holds a read as it begins to write, and another connection is writing (reproduced on 3.46); which path leaves that read open is unknown, and the busy report now names the connection's preceding statements; #231 passed in the Linux shell, and finishing a chapter's cards now returns the reader to the reading place (#397); page-range windows and the macOS shell are untested | #211, #223, #231, #252, #286, #332, #333, #388, #389, #390 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
-| | 0.18.0 | Your own server; sources become connectors; plus what Checkpoints A and B left open: the hardware session and the Practice panel's cards (§7). **#155 and #156 closed on AWS (2026-10-21).** **Checkpoint C** | #24, #99, #155, #156, #162, #211, #231, #330, #334, #348, #354, #355, #356, #357, #358, #378, #382, #430, #431–#438, #465, #467 | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key; the core ships no connector, the YouTube connector installs from the catalogue and ingests a link, and documents imported before keep opening, citing and re-importing; a connector built from the template outside this repo passes the conformance kit; zero open `bug` issues milestoned to Phase I, II or III |
+| | 0.18.0 | Your own server; sources become connectors; plus what Checkpoints A and B left open: the hardware session and the Practice panel's cards (§7). **#155 and #156 closed on AWS (2026-10-21).** **Checkpoint C. 0.18.0 released 2026-11-18:** the server refuses tokenless requests beyond loopback (#511, run in a container reached by LAN address); the core ships no connector, YouTube installs from the catalogue, and older documents open, cite and re-import (bundled app); a template-built connector passes the conformance kit. **Carried:** the CPU-only server with a key (#514, 0.18.1: no paid key was available, and the run found that a refusing provider leaves a document unenriched silently); #330 to 0.19.0 (two rated runs at 38% and 42% kept and correct); #211 and #476 to 0.18.1 (60-run soak: 52 passed, 8 lost a worker); #438's PyPI publish to 0.18.1. What the checkpoint did not exercise is listed in CHANGELOG 0.18.0 | #24, #99, #155, #156, #162, #211, #231, #330, #334, #348, #354, #355, #356, #357, #358, #378, #382, #430, #431–#438, #465, #467 | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key; the core ships no connector, the YouTube connector installs from the catalogue and ingests a link, and documents imported before keep opening, citing and re-importing; a connector built from the template outside this repo passes the conformance kit; zero open `bug` issues milestoned to Phase I, II or III |
 | IV. Separation | 0.19.0 | Components separated for mobile; beside it, the Ask track (§9) | #447–#453 | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
 | V. Mobile | 0.20.0 | Topic notes and the draft inbox; mobile reading and note capture; the Ask track lands. **Checkpoint D** | #173, #454, #455; Ask track #66, #322, #440–#443 | A merge that leaves a source note out of every section is refused, a summary claim no source note supports is flagged, and undoing a merge restores every original; a phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated; follow-up retrieval moves on two documents with numbers before and after, and no suggested question gets a general-knowledge answer |
 | VI. Extras | 0.21.0 | Anki import; the capture extension; Luminary as a read-only MCP server; card review on mobile | #349, #367, #456, #457, #458 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an MCP client receives passages only from collections the user scoped, and nothing with the setting off or without the token; an offline review on the phone merges without overwriting FSRS state |
@@ -757,7 +757,7 @@ no configuration. In public mode only `/api/*` is guarded; the SPA's files and t
 Codes (`services/devices.py`) are 8 characters, live 5 minutes in process memory, are spent on use,
 and die after 5 wrong guesses; a new code replaces the last. Tokens are `lum_` plus 256 random bits,
 stored as SHA-256 in `devices`, and a revoked row is kept (the panel folds all but the latest 3).
-Pairing is loopback-only: TrustedHost refuses any non-loopback Host, so no phone can reach it yet. `POST /devices/pair` is the one
+Pairing reaches beyond loopback only on a server that sets `LUMINARY_ALLOWED_HOSTS` (§7). `POST /devices/pair` is the one
 unguarded route; minting codes, listing and revoking are `local` only (Settings > Devices).
 `tests/test_device_auth.py` and `scripts/smoke/S255.sh` (run in both modes) are the gate. Both
 halves were shown failing: with the middleware removed, `test_an_unpaired_origin_cannot_write`
@@ -767,7 +767,6 @@ fails (200, the write lands); with only the `revoked_at` check in `resolve_token
 *Open:*
 - A paired browser origin cannot read responses yet: `Authorization` forces a CORS preflight, and
   public mode has no CORS. That lands with the first browser consumer (0.20.0 or 0.21.0).
-- A headless 0.18.0 server has no `local` caller to show the first code.
 - Not run in the desktop shell; the Settings panel was driven in a browser against `make dev`.
 
 A token resolves to a principal. 0.17.0 hangs the request context off that principal, so the token
@@ -861,9 +860,13 @@ of the same rail.
 
 **Luminary on the user's own cloud.** The container is most of it already: `Dockerfile` plus
 `LUMINARY_MODE=public` serves the SPA and the API on one port, and a compose volume holds the library.
-**What is missing is authentication, and 0.16.0 builds it.** `docker-compose.yml` binds `127.0.0.1`
-precisely because there is none. Until this rung ships, reaching the container from elsewhere is a
-tunnel the user owns, and the docs say so.
+**Serving beyond loopback is opt-in (#511).** `LUMINARY_ALLOWED_HOSTS` widens the `Host` pin to
+the names it lists, and then a client whose address is not loopback is admitted by a device token
+alone, whatever its `Origin` or `Host` say: a direct client writes both. A headless server mints
+pairing codes from its own loopback (`python -m app.scripts.pairing_code`). Unset, compose's
+`127.0.0.1` binding and the loopback pin stand. A port published beyond loopback without the setting
+is guarded only by `Host`, which a non-browser client sets at will (`docs/install.md` says so). A
+browser cannot pair yet, so the SPA is usable only on the server itself.
 
 **A server with no GPU is an unsupported host.** `host_support.local_inference_support` answers
 `container_without_accelerator` for a CPU-only container, so every local call is refused. Cloud mode
@@ -878,8 +881,8 @@ beside 0.17.0, rather than after it:
 |---|---|---|
 | Hardware session | #24, #99, #162; #155 and #156 closed | The runs below |
 | Defects the 2026-10-21 runs found | #355; #354, #356, #357 and #358 closed | A `bug`, so it holds the tag. It closes on a CI check of the `.deb`'s `Recommends` |
-| Gate and release hygiene | #211, #231, #382 | #211 fails PRs at random on Windows; #382 keeps `make smoke` red; #231 needs its last two checks in the manual pass |
-| The Practice panel's cards | #330 | The step 4 gate on the unit path (§4) |
+| Gate and release hygiene | #211 and #476 (0.18.1); #231, #382 closed | #211's 60-run bar failed: 8 of 60 Windows runs lost a test worker, exit status 1, in in-process ingestion tests |
+| The Practice panel's cards | #330, carried to 0.19.0 | The step 4 gate on the unit path (§4). Rated 2026-11-17: 5 of 13 and 8 of 19 kept and correct, 38% and 53% discarded |
 | Ask on what the documents do not say | Moved to the Ask track, landing by Checkpoint D (§9) | 0.18.0 already carries the connector track |
 | Sources become connectors | #348, #431–#438, #467; #430 fixed (#464) | Below |
 
@@ -910,10 +913,10 @@ longer imports either itself (#467).
 | B | 2 | #435 | **Done (#469).** The SDK, the process protocol and runner; install a connector from a folder; a pasted link goes to the installed connector that claims it | Nothing |
 | B | 3 | #434 | **Done (#470, luminary-connectors#1).** The YouTube connector, in `luminary-connectors`, writing a bundle; stage 0's YouTube tests become its conformance tests | Nothing yet |
 | B | 3 | #433 | **Done (#471).** The O'Reilly connector, in the private repo, writing a bundle; existing O'Reilly documents keep their EPUB | Nothing (the maintainer's library) |
-| B | 4 | #436 | **Built (#473); its desktop-shell manual pass is Checkpoint C's.** Settings, inputs and the connect modal drawn from each connector's `describe`; `/oreilly/*` becomes `/connectors/{name}/*` | One generic connector UI |
-| C | 5 | #437 | **Built (#474); the bundled-app install is Checkpoint C's.** A catalogue of `luminary-connectors`, and install into a per-connector environment, shown with its licence and the source's terms first. The private repo is never listed | Installable connectors |
-| C | 6 | #467 | The core drops its built-in O'Reilly and YouTube import, `yt-dlp` and `curl_cffi`; a link no installed connector claims says what to install | YouTube is a connector you install |
-| C | 7 | #438 | Publish the SDK; conformance kit, template repo, review checklist, `docs/connectors.md`; #348 as the second reference connector in `luminary-connectors` (MediaWiki if #348 drops) | Open to contributors |
+| B | 4 | #436 | **Done (#473).** Settings, inputs and the connect modal drawn from each connector's `describe`; `/oreilly/*` becomes `/connectors/{name}/*` | One generic connector UI |
+| C | 5 | #437 | **Done (#474).** Installed from the catalogue in the bundled app; O'Reilly through the private connector re-imports from its stored bundle with the connector removed. A catalogue of `luminary-connectors`, and install into a per-connector environment, shown with its licence and the source's terms first. The private repo is never listed | Installable connectors |
+| C | 6 | #467 | **Done.** The core drops its built-in O'Reilly and YouTube import, `yt-dlp` and `curl_cffi`; a link no installed connector claims says what to install | YouTube is a connector you install |
+| C | 7 | #438 | **Done but the PyPI publish (0.18.1); #348's HTML book and Confluence are in the catalogue (#508).** Publish the SDK; conformance kit, template repo, review checklist, `docs/connectors.md`; #348 as the second reference connector in `luminary-connectors` (MediaWiki if #348 drops) | Open to contributors |
 
 **Order.** Batch A landed, and #464 fixed #430 directly. Nothing leaves the core before the
 catalogue can install its replacement, so #467 waits on #433, #434, #436 and #437, and no user

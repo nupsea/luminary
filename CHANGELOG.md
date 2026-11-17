@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-18
+
 ### Added
 - **A note's pasted snapshot can be annotated.** Click the image, or the highlighter on its block in the live editor, to highlight, draw, add arrows or text over it in Excalidraw. It keeps its display size, and the original stays in the scene, so annotations reopen for editing.
 - **A server can answer other machines, behind device tokens.** Set `LUMINARY_ALLOWED_HOSTS` to the names it serves, and every API request from another machine needs a paired device's token, whatever its headers say; mint a code with `docker exec <container> python -m app.scripts.pairing_code`. Unset, the server stays loopback-only (#511).
@@ -31,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **On a busy machine, a document's section summaries could fail with "database is locked".** Ten summaries wrote at once and waited out SQLite's lock timeout behind each other; they now write in turn.
 - **On a busy Windows machine, `uninstall.ps1` could miss a running backend and delete its venv.** It timed a 1 s connect to :7820; it now asks Windows for a listener on the port, as `uninstall.sh` does with `lsof`.
 - **A chapter's cards could vanish from it, and be written a second time, when chapter detection changed.** Cards and written chapters are stored by a chapter's first section, and chapters are found again on every read. A stored id now finds the chapter that holds its section, for the chapter list, practice, and what is left to write (#480).
+
+### Known issues
+- **Practice-panel cards are below the quality bar.** On two rated runs, 38% and 42% of cards were kept and correct against a bar of 60%, mostly thin answers and questions that need the passage in view; chapter cards written at import are not affected (#330, 0.19.0).
+- **A server running cloud-only stores a document as complete when its provider refuses every call**, with no summary or cards and no error shown; a rate limit is reported as "unreachable" (#514, 0.18.1).
+- **The connector SDK is not on PyPI yet.** Connectors install it from GitHub, which works; publishing waits on the PyPI project's trusted publisher (#438, 0.18.1).
+- **On Windows CI a test worker exits mid-run in about 1 run in 7**, always in a test that runs ingestion in-process. No user-facing symptom is known (#211, #476, 0.18.1).
+
+### Not exercised in this checkpoint
+- A CPU-only server building an enriched library with a cloud key: neither available account could complete it (no credits; a free-tier key). Carried with #514.
+- `make eval-all`, `eval-notes`, `eval-summary` and `eval-flashcards` against Checkpoint B's rows; `make smoke` against the bundled app on Windows; the cloud arm of `make measure-ttft`; a first install on a Windows or Linux machine that has never seen Luminary, other than the installers workflow's own install and launch.
 
 ## [0.17.0] - 2026-10-28
 
