@@ -1157,6 +1157,10 @@ lines with their own copies of manifest, search and history plumbing.
   divergent FSRS state, and last-writer-wins silently discards a review session.
 - **Hosted multi-tenant, the paid tier** — after 1.0. 0.17.0 builds the seams it needs; fairness
   across tenants, billing and a tenancy UI are its own work.
+- **The learner model** — `learner-model-plan.md`. Lumen reads the measured record (retention,
+  misconceptions, reading, questions) per section and uses it in Ask; the learner sees and
+  corrects every belief. Stage 0 rides on #441/#440 (0.20.0); stages 1–2 are 1.1.0 unless they
+  displace planned work; inferred observations are never before 1.0.
 
 - **A serving width of 4, for a machine that asks for it.** Every install path sizes
   `OLLAMA_NUM_PARALLEL` from physical RAM and caps the automatic value at 2 (I-31): `performance`

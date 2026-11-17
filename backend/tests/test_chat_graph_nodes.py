@@ -586,6 +586,46 @@ async def test_comparative_node_deduplicates_across_sides(test_db):
     assert "b_only" in texts
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("resolved", "expected"),
+    [
+        # Two concepts in one book both resolve to it: the topic alone ("difference") retrieved
+        # neither concept (#490), so each side searches with its own name.
+        ({"String": ["book"], "&str": ["book"]}, ["String difference", "&str difference"]),
+        # Two works: each side's documents already say which side it is.
+        ({"String": ["book-a"], "&str": ["book-b"]}, ["difference", "difference"]),
+        ({"String": [], "&str": []}, ["String difference", "&str difference"]),
+    ],
+)
+async def test_comparative_node_keeps_a_side_name_its_documents_do_not_carry(
+    test_db, resolved, expected
+):
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(return_value=[])
+
+    async def _resolve(side, _scope):
+        return resolved[side]
+
+    with (
+        patch("app.runtime.chat_nodes.comparative.get_retriever", return_value=mock_retriever),
+        patch(
+            "app.runtime.chat_nodes.comparative._decompose_comparison",
+            new=AsyncMock(return_value={"sides": ["String", "&str"], "topic": "difference"}),
+        ),
+        patch("app.runtime.chat_nodes.comparative._resolve_side_to_docs", new=_resolve),
+    ):
+        state = _make_state(
+            question="What is the difference between a String and a string slice (&str)?",
+            doc_ids=["book"],
+            scope="single",
+            intent="comparative",
+        )
+        await comparative_node(state)
+
+    assert [c.args[0] for c in mock_retriever.retrieve.call_args_list] == expected
+
+
 # (f) test_synthesize_node_calls_litellm
 
 

@@ -521,6 +521,28 @@ async def test_has_key_boolean_true_after_save(test_db):
     assert data["has_openai_key"] is True
 
 
+async def test_an_environment_key_counts_as_a_key(test_db, monkeypatch):
+    """Docker passes the key in `.env`; routing sends it, so Settings must not ask for one
+    (the UI refused to save cloud mode with "Add a key first")."""
+    import unittest.mock
+
+    from app.config import get_settings
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    get_settings.cache_clear()
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            with unittest.mock.patch(
+                "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+            ):
+                data = (await client.get("/settings/llm")).json()
+    finally:
+        get_settings.cache_clear()
+
+    assert data["has_openai_key"] is True
+    assert data["has_google_key"] is False
+
+
 async def test_clear_key_removes_from_keychain(test_db, in_memory_keyring):
     """Passing empty string clears key from keychain and writes empty string to SQLite."""
     engine, factory = test_db
