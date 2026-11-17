@@ -54,7 +54,8 @@ def _answers(concepts: str, cards: str) -> AsyncMock:
 
 
 @pytest.fixture()
-def client():
+def client(memory_db):
+    """Its own database: the shared one carried other tests' notes, cards and queued jobs (#472)."""
     with TestClient(app) as c:
         yield c
 

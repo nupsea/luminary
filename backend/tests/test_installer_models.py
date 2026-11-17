@@ -375,6 +375,10 @@ def test_compose_file_actually_loads():
 
     if shutil.which("docker") is None:
         pytest.skip("docker not installed")
+    if sys.platform == "win32":
+        # The file is the same on every platform and Linux CI loads it; on the Windows runner
+        # the docker CLI hung past the timeout and took its xdist worker down (#487).
+        pytest.skip("compose loading is checked on Linux; the Windows runner's docker CLI hangs")
     proc = subprocess.run(
         ["docker", "compose", "--profile", "ai", "config"],
         cwd=_COMPOSE.parent,
