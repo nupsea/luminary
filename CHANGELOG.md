@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Practice-panel cards are below the quality bar.** On two rated runs, 38% and 42% of cards were kept and correct against a bar of 60%, mostly thin answers and questions that need the passage in view; chapter cards written at import are not affected (#330, 0.19.0).
 - **A server running cloud-only stores a document as complete when its provider refuses every call**, with no summary or cards and no error shown; a rate limit is reported as "unreachable" (#514, 0.18.1).
 - **The connector SDK is not on PyPI yet.** Connectors install it from GitHub, which works; publishing waits on the PyPI project's trusted publisher (#438, 0.18.1).
+- **In a technical book's chapter whose parts are titled "Part 1", "Part 2", the chapter heading nests under its own parts** in the contents list; its sections nest correctly (#516, 0.18.1).
 - **On Windows CI a test worker exits mid-run in about 1 run in 7**, always in a test that runs ingestion in-process. No user-facing symptom is known (#211, #476, 0.18.1).
 
 ### Not exercised in this checkpoint
