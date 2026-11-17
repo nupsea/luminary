@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **A note's pasted snapshot can be annotated.** Click the image, or the highlighter on its block in the live editor, to highlight, draw, add arrows or text over it in Excalidraw. It keeps its display size, and the original stays in the scene, so annotations reopen for editing.
 
+- **A server can answer other machines, behind device tokens.** Set `LUMINARY_ALLOWED_HOSTS` to the names it serves, and every API request from another machine needs a paired device's token, whatever its headers say; mint a code with `docker exec <container> python -m app.scripts.pairing_code`. Unset, the server stays loopback-only (#511).
+
 ### Changed
 - **YouTube is a connector you install, and O'Reilly is no longer built in.** Settings → Connectors installs the YouTube connector from the catalogue in one click (its licence and YouTube's terms shown first); without it, a pasted YouTube link says so, or import the talk's audio or video file. Videos and books already in the library open, cite and re-import as before. The core no longer ships yt-dlp or curl_cffi (#467).
 - **A connector's sign-in, choices and settings come from the connector itself** (#436), and connectors install from a catalogue pinned by checksum, fetching their installer on request (#437).

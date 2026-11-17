@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     #       (`make luminary`). public: curated learner surfaces only, built SPA
     #       served with the API under /api on one port (no CORS).
     LUMINARY_MODE: Literal["full", "public"] = "full"
+    # Comma-separated names a server answers to beyond loopback (#511). Set, every API request
+    # from a non-loopback client needs a device token; empty keeps the server loopback-only.
+    LUMINARY_ALLOWED_HOSTS: str = ""
     # Read here as well as from the environment: the desktop shell starts the
     # backend with a cleared environment, so `.env` in the library is its only way in.
     LUMINARY_HOST_SUPPORTED: bool = False

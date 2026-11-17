@@ -362,6 +362,7 @@ _mode = get_settings().LUMINARY_MODE
 # /study, /collections/:id, ...) never collide with router paths. full/test keep
 # routers at root, so no test paths change.
 _API_PREFIX = "/api" if _mode == "public" else ""
+_REMOTE_HOSTS = [h.strip() for h in get_settings().LUMINARY_ALLOWED_HOSTS.split(",") if h.strip()]
 
 # Innermost of the middlewares: Host is pinned and CORS preflights are answered
 # before a request is asked who it acts for.
@@ -370,17 +371,20 @@ app.add_middleware(
     api_prefix=_API_PREFIX,
     app_origins=DEV_APP_ORIGINS if _mode == "full" else frozenset(),
     pair_path=f"{_API_PREFIX}/devices/pair",
+    remote_needs_token=bool(_REMOTE_HOSTS),
 )
 
 # Load-bearing against DNS rebinding. The app's own origin is trusted without a
 # token, and a hostile page can rebind its own domain to 127.0.0.1 and become
 # same-origin. Pinning Host to loopback names rejects those requests before
-# routing; it may only widen behind authentication (roadmap, 0.18.0).
+# routing; it widens only with `remote_needs_token` on (#511).
 # Starlette strips the port before matching, so bare hostnames are correct here
 # (a "host:*" pattern would fail its wildcard assertion at import). Skipped under
 # pytest, where the ASGI transport invents its own Host values.
 if "pytest" not in sys.modules:
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "::1"])
+    app.add_middleware(
+        TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "::1", *_REMOTE_HOSTS]
+    )
 # public is single-origin (SPA + API on one port), so CORS is unnecessary; full
 # serves the frontend from Vite on a different port and needs it.
 if _mode == "full":

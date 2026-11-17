@@ -7,6 +7,10 @@ origin needs a paired device's bearer token (`services/devices.py`). A request w
 `Origin` is either a same-origin read or not from a browser at all (the shell, smoke,
 evals); a browser marks the cross-site kind with `Sec-Fetch-Site`, and that one is refused.
 
+Those headers are only evidence on loopback. A server that answers beyond it
+(`LUMINARY_ALLOWED_HOSTS`, #511) admits a non-loopback client by token alone, since a direct
+client writes whatever `Origin` and `Host` it likes.
+
 The request then runs in its principal's library (#388). Devices are looked up in the
 default library's database, the registry, whatever library they belong to.
 
@@ -14,6 +18,8 @@ Pure ASGI, like `RequestLogMiddleware`, so SSE responses are not wrapped.
 """
 
 from __future__ import annotations
+
+import ipaddress
 
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
@@ -33,6 +39,16 @@ DEV_APP_ORIGINS = frozenset(
 
 _UNPAIRED = "This origin is not paired with Luminary. Pair it under Settings > Devices."
 _NOT_ADMITTED = "This device is not paired, or its pairing was revoked."
+_REMOTE = "Requests from another machine need a paired device's token."
+
+
+def is_loopback(client: tuple[str, int] | None) -> bool:
+    if client is None:
+        return False
+    try:
+        return ipaddress.ip_address(client[0]).is_loopback
+    except ValueError:
+        return False
 
 
 def needs_token(
@@ -45,9 +61,16 @@ def needs_token(
 
 class RequestAuthMiddleware:
     def __init__(
-        self, app: ASGIApp, *, api_prefix: str, app_origins: frozenset[str], pair_path: str
+        self,
+        app: ASGIApp,
+        *,
+        api_prefix: str,
+        app_origins: frozenset[str],
+        pair_path: str,
+        remote_needs_token: bool = False,
     ) -> None:
         self.app = app
+        self.remote_needs_token = remote_needs_token
         self.api_prefix = api_prefix
         self.app_origins = app_origins
         # Reachable unpaired, or nothing could ever pair.
@@ -67,6 +90,9 @@ class RequestAuthMiddleware:
                 return
         elif scope["path"] == self.pair_path:
             principal = None
+        elif self.remote_needs_token and not is_loopback(scope.get("client")):
+            await self._refuse(scope, receive, send, _REMOTE)
+            return
         elif needs_token(
             headers.get("origin"),
             headers.get("sec-fetch-site"),
