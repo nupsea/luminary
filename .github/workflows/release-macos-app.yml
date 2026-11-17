@@ -18,9 +18,9 @@ permissions:
 # costs a re-run of `notarize` alone -- the ~25 minute build is not repeated.
 jobs:
   build:
-    # macos-14 is Apple Silicon. macos-13 is Intel, and lancedb publishes no
+    # macos-15 is Apple Silicon (macos-14 is retired). macos-13 is Intel, and lancedb publishes no
     # macOS x86_64 wheel, so it cannot build this at all.
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 90
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -116,7 +116,7 @@ jobs:
 
   notarize:
     needs: build
-    runs-on: macos-14
+    runs-on: macos-15
     # Apple's scan scales with file count and this bundle has ~55k, twice over:
     # once for the app, once for the DMG.
     timeout-minutes: 300
