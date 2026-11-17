@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **A note's pasted snapshot can be annotated.** Click the image, or the highlighter on its block in the live editor, to highlight, draw, add arrows or text over it in Excalidraw. It keeps its display size, and the original stays in the scene, so annotations reopen for editing.
 
+- **Books published as web pages, and public Confluence wikis, import as one document each.** The catalogue lists two more connectors: HTML book (the Rust book, the Python tutorial: each page a section, in reading order) and Confluence (a page and every page under it, in tree order). Each lists only sites whose terms were read (#348).
+
 ### Changed
 - **YouTube is a connector you install, and O'Reilly is no longer built in.** Settings → Connectors installs the YouTube connector from the catalogue in one click (its licence and YouTube's terms shown first); without it, a pasted YouTube link says so, or import the talk's audio or video file. Videos and books already in the library open, cite and re-import as before. The core no longer ships yt-dlp or curl_cffi (#467).
 - **A connector's sign-in, choices and settings come from the connector itself** (#436), and connectors install from a catalogue pinned by checksum, fetching their installer on request (#437).
