@@ -53,7 +53,8 @@ DR="$REPO_ROOT/frontend/src/components/reader/DocumentReader.tsx"
 # (measured -- a note posted with a document_id comes back `collections: []`),
 # so nothing about collections goes stale and the invalidation was dropped when
 # capture moved into QuickNoteComposer (f5d2344).
-for key in "reader-notes" '"notes"' '"notes-groups"'; do
+# `reader-notes` left with its query in 189fce4e; nothing reads that key any more.
+for key in '"notes"' '"notes-groups"'; do
   COUNT=$(grep -c "$key" "$DR" 2>/dev/null || echo 0)
   if [ "$COUNT" -ge 1 ]; then
     echo "  OK: $key invalidation found ($COUNT occurrences)"
