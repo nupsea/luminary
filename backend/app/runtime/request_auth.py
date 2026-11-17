@@ -81,28 +81,10 @@ class RequestAuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        headers = Headers(scope=scope)
-        authorization = headers.get("authorization")
-        if authorization is not None:
-            principal = await self._device(authorization)
-            if principal is None:
-                await self._refuse(scope, receive, send, _NOT_ADMITTED)
-                return
-        elif scope["path"] == self.pair_path:
-            principal = None
-        elif self.remote_needs_token and not is_loopback(scope.get("client")):
-            await self._refuse(scope, receive, send, _REMOTE)
+        principal, refusal = await self._principal(scope)
+        if refusal is not None:
+            await self._refuse(scope, receive, send, refusal)
             return
-        elif needs_token(
-            headers.get("origin"),
-            headers.get("sec-fetch-site"),
-            f"{scope.get('scheme', 'http')}://{headers.get('host', '')}",
-            self.app_origins,
-        ):
-            await self._refuse(scope, receive, send, _UNPAIRED)
-            return
-        else:
-            principal = LOCAL_PRINCIPAL
 
         library = principal.library if principal is not None else DEFAULT_LIBRARY
         if library != DEFAULT_LIBRARY:  # startup serves the default
@@ -110,6 +92,24 @@ class RequestAuthMiddleware:
         scope.setdefault("state", {})["principal"] = principal
         with use_library(library):
             await self.app(scope, receive, send)
+
+    async def _principal(self, scope: Scope) -> tuple[Principal | None, str | None]:
+        """Who the request acts for, or why it is refused. No principal only for pairing."""
+        headers = Headers(scope=scope)
+        authorization = headers.get("authorization")
+        if authorization is not None:
+            principal = await self._device(authorization)
+            return (principal, None) if principal is not None else (None, _NOT_ADMITTED)
+        if scope["path"] == self.pair_path:
+            return None, None
+        if self.remote_needs_token and not is_loopback(scope.get("client")):
+            return None, _REMOTE
+        own_origin = f"{scope.get('scheme', 'http')}://{headers.get('host', '')}"
+        if needs_token(
+            headers.get("origin"), headers.get("sec-fetch-site"), own_origin, self.app_origins
+        ):
+            return None, _UNPAIRED
+        return LOCAL_PRINCIPAL, None
 
     def _guards(self, path: str) -> bool:
         # In public mode only the API is guarded: the SPA's files are public, and the
