@@ -239,6 +239,7 @@ def parse_bundle(root: Path) -> ParsedDocument:
     from app.services.parser import (  # noqa: PLC0415 - the parser imports this module
         MIN_SECTION_CHARS,
         epub_chapter_sections,
+        outermost_level_one,
     )
 
     manifest = read_manifest(root)
@@ -248,13 +249,17 @@ def parse_bundle(root: Path) -> ParsedDocument:
     for entry in manifest.sections:
         text = read_section(root, entry.file)
         if PurePosixPath(entry.file).suffix.lower() != ".md":
-            sections.extend(epub_chapter_sections(text, entry.heading))
+            # A file's own headings nest under the level its manifest entry gives it.
+            sections.extend(epub_chapter_sections(text, entry.heading, top_level=entry.level))
         elif len(text := text.strip()) >= MIN_SECTION_CHARS:
             sections.append(
-                Section(heading=entry.heading, level=1, text=text, page_start=0, page_end=0)
+                Section(
+                    heading=entry.heading, level=entry.level, text=text, page_start=0, page_end=0
+                )
             )
     if not sections:
         raise BundleRefused(f"no section of the bundle has {MIN_SECTION_CHARS} characters of text")
+    sections = outermost_level_one(sections)
     raw_text = "\n\n".join(s.text for s in sections)
     return ParsedDocument(
         title=manifest.title,

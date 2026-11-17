@@ -1,6 +1,7 @@
 import logging
 import re
 from collections import Counter
+from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
 
@@ -156,45 +157,89 @@ _epub_text = _epub_html_to_markdown
 
 
 _RE_EPUB_HEADING = re.compile(r"<h([1-6])[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
+_RE_EPUB_CONTAINER = re.compile(
+    r"<(/?)(section|div|aside|figure|figcaption|nav)\b([^>]*?)(/?)>", re.IGNORECASE
+)
+_RE_EPUB_TYPE = re.compile(r"""(?:data-type|epub:type)\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
+_RE_EPUB_CLASS = re.compile(r"""class\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
+# HTMLBook / EPUB 3 structural types: each one nests the headings inside it one level deeper.
+_EPUB_STRUCTURE = re.compile(
+    r"^(part|chapter|preface|foreword|introduction|appendix|afterword|conclusion|sect[1-5])$"
+)
+# A box beside the text, not a division of it: a heading inside one is part of its section.
+_EPUB_BOXES = {"sidebar", "note", "warning", "tip", "caution", "important"}
 
 
-def _split_epub_document(raw_html: str, fallback_heading: str) -> list[tuple[str, str]]:
-    """Split one EPUB document into (heading, markdown) per heading tag it contains.
+def _epub_heading_depths(raw_html: str) -> dict[int, int | None]:
+    """Each heading's offset mapped to how many structural sections enclose it, or None when it
+    sits in a figure, an aside, a nav or a note/sidebar box and must not start a section."""
+    depths: dict[int, int | None] = {}
+    stack: list[tuple[str, bool, bool]] = []  # (tag, structural, box)
+    tokens = sorted(
+        [(m.start(), "c", m) for m in _RE_EPUB_CONTAINER.finditer(raw_html)]
+        + [(m.start(), "h", m) for m in _RE_EPUB_HEADING.finditer(raw_html)],
+        key=lambda t: t[0],
+    )
+    for pos, kind, m in tokens:
+        if kind == "h":
+            boxed = any(box for _, _, box in stack)
+            depths[pos] = None if boxed else sum(st for _, st, _ in stack)
+            continue
+        closing, tag, attrs, self_closing = m.group(1), m.group(2).lower(), m.group(3), m.group(4)
+        if closing:
+            _close(stack, tag)
+        elif not self_closing:
+            stack.append((tag, *_container_kind(tag, attrs)))
+    return depths
 
-    Text before the first heading is kept under `fallback_heading` so front
-    matter is not dropped. Headings inside <figure>, <figcaption>, or <aside>
-    are ignored so captions do not fracture chapters.
+
+def _close(stack: list[tuple[str, bool, bool]], tag: str) -> None:
+    """Pop to the nearest open tag of this name; a stray close tag pops nothing."""
+    for k in range(len(stack) - 1, -1, -1):
+        if stack[k][0] == tag:
+            del stack[k:]
+            return
+
+
+def _container_kind(tag: str, attrs: str) -> tuple[bool, bool]:
+    """(structural, box) for an opening container tag."""
+    type_m, class_m = _RE_EPUB_TYPE.search(attrs), _RE_EPUB_CLASS.search(attrs)
+    types = set((type_m.group(1) if type_m else "").lower().split())
+    classes = set((class_m.group(1) if class_m else "").lower().split())
+    structural = tag == "section" and any(_EPUB_STRUCTURE.match(t) for t in types)
+    box = tag in ("aside", "figure", "figcaption", "nav") or bool((types | classes) & _EPUB_BOXES)
+    return structural, box
+
+
+def _split_epub_document(raw_html: str, fallback_heading: str) -> list[tuple[str, int, str]]:
+    """Split one EPUB document into (heading, level, markdown) per heading that divides it.
+
+    Text before the first heading is kept under `fallback_heading` so front matter is not
+    dropped. A heading in a figure, an aside or a note/sidebar box stays in its section's text.
+    Levels follow the book's structural <section>s where it has them, else the heading tags,
+    unshifted: one EPUB's files must agree, so callers renumber the whole book, not each file.
     """
-    matches = list(_RE_EPUB_HEADING.finditer(raw_html))
-    valid_matches = []
-    for m in matches:
-        start = m.start()
-        last_open_fig = raw_html.rfind("<figure", 0, start)
-        last_close_fig = raw_html.rfind("</figure", 0, start)
-        if last_open_fig > last_close_fig:
-            continue
-        last_open_aside = raw_html.rfind("<aside", 0, start)
-        last_close_aside = raw_html.rfind("</aside", 0, start)
-        if last_open_aside > last_close_aside:
-            continue
-        valid_matches.append(m)
+    depths = _epub_heading_depths(raw_html)
+    valid = [m for m in _RE_EPUB_HEADING.finditer(raw_html) if depths[m.start()] is not None]
 
-    if not valid_matches:
+    if not valid:
         md = _epub_html_to_markdown(raw_html)
-        return [(fallback_heading, md)] if md else []
+        return [(fallback_heading, 1, md)] if md else []
 
-    out: list[tuple[str, str]] = []
-    preamble = _epub_html_to_markdown(raw_html[: valid_matches[0].start()])
+    structured = any(depths[m.start()] for m in valid)
+    levels = [max(depths[m.start()] or 1, 1) if structured else int(m.group(1)) for m in valid]
+
+    out: list[tuple[str, int, str]] = []
+    preamble = _epub_html_to_markdown(raw_html[: valid[0].start()])
     if preamble:
-        out.append((fallback_heading, preamble))
+        out.append((fallback_heading, min(levels), preamble))
 
-    for i, m in enumerate(valid_matches):
+    for i, m in enumerate(valid):
         heading = _epub_html_to_markdown(m.group(2)).strip() or fallback_heading
         heading = re.sub(r"^#+\s*", "", heading).strip()
-        end = valid_matches[i + 1].start() if i + 1 < len(valid_matches) else len(raw_html)
-        body = _epub_html_to_markdown(raw_html[m.end() : end])
-        if body:
-            out.append((heading, body))
+        end = valid[i + 1].start() if i + 1 < len(valid) else len(raw_html)
+        # Kept when empty: a page title with no text of its own still sets the page's level.
+        out.append((heading, levels[i], _epub_html_to_markdown(raw_html[m.end() : end])))
     return out
 
 
@@ -202,11 +247,23 @@ def _split_epub_document(raw_html: str, fallback_heading: str) -> list[tuple[str
 MIN_SECTION_CHARS = 50
 
 
-def epub_chapter_sections(raw_html: str, fallback_heading: str) -> list[Section]:
-    """One chapter document's sections, split at its headings."""
+def outermost_level_one(sections: list[Section]) -> list[Section]:
+    """Renumber so the document's shallowest kept section is level 1: a chapter file whose own
+    heading was too short to keep would otherwise leave the book with no top level."""
+    shift = min((s.level for s in sections), default=1) - 1
+    return [replace(s, level=s.level - shift) for s in sections] if shift else sections
+
+
+def epub_chapter_sections(
+    raw_html: str, fallback_heading: str, top_level: int | None = None
+) -> list[Section]:
+    """One chapter document's sections, split at its headings. With `top_level`, the file's
+    shallowest heading takes that level even when its own section is too short to keep."""
+    split = _split_epub_document(raw_html, fallback_heading)
+    shift = min(lv for _, lv, _ in split) - top_level if top_level and split else 0
     return [
-        Section(heading=heading, level=1, text=text, page_start=0, page_end=0)
-        for heading, text in _split_epub_document(raw_html, fallback_heading)
+        Section(heading=heading, level=level - shift, text=text, page_start=0, page_end=0)
+        for heading, level, text in split
         if len(text) >= MIN_SECTION_CHARS
     ]
 
@@ -1227,6 +1284,7 @@ class DocumentParser:
                 )
             ]
 
+        sections = outermost_level_one(sections)
         raw_text = "\n\n".join(raw_parts)
         word_count = len(raw_text.split())
         logger.info(

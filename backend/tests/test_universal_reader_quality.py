@@ -96,9 +96,9 @@ def test_split_epub_document_ignores_figure_headings():
     <p>Second chapter body.</p>
     """
     sections = _split_epub_document(html_content, "Fallback")
-    headings = [h for h, _ in sections]
+    headings = [h for h, _, _ in sections]
     assert headings == ["Chapter 1. Foundations", "Chapter 2. Advanced Retrieval"]
-    assert "Figure 1-1. Vector Space Embedding" in sections[0][1]
+    assert "Figure 1-1. Vector Space Embedding" in sections[0][2]
 
 
 @pytest.mark.asyncio

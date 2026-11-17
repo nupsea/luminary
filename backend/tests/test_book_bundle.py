@@ -151,7 +151,8 @@ async def test_a_bundles_labels_become_the_documents_tags(test_db, tmp_path):
 
 
 def test_an_epub_era_book_keeps_its_section_tree(tmp_path):
-    """Books imported before connectors keep their EPUB and read as they did (#467)."""
+    """Books imported before connectors keep their EPUB and read as they did (#467), with
+    each chapter's subsections nested under it."""
     from ebooklib import epub
 
     path = write_book_epub(tmp_path / "book.epub", FixtureBookClient())
@@ -164,7 +165,7 @@ def test_an_epub_era_book_keeps_its_section_tree(tmp_path):
         ("1. Storage", 1, "A log is an append-only sequence of records on disk."),
         (
             "Indexes",
-            1,
+            2,
             "An index is extra structure derived from the primary data.\n\n"
             f"![An LSM tree]({figure})\n*[Figure: An LSM tree]*",
         ),
@@ -173,6 +174,6 @@ def test_an_epub_era_book_keeps_its_section_tree(tmp_path):
             1,
             "Replication keeps a copy of the same data on several machines, building on logs.",
         ),
-        ("Leaders and Followers", 1, "Every write goes to the leader, which streams it on."),
+        ("Leaders and Followers", 2, "Every write goes to the leader, which streams it on."),
     ]
     assert parsed.title == "Fixture Systems"
