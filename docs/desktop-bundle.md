@@ -137,7 +137,7 @@ unsigned `Luminary.app` and refuses to run against an incomplete stage.
 Windows compile available locally: `tauri-build` needs a resource compiler macOS
 does not have, which is why every platform-specific piece lives in that crate
 rather than behind `#[cfg(windows)]` inside the shell. CI runs the whole
-workspace on `macos-14` and `windows-latest` — ordinary `make ci` is ubuntu-only
+workspace on `macos-15` and `windows-latest` — ordinary `make ci` is ubuntu-only
 and cannot build this crate at all.
 
 The app icon in `src-tauri/icons/` is a placeholder generated from the web
@@ -152,7 +152,7 @@ origin first.
 ## Release
 
 `make stage` → `make desktop-app` → sign → verify → DMG → notarize → publish,
-driven by `.github/workflows/release-macos-app.yml` on a `macos-14` runner.
+driven by `.github/workflows/release-macos-app.yml` on a `macos-15` runner.
 `make desktop-adhoc` runs the same chain locally with the ad-hoc identity, which
 exercises everything except notarization.
 
