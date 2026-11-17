@@ -227,7 +227,8 @@ if (await readTab.count()) {
   await readTab.first().click()
   await page.waitForTimeout(2500)
 }
-const para = page.locator("p").filter({ hasText: /[\s\S]{120,}/ }).first()
+// Visible only: a book also mounts its hidden tabs, whose copy of the text comes first.
+const para = page.locator("p:visible").filter({ hasText: /[\s\S]{120,}/ }).first()
 const paraCount = await para.count()
 check("the reader shows a paragraph to select", paraCount > 0)
 if (paraCount) {
@@ -253,15 +254,17 @@ if (paraCount) {
         const tabs = [...document.querySelectorAll("button[aria-pressed]")]
           .filter((b) => b.textContent === "Ask AI")
           .map((b) => b.getAttribute("aria-pressed"))
+        // Since 0.17.0 Ask drafts the quoted passage into the dock's composer; it never sends.
+        const drafted = [...document.querySelectorAll("textarea")].some((t) => t.value.startsWith("> "))
         return {
-          asked: msgs.some((m) => typeof m.text === "string" && m.text.includes("Explain this excerpt")),
+          asked: drafted || msgs.some((m) => typeof m.text === "string" && m.text.startsWith("> ")),
           askTabActive: tabs.includes("true"),
           url: location.href,
         }
       }, docId)
       check("asking a passage stays in the reader", after.url.includes(`doc=${docId}`), after.url)
       check("the dock opens on the question", after.askTabActive)
-      check("the excerpt reaches this document's conversation", after.asked)
+      check("the excerpt is drafted into this document's conversation", after.asked)
     }
 
     // The same paragraph, twice more. Explain was a sheet with a backdrop over
@@ -298,7 +301,21 @@ if (paraCount) {
 
     // A single word is a term to define, not a passage to simplify.
     const bar = page.locator('[data-testid="selection-action-bar"]')
-    await page.mouse.dblclick(boxRect.x + 20, lineY)
+    // The centre of a real word: a fixed offset can land on the space between two.
+    const word = await para.evaluate((p) => {
+      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const m = /[A-Za-z]{4,}/.exec(node.textContent ?? "")
+        if (!m) continue
+        const range = document.createRange()
+        range.setStart(node, m.index)
+        range.setEnd(node, m.index + m[0].length)
+        const r = range.getBoundingClientRect()
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+      }
+      return null
+    })
+    await page.mouse.dblclick(word?.x ?? boxRect.x + 20, word?.y ?? lineY)
     let wordActions = []
     for (let i = 0; i < 8 && !wordActions.length; i++) {
       await page.waitForTimeout(250)
