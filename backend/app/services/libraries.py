@@ -26,7 +26,7 @@ from typing import IO, Any
 from app.database import get_session_factory
 from app.exceptions import Conflict, Forbidden, InvalidInput, NotFound
 from app.library import DEFAULT_LIBRARY, current_library, use_library, valid_library
-from app.repos.device_repo import DeviceRepo
+from app.repos.device_repo import device_registry
 from app.repos.library_repo import LibraryContentsRepo
 from app.repos.settings_repo import SettingsRepo
 from app.services.library_snapshot import (
@@ -45,7 +45,6 @@ ACTIVE_FILE = "active_library.json"
 PROFILE_KEY = "library_profile"
 # Marks a library removed while this process still had it open; startup deletes it.
 REMOVED_MARK = ".removed"
-_LABEL = re.compile(r"[a-z0-9][a-z0-9-]*")
 COLORS = ("slate", "blue", "green", "amber", "rose", "violet", "teal", "orange")
 
 # Machine root -> the active library; the same id under another `DATA_DIR` is another library.
@@ -59,7 +58,6 @@ class LibraryInfo:
     bytes: int
     name: str | None = None
     color: str | None = None
-    # None when the library's database could not be read.
     contents: dict[str, int] | None = None
 
 
@@ -244,8 +242,7 @@ async def export_library(dest: Destination) -> tuple[Path, Manifest]:
 
 def _file_label(name: str | None) -> str:
     # Named for what the user calls it: "luminary-default-..." says nothing on the other machine.
-    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")[:40]
-    return slug if slug and _LABEL.fullmatch(slug) else ""
+    return re.sub(r"[^a-z0-9]+", "-", (name or "").lower())[:40].strip("-")
 
 
 def _move_in(source: Path, target: Path) -> None:
@@ -315,11 +312,8 @@ async def settle_imported_name(library: str) -> dict[str, Any]:
 
 
 async def devices_in(library: str) -> int:
-    # The registry is the machine's, in the default library.
-    with use_library(DEFAULT_LIBRARY):
-        factory = get_session_factory()
-    async with factory() as session:
-        return await DeviceRepo(session).count_in(library)
+    async with device_registry() as devices:
+        return await devices.count_in(library)
 
 
 async def check_removable(library: str) -> None:

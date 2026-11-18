@@ -35,9 +35,9 @@ export function LibrarySwitcher() {
   useEffect(() => {
     if (!open) return
     const close = (e: MouseEvent | KeyboardEvent) => {
-      if (e instanceof KeyboardEvent ? e.key === "Escape" : !menu.current?.contains(e.target as Node) && !button.current?.contains(e.target as Node)) {
-        setOpen(false)
-      }
+      const outside = (el: HTMLElement | null) => !el?.contains(e.target as Node)
+      const done = e instanceof KeyboardEvent ? e.key === "Escape" : outside(menu.current) && outside(button.current)
+      if (done) setOpen(false)
     }
     document.addEventListener("mousedown", close)
     document.addEventListener("keydown", close)

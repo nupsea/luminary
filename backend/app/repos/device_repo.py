@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
@@ -66,9 +67,15 @@ class DeviceRepo:
         return device
 
 
-async def get_device_repo() -> AsyncIterator[DeviceRepo]:
+@contextlib.asynccontextmanager
+async def device_registry() -> AsyncIterator[DeviceRepo]:
     # The registry is the machine's, in the default library whichever library the app has open.
     with use_library(DEFAULT_LIBRARY):
         factory = get_session_factory()
     async with factory() as session:
         yield DeviceRepo(session)
+
+
+async def get_device_repo() -> AsyncIterator[DeviceRepo]:
+    async with device_registry() as repo:
+        yield repo
