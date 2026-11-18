@@ -11,7 +11,8 @@ Those headers are only evidence on loopback. A server that answers beyond it
 (`LUMINARY_ALLOWED_HOSTS`, #511) admits a non-loopback client by token alone, since a direct
 client writes whatever `Origin` and `Host` it likes.
 
-The request then runs in its principal's library (#388). Devices are looked up in the
+The request then runs in its principal's library (#388): a device's is the one it paired into,
+the app's is the active library (`services/libraries.py`). Devices are looked up in the
 default library's database, the registry, whatever library they belong to.
 
 Pure ASGI, like `RequestLogMiddleware`, so SSE responses are not wrapped.
@@ -19,17 +20,22 @@ Pure ASGI, like `RequestLogMiddleware`, so SSE responses are not wrapped.
 
 from __future__ import annotations
 
+import dataclasses
 import ipaddress
+from collections.abc import Callable
 
+from fastapi import Request
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.database import get_session_factory
+from app.exceptions import Forbidden
 from app.library import use_library
 from app.repos.device_repo import DeviceRepo
 from app.runtime.library_work import serve_library
 from app.services.devices import resolve_token
+from app.services.libraries import active_library
 from app.types import DEFAULT_LIBRARY, LOCAL_PRINCIPAL, Principal
 
 # Vite's dev server, and the port it falls back to when 5173 is taken (`make clean`).
@@ -49,6 +55,17 @@ def is_loopback(client: tuple[str, int] | None) -> bool:
         return ipaddress.ip_address(client[0]).is_loopback
     except ValueError:
         return False
+
+
+def require_local(refusal: str) -> Callable[[Request], None]:
+    """A route dependency that refuses every caller but the app itself."""
+
+    def check(request: Request) -> None:
+        principal = getattr(request.state, "principal", None)
+        if principal is None or principal.kind != "local":
+            raise Forbidden(refusal)
+
+    return check
 
 
 def needs_token(
@@ -86,6 +103,8 @@ class RequestAuthMiddleware:
             await self._refuse(scope, receive, send, refusal)
             return
 
+        if principal is not None and principal.kind == "local":
+            principal = dataclasses.replace(principal, library=active_library())
         library = principal.library if principal is not None else DEFAULT_LIBRARY
         if library != DEFAULT_LIBRARY:  # startup serves the default
             await serve_library(library)

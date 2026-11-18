@@ -182,6 +182,36 @@ Which model runs, strongest first: Settings in the app, then `backend/.env`, the
 default above. `make models` prints what the configuration resolves to and warns when a model is
 too big for the machine; the choice is never overridden.
 
+## Libraries, and moving one to another computer
+
+Settings → Libraries lists the libraries on this machine. Luminary opens one at a time; **Open**
+switches and reloads the app. Each library has its own documents, notes, cards, study history,
+engine mode and model picks. Paired devices, API keys and downloaded models belong to the machine.
+
+To move a library:
+
+1. On the old machine, **Export** it. The archive lands in `~/Luminary Exports/` and appears
+   there only once complete, so a synced folder never carries half of one.
+2. Copy the file to the new machine by any means.
+3. On the new machine, **Import** it under a name, then **Open** it. Every file is checked
+   against the archive's hashes before the library is created; the result lists its documents,
+   cards and notes to compare with the export.
+
+| Refused, nothing written | Why |
+|---|---|
+| The importing Luminary is older than the exporting one | its database schema is newer than this version knows |
+| The archive comes from a different embedder | its vectors are in another space; only a re-embed moves them |
+| A name already in use, or `default` | an import never writes over a library |
+| A damaged or truncated file | a file fails its hash, or the archive does not read |
+
+The archive leaves out API keys and paired devices; enter keys and pair devices again on the new
+machine. Models are not carried either: the new machine downloads its own at setup. Exporting
+waits until no document is mid-ingestion. A Docker server writes its export inside the container;
+copy it out with `docker cp`. A source install can also run
+`python -m app.scripts.library_snapshot snapshot|restore` from `backend/`.
+
+The two copies do not sync: studying on both machines afterwards gives two diverging libraries.
+
 ## Configuration reference
 
 Source and Docker installs read `backend/.env` (gitignored); `backend/.env.example` documents

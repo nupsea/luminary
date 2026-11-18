@@ -1,6 +1,7 @@
 import { EMPTY_THREAD, migrateChatThreads, withThread, type ChatPreload, type ChatThread } from "./store/chatThreads"
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
+import { libraryScopedStorage } from "./lib/libraryScope"
 
 interface StudySectionFilter {
   sectionId: string
@@ -132,7 +133,8 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "luminary-app-store",
-      storage: createJSONStorage(() => localStorage),
+      // Holds document, session and conversation ids, which belong to one library.
+      storage: createJSONStorage(() => libraryScopedStorage(localStorage)),
       version: 2,
       // v0 persisted libraryFiltersOpen; hydrating it re-hides the rails.
       // v1 held one conversation in four flat keys; migrateChatThreads folds it

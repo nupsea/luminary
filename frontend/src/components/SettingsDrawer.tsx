@@ -16,6 +16,7 @@ import { invalidateKeyedQueries, saveProviderKey } from "@/lib/cloudKeys"
 import { API_BASE } from "@/lib/config"
 import { getTheme, setTheme, type Theme } from "@/lib/theme"
 import { DevicesSettings } from "@/components/settings/DevicesSettings"
+import { LibrariesSettings } from "@/components/settings/LibrariesSettings"
 import { ModelsAndComponents } from "@/components/settings/ModelsAndComponents"
 import { type ModelDrift } from "@/components/settings/ModelDriftNotice"
 import { ConnectorSettings } from "@/components/settings/ConnectorSettings"
@@ -663,6 +664,13 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
           <div className="border-t border-border" />
 
           <TranscriptVocabularySettings />
+
+          <div className="border-t border-border" />
+
+          <section>
+            <h3 className="mb-1 text-sm font-semibold text-foreground">Libraries</h3>
+            <LibrariesSettings />
+          </section>
 
           <div className="border-t border-border" />
 

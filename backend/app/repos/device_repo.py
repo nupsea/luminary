@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 
-from fastapi import Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_session_factory
+from app.library import DEFAULT_LIBRARY, use_library
 from app.models import DeviceModel
 from app.repos._helpers import get_or_404
 
@@ -57,5 +57,9 @@ class DeviceRepo:
         return device
 
 
-def get_device_repo(session: AsyncSession = Depends(get_db)) -> DeviceRepo:
-    return DeviceRepo(session)
+async def get_device_repo() -> AsyncIterator[DeviceRepo]:
+    # The registry is the machine's, in the default library whichever library the app has open.
+    with use_library(DEFAULT_LIBRARY):
+        factory = get_session_factory()
+    async with factory() as session:
+        yield DeviceRepo(session)

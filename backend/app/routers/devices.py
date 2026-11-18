@@ -9,21 +9,18 @@ is the app's own, so a paired device cannot mint codes or revoke its peers.
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
 
-from app.exceptions import Forbidden
 from app.models import DeviceModel
 from app.repos.device_repo import DeviceRepo, get_device_repo
+from app.runtime.request_auth import require_local
 from app.services import devices as device_service
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
 
-def require_local(request: Request) -> None:
-    principal = getattr(request.state, "principal", None)
-    if principal is None or principal.kind != "local":
-        raise Forbidden("Devices are managed from Luminary itself.")
+_LOCAL = Depends(require_local("Devices are managed from Luminary itself."))
 
 
 class PairingCodeResponse(BaseModel):
@@ -61,9 +58,7 @@ def _to_response(device: DeviceModel) -> DeviceResponse:
     )
 
 
-@router.post(
-    "/pairing-code", response_model=PairingCodeResponse, dependencies=[Depends(require_local)]
-)
+@router.post("/pairing-code", response_model=PairingCodeResponse, dependencies=[_LOCAL])
 async def create_pairing_code() -> PairingCodeResponse:
     code, expires_at = device_service.issue_pairing_code()
     return PairingCodeResponse(code=code, expires_at=expires_at)
@@ -77,12 +72,12 @@ async def pair_device(
     return PairResponse(device_id=device.id, name=device.name, token=token)
 
 
-@router.get("", response_model=list[DeviceResponse], dependencies=[Depends(require_local)])
+@router.get("", response_model=list[DeviceResponse], dependencies=[_LOCAL])
 async def list_devices(repo: DeviceRepo = Depends(get_device_repo)) -> list[DeviceResponse]:
     return [_to_response(d) for d in await device_service.list_devices(repo)]
 
 
-@router.delete("/{device_id}", status_code=204, dependencies=[Depends(require_local)])
+@router.delete("/{device_id}", status_code=204, dependencies=[_LOCAL])
 async def revoke_device(device_id: str, repo: DeviceRepo = Depends(get_device_repo)) -> Response:
     await device_service.revoke(repo, device_id)
     return Response(status_code=204)

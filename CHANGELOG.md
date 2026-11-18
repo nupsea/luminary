@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Switch between libraries, and move one to another computer.** Settings → Libraries opens, creates, exports and imports libraries; an export is one archive in `~/Luminary Exports/`, imported as a new library only after every file passes its hash. The two copies do not sync.
+
 ## [0.18.0] - 2026-11-18
 
 ### Added

@@ -13,6 +13,7 @@ checked before anything is written, and every file against its hash before the r
 from __future__ import annotations
 
 import asyncio
+import gzip
 import hashlib
 import io
 import json
@@ -20,6 +21,7 @@ import shutil
 import sqlite3
 import tarfile
 import tempfile
+import zlib
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -161,6 +163,13 @@ async def restore_snapshot(archive: Path, library: str) -> Manifest:
 
 
 def _extract(archive: Path, root: Path) -> Manifest:
+    try:
+        return _extract_from(archive, root)
+    except (tarfile.TarError, EOFError, zlib.error, gzip.BadGzipFile) as exc:
+        raise InvalidInput(f"not a readable library snapshot: {exc}") from exc
+
+
+def _extract_from(archive: Path, root: Path) -> Manifest:
     with tarfile.open(archive, "r:gz") as tar:
         manifest = _check(_read_manifest(tar))
         root.parent.mkdir(parents=True, exist_ok=True)

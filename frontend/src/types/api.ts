@@ -3764,6 +3764,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/libraries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Libraries */
+        get: operations["list_libraries_libraries_get"];
+        put?: never;
+        /** Create Library */
+        post: operations["create_library_libraries_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Switch Library */
+        put: operations["switch_library_libraries_active_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Library */
+        post: operations["import_library_libraries_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/{library}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Export Library */
+        post: operations["export_library_libraries__library__export_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/model-lab/catalogue": {
         parameters: {
             query?: never;
@@ -7223,6 +7292,18 @@ export interface components {
             /** File */
             file: string;
         };
+        /** Body_import_library_libraries_import_post */
+        Body_import_library_libraries_import_post: {
+            /** File */
+            file: string;
+            /** Library */
+            library: string;
+            /**
+             * Activate
+             * @default false
+             */
+            activate: boolean;
+        };
         /** Body_ingest_document_documents_ingest_post */
         Body_ingest_document_documents_ingest_post: {
             /** File */
@@ -9783,6 +9864,64 @@ export interface components {
             document_id: string;
             /** Objectives */
             objectives: components["schemas"]["LearningObjectiveItem"][];
+        };
+        /** LibraryContents */
+        LibraryContents: {
+            /** Documents */
+            documents: number;
+            /** Flashcards */
+            flashcards: number;
+            /** Notes */
+            notes: number;
+        };
+        /** LibraryExport */
+        LibraryExport: {
+            /** Library */
+            library: string;
+            /** Path */
+            path: string;
+            /** Bytes */
+            bytes: number;
+            /** Files */
+            files: number;
+            contents: components["schemas"]["LibraryContents"];
+        };
+        /** LibraryImport */
+        LibraryImport: {
+            /** Library */
+            library: string;
+            /** Active */
+            active: boolean;
+            /** Source Library */
+            source_library: string;
+            /** Created At */
+            created_at: string;
+            /** App Version */
+            app_version: string;
+            /** Files */
+            files: number;
+            contents: components["schemas"]["LibraryContents"];
+        };
+        /** LibraryItem */
+        LibraryItem: {
+            /** Id */
+            id: string;
+            /** Active */
+            active: boolean;
+            /** Bytes */
+            bytes: number;
+        };
+        /** LibraryList */
+        LibraryList: {
+            /** Active */
+            active: string;
+            /** Libraries */
+            libraries: components["schemas"]["LibraryItem"][];
+        };
+        /** LibraryName */
+        LibraryName: {
+            /** Library */
+            library: string;
         };
         /** LibrarySummarizeRequest */
         LibrarySummarizeRequest: {
@@ -18522,6 +18661,156 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnrichmentJobItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_libraries_libraries_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryList"];
+                };
+            };
+        };
+    };
+    create_library_libraries_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LibraryName"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    switch_library_libraries_active_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LibraryName"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_library_libraries_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_library_libraries_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryImport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_library_libraries__library__export_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                library: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryExport"];
                 };
             };
             /** @description Validation Error */
