@@ -316,7 +316,8 @@ async def test_only_listed_archives_in_known_folders_are_reachable(client, memor
         "/libraries/reveal", json={"destination": "exports", "name": exported["name"]}
     )
     assert ok.status_code == 204, ok.text
-    assert exported["path"] in " ".join(shown[0])
+    # The file selected where the platform can, else its folder opened (xdg-open on Linux).
+    assert str(Path(exported["path"]).parent) in " ".join(shown[0])
     refused = await client.post(
         "/libraries/reveal", json={"destination": "exports", "name": "x.tar.gz"}
     )
@@ -349,7 +350,7 @@ async def test_a_removed_library_is_gone_and_the_rest_are_untouched(client):
     assert (await client.post("/libraries", json={"library": KIDS})).status_code == 409
     assert library_root(library=KIDS).exists()
 
-    await stop_library(KIDS)
+    await _close(KIDS)  # as a restart does: Windows will not delete a database held open
     assert libraries.purge_removed_libraries() == [KIDS]
     assert not library_root(library=KIDS).exists()
     assert await _titles(client) == ["Odyssey"]

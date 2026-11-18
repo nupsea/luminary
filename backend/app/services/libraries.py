@@ -343,6 +343,11 @@ def purge_removed_libraries() -> list[str]:
     purged = []
     for path in others.iterdir():
         if (path / REMOVED_MARK).exists():
-            shutil.rmtree(path, ignore_errors=True)
+            try:
+                shutil.rmtree(path)
+            except OSError:
+                # Still marked, so still hidden; the next start tries again.
+                logger.warning("could not delete removed library %s", path, exc_info=True)
+                continue
             purged.append(path.name)
     return purged
