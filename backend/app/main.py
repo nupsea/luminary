@@ -73,6 +73,7 @@ from app.services.components import (
 from app.services.executors import shutdown_model_executor
 from app.services.graph_import import run_graph_import
 from app.services.ingestion_jobs import cancel_all_ingestions
+from app.services.libraries import purge_removed_libraries
 from app.services.python_extras import activate_extras
 from app.services.settings_service import _cache as _llm_cache
 from app.services.startup_status import get_startup_status
@@ -216,6 +217,9 @@ async def lifespan(app: FastAPI):
 
     # Before yielding, so jobs enqueued during the first request are dispatched. It loads the
     # library's settings too, so cloud mode is active from the first request.
+    # Before any library opens: one removed while the last process had it open is deleted now.
+    if purged := await asyncio.to_thread(purge_removed_libraries):
+        logger.info("deleted removed libraries: %s", ", ".join(purged))
     await serve_library(DEFAULT_LIBRARY)
     _chapter_backfill.start()
 

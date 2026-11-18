@@ -33,8 +33,7 @@ import { SearchDialog } from "./components/SearchDialog"
 import { StudyLauncher } from "./components/StudyLauncher"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
-import { useActiveLibrary } from "./hooks/useActiveLibrary"
-import { DEFAULT_LIBRARY } from "./lib/libraryScope"
+import { LibrarySwitcher } from "./components/libraries/LibrarySwitcher"
 import { usePanelZoomShortcut } from "./hooks/usePanelZoomShortcut"
 import { IngestionTrackerProvider } from "./hooks/IngestionTrackerProvider"
 import { EnrichmentStatus } from "./components/EnrichmentStatus"
@@ -170,7 +169,6 @@ function PageSkeleton() {
 function Sidebar({ mainTabs, devTabs }: { mainTabs: Surface[]; devTabs: Surface[] }) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const qc = useQueryClient()
-  const library = useActiveLibrary()
 
   async function handleHoverPrefetch(prefetchKey: QueryKey, prefetchFn: () => Promise<unknown>) {
     const existing = qc.getQueryData(prefetchKey)
@@ -193,6 +191,7 @@ function Sidebar({ mainTabs, devTabs }: { mainTabs: Surface[]; devTabs: Surface[
   return (
     <>
       <nav className="flex h-full w-[4.5rem] flex-col items-center gap-1 bg-gradient-to-b from-sidebar via-sidebar to-primary/5 py-4 border-r border-border/50">
+        <LibrarySwitcher />
         {mainTabs.map((s) => {
           const to = s.frontend!.route!
           const Icon = ICONS[s.id] ?? BookOpen
@@ -255,15 +254,6 @@ function Sidebar({ mainTabs, devTabs }: { mainTabs: Surface[]; devTabs: Surface[
               </NavLink>
             )
           })}
-          {library && library !== DEFAULT_LIBRARY && (
-            <button
-              onClick={() => setSettingsOpen(true)}
-              title={`Library: ${library}`}
-              className="max-w-[4rem] truncate rounded px-1 text-[10px] font-medium text-sidebar-foreground/70 hover:bg-accent"
-            >
-              {library}
-            </button>
-          )}
           <LLMModeBadge onClick={() => setSettingsOpen(true)} />
           {/* Dark mode toggle — persists via lib/theme so it survives reloads. */}
           <button

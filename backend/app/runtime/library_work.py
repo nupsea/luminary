@@ -13,9 +13,10 @@ import logging
 import sys
 from pathlib import Path
 
-from app.database import get_session_factory
+from app.database import close_library, get_session_factory
 from app.db_init import open_library
 from app.library import use_library
+from app.services import libraries
 from app.services.background import task_registry
 from app.services.background_prefs import load_background_prefs
 from app.services.chapter_cards import chapter_cards_handler
@@ -78,6 +79,23 @@ async def stop_library(library: str) -> None:
     with use_library(library):
         await get_enrichment_worker().stop()
         drop_enrichment_worker()
+
+
+async def remove_library(library: str) -> bool:
+    """Remove *library* from this machine: True if its files are gone now.
+
+    A library this process has served may still have work in flight that would reopen its
+    database, so it is only marked, hidden at once and deleted at the next start.
+    """
+    async with _starting:
+        await libraries.check_removable(library)
+        await asyncio.to_thread(libraries.mark_removed, library)
+        if library in _serving:
+            return False
+        # Listing it opened its engine; nothing else has.
+        await close_library(library)
+        await asyncio.to_thread(libraries.delete_library_files, library)
+        return True
 
 
 async def stop_serving() -> None:

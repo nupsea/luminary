@@ -3799,6 +3799,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/libraries/destinations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Destinations */
+        get: operations["list_destinations_libraries_destinations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/libraries/import": {
         parameters: {
             query?: never;
@@ -3814,6 +3831,58 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/libraries/import-from-folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import From Folder */
+        post: operations["import_from_folder_libraries_import_from_folder_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reveal Archive */
+        post: operations["reveal_archive_libraries_reveal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/libraries/{library}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Library */
+        delete: operations["delete_library_libraries__library__delete"];
+        options?: never;
+        head?: never;
+        /** Update Library */
+        patch: operations["update_library_libraries__library__patch"];
         trace?: never;
     };
     "/libraries/{library}/export": {
@@ -6809,6 +6878,18 @@ export interface components {
             /** Planned Count */
             planned_count: number;
         };
+        /** ArchiveItem */
+        ArchiveItem: {
+            /** Name */
+            name: string;
+            /** Bytes */
+            bytes: number;
+            /**
+             * Modified
+             * Format: date-time
+             */
+            modified: string;
+        };
         /**
          * ArchiveMasteredResponse
          * @description Response schema for POST /flashcards/health/{document_id}/archive-mastered
@@ -6816,6 +6897,13 @@ export interface components {
         ArchiveMasteredResponse: {
             /** Archived */
             archived: number;
+        };
+        /** ArchiveRef */
+        ArchiveRef: {
+            /** Destination */
+            destination: string;
+            /** Name */
+            name: string;
         };
         /** ArmView */
         ArmView: {
@@ -8161,6 +8249,24 @@ export interface components {
             /** Queued */
             queued: number;
         };
+        /** DestinationItem */
+        DestinationItem: {
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /** Archives */
+            archives: components["schemas"]["ArchiveItem"][];
+        };
+        /** DestinationList */
+        DestinationList: {
+            /** Destinations */
+            destinations: components["schemas"]["DestinationItem"][];
+        };
         /** DeviceResponse */
         DeviceResponse: {
             /** Id */
@@ -8885,6 +8991,14 @@ export interface components {
              * @enum {string}
              */
             mode: "define" | "plain" | "eli5" | "analogy" | "formal";
+        };
+        /** ExportRequest */
+        ExportRequest: {
+            /**
+             * Destination
+             * @default exports
+             */
+            destination: string;
         };
         /**
          * FactualityAuditRequest
@@ -9689,6 +9803,20 @@ export interface components {
             /** Page Size */
             page_size: number;
         };
+        /** ImportFromFolder */
+        ImportFromFolder: {
+            /** Destination */
+            destination: string;
+            /** Name */
+            name: string;
+            /** Library */
+            library: string;
+            /**
+             * Activate
+             * @default false
+             */
+            activate: boolean;
+        };
         /**
          * IngestResponse
          * @description Result of POST /documents/ingest.
@@ -9874,12 +10002,27 @@ export interface components {
             /** Notes */
             notes: number;
         };
+        /** LibraryCreate */
+        LibraryCreate: {
+            /** Name */
+            name?: string | null;
+            /** Color */
+            color?: ("slate" | "blue" | "green" | "amber" | "rose" | "violet" | "teal" | "orange") | null;
+            /** Library */
+            library: string;
+        };
         /** LibraryExport */
         LibraryExport: {
             /** Library */
             library: string;
+            /** Destination */
+            destination: string;
+            /** Destination Name */
+            destination_name: string;
             /** Path */
             path: string;
+            /** Name */
+            name: string;
             /** Bytes */
             bytes: number;
             /** Files */
@@ -9901,6 +10044,10 @@ export interface components {
             /** Files */
             files: number;
             contents: components["schemas"]["LibraryContents"];
+            /** Name */
+            name?: string | null;
+            /** Color */
+            color?: ("slate" | "blue" | "green" | "amber" | "rose" | "violet" | "teal" | "orange") | null;
         };
         /** LibraryItem */
         LibraryItem: {
@@ -9910,6 +10057,11 @@ export interface components {
             active: boolean;
             /** Bytes */
             bytes: number;
+            /** Name */
+            name?: string | null;
+            /** Color */
+            color?: ("slate" | "blue" | "green" | "amber" | "rose" | "violet" | "teal" | "orange") | null;
+            contents?: components["schemas"]["LibraryContents"] | null;
         };
         /** LibraryList */
         LibraryList: {
@@ -9922,6 +10074,20 @@ export interface components {
         LibraryName: {
             /** Library */
             library: string;
+        };
+        /** LibraryProfile */
+        LibraryProfile: {
+            /** Name */
+            name?: string | null;
+            /** Color */
+            color?: ("slate" | "blue" | "green" | "amber" | "rose" | "violet" | "teal" | "orange") | null;
+        };
+        /** LibraryRemoved */
+        LibraryRemoved: {
+            /** Library */
+            library: string;
+            /** Removed Now */
+            removed_now: boolean;
         };
         /** LibrarySummarizeRequest */
         LibrarySummarizeRequest: {
@@ -18703,7 +18869,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["LibraryName"];
+                "application/json": components["schemas"]["LibraryCreate"];
             };
         };
         responses: {
@@ -18760,6 +18926,26 @@ export interface operations {
             };
         };
     };
+    list_destinations_libraries_destinations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DestinationList"];
+                };
+            };
+        };
+    };
     import_library_libraries_import_post: {
         parameters: {
             query?: never;
@@ -18793,7 +18979,71 @@ export interface operations {
             };
         };
     };
-    export_library_libraries__library__export_post: {
+    import_from_folder_libraries_import_from_folder_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportFromFolder"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryImport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reveal_archive_libraries_reveal_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveRef"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_library_libraries__library__delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -18803,6 +19053,76 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryRemoved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_library_libraries__library__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                library: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LibraryProfile"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_library_libraries__library__export_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                library: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ExportRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

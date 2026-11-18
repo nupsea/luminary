@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   LIBRARY_MARKER_KEY,
+  forgetLibrary,
   libraryScopedStorage,
   rememberLibrary,
   scopedKey,
@@ -52,5 +53,23 @@ describe("libraryScope", () => {
     scoped.removeItem("k")
     expect(raw.map.get("k")).toBe("a")
     expect(raw.map.has("k@work")).toBe(false)
+  })
+
+  it("forgets a removed library's state and no other library's", () => {
+    const store = memoryStorage()
+    for (const key of ["luminary-app-store", "luminary-app-store@kids", "recent@kids", "luminary-app-store@my-kids"]) {
+      store.setItem(key, "{}")
+    }
+    const storage = {
+      ...store,
+      get length() {
+        return store.map.size
+      },
+      key: (i: number) => [...store.map.keys()][i] ?? null,
+    }
+    forgetLibrary(storage, "kids")
+    expect([...store.map.keys()].sort()).toEqual(["luminary-app-store", "luminary-app-store@my-kids"])
+    forgetLibrary(storage, "default")
+    expect(store.map.size).toBe(2)
   })
 })

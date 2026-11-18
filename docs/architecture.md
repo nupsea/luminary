@@ -80,9 +80,14 @@ previous library's work running.
 
 A library's snapshot is one archive of its root (`services/library_snapshot.py`, #390); a
 folder joined onto `library_root()` must be listed in `storage.LIBRARY_FILE_DIRS` to be carried.
-Settings exports one to `~/Luminary Exports/` and imports one as a new library, never over an
-existing one (`routers/libraries.py`); the frontend keeps library-scoped browser state per
-library (`lib/libraryScope.ts`). Its vectors are derived from its database: a re-embed
+A library's name and colour are the `library_profile` setting inside it, so they travel with an
+export. An export goes to `~/Luminary Exports/` or a sync service's folder
+(`services/sync_folders.py`), built under `machine_root()/downloads` and renamed in finished; an
+import is a new library, never over an existing one (`routers/libraries.py`). Requests name an
+archive by destination id and listed file name, never by path. A removed library that this
+process has served is marked `.removed` and deleted at the next startup, since its in-flight work
+could reopen its database. The frontend keeps library-scoped browser state per library
+(`lib/libraryScope.ts`). Its vectors are derived from its database: a re-embed
 (`services/reembed.py`) rebuilds every table beside the live folder, resumes a killed run, and
 swaps the rebuild in once it matches.
 

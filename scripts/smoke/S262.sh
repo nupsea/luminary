@@ -9,6 +9,9 @@
 #      and `active` names it
 #   2. Switching to a library that does not exist is 404; a name no library can have is 422
 #   3. An upload that is not a snapshot is refused (422) and leaves no library behind
+#   4. GET /libraries/destinations lists the export folder first; an archive or destination
+#      it does not list is 404, so no request reaches another file
+#   5. The default library cannot be removed (422); renaming a missing library is 404
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
@@ -64,6 +67,33 @@ check "POST /libraries/import of a file that is not a snapshot" "422" \
     "$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/libraries/import" \
         -F "file=@$NOT_A_SNAPSHOT;type=application/gzip" -F "library=smoke-refused-import")"
 check "a refused import leaves the library list as it was" "$BEFORE" "$(listed)"
+
+# 4. Export destinations
+DESTS=$(curl -s -w "\n%{http_code}" "$BASE/libraries/destinations")
+check "GET /libraries/destinations responds" "200" "$(echo "$DESTS" | tail -1)"
+check "GET /libraries/destinations lists the export folder first" "ok" "$(echo "$DESTS" | sed '$d' | python3 -c '
+import json, sys
+dests = json.load(sys.stdin)["destinations"]
+ok = dests and dests[0]["id"] == "exports" and all(
+    isinstance(d["archives"], list) and d["path"] for d in dests
+)
+print("ok" if ok else "bad")
+')"
+check "POST /libraries/import-from-folder from an unknown destination" "404" \
+    "$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/libraries/import-from-folder" \
+        -H "Content-Type: application/json" \
+        -d '{"destination": "smoke-nowhere", "name": "x.tar.gz", "library": "smoke-refused"}')"
+check "POST /libraries/reveal of a file no destination lists" "404" \
+    "$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/libraries/reveal" \
+        -H "Content-Type: application/json" -d '{"destination": "exports", "name": "../x.tar.gz"}')"
+
+# 5. Removing and renaming what cannot be
+check "DELETE /libraries/default" "422" \
+    "$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$BASE/libraries/default")"
+check "PATCH /libraries of a missing library" "404" \
+    "$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "$BASE/libraries/smoke-no-such-library" \
+        -H "Content-Type: application/json" -d '{"name": "x"}')"
+check "the library list is still as it was" "$BEFORE" "$(listed)"
 
 if [ "$FAIL" -ne 0 ]; then
     echo "S262: FAILED"

@@ -19,8 +19,8 @@ export function openLibrary(library: string): void {
   window.location.reload()
 }
 
-/** The backend's active library. A page holding another library's browser state reloads. */
-export function useActiveLibrary(): string | null {
+/** The libraries on this machine. A page holding another library's browser state reloads. */
+export function useLibraries(): LibraryList | undefined {
   const { data } = useQuery({
     queryKey: LIBRARIES_KEY,
     queryFn: fetchLibraries,
@@ -32,5 +32,5 @@ export function useActiveLibrary(): string | null {
   useEffect(() => {
     if (active !== null && active !== storedLibrary(localStorage)) openLibrary(active)
   }, [active])
-  return active
+  return data
 }

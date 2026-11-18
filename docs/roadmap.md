@@ -1158,9 +1158,9 @@ lines with their own copies of manifest, search and history plumbing.
   LanceDB directory mid-write produces a corrupt library on the other machine. What syncs is 0.17.0's
   snapshot format, with the live stores rebuilt from it. Two machines that both studied offline have
   divergent FSRS state, and last-writer-wins silently discards a review session.
-  **Built, one way only:** switching between libraries on a machine, and moving one by export and
-  import in Settings → Libraries (`routers/libraries.py`, `tests/test_libraries.py`). An import is a
-  new library; nothing merges two copies.
+  **Built, one way only:** named libraries switched from the sidebar, and moving one as an archive
+  through a sync service's folder (`routers/libraries.py`, `services/sync_folders.py`,
+  `tests/test_libraries.py`). An import is a new library; nothing merges two copies.
 - **Hosted multi-tenant, the paid tier** — after 1.0. 0.17.0 builds the seams it needs; fairness
   across tenants, billing and a tenancy UI are its own work.
 - **The learner model** — `learner-model-plan.md`. Lumen reads the measured record (retention,

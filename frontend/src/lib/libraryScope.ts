@@ -33,3 +33,15 @@ export function libraryScopedStorage(storage: KeyValueStore): KeyValueStore {
     removeItem: (name) => storage.removeItem(scopedKey(name, library())),
   }
 }
+
+/** Drop a removed library's browser state, so a library given its id later starts clean. */
+export function forgetLibrary(storage: Pick<Storage, "length" | "key" | "removeItem">, library: string): void {
+  if (library === DEFAULT_LIBRARY) return
+  const suffix = `@${library}`
+  const keys: string[] = []
+  for (let i = 0; i < storage.length; i++) {
+    const key = storage.key(i)
+    if (key?.endsWith(suffix)) keys.push(key)
+  }
+  keys.forEach((key) => storage.removeItem(key))
+}

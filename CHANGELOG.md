@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Switch between libraries, and move one to another computer.** Settings → Libraries opens, creates, exports and imports libraries; an export is one archive in `~/Luminary Exports/`, imported as a new library only after every file passes its hash. The two copies do not sync.
+- **Libraries: keep several, switch from the sidebar, move one to another computer.** Name and colour libraries (personal, work, the kids'), switch from the tile atop the sidebar, and export one into iCloud Drive, Dropbox, Google Drive, OneDrive or Box, where the other computer lists it for import. An import is checked file by file; the two copies do not sync.
 
 ## [0.18.0] - 2026-11-18
 

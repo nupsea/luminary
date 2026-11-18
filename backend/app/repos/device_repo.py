@@ -6,7 +6,7 @@ import uuid
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session_factory
@@ -37,6 +37,15 @@ class DeviceRepo:
             select(DeviceModel).order_by(DeviceModel.created_at.desc())
         )
         return result.scalars().all()
+
+    async def count_in(self, library: str) -> int:
+        """Devices still paired into *library*."""
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(DeviceModel)
+            .where(DeviceModel.library == library, DeviceModel.revoked_at.is_(None))
+        )
+        return int(result.scalar_one())
 
     async def by_token_hash(self, token_hash: str) -> DeviceModel | None:
         result = await self.session.execute(
