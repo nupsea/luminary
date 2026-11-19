@@ -61,6 +61,36 @@ def test_a_numbered_heading_overrides_the_authored_level():
     assert result[0]["level"] == 3
 
 
+def test_a_chapter_stays_above_its_parts():
+    """#516: an O'Reilly chapter's sect1 "Part 1: ..." was stored at 1, above its chapter."""
+    sections = [
+        {"heading": "Chapter 2. Agent Building Blocks", "level": 1},
+        {"heading": "Part 1: Planning", "level": 2},
+        {"heading": "Task Decomposition", "level": 3},
+        {"heading": "Part 2: Memory", "level": 2},
+    ]
+    result = assign_parent_headings_dicts(sections)
+
+    assert [s["level"] for s in result] == [1, 2, 3, 2]
+    assert [s["parent_index"] for s in result] == [None, 0, 1, 0]
+
+
+def test_marks_rebuild_a_flat_source_and_fill_a_missing_level():
+    flat = [
+        {"heading": "Part I Foundations", "level": 1},
+        {"heading": "Chapter 1 Basics", "level": 1},
+        {"heading": "1.1 Overview", "level": 1},
+    ]
+    assert [s["level"] for s in assign_parent_headings_dicts(flat)] == [1, 2, 3]
+
+    missing = [
+        {"heading": "Chapter 1 Basics", "level": 1},
+        {"heading": "Background", "level": 2},
+        {"heading": "1.1 Overview"},
+    ]
+    assert [s["level"] for s in assign_parent_headings_dicts(missing)] == [1, 2, 3]
+
+
 def test_numbered_hierarchy_levels_and_parent_chain():
     sections = [
         {"heading": "Part I Introduction", "text": "Part text"},
