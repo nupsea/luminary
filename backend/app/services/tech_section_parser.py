@@ -78,9 +78,7 @@ def assign_parent_headings_dicts(sections: list[dict]) -> list[dict]:
     stated = len({s["level"] for s in sections if s.get("level")}) > 1
 
     for i, s in enumerate(sections):
-        parsed = s.get("level")
-        mark = None if stated and parsed else classify_section_level(s.get("heading", ""))
-        level = mark or parsed or 2
+        level = _level(s, stated)
         s["level"] = level
 
         parent = stack.get(level - 1)
@@ -92,6 +90,13 @@ def assign_parent_headings_dicts(sections: list[dict]) -> list[dict]:
             del stack[deeper]
 
     return sections
+
+
+def _level(section: dict, stated: bool) -> int:
+    parsed = section.get("level")
+    if stated and parsed:
+        return parsed
+    return classify_section_level(section.get("heading", "")) or parsed or 2
 
 
 # Learning objective candidate detection
