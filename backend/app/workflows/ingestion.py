@@ -10,6 +10,7 @@ from app.database import get_session_factory
 from app.models import DocumentModel
 from app.repos.document_repo import DocumentRepo
 from app.services.document_deletion_service import get_document_deletion_service
+from app.services.enrichment_outcome import for_document
 from app.services.ingestion_jobs import get_ingestion_jobs
 from app.telemetry import trace_chain
 from app.types import MEDIA_FORMATS
@@ -232,7 +233,9 @@ async def _run_graph(initial_state: IngestionState) -> None:
         root_span.set_attribute("ingestion.document_id", document_id)
         root_span.set_attribute("ingestion.format", format)
         try:
-            await ingestion_graph.ainvoke(initial_state)
+            # Follow-up summaries and tags are tasks started in here, so they inherit it.
+            with for_document(document_id):
+                await ingestion_graph.ainvoke(initial_state)
             root_span.set_attribute("output.value", "complete")
             logger.info("Ingestion task complete", extra={"document_id": document_id})
         except Exception as exc:

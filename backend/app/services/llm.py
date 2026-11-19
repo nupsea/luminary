@@ -11,6 +11,7 @@ import re
 import socket
 import warnings
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from typing import Any
 
 import litellm
@@ -97,6 +98,109 @@ def missing_model_from(exc: BaseException) -> str | None:
             return match.group(1)
         cur = cur.__cause__ or cur.__context__
     return None
+
+
+# A refused cloud call is retried on the same model after the delay the provider states.
+# Bounded by the cases that decide it: a per-minute window never asks for more than 60 s
+# (Gemini's free tier said 12 s), and a daily quota is never waited for, whatever delay it
+# names (it said 31 s with 20 requests a day used up, #514).
+_MAX_REFUSAL_WAIT_S = 60.0
+_REFUSAL_RETRIES = 2
+# An overloaded provider names no delay; a short pause, not a backoff schedule.
+_UNSTATED_WAIT_S = 5.0
+_pause = asyncio.sleep  # a test's clock
+
+# The structured field first: Gemini's prose rounds differently ("retry in 12.4s" beside 12s).
+_RETRY_DELAY_RES = (
+    re.compile(r"""retryDelay["']?\s*:\s*["']?(\d+(?:\.\d+)?)s"""),
+    re.compile(r"(?:retry|try again) in (\d+(?:\.\d+)?)\s*s", re.IGNORECASE),
+)
+_DAILY_QUOTA_RE = re.compile(r"PerDay|per\s+day|daily", re.IGNORECASE)
+_SPENT_QUOTA_RE = re.compile(r"insufficient_quota|billing|credit", re.IGNORECASE)
+# The status inside a body, for a 429 a gateway wrapped in a 5xx envelope.
+_BODY_429_RE = re.compile(r"RESOURCE_EXHAUSTED|[\"']code[\"']\s*:\s*429")
+_OVERLOADED_RE = re.compile(r"overloaded|[\"']UNAVAILABLE[\"']|[\"']code[\"']\s*:\s*503")
+
+
+@dataclass(frozen=True)
+class Refusal:
+    """A provider that answered and declined: "quota", "rate_limit" or "overloaded"."""
+
+    kind: str
+    retry_after: float | None
+
+
+def _chain(exc: BaseException) -> list[BaseException]:
+    seen: list[BaseException] = []
+    cur: BaseException | None = exc
+    while cur is not None and cur not in seen:
+        seen.append(cur)
+        cur = cur.__cause__ or cur.__context__
+    return seen
+
+
+def _stated_delay(exc: BaseException, text: str) -> float | None:
+    headers = getattr(exc, "litellm_response_headers", None) or {}
+    try:
+        return float(headers.get("retry-after") or headers.get("Retry-After"))
+    except (TypeError, ValueError, AttributeError):
+        pass
+    for pattern in _RETRY_DELAY_RES:
+        if match := pattern.search(text):
+            return float(match.group(1))
+    return None
+
+
+def provider_refusal(exc: BaseException) -> Refusal | None:
+    """How a cloud provider declined the call, or None when it was not a refusal.
+
+    By the body as well as the type: litellm raised ServiceUnavailableError for a
+    quota refusal, and a gateway may wrap a 429 in a 5xx.
+    """
+    chain = _chain(exc)
+    text = " ".join(str(e) for e in chain)
+    delay = _stated_delay(exc, text)
+    if any(isinstance(e, LLMRateLimitError) for e in chain) or _BODY_429_RE.search(text):
+        if _DAILY_QUOTA_RE.search(text) or (delay is None and _SPENT_QUOTA_RE.search(text)):
+            return Refusal("quota", None)
+        return Refusal("rate_limit", delay)
+    if any(isinstance(e, (socket.gaierror, ConnectionError)) for e in chain):
+        return None
+    if any(isinstance(e, LLMServiceUnavailableError) for e in chain) or _OVERLOADED_RE.search(text):
+        return Refusal("overloaded", delay)
+    return None
+
+
+def _refusal_wait(refusal: Refusal | None, attempt: int) -> float | None:
+    """Seconds to wait before asking the same model again, or None to stop asking."""
+    if refusal is None or refusal.kind == "quota" or attempt >= _REFUSAL_RETRIES:
+        return None
+    wait = refusal.retry_after if refusal.retry_after is not None else _UNSTATED_WAIT_S
+    return wait if wait <= _MAX_REFUSAL_WAIT_S else None
+
+
+def describe_llm_failure(exc: BaseException, model: str) -> str:
+    """One sentence for the user on why a call to *model* failed."""
+    refusal = provider_refusal(exc)
+    if refusal is not None:
+        return {
+            "quota": f"{model} refused the calls: its quota is used up",
+            "rate_limit": f"{model} refused the calls: too many requests (rate limit)",
+            "overloaded": f"{model} refused the calls: the provider is overloaded",
+        }[refusal.kind]
+    if _is_offline_error(exc):
+        return f"{model} could not be reached"
+    return f"{model} failed ({type(exc).__name__})"
+
+
+def _local_inference_supported() -> bool:
+    try:
+        from app.host_support import local_inference_support  # noqa: PLC0415
+
+        return local_inference_support().supported
+    except Exception:
+        logger.debug("local inference support check failed", exc_info=True)
+        return True
 
 
 def _local_model(settings: Settings) -> str:
@@ -273,6 +377,10 @@ class LLMService:
             return None
         if effective_model.startswith("ollama/"):
             return None
+        # A CPU-only server has no local model: the retry only turned a provider's
+        # refusal into "cannot connect to 127.0.0.1:11434" (#514).
+        if not _local_inference_supported():
+            return None
 
         local_model = _local_model(settings)
 
@@ -304,6 +412,8 @@ class LLMService:
         if requested_model is not None or not is_cloud_model(effective_model):
             return effective_model, None, False
         if await asyncio.to_thread(provider_reachable, effective_model):
+            return effective_model, None, False
+        if not _local_inference_supported():
             return effective_model, None, False
 
         local_model = _local_model(settings)
@@ -383,6 +493,8 @@ class LLMService:
         Caller controls message shape (multi-turn, system+user, multimodal vision).
         Telemetry span and Langfuse logging are applied uniformly.
         """
+        from app.services.connectivity import is_cloud_model  # noqa: PLC0415
+
         settings = get_settings()
         effective_model, override_key = self._resolve_model(model, background=background)
         effective_model, override_key, _ = await self._reroute_if_offline(
@@ -409,29 +521,32 @@ class LLMService:
             kwargs.update(extra)
 
         with trace_llm_call("complete", model=effective_model) as span:
-            try:
-                async with admit(effective_model, background=background):
-                    response = await litellm.acompletion(**kwargs)
-            except Exception as exc:
-                retry = (
-                    self._offline_fallback_kwargs(
-                        model, effective_model, kwargs, settings, num_ctx=num_ctx
+            attempt = 0
+            while True:
+                try:
+                    async with admit(effective_model, background=background):
+                        response = await litellm.acompletion(**kwargs)
+                    break
+                except Exception as exc:
+                    refusal = provider_refusal(exc) if is_cloud_model(effective_model) else None
+                    wait = _refusal_wait(refusal, attempt)
+                    if refusal is not None and wait is not None:
+                        attempt += 1
+                        logger.warning(
+                            "%s refused the call (%s); asking again in %.0fs (%d/%d)",
+                            effective_model,
+                            refusal.kind,
+                            wait,
+                            attempt,
+                            _REFUSAL_RETRIES,
+                        )
+                        await _pause(wait)
+                        continue
+                    response, effective_model = await self._fall_back(
+                        exc, refusal, model, effective_model, kwargs, settings, num_ctx, background
                     )
-                    if _is_offline_error(exc)
-                    else None
-                )
-                if retry is None:
-                    raise
-                logger.warning(
-                    "%s unreachable (%s); retrying on local model %s",
-                    effective_model,
-                    type(exc).__name__,
-                    retry["model"],
-                )
-                effective_model = retry["model"]
-                span.set_attribute("llm.offline_fallback", True)
-                async with admit(effective_model, background=background):
-                    response = await litellm.acompletion(**retry)
+                    span.set_attribute("llm.offline_fallback", True)
+                    break
             content = response.choices[0].message.content or ""
             usage = getattr(response, "usage", None)
             prompt_tokens = 0
@@ -444,6 +559,50 @@ class LLMService:
         prompt_text = _messages_to_text(messages)
         _log_to_langfuse(effective_model, prompt_text, content, prompt_tokens, completion_tokens)
         return content
+
+    async def _fall_back(
+        self,
+        exc: Exception,
+        refusal: Refusal | None,
+        requested_model: str | None,
+        effective_model: str,
+        kwargs: dict,
+        settings: Settings,
+        num_ctx: int | None,
+        background: bool,
+    ) -> tuple[Any, str]:
+        """The local model's response to a call the cloud could not serve, else *exc*."""
+        offline = _is_offline_error(exc) and (refusal is None or refusal.kind == "overloaded")
+        retry = (
+            self._offline_fallback_kwargs(
+                requested_model, effective_model, kwargs, settings, num_ctx=num_ctx
+            )
+            if offline
+            else None
+        )
+        if retry is None:
+            if refusal is not None:
+                logger.warning("%s refused the call (%s)", effective_model, refusal.kind)
+            await _note_document_failure(exc, effective_model)
+            raise exc
+        logger.warning(
+            "%s %s (%s); retrying on local model %s",
+            effective_model,
+            "is overloaded" if refusal is not None else "unreachable",
+            type(exc).__name__,
+            retry["model"],
+        )
+        response = None
+        try:
+            async with admit(retry["model"], background=background):
+                response = await litellm.acompletion(**retry)
+        except Exception:
+            logger.warning("local model %s failed too", retry["model"], exc_info=True)
+        if response is None:
+            # The provider's reason, not the fallback's, is what the user can act on.
+            await _note_document_failure(exc, effective_model)
+            raise exc
+        return response, retry["model"]
 
     async def stream_messages(
         self,
@@ -537,7 +696,12 @@ class LLMService:
             try:
                 response = await litellm.acompletion(stream=True, **kwargs)
             except Exception as exc:
-                if fallback_kwargs is None or not _is_offline_error(exc):
+                refusal = provider_refusal(exc)
+                if (
+                    fallback_kwargs is None
+                    or not _is_offline_error(exc)
+                    or (refusal is not None and refusal.kind != "overloaded")
+                ):
                     raise
                 logger.warning(
                     "%s unreachable while streaming (%s); retrying on local model %s",
@@ -585,6 +749,12 @@ class TokenStream:
 
     async def aclose(self) -> None:
         await self._gen.aclose()
+
+
+async def _note_document_failure(exc: BaseException, model: str) -> None:
+    from app.services.enrichment_outcome import record_failure  # noqa: PLC0415
+
+    await record_failure(describe_llm_failure(exc, model))
 
 
 def _messages_to_text(messages: list[dict]) -> str:

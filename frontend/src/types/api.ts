@@ -8308,6 +8308,8 @@ export interface components {
             extraction_report?: {
                 [key: string]: unknown;
             } | null;
+            /** Enrichment Notice */
+            enrichment_notice?: string | null;
             /** Word Count */
             word_count: number;
             /** Page Count */

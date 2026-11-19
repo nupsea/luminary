@@ -499,6 +499,8 @@ interface ReadViewProps {
   /** What the importer captured and what it could not. Undefined means fidelity
    *  was never measured for this document, which is not the same as clean. */
   extractionReport?: ExtractionReport | null
+  /** Why summaries or cards are missing, while they still are: a refused model call. */
+  enrichmentNotice?: string | null
   /** Needed to re-render the page on a re-import; absent for non-URL sources. */
   sourceUrl?: string | null
   /** In-document search term, marked in the body. Empty when search is closed. */
@@ -529,6 +531,7 @@ export function ReadView({
   form,
   structureType,
   extractionReport,
+  enrichmentNotice,
   sourceUrl,
   searchTerm = "",
   citationWords = EMPTY_WORDS,
@@ -983,6 +986,14 @@ export function ReadView({
             documentId={documentId}
             sourceUrl={sourceUrl}
           />
+          {enrichmentNotice && (
+            <p
+              role="status"
+              className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
+            >
+              {enrichmentNotice}
+            </p>
+          )}
           {degradedCount > 0 && (
             <div className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
               <p>
