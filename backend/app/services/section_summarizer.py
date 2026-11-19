@@ -16,6 +16,7 @@ from app.models import SectionModel, SectionSummaryModel
 from app.repos.document_repo import DocumentRepo
 from app.repos.enrichment_repo import EnrichmentRepo
 from app.repos.summary_repo import SummaryRepo
+from app.services.enrichment_outcome import for_document
 from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.llm import LLMUnavailableError, get_llm_service
 
@@ -503,10 +504,11 @@ async def resummarize_documents_missing_summaries(limit: int = 20) -> int:
         if get_ingestion_jobs().has_work(doc_id):
             continue
         try:
-            if await get_section_summarizer_service().resume(doc_id):
-                repaired += 1
-                # Key points built before the repair saw only the sections then done.
-                await get_summarization_service().pregenerate(doc_id, refresh=True)
+            with for_document(doc_id):
+                if await get_section_summarizer_service().resume(doc_id):
+                    repaired += 1
+                    # Key points built before the repair saw only the sections then done.
+                    await get_summarization_service().pregenerate(doc_id, refresh=True)
         except Exception as exc:
             logger.warning(
                 "section summary repair failed (non-fatal): %s", exc, extra={"doc_id": doc_id}

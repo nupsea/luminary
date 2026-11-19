@@ -68,6 +68,29 @@ rather than restating it: two wordings about what leaves the machine are two thi
   library's database, which a snapshot or a second user could carry away.
   `tests/test_library_preferences.py` holds both.
 
+## A cloud call that fails
+
+`LLMService.complete` (`services/llm.py`) tells a provider that declined apart from one it could
+not reach, by the error body as well as its type: litellm raised `ServiceUnavailableError` for
+Gemini's daily quota, and a gateway can wrap a 429 in a 5xx (`provider_refusal`).
+
+| Failure | What happens |
+|---|---|
+| Rate limit, overloaded | Asked again on the same model after the delay it states (5 s if none), at most twice, and only when the delay is 60 s or less |
+| Quota used up (a daily window, or billing) | Not waited for and not sent to the local model; raised |
+| Unreachable, or still overloaded | Retried on the local model only where `local_inference_support()` allows it; a CPU-only server raises the provider's own error |
+
+The 60 s bound comes from the two cases that decide it: a per-minute window never asks for more
+(Gemini's free tier said 12 s), and a daily quota named 31 s with nothing left until the next day.
+Streams are not asked again, only kept from falling back on a refusal.
+
+Summaries, tags and cards treat a failed call as non-fatal, so a refusing provider once left a
+document `complete` with none of them (#514). Ingestion, enrichment jobs and the startup summary
+repair run under `enrichment_outcome.for_document`; a call that finally fails there writes its
+reason to the document's `extraction_report`, and `GET /documents/{id}` returns
+`enrichment_notice` while summaries are missing or its chapter cards failed. The reader shows it.
+`tests/test_llm_provider_refusal.py` holds each row.
+
 ## Latency: what the cloud buys
 
 `make measure-ttft` reads the figure each answer's receipt reports, so a quoted number is the one a

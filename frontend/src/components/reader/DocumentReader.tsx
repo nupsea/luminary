@@ -1683,6 +1683,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 form={doc.facets?.form}
                 structureType={doc.structure_type}
                 extractionReport={doc.extraction_report}
+                enrichmentNotice={doc.enrichment_notice}
                 sourceUrl={doc.source_url}
                 searchTerm={searchOpen ? searchTerm : ""}
                 citationWords={citationWords}

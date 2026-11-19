@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **A technical document keeps the levels its source states.** A chapter whose sections are titled "Part 1", "Part 2" stays above them instead of below, and a PDF's "4.1" sits under its "4"; a heading's "Part N" or "1.1" mark sets its level only in a source with flat or missing levels. Existing documents change when re-imported (#516).
+- **A cloud provider that refuses calls no longer leaves a document looking enriched.** A rate limit or an overloaded provider is asked again after the delay it states; a used-up quota is named as one, never as "unreachable", and is not sent to a local model a CPU-only server does not have. A document left without summaries or chapter cards says why in the reader (#514).
 
 ### Added
 - **Spaces: keep several, switch from the sidebar, move one to another computer.** A space is a whole library of its own. Name and colour spaces (personal, work, the kids'), switch from the tile atop the sidebar, and export one into iCloud Drive, Dropbox, Google Drive, OneDrive or Box, where the other computer lists it for import. An import is checked file by file; the two copies do not sync.

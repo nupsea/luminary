@@ -19,6 +19,7 @@ from app.models import EnrichmentJobModel
 from app.repos.document_repo import DocumentRepo
 from app.repos.enrichment_repo import EnrichmentRepo
 from app.services.components import component_for_model
+from app.services.enrichment_outcome import for_document
 from app.services.llm import LLMUnavailableError, missing_model_from
 from app.services.llm_admission import unattended
 
@@ -285,7 +286,8 @@ class EnrichmentQueueWorker:
             return
 
         try:
-            await self._invoke_with_backoff(handler, document_id, job_id)
+            with for_document(document_id):
+                await self._invoke_with_backoff(handler, document_id, job_id)
             await _update_job(job_id, status="done", completed_at=datetime.now(UTC))
             logger.info("EnrichmentQueueWorker: job done job_id=%s doc=%s", job_id, document_id)
         except LLMUnavailableError as exc:

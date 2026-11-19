@@ -73,8 +73,8 @@ from app.schemas.documents import (
     YouTubeIngestRequest,
 )
 from app.schemas.membership import CollectionRef
+from app.services import enrichment_outcome, ingestion_progress, network_errors
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched in tests
-from app.services import ingestion_progress, network_errors
 from app.services.activity_service import ActivityService
 from app.services.article_extractor import get_article_extractor
 from app.services.connectors import connector_for_url
@@ -666,9 +666,7 @@ async def ingest_url(
 
     try:
         extractor = get_article_extractor()
-        parsed = await extractor.extract(
-            body.url, doc_id=doc_id, rendered_html=body.rendered_html
-        )
+        parsed = await extractor.extract(body.url, doc_id=doc_id, rendered_html=body.rendered_html)
     except Exception as exc:
         logger.exception("Article extraction failed for %s", body.url)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -753,6 +751,7 @@ async def get_document(document_id: str):
         # a section's label is by definition its first chunk's. Empty for a
         # document whose sheets and printed pages agree, which is most of them.
         label_rows = await repo.chunk_page_labels(document_id)
+        unenriched = await enrichment_outcome.notice(session, doc)
         section_page_labels: dict[str, str] = {}
         # A section's printed page is the one its *first* chunk sits on. Labels
         # are stored only where they differ from the sheet, so filtering to
@@ -785,6 +784,7 @@ async def get_document(document_id: str):
         is_favorite=bool(doc.is_favorite),
         structure_type=doc.structure_type,
         extraction_report=doc.extraction_report,
+        enrichment_notice=unenriched,
         word_count=doc.word_count,
         page_count=doc.page_count,
         stage=doc.stage,

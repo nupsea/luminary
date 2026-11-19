@@ -147,6 +147,8 @@ class DocumentDetail(BaseModel):
     # What the importer captured and what it could not. Null means fidelity was
     # never measured for this document -- which is not the same as a clean import.
     extraction_report: dict | None = None
+    # Summaries or cards a refused model call left unwritten, while still missing (#514).
+    enrichment_notice: str | None = None
     word_count: int
     page_count: int
     stage: str
