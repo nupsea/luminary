@@ -233,7 +233,8 @@ jobs:
           Start-Sleep -Seconds 10
           "the watcher recorded the canary exit: $(Select-String -Path $log -Pattern 'exit=0x00000003' -Quiet)"
           Get-Content "$log.err" -ErrorAction Continue
-          uv run --with pytest-xdist==3.8.0 pytest -n logical --dist loadfile --max-worker-restart=0
+          # --durations: how close the in-process ingest tests run to the 120 s timeout here.
+          uv run --with pytest-xdist==3.8.0 pytest -n logical --dist loadfile --max-worker-restart=0 --durations=30
           $suite = $LASTEXITCODE
           Start-Sleep -Seconds 10
           exit $suite
