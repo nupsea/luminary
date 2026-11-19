@@ -33,6 +33,8 @@ _SERVICES = (
     ("OneDrive", "onedrive", "OneDrive"),
     ("Box", "box", "Box"),
 )
+# SharePoint sites OneDrive mirrors: their root holds one folder per site, nothing of the user's.
+_NOT_A_DRIVE = ("OneDrive-SharedLibraries",)
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,8 @@ def _subdirs(parent: Path) -> list[Path]:
 
 
 def _service(entry: Path) -> Destination | None:
+    if entry.name.startswith(_NOT_A_DRIVE):
+        return None
     for prefix, kind, service in _SERVICES:
         # Windows names a work OneDrive "OneDrive - <organisation>".
         if entry.name == prefix or entry.name.startswith((f"{prefix}-", f"{prefix} -")):

@@ -231,6 +231,7 @@ def _sync_home(home: Path) -> dict[str, Path]:
         "dropbox": storage / "Dropbox",
         "google-drive": storage / "GoogleDrive-reader@example.com" / "My Drive",
         "onedrive": storage / "OneDrive-Personal",
+        "sharepoint": storage / "OneDrive-SharedLibraries-Contoso",
     }
     for folder in folders.values():
         folder.mkdir(parents=True)
