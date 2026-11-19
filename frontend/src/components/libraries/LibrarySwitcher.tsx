@@ -1,8 +1,8 @@
-// The open library, at the top of the rail: its tile opens a list to switch libraries.
+// The open space, at the top of the rail: its tile opens a list to switch spaces.
 
 import { useEffect, useRef, useState } from "react"
 import { useMutation } from "@tanstack/react-query"
-import { Check, Library, Settings2 } from "lucide-react"
+import { Check, Layers, Settings2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -29,7 +29,7 @@ export function LibrarySwitcher() {
   const switchTo = useMutation({
     mutationFn: (library: string) => apiPut<LibraryList>("/libraries/active", { library }),
     onSuccess: (list) => openLibrary(list.active),
-    onError: (err) => toast.error(detailFromError(err, "Could not open that library").message),
+    onError: (err) => toast.error(detailFromError(err, "Could not open that space").message),
   })
 
   useEffect(() => {
@@ -47,7 +47,7 @@ export function LibrarySwitcher() {
     }
   }, [open])
 
-  // A paired device is refused the list: it has no libraries to switch.
+  // A paired device is refused the list: it has no spaces to switch.
   if (!data) return null
   const active = data.libraries.find((l) => l.active)
 
@@ -59,12 +59,12 @@ export function LibrarySwitcher() {
           setAnchor(button.current?.getBoundingClientRect() ?? null)
           setOpen((o) => !o)
         }}
-        title={active ? `Library: ${libraryTitle(active)}` : "Libraries"}
-        aria-label="Switch library"
+        title={active ? `Space: ${libraryTitle(active)}` : "Spaces"}
+        aria-label="Switch space"
         aria-expanded={open}
         className="mb-2 rounded-xl p-1 transition-colors hover:bg-accent"
       >
-        {active ? <LibraryTile item={active} /> : <Library size={18} />}
+        {active ? <LibraryTile item={active} /> : <Layers size={18} />}
       </button>
 
       {open && anchor && (
@@ -75,7 +75,7 @@ export function LibrarySwitcher() {
           className="fixed z-50 w-64 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-lg"
         >
           <p className="px-2 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Libraries
+            Spaces
           </p>
           {data.libraries.map((lib) => (
             <button
@@ -115,8 +115,8 @@ export function LibrarySwitcher() {
       <Dialog open={managing} onOpenChange={setManaging}>
         <DialogContent className="max-h-[85vh] max-w-xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Libraries</DialogTitle>
-            <DialogDescription className="sr-only">Create, rename, open, remove and move libraries.</DialogDescription>
+            <DialogTitle>Spaces</DialogTitle>
+            <DialogDescription className="sr-only">Create, rename, open, remove and move spaces.</DialogDescription>
           </DialogHeader>
           <LibraryManager />
         </DialogContent>

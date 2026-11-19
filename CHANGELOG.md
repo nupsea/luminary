@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Libraries: keep several, switch from the sidebar, move one to another computer.** Name and colour libraries (personal, work, the kids'), switch from the tile atop the sidebar, and export one into iCloud Drive, Dropbox, Google Drive, OneDrive or Box, where the other computer lists it for import. An import is checked file by file; the two copies do not sync.
+- **Spaces: keep several, switch from the sidebar, move one to another computer.** A space is a whole library of its own. Name and colour spaces (personal, work, the kids'), switch from the tile atop the sidebar, and export one into iCloud Drive, Dropbox, Google Drive, OneDrive or Box, where the other computer lists it for import. An import is checked file by file; the two copies do not sync.
 
 ## [0.18.0] - 2026-11-18
 

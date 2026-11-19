@@ -39,7 +39,7 @@ from app.services.library_snapshot import Manifest
 router = APIRouter(
     prefix="/libraries",
     tags=["libraries"],
-    dependencies=[Depends(require_local("Libraries are managed from Luminary itself."))],
+    dependencies=[Depends(require_local("Spaces are managed from Luminary itself."))],
 )
 
 

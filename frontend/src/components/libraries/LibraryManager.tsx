@@ -1,4 +1,4 @@
-// The libraries on this machine: name and colour them, open one, remove one, and move one to
+// The spaces on this machine (libraries, in the code): name and colour them, open one, remove one, and move one to
 // another computer through a folder a sync service keeps (iCloud Drive, Dropbox, ...).
 
 import { useState } from "react"
@@ -101,7 +101,7 @@ function LibraryRow({ item, busy, onOpen }: { item: LibraryItem; busy: boolean; 
       queryClient.setQueryData(LIBRARIES_KEY, list)
       setMode("view")
     },
-    onError: fail("Could not rename the library"),
+    onError: fail("Could not rename the space"),
   })
   const remove = useMutation({
     mutationFn: () => apiDelete<LibraryRemoved>(`/libraries/${item.id}`),
@@ -114,7 +114,7 @@ function LibraryRow({ item, busy, onOpen }: { item: LibraryItem; busy: boolean; 
       )
       void queryClient.invalidateQueries({ queryKey: LIBRARIES_KEY })
     },
-    onError: fail("Could not remove the library"),
+    onError: fail("Could not remove the space"),
   })
 
   return (
@@ -163,7 +163,7 @@ function LibraryRow({ item, busy, onOpen }: { item: LibraryItem; busy: boolean; 
             value={name}
             onChange={(e) => setName(e.target.value)}
             maxLength={40}
-            aria-label="Library name"
+            aria-label="Space name"
             className={cn(INPUT, "w-full")}
             autoFocus
           />
@@ -195,7 +195,7 @@ function LibraryRow({ item, busy, onOpen }: { item: LibraryItem; busy: boolean; 
           <input
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
-            aria-label="Type the library id to confirm"
+            aria-label="Type the space id to confirm"
             className={cn(INPUT, "w-full")}
             autoFocus
           />
@@ -223,7 +223,7 @@ function NewLibrary({ taken, onCreated }: { taken: string[]; onCreated: (list: L
       onCreated(list)
       setName("")
     },
-    onError: fail("Could not create the library"),
+    onError: fail("Could not create the space"),
   })
   return (
     <form
@@ -239,7 +239,7 @@ function NewLibrary({ taken, onCreated }: { taken: string[]; onCreated: (list: L
           onChange={(e) => setName(e.target.value)}
           maxLength={40}
           placeholder="Name, e.g. Personal, Work, Kids"
-          aria-label="New library name"
+          aria-label="New space name"
           className={cn(INPUT, "min-w-0 flex-1")}
         />
         <button type="submit" disabled={!name.trim() || create.isPending} className={PRIMARY}>
@@ -269,7 +269,7 @@ function ExportPanel({ libraries, destinations }: { libraries: LibraryItem[]; de
       setExported(result)
       void queryClient.invalidateQueries({ queryKey: DESTINATIONS_KEY })
     },
-    onError: fail("Could not export the library"),
+    onError: fail("Could not export the space"),
   })
   const reveal = useMutation({
     mutationFn: (ref: { destination: string; name: string }) => apiPost("/libraries/reveal", ref),
@@ -280,7 +280,7 @@ function ExportPanel({ libraries, destinations }: { libraries: LibraryItem[]; de
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2 text-xs text-foreground">
         <span>Export</span>
-        <select value={library} onChange={(e) => setLibrary(e.target.value)} aria-label="Library to export" className={INPUT}>
+        <select value={library} onChange={(e) => setLibrary(e.target.value)} aria-label="Space to export" className={INPUT}>
           {libraries.map((l) => (
             <option key={l.id} value={l.id}>
               {libraryTitle(l)}
@@ -306,7 +306,7 @@ function ExportPanel({ libraries, destinations }: { libraries: LibraryItem[]; de
       </div>
       {run.isPending && (
         <p className="text-xs text-muted-foreground">
-          Copying the database, vectors and files into one archive. A large library takes a few minutes.
+          Copying the database, vectors and files into one archive. A large space takes a few minutes.
         </p>
       )}
       {exported && (
@@ -330,7 +330,7 @@ function ExportPanel({ libraries, destinations }: { libraries: LibraryItem[]; de
           <p className="text-muted-foreground">
             {exported.destination === "exports"
               ? "Copy this file to the other computer (AirDrop, a USB drive) and import it there."
-              : `Once ${exported.destination_name} has synced it, open Libraries on the other computer: it is listed there under Import.`}
+              : `Once ${exported.destination_name} has synced it, open Spaces on the other computer: it is listed there under Import.`}
           </p>
         </div>
       )}
@@ -369,7 +369,7 @@ function ImportPanel({
     mutationFn: (req: { destination: string; name: string; library: string }) =>
       apiPost<LibraryImport>("/libraries/import-from-folder", req),
     onSuccess: done,
-    onError: fail("Could not import the library"),
+    onError: fail("Could not import the space"),
   })
   const fromFile = useMutation({
     mutationFn: ({ upload, library }: { upload: File; library: string }) => {
@@ -379,7 +379,7 @@ function ImportPanel({
       return apiPost<LibraryImport>("/libraries/import", form)
     },
     onSuccess: done,
-    onError: fail("Could not import the library"),
+    onError: fail("Could not import the space"),
   })
   const pending = fromFolder.isPending || fromFile.isPending
   const suggest = (fileName: string) => libraryIdFor(suggestedLibraryName(fileName) || "imported", taken)
@@ -395,7 +395,7 @@ function ImportPanel({
       </div>
       {found.length === 0 ? (
         <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
-          No exported libraries in {destinations.map((d) => (d.kind === "exports" ? "Luminary Exports" : d.name)).join(", ")}.
+          No exported spaces in {destinations.map((d) => (d.kind === "exports" ? "Luminary Exports" : d.name)).join(", ")}.
         </p>
       ) : (
         <ul className="divide-y divide-border rounded-md border border-border">
@@ -437,7 +437,7 @@ function ImportPanel({
                     <input
                       value={libraryName}
                       onChange={(e) => setLibraryName(e.target.value.toLowerCase())}
-                      aria-label="Folder name for the imported library"
+                      aria-label="Folder name for the imported space"
                       className={cn(INPUT, "min-w-0 flex-1 font-mono text-xs")}
                       autoFocus
                     />
@@ -469,7 +469,7 @@ function ImportPanel({
           <input
             type="file"
             accept=".gz,application/gzip"
-            aria-label="Exported library file"
+            aria-label="Exported space file"
             onChange={(e) => {
               const chosen = e.target.files?.[0] ?? null
               setFile(chosen)
@@ -484,7 +484,7 @@ function ImportPanel({
               <input
                 value={libraryName}
                 onChange={(e) => setLibraryName(e.target.value.toLowerCase())}
-                aria-label="Name for the imported library"
+                aria-label="Name for the imported space"
                 className={cn(INPUT, "min-w-0 flex-1 font-mono text-xs")}
               />
               <button type="submit" disabled={!libraryName.trim() || pending} className={PRIMARY}>
@@ -497,7 +497,7 @@ function ImportPanel({
 
       {pending && (
         <p className="text-xs text-muted-foreground">
-          Checking and unpacking every file. A large library takes a few minutes.
+          Checking and unpacking every file. A large space takes a few minutes.
         </p>
       )}
       {imported && (
@@ -505,7 +505,7 @@ function ImportPanel({
           <p className="text-foreground">
             Imported <span className="font-medium">{libraryTitle({ id: imported.library, name: imported.name })}</span>:{" "}
             {describeContents(imported.contents)}, {imported.files.toLocaleString()} files, all checked. Exported from
-            library "{imported.source_library}" on {new Date(imported.created_at).toLocaleString()} by Luminary{" "}
+            space "{imported.source_library}" on {new Date(imported.created_at).toLocaleString()} by Luminary{" "}
             {imported.app_version}.
           </p>
           <button onClick={() => onOpen(imported.library)} className={PRIMARY}>
@@ -528,7 +528,7 @@ export function LibraryManager() {
   const switchTo = useMutation({
     mutationFn: (library: string) => apiPut<LibraryList>("/libraries/active", { library }),
     onSuccess: (list) => openLibrary(list.active),
-    onError: fail("Could not open that library"),
+    onError: fail("Could not open that space"),
   })
 
   const items = libraries.data?.libraries ?? []
@@ -537,14 +537,14 @@ export function LibraryManager() {
   return (
     <div className="space-y-5">
       <p className="text-xs text-muted-foreground">
-        Keep separate libraries for separate parts of life: personal reading, work, the kids' books. Each has its
-        own documents, notes, cards and study history, and Luminary works in one at a time.
+        Keep separate spaces for separate parts of life: personal reading, work, the kids' books. Each has its
+        own library of documents, its own notes, cards and study history, and Luminary works in one at a time.
       </p>
 
       <section className="space-y-2">
-        <h4 className={HEADING}>Your libraries</h4>
+        <h4 className={HEADING}>Your spaces</h4>
         {libraries.isLoading && <div className="h-14 animate-pulse rounded-md bg-muted" />}
-        {libraries.isError && <p className="text-xs text-destructive">Couldn't load the libraries.</p>}
+        {libraries.isError && <p className="text-xs text-destructive">Couldn't load the spaces.</p>}
         {items.length > 0 && (
           <ul className="divide-y divide-border rounded-md border border-border">
             {items.map((item) => (
@@ -560,12 +560,12 @@ export function LibraryManager() {
       </section>
 
       <section className="space-y-2">
-        <h4 className={HEADING}>New library</h4>
+        <h4 className={HEADING}>New space</h4>
         <NewLibrary
           taken={items.map((i) => i.id)}
           onCreated={(list) => {
             queryClient.setQueryData(LIBRARIES_KEY, list)
-            toast.success("Library created. Open it to start adding to it.")
+            toast.success("Space created. Open it to start adding to it.")
           }}
         />
       </section>
@@ -576,7 +576,7 @@ export function LibraryManager() {
           {synced.length > 0
             ? `Export into ${synced.map((d) => d.name).join(", ")} and the other computer, signed in to the same service, finds it under Import.`
             : "No sync folder found (iCloud Drive, Dropbox, Google Drive, OneDrive, Box). Exports go to Luminary Exports in your home folder; copy the file across yourself."}{" "}
-          Only the finished archive is ever written there: a live library is never synced.
+          Only the finished archive is ever written there: a space in use is never synced.
         </p>
         {destinations.isLoading && <div className="h-10 animate-pulse rounded-md bg-muted" />}
         {destinations.isError && <p className="text-xs text-destructive">Couldn't look for export folders.</p>}

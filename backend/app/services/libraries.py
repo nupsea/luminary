@@ -66,7 +66,7 @@ def library_id(name: str) -> str:
         return valid_library(name.strip())
     except ValueError as exc:
         raise InvalidInput(
-            "A library id is lower-case letters, digits, '-' and '_', starting with a "
+            "A space id is lower-case letters, digits, '-' and '_', starting with a "
             "letter or digit, at most 63 characters."
         ) from exc
 
@@ -81,7 +81,7 @@ def library_exists(library: str) -> bool:
 def require_library(library: str) -> str:
     library = library_id(library)
     if not library_exists(library):
-        raise NotFound(f"No library named {library!r} on this machine.")
+        raise NotFound(f"No space named {library!r} on this computer.")
     return library
 
 
@@ -108,7 +108,7 @@ def _read_active(path: Path) -> str:
 
 def set_active_library(library: str) -> None:
     if not library_exists(library):
-        raise NotFound(f"No library named {library!r} on this machine.")
+        raise NotFound(f"No space named {library!r} on this computer.")
     root = machine_root()
     # Written beside and renamed over, so a crash leaves the old choice or the new, never half.
     fd, tmp = tempfile.mkstemp(dir=root, prefix=f".{ACTIVE_FILE}.")
@@ -174,7 +174,7 @@ def _library_bytes(root: Path) -> int:
 
 def check_new_library(library: str) -> None:
     if library == DEFAULT_LIBRARY:
-        raise InvalidInput("The default library already exists; choose another name.")
+        raise InvalidInput("The default space already exists; choose another name.")
     root = library_root(library=library)
     if (root / REMOVED_MARK).exists():
         raise Conflict(
@@ -182,7 +182,7 @@ def check_new_library(library: str) -> None:
             "choose another name until then."
         )
     if root.exists() and any(root.iterdir()):
-        raise Conflict(f"A library named {library!r} already exists on this machine.")
+        raise Conflict(f"A space named {library!r} already exists on this computer.")
 
 
 async def read_profile() -> dict[str, Any]:
@@ -200,7 +200,7 @@ async def read_profile() -> dict[str, Any]:
 async def write_profile(*, name: str | None, color: str | None) -> None:
     """Set the current library's name and colour; None clears one."""
     if color is not None and color not in COLORS:
-        raise InvalidInput(f"A library colour is one of {', '.join(COLORS)}.")
+        raise InvalidInput(f"A space colour is one of {', '.join(COLORS)}.")
     name = (name or "").strip() or None
     async with get_session_factory()() as session:
         await SettingsRepo(session).put(PROFILE_KEY, {"name": name, "color": color})
@@ -318,9 +318,9 @@ async def devices_in(library: str) -> int:
 
 async def check_removable(library: str) -> None:
     if library == DEFAULT_LIBRARY:
-        raise InvalidInput("The default library cannot be removed.")
+        raise InvalidInput("The default space cannot be removed.")
     if library == active_library():
-        raise Conflict("Open another library before removing this one.")
+        raise Conflict("Open another space before removing this one.")
     if paired := await devices_in(library):
         raise Conflict(
             f"{paired} paired device(s) work in {library!r}; unpair them under Devices first."

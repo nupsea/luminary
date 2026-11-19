@@ -80,6 +80,7 @@ previous library's work running.
 
 A library's snapshot is one archive of its root (`services/library_snapshot.py`, #390); a
 folder joined onto `library_root()` must be listed in `storage.LIBRARY_FILE_DIRS` to be carried.
+The app calls a library a *space*, since its Library tab is the document list inside one.
 A library's name and colour are the `library_profile` setting inside it, so they travel with an
 export. An export goes to `~/Luminary Exports/` or a sync service's folder
 (`services/sync_folders.py`), built under `machine_root()/downloads` and renamed in finished; an

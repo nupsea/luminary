@@ -668,7 +668,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
           <div className="border-t border-border" />
 
           <section>
-            <h3 className="mb-1 text-sm font-semibold text-foreground">Libraries</h3>
+            <h3 className="mb-1 text-sm font-semibold text-foreground">Spaces</h3>
             <LibraryManager />
           </section>
 
