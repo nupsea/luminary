@@ -165,6 +165,12 @@ jobs:
   windows-host-policy:
     runs-on: windows-latest
     timeout-minutes: 50
+    # #211/#476 diagnosis: 20 runs, so a timed-out test names itself (#522). Never merged.
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     needs: [branch-check]
     if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master')
     defaults:
