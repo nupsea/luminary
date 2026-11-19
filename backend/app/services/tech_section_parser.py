@@ -68,15 +68,17 @@ def classify_section_level(heading: str) -> int | None:
 def assign_parent_headings_dicts(sections: list[dict]) -> list[dict]:
     """Set each section dict's 'level', 'parent_heading' and 'parent_index' in place.
 
-    A numbered heading's mark decides its level; an unnumbered one keeps the level the
-    parser read from the source (default 2). Overwriting that with 2 flattened every
-    markdown book into one level, so its topics were all 241 headings (#307).
-    The parent is the most recent section one level up, else None.
+    The source's own levels win wherever it states more than one: a chapter whose `sect1`
+    is titled "Part 1" stays above it (#516). Only where every parsed level is the same (a
+    flat source) or a section has none does a numbered heading's mark decide. An unmarked
+    heading keeps its parsed level, default 2: overwriting it with 2 flattened markdown
+    books into one level (#307). The parent is the most recent section one level up.
     """
     stack: dict[int, int] = {}  # level -> index of the most recent section at it
+    stated = len({s["level"] for s in sections if s.get("level")}) > 1
 
     for i, s in enumerate(sections):
-        level = classify_section_level(s.get("heading", "")) or s.get("level") or 2
+        level = _level(s, stated)
         s["level"] = level
 
         parent = stack.get(level - 1)
@@ -88,6 +90,13 @@ def assign_parent_headings_dicts(sections: list[dict]) -> list[dict]:
             del stack[deeper]
 
     return sections
+
+
+def _level(section: dict, stated: bool) -> int:
+    parsed = section.get("level")
+    if stated and parsed:
+        return parsed
+    return classify_section_level(section.get("heading", "")) or parsed or 2
 
 
 # Learning objective candidate detection

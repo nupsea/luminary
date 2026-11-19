@@ -31,6 +31,10 @@ import pytest_asyncio
 from inherited_work import settle_inherited_work
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from task_drain import dispose_engine
+from timeout_notice import (  # noqa: F401 - hooks: a timed-out test names itself
+    pytest_timeout_cancel_timer,
+    pytest_timeout_set_timer,
+)
 
 # litellm's import calls load_dotenv() unless LITELLM_MODE=PRODUCTION, copying the
 # CWD's backend/.env (which install.sh writes) into os.environ, where it outranks
