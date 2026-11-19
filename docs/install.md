@@ -182,6 +182,51 @@ Which model runs, strongest first: Settings in the app, then `backend/.env`, the
 default above. `make models` prints what the configuration resolves to and warns when a model is
 too big for the machine; the choice is never overridden.
 
+## Spaces, and moving one to another computer
+
+A space is a whole library of its own (the code and API call it a library). The tile at the top
+of the sidebar is the open space; click it to switch, or choose **New, rename, move…** for the
+full list (also in Settings → Spaces). Luminary opens one space at a time, and switching reloads
+the app. Each space has its own documents, notes, cards, study history, engine mode and model
+picks, and its own name and colour. Paired devices, API keys and
+downloaded models belong to the machine.
+
+Removing a space asks you to type its id. It is refused for the default space, the open one,
+and one a paired device still works in. A space this run of Luminary has opened is hidden at
+once and its files deleted at the next start, because work it started may still be writing.
+
+To move a space:
+
+1. On the old machine, **Export** it to a sync folder: iCloud Drive, Dropbox, Google Drive,
+   OneDrive or Box, whichever this computer has (into a `Luminary` folder inside it), or to
+   `~/Luminary Exports/`. The archive is built elsewhere and moved in finished, so the sync client
+   only ever uploads a whole one.
+2. If you exported to `~/Luminary Exports/`, copy the file across yourself.
+3. On the new machine, open Spaces: an archive in any of those folders is listed under
+   **Import**. Import it under a folder name, then **Open** it. Every file is checked against the
+   archive's hashes before the space is created, so an archive still downloading fails and
+   leaves nothing. The result lists its documents, cards and notes to compare with the export.
+   A file anywhere else imports through **Import a file from somewhere else**.
+
+Only archives go into a sync folder. A space in use under a sync client corrupts: its database
+journal and vector files change underneath the client.
+
+| Refused, nothing written | Why |
+|---|---|
+| The importing Luminary is older than the exporting one | its database schema is newer than this version knows |
+| The archive comes from a different embedder | its vectors are in another space; only a re-embed moves them |
+| A name already in use, or `default` | an import never writes over a space |
+| A damaged, truncated or half-synced file | a file fails its hash, or the archive does not read |
+| A folder macOS has not let Luminary use | allow it under System Settings > Privacy & Security > Files and Folders |
+
+The archive leaves out API keys and paired devices; enter keys and pair devices again on the new
+machine. Models are not carried either: the new machine downloads its own at setup. Exporting
+waits until no document is mid-ingestion. A Docker server writes its export inside the container;
+copy it out with `docker cp`. A source install can also run
+`python -m app.scripts.library_snapshot snapshot|restore` from `backend/`.
+
+The two copies do not sync: studying on both machines afterwards gives two diverging spaces.
+
 ## Configuration reference
 
 Source and Docker installs read `backend/.env` (gitignored); `backend/.env.example` documents

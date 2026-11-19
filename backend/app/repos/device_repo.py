@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 
-from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_session_factory
+from app.library import DEFAULT_LIBRARY, use_library
 from app.models import DeviceModel
 from app.repos._helpers import get_or_404
 
@@ -38,6 +39,15 @@ class DeviceRepo:
         )
         return result.scalars().all()
 
+    async def count_in(self, library: str) -> int:
+        """Devices still paired into *library*."""
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(DeviceModel)
+            .where(DeviceModel.library == library, DeviceModel.revoked_at.is_(None))
+        )
+        return int(result.scalar_one())
+
     async def by_token_hash(self, token_hash: str) -> DeviceModel | None:
         result = await self.session.execute(
             select(DeviceModel).where(DeviceModel.token_hash == token_hash)
@@ -57,5 +67,15 @@ class DeviceRepo:
         return device
 
 
-def get_device_repo(session: AsyncSession = Depends(get_db)) -> DeviceRepo:
-    return DeviceRepo(session)
+@contextlib.asynccontextmanager
+async def device_registry() -> AsyncIterator[DeviceRepo]:
+    # The registry is the machine's, in the default library whichever library the app has open.
+    with use_library(DEFAULT_LIBRARY):
+        factory = get_session_factory()
+    async with factory() as session:
+        yield DeviceRepo(session)
+
+
+async def get_device_repo() -> AsyncIterator[DeviceRepo]:
+    async with device_registry() as repo:
+        yield repo

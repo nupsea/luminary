@@ -63,19 +63,34 @@ another library's is `<DATA_DIR>/libraries/<id>`. The current library rides in a
 (`app/library.py`) that asyncio tasks and `to_thread` inherit, and `library_root()`,
 `get_session_factory()` and `get_lancedb_service()` resolve it, so code opens a store without
 naming the library. `RequestAuthMiddleware` runs each request in its principal's library: the
-app's own origin is the default library, and a paired device is the library recorded beside it in
-the default library's `devices` table. A library's background work (its enrichment queue and
-startup backfills) starts in that library the first time the process serves it
-(`runtime/library_work.py`). Models, the engine and downloads are shared (`machine_root()`).
+app's own origin is the **active library**, and a paired device is the library recorded beside it
+in the default library's `devices` table.
+
+| Machine-wide, whatever library is active | Where |
+|---|---|
+| The active library | `<machine root>/active_library.json`, written by rename; a name whose library is gone opens the default (`services/libraries.py`) |
+| The device registry | the default library's `devices` table; `get_device_repo` opens the default library itself |
+| API keys | the keychain and the default library's rows (`docs/engine-and-hosts.md`) |
+| Models, the engine, downloads, connectors | `machine_root()` |
+
+Engine mode, model picks and background pacing are each library's. A library's background work
+(its enrichment queue and startup backfills) starts in that library the first time the process
+serves it (`runtime/library_work.py`), after loading its preferences. A switch leaves the
+previous library's work running.
+
 A library's snapshot is one archive of its root (`services/library_snapshot.py`, #390); a
 folder joined onto `library_root()` must be listed in `storage.LIBRARY_FILE_DIRS` to be carried.
-Its vectors are derived from its database: a re-embed (`services/reembed.py`) rebuilds every
-table beside the live folder, resumes a killed run, and swaps the rebuild in once it matches.
-(`runtime/library_work.py`), after loading its preferences: engine mode, model picks and
-background pacing are each library's, while API keys stay the machine user's
-(`docs/engine-and-hosts.md`). Models, the engine and downloads are shared (`machine_root()`).
-A library's snapshot is one archive of its root (`services/library_snapshot.py`, #390); a
-folder joined onto `library_root()` must be listed in `storage.LIBRARY_FILE_DIRS` to be carried.
+The app calls a library a *space*, since its Library tab is the document list inside one.
+A library's name and colour are the `library_profile` setting inside it, so they travel with an
+export. An export goes to `~/Luminary Exports/` or a sync service's folder
+(`services/sync_folders.py`), built under `machine_root()/downloads` and renamed in finished; an
+import is a new library, never over an existing one (`routers/libraries.py`). Requests name an
+archive by destination id and listed file name, never by path. A removed library that this
+process has served is marked `.removed` and deleted at the next startup, since its in-flight work
+could reopen its database. The frontend keeps library-scoped browser state per library
+(`lib/libraryScope.ts`). Its vectors are derived from its database: a re-embed
+(`services/reembed.py`) rebuilds every table beside the live folder, resumes a killed run, and
+swaps the rebuild in once it matches.
 
 - **SQLite** (`~/.luminary/luminary.db`): all structured metadata -- documents, chunks, sections, summaries, flashcards, notes, Q&A history, and **concepts** (hot learning state: mastery, FSRS stability, origin, status, evidence refs). Schema is Alembic-versioned and migrated to head on boot (I-23)
 - **LanceDB**: dense embeddings for chunks and notes (both bge-small, 384-dim, one shared space) and **concepts** (384-dim centroid of evidence chunks, in the same space -- derived, for similarity/linking/dedup, never retrieval-primary)

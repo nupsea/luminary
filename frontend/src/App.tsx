@@ -33,6 +33,7 @@ import { SearchDialog } from "./components/SearchDialog"
 import { StudyLauncher } from "./components/StudyLauncher"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
+import { LibrarySwitcher } from "./components/libraries/LibrarySwitcher"
 import { usePanelZoomShortcut } from "./hooks/usePanelZoomShortcut"
 import { IngestionTrackerProvider } from "./hooks/IngestionTrackerProvider"
 import { EnrichmentStatus } from "./components/EnrichmentStatus"
@@ -190,6 +191,7 @@ function Sidebar({ mainTabs, devTabs }: { mainTabs: Surface[]; devTabs: Surface[
   return (
     <>
       <nav className="flex h-full w-[4.5rem] flex-col items-center gap-1 bg-gradient-to-b from-sidebar via-sidebar to-primary/5 py-4 border-r border-border/50">
+        <LibrarySwitcher />
         {mainTabs.map((s) => {
           const to = s.frontend!.route!
           const Icon = ICONS[s.id] ?? BookOpen

@@ -8,6 +8,7 @@
  */
 
 import { apiGet } from "@/lib/apiClient"
+import { libraryScopedStorage } from "@/lib/libraryScope"
 import type { components } from "@/types/api"
 
 type SearchResponse = components["schemas"]["SearchResponse"]
@@ -153,7 +154,7 @@ const RECENT_MAX = 5
 
 export function loadRecentSeeks(): string[] {
   try {
-    const raw = localStorage.getItem(RECENT_KEY)
+    const raw = libraryScopedStorage(localStorage).getItem(RECENT_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
@@ -169,7 +170,7 @@ export function pushRecentSeek(q: string): void {
   try {
     const current = loadRecentSeeks().filter((s) => s !== trimmed)
     current.unshift(trimmed)
-    localStorage.setItem(RECENT_KEY, JSON.stringify(current.slice(0, RECENT_MAX)))
+    libraryScopedStorage(localStorage).setItem(RECENT_KEY, JSON.stringify(current.slice(0, RECENT_MAX)))
   } catch {
     // Quota / privacy mode: drop silently.
   }

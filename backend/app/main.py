@@ -44,6 +44,7 @@ from app.routers.goals import router as goals_router
 from app.routers.graph import router as graph_router
 from app.routers.home import router as home_router
 from app.routers.images import router as images_router
+from app.routers.libraries import router as libraries_router
 from app.routers.mastery import router as mastery_router
 from app.routers.model_lab import router as model_lab_router
 from app.routers.monitoring import router as monitoring_router
@@ -72,6 +73,7 @@ from app.services.components import (
 from app.services.executors import shutdown_model_executor
 from app.services.graph_import import run_graph_import
 from app.services.ingestion_jobs import cancel_all_ingestions
+from app.services.libraries import purge_removed_libraries
 from app.services.python_extras import activate_extras
 from app.services.settings_service import _cache as _llm_cache
 from app.services.startup_status import get_startup_status
@@ -215,6 +217,9 @@ async def lifespan(app: FastAPI):
 
     # Before yielding, so jobs enqueued during the first request are dispatched. It loads the
     # library's settings too, so cloud mode is active from the first request.
+    # Before any library opens: one removed while the last process had it open is deleted now.
+    if purged := await asyncio.to_thread(purge_removed_libraries):
+        logger.info("deleted removed libraries: %s", ", ".join(purged))
     await serve_library(DEFAULT_LIBRARY)
     _chapter_backfill.start()
 
@@ -419,6 +424,7 @@ ROUTER_REGISTRY = {
     "graph": graph_router,
     "home": home_router,
     "images": images_router,
+    "libraries": libraries_router,
     "model_lab": model_lab_router,
     "monitoring": monitoring_router,
     "notes": notes_router,
@@ -439,8 +445,8 @@ ROUTER_REGISTRY = {
 
 # settings and setup are always registered: the Settings drawer needs one, and
 # the other is what a user with an incomplete install has to reach. devices is
-# how any caller but the app gets in.
-_enabled = enabled_routers(_mode) | {"settings", "setup", "devices"}
+# how any caller but the app gets in; libraries is which library the app opens.
+_enabled = enabled_routers(_mode) | {"settings", "setup", "devices", "libraries"}
 for _name, _router in ROUTER_REGISTRY.items():
     if _name in _enabled:
         app.include_router(_router, prefix=_API_PREFIX)
