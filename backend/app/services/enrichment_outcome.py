@@ -66,13 +66,7 @@ async def notice(session: AsyncSession, doc: DocumentModel) -> str | None:
     failure = (doc.extraction_report or {}).get(REPORT_KEY)
     if not failure or doc.stage != "complete":
         return None
-    summaries = SummaryRepo(session)
-    missing = []
-    has_summary = any(not m.startswith("_") for m in await summaries.modes(doc.id))
-    if not has_summary and not await summaries.section_summaries(doc.id):
-        missing.append("summaries")
-    if await EnrichmentRepo(session).latest_status(doc.id, "chapter_cards") == "failed":
-        missing.append("chapter cards")
+    missing = await _missing(session, doc.id)
     if not missing:
         return None
     text = f"No {' or '.join(missing)} were written for this document: {failure['reason']}."
@@ -81,3 +75,14 @@ async def notice(session: AsyncSession, doc: DocumentModel) -> str | None:
     if "chapter cards" in missing:
         text += " Chapter cards are tried again when Luminary next starts."
     return text
+
+
+async def _missing(session: AsyncSession, document_id: str) -> list[str]:
+    summaries = SummaryRepo(session)
+    missing = []
+    has_summary = any(not m.startswith("_") for m in await summaries.modes(document_id))
+    if not has_summary and not await summaries.section_summaries(document_id):
+        missing.append("summaries")
+    if await EnrichmentRepo(session).latest_status(document_id, "chapter_cards") == "failed":
+        missing.append("chapter cards")
+    return missing

@@ -159,16 +159,23 @@ def provider_refusal(exc: BaseException) -> Refusal | None:
     """
     chain = _chain(exc)
     text = " ".join(str(e) for e in chain)
-    delay = _stated_delay(exc, text)
-    if any(isinstance(e, LLMRateLimitError) for e in chain) or _BODY_429_RE.search(text):
-        if _DAILY_QUOTA_RE.search(text) or (delay is None and _SPENT_QUOTA_RE.search(text)):
-            return Refusal("quota", None)
-        return Refusal("rate_limit", delay)
-    if any(isinstance(e, (socket.gaierror, ConnectionError)) for e in chain):
+    if _any_is(chain, (LLMRateLimitError,)) or _BODY_429_RE.search(text):
+        return _rate_refusal(text, _stated_delay(exc, text))
+    if _any_is(chain, (socket.gaierror, ConnectionError)):
         return None
-    if any(isinstance(e, LLMServiceUnavailableError) for e in chain) or _OVERLOADED_RE.search(text):
-        return Refusal("overloaded", delay)
+    if _any_is(chain, (LLMServiceUnavailableError,)) or _OVERLOADED_RE.search(text):
+        return Refusal("overloaded", _stated_delay(exc, text))
     return None
+
+
+def _any_is(chain: list[BaseException], types: tuple[type[BaseException], ...]) -> bool:
+    return any(isinstance(e, types) for e in chain)
+
+
+def _rate_refusal(text: str, delay: float | None) -> Refusal:
+    if _DAILY_QUOTA_RE.search(text) or (delay is None and _SPENT_QUOTA_RE.search(text)):
+        return Refusal("quota", None)
+    return Refusal("rate_limit", delay)
 
 
 def _refusal_wait(refusal: Refusal | None, attempt: int) -> float | None:
