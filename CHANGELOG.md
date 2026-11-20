@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Saving an API key while macOS asks for keychain access no longer freezes the app.** The keychain call ran on the backend's one event loop, so every request waited until the prompt was answered or the app was quit (#525).
+
 ## [0.18.1] - 2026-11-19
 
 ### Added
