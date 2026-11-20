@@ -92,9 +92,8 @@ async def test_work_someone_waits_on_or_a_loud_setting_never_rests(setup, memory
 async def test_concurrent_unattended_callers_run_one_at_a_time_and_keep_the_pace(
     monkeypatch, width
 ):
-    """Ingestion runs several unattended callers at once (summaries three wide, figures, web
-    refs). A rest released every waiter together, so a two-slot runtime ran them in pairs and an
-    ingest held the GPU at 99% with Quiet on; width 1 never showed it."""
+    """Ingestion runs several unattended callers at once; width 2 is where a rest that released
+    every waiter together showed as calls in pairs (I-78)."""
     monkeypatch.setattr(llm_admission, "enrichment_concurrency", lambda: width)
     # The queue polls every 0.2 s; left alone, its gaps between 0.1 s calls pass for rest.
     monkeypatch.setattr(llm_admission, "_POLL_SECONDS", 0.005)
