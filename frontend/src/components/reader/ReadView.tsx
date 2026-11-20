@@ -981,28 +981,31 @@ export function ReadView({
             ["--reader-leading" as string]: spec.lineHeight,
           }}
         >
-          <ImportFidelityNotice
-            report={extractionReport}
-            documentId={documentId}
-            sourceUrl={sourceUrl}
-          />
-          {enrichmentNotice && (
-            <p
-              role="status"
-              className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
-            >
-              {enrichmentNotice}
-            </p>
-          )}
-          {degradedCount > 0 && (
-            <div className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-              <p>
-                {degradedCount} of the {sections.length} sections loaded were stored before
-                Luminary kept full section text, so their paragraph breaks are approximate.
+          {/* Clear of the sticky settings row the text above rises under (-mt-6). */}
+          <div className="pt-8 empty:hidden">
+            <ImportFidelityNotice
+              report={extractionReport}
+              documentId={documentId}
+              sourceUrl={sourceUrl}
+            />
+            {enrichmentNotice && (
+              <p
+                role="status"
+                className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
+              >
+                {enrichmentNotice}
               </p>
-              <ReimportAction documentId={documentId} sourceUrl={sourceUrl} />
-            </div>
-          )}
+            )}
+            {degradedCount > 0 && (
+              <div className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                <p>
+                  {degradedCount} of the {sections.length} sections loaded were stored before
+                  Luminary kept full section text, so their paragraph breaks are approximate.
+                </p>
+                <ReimportAction documentId={documentId} sourceUrl={sourceUrl} />
+              </div>
+            )}
+          </div>
           {(page?.offset ?? 0) > 0 && (
             <div ref={loadEarlierRef} className="mb-12 flex justify-center">
               <Loader2 size={16} className="animate-spin text-muted-foreground" />
