@@ -6,10 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-11-21
+
 ### Fixed
 - **Quiet background work is quiet again on a two-slot Mac.** Enrichment ran two model calls at once, and a new book's first chapter cards were never paced, so one 31-page PDF kept the GPU 96% busy for nine minutes. Unattended calls now run one at a time and rest as long as they ran; the first chapters still go first (#527).
 - **Saving an API key while macOS asks for keychain access no longer freezes the app.** The keychain call ran on the backend's one event loop, so every request waited until the prompt was answered or the app was quit (#525).
 - **The reader's text-size button no longer covers the first line of a notice above the text** (#526).
+
+### Known issues
+- **Practice-panel cards are below the quality bar** (#330, 0.19.0), as in 0.18.0.
+- **The connector SDK is not on PyPI yet.** Connectors install it from GitHub, which works; publishing waits on the PyPI project's trusted publisher (#438).
+- **On Windows CI a test worker still exits mid-run now and then**, always in a test that runs ingestion in-process; #528's first run lost one. No user-facing symptom is known (#211, #476).
+
+### Not exercised in this release
+- None of the three fixes ran in the bundled desktop app. Quiet background work was checked by tests and by replaying the reported ingest's 131 call durations through the admission gate, not by a real ingest; the keychain fix by a stand-in keyring that blocks like a prompt; the notice layout in Chrome at 1400x900 only.
 
 ## [0.18.1] - 2026-11-19
 
