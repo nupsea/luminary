@@ -17,7 +17,7 @@ from app.models import (
 )
 from app.repos.flashcard_repo import FlashcardRepo
 from app.repos.study_repo import DueScope, StudyRepo
-from app.services import chapter_backfill, chapter_cards
+from app.services import chapter_backfill, chapter_cards, llm_admission
 from app.services.flashcard_chapter import (
     MAX_CHAPTER_WINDOWS,
     MAX_EVIDENCE_RESTATED,
@@ -196,11 +196,13 @@ class _FakeLLM:
     def __init__(self) -> None:
         self.calls = 0
         self.foreground = 0
+        self.not_ahead = 0
         self.systems: list[str] = []
 
     async def generate(self, prompt: str, *, system: str, **kw) -> str:
         self.calls += 1
         self.foreground += not kw.get("background")
+        self.not_ahead += not llm_admission._ahead.get()
         self.systems.append(system)
         if system.startswith(CHAPTER_NOTES_SYSTEM):
             return json.dumps({"notes": ["A log is an append-only sequence of records."]})
@@ -234,8 +236,9 @@ def fakes(monkeypatch):
 
 async def test_the_job_writes_held_cards_outside_the_review_queue(book, fakes):
     await chapter_cards.chapter_cards_handler("doc", "job")
-    # Background: stays on this machine in Hybrid mode and yields to the user.
-    assert fakes.calls > 0 and fakes.foreground == 0
+    # Background: stays on this machine in Hybrid mode and yields to the user; paced in Quiet
+    # mode like any unattended work, but ahead of it.
+    assert fakes.calls > 0 and fakes.foreground == 0 and fakes.not_ahead == 0
 
     async with book.factory() as session:
         cards = (await session.execute(select(FlashcardModel))).scalars().all()

@@ -31,7 +31,7 @@ from app.services.flashcard_chapter import Book, ChapterCard, Passage, write_cha
 from app.services.flashcard_factuality import FACTUALITY_UNCHECKED
 from app.services.flashcard_parsers import grounding_state
 from app.services.flashcard_prompts import _infer_genre
-from app.services.llm_admission import unattended
+from app.services.llm_admission import ahead
 from app.types import CARD_HELD
 
 logger = logging.getLogger(__name__)
@@ -162,8 +162,9 @@ async def chapter_cards_handler(document_id: str, job_id: str) -> None:
     async with get_session_factory()() as session:
         book = await book_for(document_id, session)
         chapters = await chapters_for_document(document_id, book.title, session)
-        # The reader offers these at the end of chapter one, so they are not paced.
-        with unattended(False):
+        # The reader offers these at the end of chapter one: paced like all unattended work, but
+        # ahead of it, since reading a chapter takes longer than writing its cards at half speed.
+        with ahead():
             for chapter in chapters[:INGEST_CHAPTERS]:
                 # Read per chapter: the backfill may have written one while this job wrote another.
                 if chapter.id not in await written_chapters(document_id, chapters, session):

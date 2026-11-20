@@ -64,10 +64,7 @@ async def test_an_unattended_call_rests_as_long_as_the_last_one_ran():
     assert loop.time() - started >= 0.18
 
 
-@pytest.mark.parametrize(
-    "setup",
-    ["attended", "awaited", "first chapters", "loud"],
-)
+@pytest.mark.parametrize("setup", ["attended", "awaited", "loud"])
 async def test_work_someone_waits_on_or_a_loud_setting_never_rests(setup, memory_db):
     if setup == "loud":
         async with memory_db.factory() as session:
@@ -85,21 +82,19 @@ async def test_work_someone_waits_on_or_a_loud_setting_never_rests(setup, memory
     elif setup == "awaited":
         with llm_admission.unattended(), llm_admission.awaited():
             waited = await two_calls()
-    elif setup == "first chapters":
-        # chapter_cards_handler runs inside the worker's unattended context.
-        with llm_admission.unattended(), llm_admission.unattended(False):
-            waited = await two_calls()
     else:
         with llm_admission.unattended():
             waited = await two_calls()
     assert waited < 0.1
 
 
-async def test_concurrent_unattended_callers_keep_the_pace(monkeypatch):
-    """Ingestion runs several unattended callers at once (summaries three wide, figures,
-    diagrams). Checking the rest only before queueing let a queued caller walk past a rest
-    earned while it waited: three callers kept the runtime 76% busy, and a real ingest 100%."""
-    monkeypatch.setattr(llm_admission, "enrichment_concurrency", lambda: 1)
+@pytest.mark.parametrize("width", [1, 2])
+async def test_concurrent_unattended_callers_run_one_at_a_time_and_keep_the_pace(
+    monkeypatch, width
+):
+    """Ingestion runs several unattended callers at once; width 2 is where a rest that released
+    every waiter together showed as calls in pairs (I-78)."""
+    monkeypatch.setattr(llm_admission, "enrichment_concurrency", lambda: width)
     # The queue polls every 0.2 s; left alone, its gaps between 0.1 s calls pass for rest.
     monkeypatch.setattr(llm_admission, "_POLL_SECONDS", 0.005)
     spans: list[tuple[float, float]] = []
@@ -114,5 +109,29 @@ async def test_concurrent_unattended_callers_keep_the_pace(monkeypatch):
     with llm_admission.unattended():
         await asyncio.gather(*(worker() for _ in range(3)))
     spans.sort()
-    busy = sum(e - s for s, e in spans)  # one slot, so calls never overlap
+    assert all(nxt[0] >= prev[1] for prev, nxt in zip(spans, spans[1:], strict=False))
+    busy = sum(e - s for s, e in spans)
     assert busy / (spans[-1][1] - spans[0][0]) < 0.6
+
+
+async def test_a_new_books_first_chapters_rest_but_go_first(monkeypatch):
+    monkeypatch.setattr(llm_admission, "enrichment_concurrency", lambda: 2)
+    monkeypatch.setattr(llm_admission, "_POLL_SECONDS", 0.005)
+    order: list[str] = []
+
+    async def call(name: str, seconds: float = 0.05) -> None:
+        async with llm_admission.background_call():
+            order.append(name)
+            await asyncio.sleep(seconds)
+
+    async def first_chapters() -> None:
+        await asyncio.sleep(0.01)  # queues behind the summaries
+        with llm_admission.ahead():
+            await call("chapter")
+
+    with llm_admission.unattended():
+        started = asyncio.get_running_loop().time()
+        await asyncio.gather(call("running", 0.1), call("summary"), first_chapters())
+    assert order == ["running", "chapter", "summary"]
+    # Two rests of a call's length each: the chapter is paced like the rest.
+    assert asyncio.get_running_loop().time() - started >= 0.1 + 0.1 + 0.05 + 0.05

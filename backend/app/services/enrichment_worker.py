@@ -150,7 +150,7 @@ class EnrichmentQueueWorker:
                 )
 
         self._running = True
-        # Every job inherits this: nobody waits on a queued job (llm_admission._rest).
+        # Every job inherits this: nobody waits on a queued job (llm_admission._paced_turn).
         with unattended():
             self._task = asyncio.create_task(self._poll_loop())
         logger.info("EnrichmentQueueWorker: started")

@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Quiet background work is quiet again on a two-slot Mac.** Enrichment ran two model calls at once, and a new book's first chapter cards were never paced, so one 31-page PDF kept the GPU 96% busy for nine minutes. Unattended calls now run one at a time and rest as long as they ran; the first chapters still go first (#527).
 - **Saving an API key while macOS asks for keychain access no longer freezes the app.** The keychain call ran on the backend's one event loop, so every request waited until the prompt was answered or the app was quit (#525).
 - **The reader's text-size button no longer covers the first line of a notice above the text** (#526).
 
