@@ -1,5 +1,7 @@
 """Tests for LLM settings service — keychain storage, sentinel, migration, and routing."""
 
+import asyncio
+
 import keyring
 import keyring.backend
 import keyring.errors
@@ -981,3 +983,32 @@ async def test_two_writers_of_an_absent_setting_both_succeed(test_db):
             )
         ).scalar_one()
     assert row.value == "qwen3.5:4b"
+
+
+@pytest.mark.parametrize("action", ["save", "clear", "load"])
+async def test_a_keychain_prompt_does_not_stall_the_event_loop(test_db, in_memory_keyring, action):
+    """macOS shows a prompt inside the keyring call; on the event loop, every request waited on
+    it until the app was quit (I-2)."""
+    import threading
+
+    from app.services.settings_service import load_llm_settings
+
+    _engine, factory = test_db
+    async with factory() as session:
+        await update_llm_settings(session, openai_api_key="sk-old-key")
+    loop = asyncio.get_running_loop()
+    loop_ran_during_prompt: list[bool] = []
+
+    def prompting(*_args):
+        ran = threading.Event()
+        loop.call_soon_threadsafe(ran.set)
+        loop_ran_during_prompt.append(ran.wait(timeout=2))
+
+    for method in ("set_password", "get_password", "delete_password"):
+        setattr(in_memory_keyring, method, prompting)
+    async with factory() as session:
+        if action == "load":
+            await load_llm_settings(session)
+        else:
+            await update_llm_settings(session, openai_api_key="sk-new" if action == "save" else "")
+    assert loop_ran_during_prompt == [True]

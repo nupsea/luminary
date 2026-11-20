@@ -1,5 +1,6 @@
 """LLM settings service — DB-backed mode/provider/key management with OS keychain storage."""
 
+import asyncio
 import contextlib
 import hashlib
 import logging
@@ -122,7 +123,8 @@ def _is_xor_encrypted(value: str) -> bool:
 # The actual key follows the prefix so load can distinguish it from legacy XOR values.
 _PLAINTEXT_PREFIX = "__plain__:"
 
-# Keyring helpers — fall back to plaintext-in-DB when no system keyring (e.g. Docker)
+# Keyring helpers — fall back to plaintext-in-DB when no system keyring (e.g. Docker).
+# Call them in a thread: a keychain prompt blocks the call for as long as it is up (I-2).
 
 
 def _keyring_set(field: str, value: str) -> bool:
@@ -212,7 +214,7 @@ async def load_llm_settings(db: AsyncSession) -> None:
 
         # API key field: resolve by storage format
         if raw_value == _KEYCHAIN_SENTINEL:
-            retrieved = _keyring_get(key)
+            retrieved = await asyncio.to_thread(_keyring_get, key)
             _cache[key] = retrieved or ""
         elif raw_value == "":
             _cache[key] = ""
@@ -227,7 +229,7 @@ async def load_llm_settings(db: AsyncSession) -> None:
                 logger.warning("Failed to decrypt legacy key %r -- clearing it", key)
                 _cache[key] = ""
                 continue
-            if _keyring_set(key, plaintext):
+            if await asyncio.to_thread(_keyring_set, key, plaintext):
                 new_db_value = _KEYCHAIN_SENTINEL
                 logger.debug("Migrated legacy XOR key %r to OS keychain", key)
             else:
@@ -398,7 +400,7 @@ async def _store_keys(db: AsyncSession, keys: dict[str, str | None]) -> None:
         if raw_value is None:
             continue
         if raw_value:
-            if _keyring_set(field, raw_value):
+            if await asyncio.to_thread(_keyring_set, field, raw_value):
                 # OS keyring available — store sentinel in DB
                 rows[field] = _KEYCHAIN_SENTINEL
             else:
@@ -407,7 +409,7 @@ async def _store_keys(db: AsyncSession, keys: dict[str, str | None]) -> None:
                 # making the derived XOR key unstable across runs.
                 rows[field] = _PLAINTEXT_PREFIX + raw_value
         else:
-            _keyring_delete(field)
+            await asyncio.to_thread(_keyring_delete, field)
             rows[field] = ""
     if not rows:
         return
