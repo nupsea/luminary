@@ -88,6 +88,9 @@ _awaited: contextvars.ContextVar[bool] = contextvars.ContextVar("llm_awaited", d
 # after a document is readable. Inherited by the tasks it spawns.
 _unattended: contextvars.ContextVar[bool] = contextvars.ContextVar("llm_unattended", default=False)
 
+# Set on unattended work a reader reaches first: a new book's first chapters (#231).
+_ahead: contextvars.ContextVar[bool] = contextvars.ContextVar("llm_ahead", default=False)
+
 
 @dataclass
 class AdmissionState:
@@ -107,8 +110,10 @@ class AdmissionState:
     queue: list[tuple[int, int]] = field(default_factory=list)
     arrivals: itertools.count = field(default_factory=itertools.count)
     last_interactive_end: float = 0.0
-    # Unattended calls wait until then: see `_rest`.
+    # Unattended calls wait until then: see `_paced_turn`.
     rest_until: float = 0.0
+    # Unattended callers waiting for their turn, resting included, as (priority, arrival).
+    paced_queue: list[tuple[int, int]] = field(default_factory=list)
     # How long the most recent interactive call ran. The deferral bound is
     # wall-clock, and 60s was calibrated where a call takes seconds; on a CPU-only
     # host one runs into minutes, so the bound expired mid-answer and admitted
@@ -339,13 +344,23 @@ def awaited():
 
 
 @contextlib.contextmanager
-def unattended(on: bool = True):
-    """Mark work started inside as unattended, so its local calls are paced (`_rest`)."""
-    token = _unattended.set(on)
+def unattended():
+    """Mark work started inside as unattended, so its local calls are paced (`_paced_turn`)."""
+    token = _unattended.set(True)
     try:
         yield
     finally:
         _unattended.reset(token)
+
+
+@contextlib.contextmanager
+def ahead():
+    """Give unattended work started inside the next paced turn, before other unattended work."""
+    token = _ahead.set(True)
+    try:
+        yield
+    finally:
+        _ahead.reset(token)
 
 
 def background_duty() -> float:
@@ -357,20 +372,31 @@ def background_duty() -> float:
     return min(1.0, max(0.1, float(_settings().BACKGROUND_LLM_DUTY)))
 
 
-async def _rest(state: AdmissionState) -> None:
-    """Wait out the rest the last unattended call earned.
+def _is_paced() -> bool:
+    return _unattended.get() and not _awaited.get() and background_duty() < 1.0
 
-    A laptop's fans follow the processor's sustained power, not its peak, and one ingest
-    queues an hour of calls: unpaced, that hour runs at full load. Resting as long as the
-    calls ran halves the sustained power and doubles how long the work takes. A rest
-    happens inside whatever the caller holds, so it costs at most one call's length.
+
+def _rested_and_alone(state: AdmissionState) -> bool:
+    return state.rest_until <= time.monotonic() and not state.live_background()
+
+
+def _paced_turn_open(state: AdmissionState, ticket: tuple[int, int]) -> bool:
+    return _rested_and_alone(state) and not state.queue and min(state.paced_queue) == ticket
+
+
+async def _paced_turn(state: AdmissionState) -> None:
+    """Wait until this unattended call may run: alone, after the last one's rest, in turn (I-78).
+
+    A rest happens inside whatever the caller holds, so it costs at most one call's length.
     """
-    # Another call ending meanwhile may lengthen the rest.
-    while True:
-        wait = state.rest_until - time.monotonic()
-        if wait <= 0:
-            return
-        await asyncio.sleep(wait)
+    ticket = (0 if _ahead.get() else 1, next(state.arrivals))
+    state.paced_queue.append(ticket)
+    try:
+        while not _paced_turn_open(state, ticket):
+            rest_left = state.rest_until - time.monotonic()
+            await asyncio.sleep(max(_POLL_SECONDS, rest_left))
+    finally:
+        state.paced_queue.remove(ticket)
 
 
 def _earn_rest(state: AdmissionState, busy: float) -> None:
@@ -383,14 +409,14 @@ def _earn_rest(state: AdmissionState, busy: float) -> None:
 async def background_call():
     """Hold a background call until the runtime has room for it."""
     state = _state()
-    paced = _unattended.get() and not _awaited.get()
+    paced = _is_paced()
     while True:
         if paced:
-            await _rest(state)
+            await _paced_turn(state)
         if admission_enabled():
             await _wait_for_slot(state, _awaited.get())
-        # A call that ended while this one queued may have earned a rest it must also wait out.
-        if not paced or state.rest_until <= time.monotonic():
+        # Held for an interactive call, this one may have been passed, or a rest earned meanwhile.
+        if not paced or _rested_and_alone(state):
             break
     # Claim the slot before any await, or a waiter behind this one is admitted past the width.
     alone = not state.background_activity and not state.interactive_activity

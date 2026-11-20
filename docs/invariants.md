@@ -172,6 +172,14 @@ A trailing comment field dropped teach-back parsing from 14/16 to 4/16 on paired
 parsing 12/12 in isolation. Numbers go after prose. No free-text field joins
 `_TEACHBACK_USER_TMPL` without re-running the parse-rate arm at scale.
 
+**I-78. Quiet background work runs one unattended call at a time, with nothing else in flight, and exempts no unattended job.**
+Fans follow sustained power. Resting as long as a call ran halves it only for one stream: a rest
+that ends releases every waiter together, so a two-slot runtime ran them in pairs, and an exempt
+job filled the other slot. One 31-page PDF held the GPU 96% busy for 9 minutes with Quiet on.
+Waiters keep tickets through the rest; `ahead()` orders a new book's first chapters first.
+`tests/test_background_settings.py::test_concurrent_unattended_callers_run_one_at_a_time_and_keep_the_pace`
+(width 2) and `::test_a_new_books_first_chapters_rest_but_go_first` fail CI if this regresses.
+
 ## Flashcards and practice
 
 **I-34. A flashcard's excerpt is a span of the passage the card was written from, and every card records whether that was checked.**
