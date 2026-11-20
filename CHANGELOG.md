@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The reader's text-size button no longer covers the first line of a notice above the text** (#526).
+
 ## [0.18.1] - 2026-11-19
 
 ### Added
