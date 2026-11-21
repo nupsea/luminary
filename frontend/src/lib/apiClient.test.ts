@@ -69,9 +69,39 @@ describe("transport", () => {
     const stub = stubFetch(new Response("{}", { status: 200 }))
     await apiFetch("/notes")
     const [url, init] = stub.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe(`${API_BASE}/notes`)
+    expect(url).toBe("http://localhost:7820/notes")
     expect([...new Headers(init.headers).keys()]).toEqual([])
-    expect(apiUrl("/images/x/raw")).toBe(`${API_BASE}/images/x/raw`)
+    expect(apiUrl("/images/x/raw")).toBe("http://localhost:7820/images/x/raw")
+  })
+
+  it("sends the transport's headers only to the transport's origin", async () => {
+    const stub = stubFetch(new Response("{}", { status: 200 }))
+    configureTransport({ baseUrl: "https://desk.example:7820", headers: () => ({ Authorization: "Bearer lum_x" }) })
+    await apiFetch("https://elsewhere.example/x")
+    await apiFetch("https://desk.example:7820/images/local/a.png")
+    const [, foreign] = stub.mock.calls[0] as [string, RequestInit]
+    const [, own] = stub.mock.calls[1] as [string, RequestInit]
+    expect(new Headers(foreign.headers).has("Authorization")).toBe(false)
+    expect(new Headers(own.headers).get("Authorization")).toBe("Bearer lum_x")
+  })
+
+  it("sends a relative base's headers on its relative paths", async () => {
+    const stub = stubFetch(new Response("{}", { status: 200 }))
+    configureTransport({ baseUrl: "/api", headers: () => ({ Authorization: "Bearer lum_x" }) })
+    await apiFetch("/notes")
+    const [url, init] = stub.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/api/notes")
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer lum_x")
+  })
+
+  it("leaves Content-Type to the browser for a FormData body", async () => {
+    const stub = stubFetch(new Response("{}", { status: 200 }))
+    const form = new FormData()
+    form.append("file", new Blob(["x"]), "x.png")
+    await apiFetch("/images/notes", { method: "POST", body: form })
+    const [, init] = stub.mock.calls[0] as [string, RequestInit]
+    expect(init.body).toBe(form)
+    expect(new Headers(init.headers).has("Content-Type")).toBe(false)
   })
 
   it("applies the transport's base, headers and fetch, and lets the caller's header win", async () => {

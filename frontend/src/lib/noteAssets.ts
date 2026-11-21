@@ -63,8 +63,14 @@ export async function uploadNoteAsset(file: File): Promise<NoteAssetUpload> {
   return res.json() as Promise<NoteAssetUpload>
 }
 
+/** The API path of a note asset, for apiFetch: `__LUMINARY_IMG__/a/b` -> `/images/local/a/b`. */
+export function luminaryAssetPath(path: string): string {
+  return path.replace(/^__LUMINARY_IMG__\//, "/images/local/")
+}
+
+/** The note asset's URL, for `src=`. Never pass it to apiFetch, which would prefix the base twice. */
 export function resolveLuminaryAssetUrl(path: string): string {
-  return path.replace(/^__LUMINARY_IMG__\//, apiUrl("/images/local/"))
+  return apiUrl(luminaryAssetPath(path))
 }
 
 /**

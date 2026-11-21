@@ -15,7 +15,8 @@ export interface ApiTransport {
 
 let transport: ApiTransport = { baseUrl: API_BASE }
 
-/** Replace the transport; the desktop app keeps the default (same origin, no token). */
+/** Replace the transport; the desktop app keeps the default (same origin, no token).
+ *  Call before the first render: components memoise URLs built from the base. */
 export function configureTransport(next: ApiTransport): void {
   transport = next
 }
@@ -93,7 +94,7 @@ export function apiBaseUrl(): string {
   return transport.baseUrl
 }
 
-/** The absolute URL of an API path, for `src=` and other places that cannot carry headers. */
+/** The URL of an API path, for `src=` and other places that cannot carry headers. */
 export function apiUrl(path: string): string {
   return path.startsWith("http") ? path : `${transport.baseUrl}${path}`
 }
@@ -107,6 +108,16 @@ function buildUrl(path: string, params?: QueryParams): string {
     url.searchParams.set(key, String(value))
   }
   return url.toString()
+}
+
+// The transport's headers (a device token) go only to the server the transport points at.
+function isTransportOrigin(url: string): boolean {
+  const here = typeof window === "undefined" ? undefined : window.location.origin
+  try {
+    return new URL(url, here).origin === new URL(transport.baseUrl, here).origin
+  } catch {
+    return !/^[a-z][a-z\d+.-]*:/i.test(url) && !/^[a-z][a-z\d+.-]*:/i.test(transport.baseUrl)
+  }
 }
 
 function isPlainBody(body: unknown): boolean {
@@ -133,14 +144,15 @@ export async function apiFetch(
   if (hasBody && !isPlainBody(body) && !finalHeaders.has("Content-Type")) {
     finalHeaders.set("Content-Type", "application/json")
   }
-  if (transport.headers) {
+  const url = buildUrl(path, params)
+  if (transport.headers && isTransportOrigin(url)) {
     new Headers(transport.headers()).forEach((value, name) => {
       if (!finalHeaders.has(name)) finalHeaders.set(name, value)
     })
   }
   // Looked up per call, not captured at import, so a replaced global fetch is the one used.
   const send = transport.fetch ?? fetch
-  return send(buildUrl(path, params), {
+  return send(url, {
     ...init,
     headers: finalHeaders,
     body: encoded ?? undefined,

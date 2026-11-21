@@ -8,11 +8,16 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 // One transport, so a paired device's token and base URL apply to every request (#447).
 const RAW_FETCH_MESSAGE =
   'Call the backend through "@/lib/apiClient": request / apiGet / apiPost for JSON, apiFetch for streams, downloads and asset reads, apiUrl for src= URLs. Raw fetch() bypasses the transport.'
-const NO_RAW_FETCH = [
-  { selector: 'CallExpression[callee.type="Identifier"][callee.name="fetch"]', message: RAW_FETCH_MESSAGE },
+const API_BASE_MESSAGE =
+  'Build URLs with apiUrl / apiBaseUrl from "@/lib/apiClient"; API_BASE is only the transport default.'
+const NO_TRANSPORT_BYPASS = [
   {
-    selector: 'CallExpression > MemberExpression.callee[object.name=/^(window|globalThis|self)$/][property.name="fetch"]',
+    selector: 'MemberExpression[object.name=/^(window|globalThis|self)$/][property.name="fetch"]',
     message: RAW_FETCH_MESSAGE,
+  },
+  {
+    selector: 'MemberExpression[object.type="MemberExpression"][object.object.type="MetaProperty"][object.property.name="env"][property.name="VITE_API_BASE"]',
+    message: API_BASE_MESSAGE,
   },
 ]
 
@@ -53,19 +58,22 @@ export default defineConfig([
   },
   {
     files: ['src/**/*.{ts,tsx}'],
-    ignores: ['src/lib/apiClient.ts', 'src/**/*.test.{ts,tsx}'],
     rules: {
       // An error, not a warning: as a warning it sat inside the --max-warnings
       // budget and the count roughly doubled while nothing ever failed.
-      'no-restricted-syntax': ['error', ...NO_RAW_FETCH, NO_INLINE_INNER_HTML],
-      // The base URL is the transport's, read at runtime; the build-time constant is its default.
+      'no-restricted-syntax': ['error', NO_INLINE_INNER_HTML],
+    },
+  },
+  {
+    // The transport's own module, its build-time default and the tests that stub fetch are exempt.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/lib/apiClient.ts', 'src/lib/config.ts', 'src/**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': ['error', NO_INLINE_INNER_HTML, ...NO_TRANSPORT_BYPASS],
+      'no-restricted-globals': ['error', { name: 'fetch', message: RAW_FETCH_MESSAGE }],
       'no-restricted-imports': [
         'error',
-        ...['@/lib/config', './config'].map((name) => ({
-          name,
-          importNames: ['API_BASE'],
-          message: 'Build URLs with apiUrl / apiBaseUrl from "@/lib/apiClient"; API_BASE is only the transport default.',
-        })),
+        { patterns: [{ regex: '(^@/lib|^\\.{1,2}(/\\.\\.)*(/lib)?)/config$', importNames: ['API_BASE'], message: API_BASE_MESSAGE }] },
       ],
     },
   },

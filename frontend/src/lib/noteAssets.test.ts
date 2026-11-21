@@ -1,6 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { isWithheldImage, readShellClipboardImage } from "./noteAssets"
+import { apiFetch, configureTransport } from "./apiClient"
+import { API_BASE } from "./config"
+import { isWithheldImage, luminaryAssetPath, readShellClipboardImage, resolveLuminaryAssetUrl } from "./noteAssets"
 
 type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
 
@@ -61,5 +63,19 @@ describe("readShellClipboardImage", () => {
       throw "the clipboard holds no image"
     })
     await expect(readShellClipboardImage()).rejects.toBe("the clipboard holds no image")
+  })
+})
+
+describe("note asset URLs under a relative base", () => {
+  afterEach(() => configureTransport({ baseUrl: API_BASE }))
+
+  // Public mode serves the API under /api; feeding a resolved URL back to apiFetch made /api/api/...
+  it("prefixes the base once, for src= and for apiFetch", async () => {
+    configureTransport({ baseUrl: "/api" })
+    expect(resolveLuminaryAssetUrl("__LUMINARY_IMG__/notes/a.svg")).toBe("/api/images/local/notes/a.svg")
+    const stub = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }))
+    configureTransport({ baseUrl: "/api", fetch: stub as unknown as typeof fetch })
+    await apiFetch(luminaryAssetPath("__LUMINARY_IMG__/notes/a.excalidraw.json"))
+    expect(stub.mock.calls[0][0]).toBe("/api/images/local/notes/a.excalidraw.json")
   })
 })
