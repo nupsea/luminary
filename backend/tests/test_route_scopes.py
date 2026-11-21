@@ -159,15 +159,14 @@ def test_every_route_a_device_reaches_is_one_this_test_names():
 
 
 def test_a_route_that_loses_its_declaration_is_caught(monkeypatch):
-    note_routes = [r for r in app.routes if isinstance(r, APIRoute) and r.path == "/notes"]
-    create = next(r for r in note_routes if "POST" in r.methods)
-    kept = [d for d in create.dependant.dependencies if d not in _scope_deps(create)]
+    create = next(
+        r
+        for r in app.routes
+        if isinstance(r, APIRoute) and r.path == "/notes" and "POST" in r.methods
+    )
+    kept = [d for d in create.dependant.dependencies if not hasattr(d.call, "scope")]
     monkeypatch.setattr(create.dependant, "dependencies", kept)
     assert ("POST", "/notes", "notes:write") not in _declared()
-
-
-def _scope_deps(route: APIRoute) -> list:
-    return [d for d in route.dependant.dependencies if getattr(d.call, "scope", None)]
 
 
 # Inputs that do nothing if they get through: an unknown component or connector, an

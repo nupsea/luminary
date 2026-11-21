@@ -34,7 +34,7 @@ _TOUCH_INTERVAL = timedelta(seconds=60)
 # Attempts one client address may make per code lifetime: one fewer than voids the code,
 # so a single LAN client cannot keep voiding the codes the user shows, and a typo or two pairs.
 _MAX_ATTEMPTS_PER_CLIENT = _MAX_FAILED_ATTEMPTS - 1
-# Bounds the table a flood of spoofed-looking addresses could grow.
+# Bounds memory; past it the table starts again empty.
 _MAX_TRACKED_CLIENTS = 1024
 
 

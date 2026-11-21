@@ -356,7 +356,7 @@ def _restrict_permissions(data_dir: Path) -> None:
             logger.warning("Could not restrict permissions on %s: %s", path, exc)
 
 
-# Default-deny for devices: a route a device may call declares its scope (#532).
+# Default-deny for devices: a route a device may call declares its scope (I-79).
 app = FastAPI(title="Luminary", lifespan=lifespan, dependencies=[Depends(authorize_route)])
 
 

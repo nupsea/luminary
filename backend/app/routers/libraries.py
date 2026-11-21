@@ -35,7 +35,7 @@ from app.services import libraries as library_service
 from app.services import sync_folders
 from app.services.library_snapshot import Manifest
 
-# Declares no device scope: spaces are managed from Luminary itself (#532).
+# No device scope: spaces are managed from Luminary itself (I-79).
 router = APIRouter(prefix="/libraries", tags=["libraries"])
 
 
