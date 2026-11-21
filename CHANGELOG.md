@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An uploaded file can no longer run script as Luminary.** A note image keeps only an image extension, and stored images are served so that opening one directly runs nothing.
 - **A server behind a reverse proxy on the same machine no longer treats proxied requests as its own.** A request carrying a forwarding header needs a device token, and with `LUMINARY_ALLOWED_HOSTS` set so does one naming another host. A proxy that rewrites `Host` to loopback and forwards nothing (nginx's default) is not supported.
 
+### Fixed
+- **A card you are learning now graduates when you answer Good.** Every review restarted the card at its first learning step, so Good, Good kept it in learning and only Easy moved it on; the dev library had 88 cards stuck in learning and 3 in review. The step is now kept between reviews. On upgrade, a learning card whose last study-session review was Good resumes at the second step and every other learning or relearning card at the first; no due date changes until the card's next review (#533).
+
 ## [0.18.2] - 2026-11-21
 
 ### Fixed

@@ -207,6 +207,8 @@ class FlashcardModel(Base):
     fsrs_difficulty: Mapped[float] = mapped_column(Float, default=0.0)
     due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     fsrs_state: Mapped[str] = mapped_column(String, default="new")  # new|learning|review|relearning
+    # The learning or relearning step the scheduler left the card at; NULL outside them (#533).
+    fsrs_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reps: Mapped[int] = mapped_column(Integer, default=0)
     lapses: Mapped[int] = mapped_column(Integer, default=0)
     last_review: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

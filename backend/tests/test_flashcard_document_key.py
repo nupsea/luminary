@@ -8,7 +8,7 @@ orphans an older library already holds.
 import sqlite3
 
 import pytest
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, insert, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -16,7 +16,7 @@ from app.database import make_engine
 from app.db_init import _alembic_config, init_database
 from app.models import DocumentModel, FlashcardModel
 from app.repos.flashcard_repo import FlashcardRepo
-from tests.factories import make_card
+from tests.factories import make_card, set_values
 from tests.graph_seed import add_documents
 
 
@@ -80,8 +80,8 @@ async def test_the_upgrade_removes_orphan_cards_and_their_index_rows(tmp_path):
                 )
             )
             kept, orphan, note = _card("kept"), _card("gone"), _card(None)
-            session.add_all([kept, orphan, note])
             for card in (kept, orphan, note):
+                await session.execute(insert(FlashcardModel.__table__).values(**set_values(card)))
                 await FlashcardRepo(session).sync_fts(card)
             await session.commit()
 
