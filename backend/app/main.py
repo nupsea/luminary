@@ -65,6 +65,7 @@ from app.routers.tags import router as tags_router
 from app.runtime.library_work import serve_library, serving, stop_serving
 from app.runtime.request_auth import (
     DEV_APP_ORIGINS,
+    SCHEMA_PATH,
     RequestAuthMiddleware,
     authorize_route,
     device_scope,
@@ -594,19 +595,19 @@ async def read_storage(settings: Settings = Depends(get_settings)) -> dict:
 
 app.include_router(misc_router, prefix=_API_PREFIX)
 
-# At the origin root in every mode, where smoke reads it (`smoke_openapi`); the middleware does
-# not guard the root in public mode, so this computer is checked here.
-schema_router = APIRouter(include_in_schema=False, dependencies=[Depends(require_this_computer)])
+# The schema is a read a paired device may make (smoke against a server sends a token); the
+# middleware guards its root path in every mode (`SCHEMA_PATH`).
+schema_router = APIRouter(include_in_schema=False)
 
 
-@schema_router.get("/openapi.json")
+@schema_router.get(SCHEMA_PATH, dependencies=[device_scope("read")])
 async def openapi_schema() -> JSONResponse:
     return JSONResponse(app.openapi())
 
 
 if _mode == "full":
 
-    @schema_router.get("/docs")
+    @schema_router.get("/docs", dependencies=[Depends(require_this_computer)])
     async def swagger_docs() -> HTMLResponse:
         return get_swagger_ui_html(openapi_url="/openapi.json", title="Luminary API")
 

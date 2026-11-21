@@ -127,13 +127,16 @@ smoke_require_mode() {
 }
 
 # smoke_openapi: the API schema, paths relative to $BASE. Served at the origin root,
-# with /api-prefixed paths in public mode. Fetched once per run.
+# with /api-prefixed paths in public mode. Fetched once per run. A server reached from
+# another machine answers only a paired device: set LUMINARY_TOKEN to its token.
 smoke_openapi() {
     local cache="$SMOKE_TMP/openapi.json" origin="${BASE%/api}" prefix=""
+    local auth=()
     [ "$origin" != "$BASE" ] && prefix="/api"
+    [ -n "${LUMINARY_TOKEN:-}" ] && auth=(-H "Authorization: Bearer $LUMINARY_TOKEN")
     if [ ! -s "$cache" ]; then
         # Git Bash otherwise rewrites the "/api" argv to "C:/Program Files/Git/api".
-        curl -sf --max-time 60 "$origin/openapi.json" | MSYS_NO_PATHCONV=1 python3 -c '
+        curl -sf --max-time 60 ${auth[@]+"${auth[@]}"} "$origin/openapi.json" | MSYS_NO_PATHCONV=1 python3 -c '
 import json, sys
 spec, prefix = json.load(sys.stdin), sys.argv[1]
 if prefix:

@@ -84,10 +84,25 @@ class EnrichmentQueueSummary(BaseModel):
     active: bool
 
 
-# What a note may hold. Anything else could be served back as a document on the app's origin.
-_NOTE_IMAGE_EXTENSIONS = frozenset(
-    {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".svg"}
-)
+# What a local image is served as. Anything else could be served back as a document on the
+# app's origin, so a note may hold only these (HEIC is an iPhone's default photo format).
+_IMAGE_TYPES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "jfif": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "bmp": "image/bmp",
+    "tiff": "image/tiff",
+    "tif": "image/tiff",
+    "svg": "image/svg+xml",
+    "avif": "image/avif",
+    "heic": "image/heic",
+    "heif": "image/heif",
+    "ico": "image/x-icon",
+}
+_NOTE_IMAGE_EXTENSIONS = frozenset(f".{ext}" for ext in _IMAGE_TYPES)
 _SCENE_SUFFIX = ".excalidraw.json"
 
 
@@ -229,17 +244,8 @@ async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
     if not abs_path.is_relative_to(root) or not abs_path.is_file():
         raise NotFound("Local image not found")
 
-    # Detect media type from extension
     ext = filename.rsplit(".", maxsplit=1)[-1].lower()
-    if ext == "svg":
-        media_type = "image/svg+xml"
-    elif ext == "json":
-        media_type = "application/json"
-    elif ext in ["tiff", "tif"]:
-        media_type = "image/tiff"
-    else:
-        common_types = {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
-        media_type = f"image/{ext}" if ext in common_types else "image/png"
+    media_type = "application/json" if ext == "json" else _IMAGE_TYPES.get(ext, "image/png")
     return FileResponse(str(abs_path), media_type=media_type, headers=UNTRUSTED_ASSET_HEADERS)
 
 

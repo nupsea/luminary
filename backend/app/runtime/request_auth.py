@@ -12,8 +12,11 @@ Those headers are only evidence on loopback. A server that answers beyond it
 direct client writes whatever `Origin` and `Host` it likes. A same-host reverse proxy
 (`tailscale serve`, Caddy) connects from 127.0.0.1, so a request is from beyond loopback if
 its address is not loopback, OR it names a host that is not, OR it carries a forwarding header.
-uvicorn, launched without `--proxy-headers` flags everywhere, already rewrites the address
-from `X-Forwarded-For` when the connection is from 127.0.0.1 (`FORWARDED_ALLOW_IPS`).
+The forwarding header counts in every configuration: neither the desktop app nor `make dev`
+sends one, so only a proxy does. uvicorn, launched without `--proxy-headers` flags everywhere,
+also rewrites the address from `X-Forwarded-For` when the connection is from 127.0.0.1
+(`FORWARDED_ALLOW_IPS`). A proxy that rewrites `Host` to loopback and forwards nothing
+(nginx's default `proxy_pass`) is indistinguishable from this computer and is unsupported.
 
 What an admitted device may then do is decided after routing (#532): a route is the app's
 alone unless it declares a device scope (`device_scope`), and `authorize_route`, an app-wide
@@ -59,6 +62,8 @@ _REMOTE = "Requests from another machine need a paired device's token."
 _LOCAL_ONLY = "Only Luminary on this computer can do this; a paired device cannot."
 
 
+# Served at the origin root in every mode, where smoke reads it.
+SCHEMA_PATH = "/openapi.json"
 _LOOPBACK_NAMES = frozenset({"127.0.0.1", "localhost", "::1"})
 _FORWARDING_HEADERS = ("forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip")
 
@@ -72,19 +77,22 @@ def is_loopback(client: tuple[str, int] | None) -> bool:
         return False
 
 
-def from_beyond_loopback(scope: Scope) -> bool:
-    """Whether the request came from another machine, directly or through a proxy here."""
-    if not is_loopback(scope.get("client")):
-        return True
+def is_forwarded(scope: Scope) -> bool:
+    """Whether a proxy relayed the request: only a proxy writes these."""
     headers = Headers(scope=scope)
-    host = urlsplit(f"//{headers.get('host', '')}").hostname or ""
-    if host not in _LOOPBACK_NAMES:
-        return True
     return any(name in headers for name in _FORWARDING_HEADERS)
 
 
+def from_beyond_loopback(scope: Scope) -> bool:
+    """Whether the request came from another machine, directly or through a proxy here."""
+    if not is_loopback(scope.get("client")) or is_forwarded(scope):
+        return True
+    host = urlsplit(f"//{Headers(scope=scope).get('host', '')}").hostname or ""
+    return host not in _LOOPBACK_NAMES
+
+
 def require_this_computer(request: Request) -> None:
-    """For a route outside the guarded API (the schema): this computer only, never a device."""
+    """For a tool route (the API docs): this computer only, never a device."""
     if is_device(request) or from_beyond_loopback(request.scope):
         raise Forbidden(_LOCAL_ONLY)
 
@@ -185,7 +193,7 @@ class RequestAuthMiddleware:
             return (principal, None) if principal is not None else (None, _NOT_ADMITTED)
         if scope["path"] == self.pair_path:
             return None, None
-        if self.remote_needs_token and from_beyond_loopback(scope):
+        if is_forwarded(scope) or (self.remote_needs_token and from_beyond_loopback(scope)):
             return None, _REMOTE
         own_origin = f"{scope.get('scheme', 'http')}://{headers.get('host', '')}"
         if needs_token(
@@ -195,9 +203,9 @@ class RequestAuthMiddleware:
         return LOCAL_PRINCIPAL, None
 
     def _guards(self, path: str) -> bool:
-        # In public mode only the API is guarded: the SPA's files are public, and the
-        # root probes are reads the shell makes before the SPA exists.
-        return not self.api_prefix or path.startswith(self.api_prefix + "/")
+        # In public mode only the API and its schema are guarded: the SPA's files are public,
+        # and the root health routes are what the shell reads before the SPA exists.
+        return not self.api_prefix or path.startswith(self.api_prefix + "/") or path == SCHEMA_PATH
 
     @staticmethod
     async def _device(authorization: str) -> Principal | None:

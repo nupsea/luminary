@@ -17,7 +17,12 @@ from app.db_init import init_database
 from app.exceptions import TooManyRequests
 from app.main import app
 from app.models import DeviceModel, NoteModel
-from app.runtime.request_auth import authorize_route, require_this_computer, route_scopes
+from app.runtime.request_auth import (
+    RequestAuthMiddleware,
+    authorize_route,
+    require_this_computer,
+    route_scopes,
+)
 from app.types import DEFAULT_DEVICE_SCOPES, DEVICE_SCOPES
 from tests.test_drop_content_type_migration import _migrate
 
@@ -73,6 +78,7 @@ DEVICE_ROUTES = {
     ("GET", "/images/local/{doc_id}/{filename}", "read"),
     ("GET", "/images/{image_id}/raw", "read"),
     ("GET", "/notes", "read"),
+    ("GET", "/openapi.json", "read"),
     ("GET", "/notes/autocomplete", "read"),
     ("GET", "/notes/cluster/suggestions", "read"),
     ("GET", "/notes/flashcards", "read"),
@@ -310,26 +316,57 @@ def test_every_route_is_behind_the_device_check():
         assert authorize_route in calls, f"{route.path} skips authorize_route"
 
 
-@pytest.mark.parametrize(
-    "headers",
-    [
-        {"Authorization": "device"},
-        {"Host": "luminary.lan:7820"},
-        {"X-Forwarded-For": "203.0.113.7"},
-    ],
-)
-async def test_the_schema_answers_only_this_computer(client, headers):
+def _served(*, api_prefix: str = "", remote: bool = False, client=("127.0.0.1", 51000)):
+    served = RequestAuthMiddleware(
+        app,
+        api_prefix=api_prefix,
+        app_origins=frozenset(),
+        pair_path="/devices/pair",
+        remote_needs_token=remote,
+    )
+    return AsyncClient(transport=ASGITransport(app=served, client=client), base_url=OWN)
+
+
+async def test_the_schema_answers_this_computer_and_a_reader(client, memory_db):
     assert (await client.get("/openapi.json")).status_code == 200
-    if headers.get("Authorization") == "device":
-        headers = await _device(client)
-    resp = await client.get("/openapi.json", headers=headers)
-    assert resp.status_code == 403, resp.text
+    device = await _device(client)
+    assert (await client.get("/openapi.json", headers=device)).status_code == 200
+    async with memory_db.factory() as session:
+        await session.execute(update(DeviceModel).values(scopes=[]))
+        await session.commit()
+    assert (await client.get("/openapi.json", headers=device)).status_code == 403
+
+
+@pytest.mark.parametrize("api_prefix", ["", "/api"])
+async def test_the_schema_refuses_a_tokenless_caller_from_beyond(memory_db, api_prefix):
+    # Public mode guards only /api, so the schema's root path is named to the middleware.
+    async with _served(api_prefix=api_prefix, remote=True, client=("203.0.113.7", 1)) as c:
+        assert (await c.get("/openapi.json")).status_code == 401
+    async with _served(api_prefix=api_prefix) as c:
+        assert (
+            await c.get("/openapi.json", headers={"X-Forwarded-For": "203.0.113.7"})
+        ).status_code == 401
+
+
+async def test_the_api_docs_are_this_computers(client):
+    assert (await client.get("/docs")).status_code == 200
+    device = await _device(client)
+    resp = await client.get("/docs", headers=device)
+    assert resp.status_code == 403 and resp.json()["detail"] == LOCAL_ONLY
     assert any(
         d.call is require_this_computer
         for r in app.routes
-        if isinstance(r, APIRoute) and r.path == "/openapi.json"
+        if isinstance(r, APIRoute) and r.path == "/docs"
         for d in r.dependant.dependencies
     )
+
+
+async def test_a_forwarded_request_needs_a_token_with_remote_serving_off(client, memory_db):
+    resp = await client.patch(
+        "/settings", json={"planted": "yes"}, headers={"X-Forwarded-For": "203.0.113.7"}
+    )
+    assert resp.status_code == 401, resp.text
+    assert (await client.get("/notes")).status_code == 200
 
 
 @pytest.mark.parametrize("body", [{"model": "gpt-4o"}, {"web_enabled": True}])

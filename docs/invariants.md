@@ -364,8 +364,10 @@ holder's key. `authorize_route` is an app-wide dependency that reads the matched
 refuses a device unless the route declares a scope (`device_scope`) the token holds; the app's own
 origin passes. A scope this build does not know grants nothing, and FastAPI's schema and docs
 routes are re-registered as API routes so none escapes the check. Behind a same-host proxy
-every request connects from 127.0.0.1, so with `LUMINARY_ALLOWED_HOSTS` set a request is remote
-if its address, its `Host` or any forwarding header says so.
+every request connects from 127.0.0.1: a forwarding header makes a request remote in every
+configuration, and with `LUMINARY_ALLOWED_HOSTS` set so does a non-loopback address or `Host`.
+A proxy that rewrites `Host` to loopback and forwards nothing (nginx's default `proxy_pass`)
+cannot be told from this computer and is unsupported.
 `tests/test_route_scopes.py` pins every route a device reaches and fails CI if one is added,
 dropped, if a route skips the check, or if a local-only class answers a token;
 `test_device_auth.py::test_a_request_through_a_proxy_here_needs_a_token` guards the proxy case.

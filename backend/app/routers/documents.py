@@ -1078,7 +1078,9 @@ async def get_document_cover(document_id: str) -> Response:
     covers_dir = library_root(settings) / "covers"
     cached_cover = covers_dir / f"{document_id}.webp"
     if cached_cover.is_file():
-        return FileResponse(str(cached_cover), media_type="image/webp")
+        return FileResponse(
+            str(cached_cover), media_type="image/webp", headers=UNTRUSTED_ASSET_HEADERS
+        )
 
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
@@ -1091,13 +1093,17 @@ async def get_document_cover(document_id: str) -> Response:
                 _extract_epub_cover_sync, file_path, str(cached_cover)
             )
             if success and cached_cover.is_file():
-                return FileResponse(str(cached_cover), media_type="image/webp")
+                return FileResponse(
+                    str(cached_cover), media_type="image/webp", headers=UNTRUSTED_ASSET_HEADERS
+                )
 
         # 2. For PDF (or EPUB fallback), try rendering page 0
         if doc_format in ("pdf", "epub") and file_path and Path(file_path).is_file():
             success = await asyncio.to_thread(_render_cover_sync, file_path, str(cached_cover))
             if success and cached_cover.is_file():
-                return FileResponse(str(cached_cover), media_type="image/webp")
+                return FileResponse(
+                    str(cached_cover), media_type="image/webp", headers=UNTRUSTED_ASSET_HEADERS
+                )
 
         # 2. If article/figures exist in ImageModel
         img_row = await DocumentRepo(session).first_figure_path(document_id)
@@ -1108,7 +1114,9 @@ async def get_document_cover(document_id: str) -> Response:
                 ext = img_abs.suffix.lstrip(".").lower()
                 valid_exts = ("png", "jpg", "jpeg", "webp")
                 media_type = f"image/{ext}" if ext in valid_exts else "image/png"
-                return FileResponse(str(img_abs), media_type=media_type)
+                return FileResponse(
+                    str(img_abs), media_type=media_type, headers=UNTRUSTED_ASSET_HEADERS
+                )
 
         # 3. Check for local mirrored article images
         article_img_dir = (library_root(settings) / "images" / document_id).resolve()
@@ -1125,7 +1133,9 @@ async def get_document_cover(document_id: str) -> Response:
                 ext = first_img.suffix.lstrip(".").lower()
                 valid_exts = ("png", "jpg", "jpeg", "webp")
                 media_type = f"image/{ext}" if ext in valid_exts else "image/png"
-                return FileResponse(str(first_img), media_type=media_type)
+                return FileResponse(
+                    str(first_img), media_type=media_type, headers=UNTRUSTED_ASSET_HEADERS
+                )
 
     # No cover is an expected answer, not a failure: the tile falls back on any empty
     # response, and a 404 here was logged as a warning for every coverless document.

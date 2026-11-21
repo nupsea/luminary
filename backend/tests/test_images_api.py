@@ -393,3 +393,45 @@ async def test_reextract_returns_404_for_unknown_doc(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/documents/nonexistent-id/images/reextract")
     assert resp.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("name", "mime", "served_as"),
+    [
+        ("photo.heic", "image/heic", "image/heic"),
+        ("photo.heif", "image/heif", "image/heif"),
+        ("photo.avif", "image/avif", "image/avif"),
+        ("favicon.ico", "image/x-icon", "image/x-icon"),
+        ("photo.jfif", "image/jpeg", "image/jpeg"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_phone_photo_format_round_trips(test_db, name, mime, served_as):
+    """HEIC is an iPhone's default photo format; the allowlist must not refuse it."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        upload = await client.post("/images/notes", files={"file": (name, b"bytes", mime)})
+        assert upload.status_code == 200, upload.text
+        served = await client.get(f"/images/local/notes/{upload.json()['filename']}")
+
+    assert served.status_code == 200
+    assert served.headers["content-type"] == served_as
+    assert served.headers["x-content-type-options"] == "nosniff"
+
+
+@pytest.mark.asyncio
+async def test_a_cover_is_served_inert(test_db):
+    """An EPUB's cover may be an SVG, opened directly on the app's origin."""
+    _, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(make_document(id=doc_id, title="Book", file_path="/fake.epub"))
+        await session.commit()
+    (tmp_path / "covers").mkdir()
+    (tmp_path / "covers" / f"{doc_id}.webp").write_bytes(b"cover")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        served = await client.get(f"/documents/{doc_id}/cover")
+
+    assert served.status_code == 200
+    assert served.headers["content-security-policy"].startswith("sandbox;")
+    assert served.headers["x-content-type-options"] == "nosniff"
