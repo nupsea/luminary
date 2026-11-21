@@ -1,4 +1,8 @@
-"""Each library is served under its own preferences; API keys stay the machine user's (#389)."""
+"""Each library is served under its own preferences; API keys stay the machine user's (#389).
+
+Settings are the app's alone (#532), so the second library's are written by the app with
+that library open, and a device paired into it is refused.
+"""
 
 import pytest
 
@@ -9,7 +13,8 @@ from app.library import DEFAULT_LIBRARY, use_library
 from app.repos.settings_repo import SettingsRepo
 from app.runtime.library_work import serve_library, stop_library
 from app.services.settings_service import get_effective_routing
-from tests.test_library_binding import OTHER, _pair_into, client  # noqa: F401
+from tests.test_library_binding import OTHER, _app_in, _pair_into, client  # noqa: F401
+from tests.test_route_scopes import LOCAL_ONLY
 
 
 @pytest.fixture(autouse=True)
@@ -44,9 +49,14 @@ async def _restart() -> None:
         await serve_library(library)
 
 
-async def _llm(client, headers) -> tuple:  # noqa: F811
-    body = (await client.get("/settings/llm", headers=headers)).json()
+async def _llm(client) -> tuple:  # noqa: F811
+    body = (await client.get("/settings/llm")).json()
     return body["mode"], body["mode_chosen"], body["local_chat_model"], body["vision_model"]
+
+
+async def _refused(client, device, path: str, body: dict) -> None:  # noqa: F811
+    resp = await client.patch(path, json=body, headers=device)
+    assert resp.status_code == 403 and resp.json()["detail"] == LOCAL_ONLY
 
 
 async def test_each_library_is_served_under_its_own_preferences(client):  # noqa: F811
@@ -54,19 +64,19 @@ async def test_each_library_is_served_under_its_own_preferences(client):  # noqa
     own = {"mode": "hybrid", "local_chat_model": "qwen3.5:9b", "vision_model": "gemma3:4b"}
     assert (await client.patch("/settings/llm", json=own)).status_code == 200
     other = {"local_chat_model": "qwen3.5:0.8b"}
-    assert (await client.patch("/settings/llm", json=other, headers=device)).status_code == 200
     quiet = {"quiet_background": False}
-    assert (
-        await client.patch("/settings/background", json=quiet, headers=device)
-    ).status_code == 200
+    await _refused(client, device, "/settings/llm", other)
+    await _refused(client, device, "/settings/background", quiet)
+    with _app_in(OTHER):
+        assert (await client.patch("/settings/llm", json=other)).status_code == 200
+        assert (await client.patch("/settings/background", json=quiet)).status_code == 200
 
     expected_own = ("hybrid", True, "ollama/qwen3.5:9b", "ollama/gemma3:4b")
-    assert await _llm(client, {}) == expected_own
-    assert (await _llm(client, device))[:3] == ("private", False, "ollama/qwen3.5:0.8b")
+    assert await _llm(client) == expected_own
     assert (await client.get("/settings/background")).json()["quiet_background"] is True
-    assert (await client.get("/settings/background", headers=device)).json()[
-        "quiet_background"
-    ] is False
+    with _app_in(OTHER):
+        assert (await _llm(client))[:3] == ("private", False, "ollama/qwen3.5:0.8b")
+        assert (await client.get("/settings/background")).json()["quiet_background"] is False
     assert get_effective_routing(background=True)[0] == "ollama/qwen3.5:9b"
     with use_library(OTHER):
         assert get_effective_routing(background=True)[0] == "ollama/qwen3.5:0.8b"
@@ -82,7 +92,9 @@ async def test_each_library_is_served_under_its_own_preferences(client):  # noqa
 
 async def test_a_key_saved_from_any_library_is_kept_in_the_default_one(client):  # noqa: F811
     device = await _pair_into(client, OTHER)
-    resp = await client.patch("/settings/llm", json={"openai_api_key": "sk-phone"}, headers=device)
+    await _refused(client, device, "/settings/llm", {"openai_api_key": "sk-device"})
+    with _app_in(OTHER):
+        resp = await client.patch("/settings/llm", json={"openai_api_key": "sk-phone"})
     assert resp.status_code == 200 and resp.json()["has_openai_key"] is True
 
     rows = {}
