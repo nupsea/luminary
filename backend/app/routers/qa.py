@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.runtime.qa_stream import get_qa_service
+from app.runtime.request_auth import device_scope
 from app.services.intent import (
     LLM_FALLBACK_BELOW,
     _llm_classify_fallback,
@@ -68,7 +69,7 @@ def _normalize_classify_route(intent: str) -> Literal["summary", "graph", "compa
     return "search"
 
 
-@router.post("")
+@router.post("", dependencies=[device_scope("read")])
 async def ask_question(req: QARequest) -> StreamingResponse:
     svc = get_qa_service()
     history = [m.model_dump() for m in req.messages] if req.messages else []

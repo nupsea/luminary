@@ -11,6 +11,10 @@ Those headers are only evidence on loopback. A server that answers beyond it
 (`LUMINARY_ALLOWED_HOSTS`, #511) admits a non-loopback client by token alone, since a direct
 client writes whatever `Origin` and `Host` it likes.
 
+What an admitted device may then do is decided after routing (#532): a route is the app's
+alone unless it declares a device scope (`device_scope`), and `authorize_route`, an app-wide
+dependency, admits a device only to a route whose scope its token holds.
+
 The request then runs in its principal's library (#388): a device's is the one it paired into,
 the app's is the active library (`services/libraries.py`). Devices are looked up in the
 default library's database, the registry, whatever library they belong to.
@@ -22,9 +26,10 @@ from __future__ import annotations
 
 import dataclasses
 import ipaddress
-from collections.abc import Callable
 
-from fastapi import Request
+from fastapi import Depends, Request
+from fastapi.params import Depends as DependsParam
+from fastapi.routing import APIRoute
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -36,7 +41,7 @@ from app.repos.device_repo import DeviceRepo
 from app.runtime.library_work import serve_library
 from app.services.devices import resolve_token
 from app.services.libraries import active_library
-from app.types import DEFAULT_LIBRARY, LOCAL_PRINCIPAL, Principal
+from app.types import DEFAULT_LIBRARY, LOCAL_PRINCIPAL, DeviceScope, Principal
 
 # Vite's dev server, and the port it falls back to when 5173 is taken (`make clean`).
 DEV_APP_ORIGINS = frozenset(
@@ -46,6 +51,7 @@ DEV_APP_ORIGINS = frozenset(
 _UNPAIRED = "This origin is not paired with Luminary. Pair it under Settings > Devices."
 _NOT_ADMITTED = "This device is not paired, or its pairing was revoked."
 _REMOTE = "Requests from another machine need a paired device's token."
+_LOCAL_ONLY = "Only Luminary on this computer can do this; a paired device cannot."
 
 
 def is_loopback(client: tuple[str, int] | None) -> bool:
@@ -57,15 +63,42 @@ def is_loopback(client: tuple[str, int] | None) -> bool:
         return False
 
 
-def require_local(refusal: str) -> Callable[[Request], None]:
-    """A route dependency that refuses every caller but the app itself."""
+class _DeviceAccess:
+    """Marks a route a device may call with `scope`. Never called for its result."""
 
-    def check(request: Request) -> None:
-        principal = getattr(request.state, "principal", None)
-        if principal is None or principal.kind != "local":
-            raise Forbidden(refusal)
+    def __init__(self, scope: DeviceScope) -> None:
+        self.scope = scope
 
-    return check
+    def __call__(self) -> None:
+        return None
+
+
+def device_scope(scope: DeviceScope) -> DependsParam:
+    """Declare, on a route or a whole router, the device scope that admits a device to it."""
+    return Depends(_DeviceAccess(scope))
+
+
+def route_scopes(route: APIRoute) -> list[DeviceScope]:
+    """Every device scope `route` declares; none means the app's alone."""
+    return [
+        dep.call.scope
+        for dep in route.dependant.dependencies
+        if isinstance(dep.call, _DeviceAccess)
+    ]
+
+
+def authorize_route(request: Request) -> None:
+    """Admit a device only to a route that declares a scope its token holds."""
+    principal: Principal | None = getattr(request.state, "principal", None)
+    # None: pairing, or a path the middleware does not guard. The app itself may do anything.
+    if principal is None or principal.kind == "local":
+        return
+    route = request.scope.get("route")
+    scopes = route_scopes(route) if isinstance(route, APIRoute) else []
+    if not scopes:
+        raise Forbidden(_LOCAL_ONLY)
+    if not principal.scopes.issuperset(scopes):
+        raise Forbidden(f"This device was not given the {', '.join(scopes)} permission.")
 
 
 def needs_token(

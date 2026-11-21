@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import UTC, date, datetime
 
@@ -19,7 +20,7 @@ from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.types import DEFAULT_LIBRARY
+from app.types import DEFAULT_DEVICE_SCOPES, DEFAULT_LIBRARY
 
 logger = logging.getLogger(__name__)
 
@@ -1617,6 +1618,13 @@ class DeviceModel(Base):
         String(63), nullable=False, default=DEFAULT_LIBRARY, server_default=DEFAULT_LIBRARY
     )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # What the device may do (`DeviceScope`); devices paired before 0.19.0 got the defaults.
+    scopes: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=lambda: list(DEFAULT_DEVICE_SCOPES),
+        server_default=json.dumps(list(DEFAULT_DEVICE_SCOPES)),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )

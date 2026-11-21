@@ -42,6 +42,7 @@ from app.repos.collection_repo import CollectionRepo
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo, get_flashcard_repo
 from app.repos.study_repo import StudyRepo
+from app.runtime.request_auth import device_scope
 from app.schemas.flashcards import (
     ArchiveMasteredResponse,
     BulkDeleteRequest,
@@ -153,7 +154,7 @@ __all__ = [
 # matching the literal segment "search" as a document_id wildcard.
 
 
-@router.get("/search", response_model=FlashcardSearchResponse)
+@router.get("/search", response_model=FlashcardSearchResponse, dependencies=[device_scope("read")])
 async def search_flashcards(
     query: str | None = Query(default=None),
     document_id: str | None = Query(default=None),
@@ -195,7 +196,7 @@ async def search_flashcards(
     )
 
 
-@router.get("/grounding", response_model=GroundingReport)
+@router.get("/grounding", response_model=GroundingReport, dependencies=[device_scope("read")])
 async def grounding_summary(
     document_id: str | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
@@ -390,7 +391,9 @@ async def generate_from_gaps(
     return FromGapsResponse(created=created)
 
 
-@router.get("/entity-pairs", response_model=EntityPairsResponse)
+@router.get(
+    "/entity-pairs", response_model=EntityPairsResponse, dependencies=[device_scope("read")]
+)
 async def get_entity_pairs(document_id: str) -> EntityPairsResponse:
     """Return a document's top co-occurring entity pairs, to preview before generation."""
     graph = _graph_module.get_graph_service()
@@ -544,7 +547,11 @@ async def _used_chunk_ids(document_id: str, session: AsyncSession) -> set[str]:
 # NOTE: /audit before /{document_id} — prevents FastAPI treating "audit" as a document_id.
 
 
-@router.get("/audit/{document_id}", response_model=CoverageReportResponse)
+@router.get(
+    "/audit/{document_id}",
+    response_model=CoverageReportResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_audit(
     document_id: str,
     session: AsyncSession = Depends(get_db),
@@ -593,7 +600,11 @@ async def fill_audit_gaps(
 # NOTE: /health before /{document_id} — prevents FastAPI treating "health" as a document_id.
 
 
-@router.get("/health/{document_id}", response_model=DeckHealthReportResponse)
+@router.get(
+    "/health/{document_id}",
+    response_model=DeckHealthReportResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_deck_health(
     document_id: str,
     session: AsyncSession = Depends(get_db),
@@ -651,7 +662,7 @@ async def fill_uncovered_sections(
 # NOTE: /decks before /{document_id} — prevents FastAPI treating "decks" as a document_id.
 
 
-@router.get("/decks", response_model=list[DeckItem])
+@router.get("/decks", response_model=list[DeckItem], dependencies=[device_scope("read")])
 async def list_flashcard_decks(
     session: AsyncSession = Depends(get_db),
 ) -> list[DeckItem]:
@@ -693,7 +704,7 @@ async def list_flashcard_decks(
     return items
 
 
-@router.get("/{document_id}/export/csv")
+@router.get("/{document_id}/export/csv", dependencies=[device_scope("read")])
 async def export_flashcards_csv(
     document_id: str,
     session: AsyncSession = Depends(get_db),
@@ -712,7 +723,11 @@ async def export_flashcards_csv(
     )
 
 
-@router.get("/{document_id}/headroom", response_model=MaterialHeadroomResponse)
+@router.get(
+    "/{document_id}/headroom",
+    response_model=MaterialHeadroomResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_material_headroom(
     document_id: str,
     section_id: str | None = Query(default=None),
@@ -731,7 +746,9 @@ async def get_material_headroom(
     return MaterialHeadroomResponse(**asdict(headroom))
 
 
-@router.get("/{document_id}", response_model=list[FlashcardResponse])
+@router.get(
+    "/{document_id}", response_model=list[FlashcardResponse], dependencies=[device_scope("read")]
+)
 async def list_flashcards(
     document_id: str,
     section_id: str | None = Query(default=None),
@@ -897,7 +914,11 @@ async def delete_all_collection_flashcards(
     return BulkDeleteResponse(deleted=len(ids), sessions_removed=sessions_removed)
 
 
-@router.post("/{card_id}/review", response_model=FlashcardResponse)
+@router.post(
+    "/{card_id}/review",
+    response_model=FlashcardResponse,
+    dependencies=[device_scope("reviews:write")],
+)
 async def review_flashcard(
     card_id: str,
     req: ReviewRequest,
@@ -956,7 +977,11 @@ async def review_flashcard(
     return _to_response(card)
 
 
-@router.get("/{card_id}/source-context", response_model=SourceContextResponse)
+@router.get(
+    "/{card_id}/source-context",
+    response_model=SourceContextResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_source_context(
     card_id: str,
     session: AsyncSession = Depends(get_db),

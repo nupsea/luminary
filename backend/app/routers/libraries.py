@@ -10,11 +10,10 @@ not see, switch or copy the others.
 
 import asyncio
 
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
+from fastapi import APIRouter, File, Form, Response, UploadFile
 
 from app.library import DEFAULT_LIBRARY, use_library
 from app.runtime.library_work import remove_library, serve_library
-from app.runtime.request_auth import require_local
 from app.schemas.libraries import (
     ArchiveItem,
     ArchiveRef,
@@ -36,11 +35,8 @@ from app.services import libraries as library_service
 from app.services import sync_folders
 from app.services.library_snapshot import Manifest
 
-router = APIRouter(
-    prefix="/libraries",
-    tags=["libraries"],
-    dependencies=[Depends(require_local("Spaces are managed from Luminary itself."))],
-)
+# Declares no device scope: spaces are managed from Luminary itself (#532).
+router = APIRouter(prefix="/libraries", tags=["libraries"])
 
 
 async def _open(library: str) -> None:

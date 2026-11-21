@@ -23,6 +23,7 @@ from app.database import get_session_factory
 from app.models import DocumentModel, ImageModel
 from app.repos._helpers import get_or_404
 from app.repos.enrichment_repo import EnrichmentRepo
+from app.runtime.request_auth import device_scope
 from app.storage import library_root
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,9 @@ class EnrichmentQueueSummary(BaseModel):
     active: bool
 
 
-@router.post("/images/notes", response_model=UploadResponse)
+@router.post(
+    "/images/notes", response_model=UploadResponse, dependencies=[device_scope("notes:write")]
+)
 async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
     """Upload a note asset such as an image, SVG diagram, or Excalidraw scene.
 
@@ -143,7 +146,11 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
     )
 
 
-@router.get("/documents/{document_id}/images", response_model=ImageListResponse)
+@router.get(
+    "/documents/{document_id}/images",
+    response_model=ImageListResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_document_images(
     document_id: str,
     page: int = 1,
@@ -186,7 +193,7 @@ async def get_document_images(
     )
 
 
-@router.get("/images/{image_id}/raw")
+@router.get("/images/{image_id}/raw", dependencies=[device_scope("read")])
 async def serve_image_raw(image_id: str) -> FileResponse:
     """Serve the raw PNG file for an extracted image.
 
@@ -204,7 +211,7 @@ async def serve_image_raw(image_id: str) -> FileResponse:
     return FileResponse(str(abs_path), media_type="image/png")
 
 
-@router.get("/images/local/{doc_id}/{filename}")
+@router.get("/images/local/{doc_id}/{filename}", dependencies=[device_scope("read")])
 async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
     """Serve a locally mirrored image for an article."""
     settings = get_settings()

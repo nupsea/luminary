@@ -62,7 +62,12 @@ from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
 from app.runtime.library_work import serve_library, serving, stop_serving
-from app.runtime.request_auth import DEV_APP_ORIGINS, RequestAuthMiddleware
+from app.runtime.request_auth import (
+    DEV_APP_ORIGINS,
+    RequestAuthMiddleware,
+    authorize_route,
+    device_scope,
+)
 from app.services.background import all_pending, clear_registries, task_registry
 from app.services.chapter_backfill import ChapterBackfill
 from app.services.components import (
@@ -351,7 +356,8 @@ def _restrict_permissions(data_dir: Path) -> None:
             logger.warning("Could not restrict permissions on %s: %s", path, exc)
 
 
-app = FastAPI(title="Luminary", lifespan=lifespan)
+# Default-deny for devices: a route a device may call declares its scope (#532).
+app = FastAPI(title="Luminary", lifespan=lifespan, dependencies=[Depends(authorize_route)])
 
 
 @app.exception_handler(LuminaryError)
@@ -459,7 +465,7 @@ misc_router = APIRouter()
 # and know nothing about /api; the SPA calls them through its own /api base. When
 # these lived only at the root, the About dialog's version request for
 # /api/health hit serve_spa's 404-for-api/ guard in every shipped build.
-probe_router = APIRouter()
+probe_router = APIRouter(dependencies=[device_scope("read")])
 
 
 @probe_router.get("/health")

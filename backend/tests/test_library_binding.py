@@ -1,11 +1,14 @@
 """Through HTTP, a request runs in its principal's library and sees nothing of another's (#388).
 
 The app's own origin is the default library; a device pairs into the library whose app
-showed the code. Each side writes a document, a note, a card and a graph entity, and
-reads back only its own.
+showed the code. Each library holds a document, a note, a card and a graph entity, and each
+side reads back only its own. A device may not ingest or write cards (#532), so the second
+library's are written by the app with that library active; a note the device writes lands there.
 """
 
+import contextlib
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -13,6 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 import app.routers.documents as documents_router
+import app.runtime.request_auth as request_auth
 import app.services.devices as devices
 from app.database import get_session_factory
 from app.library import use_library
@@ -34,10 +38,20 @@ async def client(memory_db, monkeypatch):
     # The pipeline is not under test: only where the upload and its row land.
     monkeypatch.setattr(documents_router, "run_ingestion", _no_pipeline)
     devices._active_code = None
+    devices._attempts.clear()
     async with AsyncClient(transport=ASGITransport(app=app), base_url=OWN) as c:
         yield c
     devices._active_code = None
+    devices._attempts.clear()
     await _close(OTHER)
+
+
+@contextlib.contextmanager
+def _app_in(library: str) -> Iterator[None]:
+    """The app's own requests run in *library*, as after switching spaces."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(request_auth, "active_library", lambda: library)
+        yield
 
 
 async def _pair_into(client: AsyncClient, library: str) -> dict[str, str]:
@@ -90,16 +104,20 @@ async def _add_entity(library: str, doc_id: str, name: str) -> None:
             await session.commit()
 
 
-async def _seen(client: AsyncClient, headers: dict[str, str], doc_ids: list[str]) -> dict:
+async def _seen(
+    client: AsyncClient, headers: dict[str, str], doc_ids: list[str], library: str
+) -> dict:
     documents = (await client.get("/documents", headers=headers)).json()["items"]
     notes = (await client.get("/notes", headers=headers)).json()
     cards = {d: (await client.get(f"/flashcards/{d}", headers=headers)).json() for d in doc_ids}
-    entities = {
-        d: (
-            await client.get(f"/graph/entities/{d}", params={"type": "PERSON"}, headers=headers)
-        ).json()["entities"]
-        for d in doc_ids
-    }
+    # The graph is the app's alone (#532): read it as the app in the same library.
+    with _app_in(library):
+        entities = {
+            d: (await client.get(f"/graph/entities/{d}", params={"type": "PERSON"})).json()[
+                "entities"
+            ]
+            for d in doc_ids
+        }
     return {
         "documents": sorted(d["id"] for d in documents),
         "notes": sorted(n["document_id"] for n in notes),
@@ -111,25 +129,31 @@ async def _seen(client: AsyncClient, headers: dict[str, str], doc_ids: list[str]
 async def test_a_device_sees_only_the_library_it_paired_into(client, memory_db):
     device = await _pair_into(client, OTHER)
     own = await _write(client, {}, "Odyssey")
-    other = await _write(client, device, "Iliad")
+    with _app_in(OTHER):
+        other = await _write(client, {}, "Iliad")
     await _add_entity("default", own, "Penelope")
     await _add_entity(OTHER, other, "Hector")
 
-    assert await _seen(client, {}, [own, other]) == {
+    assert await _seen(client, {}, [own, other], "default") == {
         "documents": [own],
         "notes": [own],
         "cards": [own],
         "entities": ["Penelope"],
     }
-    assert await _seen(client, device, [own, other]) == {
+    assert await _seen(client, device, [own, other], OTHER) == {
         "documents": [other],
         "notes": [other],
         "cards": [other],
         "entities": ["Hector"],
     }
     assert (await client.get(f"/documents/{own}", headers=device)).status_code == 404
-    # The device's first request started its library's background work.
+    # The first request into the second library started its background work.
     assert OTHER in serving()
+    written = await client.post("/notes", json={"content": "From the phone."}, headers=device)
+    assert written.status_code == 201, written.text
+    with _app_in(OTHER):
+        assert written.json()["id"] in {n["id"] for n in (await client.get("/notes")).json()}
+    assert written.json()["id"] not in {n["id"] for n in (await client.get("/notes")).json()}
     uploads = {p.name for p in (library_root(library=OTHER) / "raw").iterdir()}
     assert uploads == {f"{other}.txt"}
     assert not (Path(memory_db.tmp_path) / "raw" / f"{other}.txt").exists()

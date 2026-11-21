@@ -356,6 +356,16 @@ entitlement, and an entitlements plist may carry no XML comment. `verify_signed.
 the built artefact. A feature reaching a camera, outside files or the network in a new way needs the
 same pair.
 
+**I-79. A route answers a paired device only if it declares a device scope; a new route is the app's alone.**
+The middleware runs before routing and sees only a path, and the surface manifest lists whole
+routers, so neither can say what a phone's token may do: before #532 it reached everything but
+two routers, `PATCH /settings/llm` included, which sends every later question to the token
+holder's key. `authorize_route` is an app-wide dependency that reads the matched route and
+refuses a device unless the route declares a scope (`device_scope`) the token holds; the app's own
+origin passes. A scope this build does not know grants nothing.
+`tests/test_route_scopes.py` pins every route a device reaches and fails CI if one is added,
+dropped, or a local-only class answers a token.
+
 ## Cross-platform
 
 **I-54. `os.kill` is not a liveness probe on Windows: every signal but a console event terminates the target.**

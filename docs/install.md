@@ -133,7 +133,10 @@ docker exec <container> python -m app.scripts.pairing_code
 ```
 
 The device sends the code to `POST /api/devices/pair` and gets back the token to send as
-`Authorization: Bearer <token>`. A browser cannot pair yet, so the app's pages are usable only on
+`Authorization: Bearer <token>`. One address may try a code four times per five minutes. A
+token reads the library (documents, sections, notes, cards, study, search and Ask), writes
+notes and records card reviews, and nothing else: settings, setup, connectors, the blog, admin,
+document deletes, spaces and devices answer only to Luminary on the server itself. A browser cannot pair yet, so the app's pages are usable only on
 the server itself. Publishing the port beyond loopback without the setting leaves it guarded only
 by the `Host` header, which any client other than a browser can set to `127.0.0.1`.
 

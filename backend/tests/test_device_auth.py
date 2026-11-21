@@ -25,8 +25,10 @@ EVIL = {"Origin": "https://evil.example"}
 @pytest.fixture(autouse=True)
 def _no_active_code():
     devices._active_code = None
+    devices._attempts.clear()
     yield
     devices._active_code = None
+    devices._attempts.clear()
 
 
 @pytest.fixture
@@ -83,10 +85,10 @@ async def test_a_paired_device_is_admitted_until_revoked(client):
     device_id, token = await _pair(client)
     bearer = {**EVIL, "Authorization": f"Bearer {token}"}
 
-    assert (await client.get("/tags", headers=bearer)).status_code == 200
+    assert (await client.get("/notes", headers=bearer)).status_code == 200
 
     assert (await client.delete(f"/devices/{device_id}")).status_code == 204
-    resp = await client.get("/tags", headers=bearer)
+    resp = await client.get("/notes", headers=bearer)
     assert resp.status_code == 401
     listed = (await client.get("/devices")).json()
     assert listed[0]["id"] == device_id and listed[0]["revoked_at"] is not None
@@ -131,19 +133,26 @@ async def test_the_code_is_read_forgivingly(client):
     assert resp.status_code == 201
 
 
+async def _guess_from(address: str, code: str) -> int:
+    # One client may not make five attempts (#532), so the guesses come from several.
+    transport = ASGITransport(app=app, client=(address, 50000))
+    async with AsyncClient(transport=transport, base_url=OWN) as c:
+        resp = await c.post("/devices/pair", json={"code": code, "name": "x"})
+    return resp.status_code
+
+
 async def test_five_wrong_guesses_void_the_code(client):
     code = (await client.post("/devices/pairing-code")).json()["code"]
-    for _ in range(5):
-        wrong = await client.post("/devices/pair", json={"code": "AAAA-AAAA", "name": "x"})
-        assert wrong.status_code == 403
+    for i in range(5):
+        assert await _guess_from(f"127.0.0.{i + 2}", "AAAA-AAAA") == 403
     resp = await client.post("/devices/pair", json={"code": code, "name": "x"})
     assert resp.status_code == 403
 
 
 async def test_four_wrong_guesses_leave_the_code_usable(client):
     code = (await client.post("/devices/pairing-code")).json()["code"]
-    for _ in range(4):
-        await client.post("/devices/pair", json={"code": "AAAA-AAAA", "name": "x"})
+    for i in range(4):
+        assert await _guess_from(f"127.0.0.{i + 2}", "AAAA-AAAA") == 403
     resp = await client.post("/devices/pair", json={"code": code, "name": "x"})
     assert resp.status_code == 201
 
@@ -221,7 +230,7 @@ async def test_a_client_beyond_loopback_is_admitted_with_a_token(client, remote)
     _, token = await _pair(client)
 
     assert (
-        await remote.get("/tags", headers={"Authorization": f"Bearer {token}"})
+        await remote.get("/notes", headers={"Authorization": f"Bearer {token}"})
     ).status_code == 200
     assert (await remote.post("/devices/pairing-code")).status_code == 401
 

@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **A paired device can do only what a phone needs.** Its token reads the library, writes notes and records reviews; settings, setup, connectors, the blog, admin, document deletes, spaces and devices answer only to Luminary on the computer itself. Before, a token reached nearly every route, including the one that switches answers to a cloud key. Devices paired earlier keep exactly those three permissions (#532).
+- **One address can no longer void the pairing code by guessing.** It gets four tries per five minutes, one fewer than voids a code (#532).
+
 ## [0.18.2] - 2026-11-21
 
 ### Fixed
