@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, Response
 
 from app.config import Settings, get_settings
 from app.database import get_session_factory
+from app.exceptions import NotFound
 from app.models import (
     DocumentModel,
     LearningObjectiveModel,
@@ -34,6 +35,8 @@ from app.repos.document_list_repo import (
 )
 from app.repos.document_repo import DocumentRepo
 from app.repos.summary_repo import SummaryRepo
+from app.runtime.asset_response import UNTRUSTED_ASSET_HEADERS
+from app.runtime.request_auth import device_scope
 from app.schemas.documents import (
     AssignCollectionsRequest,
     BulkDeleteRequest,
@@ -230,7 +233,7 @@ def _kind(doc: DocumentModel) -> DocumentKind:
     return document_kind(doc.format, doc.form, doc.domain)
 
 
-@router.get("", response_model=DocumentListResponse)
+@router.get("", response_model=DocumentListResponse, dependencies=[device_scope("read")])
 async def list_documents(
     kind: str | None = Query(
         default=None, description="Comma-separated kinds, derived from the format and facets"
@@ -719,7 +722,7 @@ async def ingest_url(
     return {"document_id": doc_id, "status": "processing", "warnings": parsed.warnings}
 
 
-@router.get("/facets", response_model=DocumentFacetsResponse)
+@router.get("/facets", response_model=DocumentFacetsResponse, dependencies=[device_scope("read")])
 async def document_facets() -> DocumentFacetsResponse:
     """Counts per kind and format, for deciding which filters to show.
 
@@ -738,7 +741,7 @@ async def document_facets() -> DocumentFacetsResponse:
     )
 
 
-@router.get("/{document_id}", response_model=DocumentDetail)
+@router.get("/{document_id}", response_model=DocumentDetail, dependencies=[device_scope("read")])
 async def get_document(document_id: str):
     """Return document detail with sections list."""
     async with get_session_factory()() as session:
@@ -836,7 +839,11 @@ async def correct_transcript_term(
     return TranscriptFixResponse(**asdict(result))
 
 
-@router.get("/{document_id}/overview", response_model=DocumentOverviewResponse)
+@router.get(
+    "/{document_id}/overview",
+    response_model=DocumentOverviewResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_document_overview(document_id: str) -> DocumentOverviewResponse:
     """Read-aggregation for the Doc overview page (docs/02-ingest-and-doc-overview.md).
 
@@ -888,7 +895,9 @@ async def assign_document_collections(
     ]
 
 
-@router.get("/{document_id}/chunks", response_model=list[ChunkItem])
+@router.get(
+    "/{document_id}/chunks", response_model=list[ChunkItem], dependencies=[device_scope("read")]
+)
 async def get_document_chunks(document_id: str) -> list[ChunkItem]:
     """Return all chunks for a document in chunk_index order.
 
@@ -913,7 +922,7 @@ async def get_document_chunks(document_id: str) -> list[ChunkItem]:
     ]
 
 
-@router.get("/{document_id}/audio")
+@router.get("/{document_id}/audio", dependencies=[device_scope("read")])
 async def serve_audio_file(document_id: str) -> FileResponse:
     """Stream the raw audio file for audio documents (used by the mini-player)."""
     async with get_session_factory()() as session:
@@ -929,7 +938,7 @@ async def serve_audio_file(document_id: str) -> FileResponse:
     return FileResponse(str(fp), media_type=mime)
 
 
-@router.get("/{document_id}/video")
+@router.get("/{document_id}/video", dependencies=[device_scope("read")])
 async def serve_video_file(document_id: str) -> FileResponse:
     """Stream the raw video file for video documents (used by the HTML5 video player)."""
     async with get_session_factory()() as session:
@@ -942,7 +951,7 @@ async def serve_video_file(document_id: str) -> FileResponse:
     return FileResponse(str(fp), media_type="video/mp4")
 
 
-@router.get("/{document_id}/file")
+@router.get("/{document_id}/file", dependencies=[device_scope("read")])
 async def serve_document_file(document_id: str) -> FileResponse:
     """Serve the raw uploaded file for a document.
 
@@ -1056,7 +1065,7 @@ def _opf_cover(zf: zipfile.ZipFile, namelist: list[str]) -> str | None:
     return None
 
 
-@router.get("/{document_id}/cover")
+@router.get("/{document_id}/cover", dependencies=[device_scope("read")])
 async def get_document_cover(document_id: str) -> Response:
     """Serve or generate on-demand the cover / preview image for a document.
 
@@ -1069,7 +1078,9 @@ async def get_document_cover(document_id: str) -> Response:
     covers_dir = library_root(settings) / "covers"
     cached_cover = covers_dir / f"{document_id}.webp"
     if cached_cover.is_file():
-        return FileResponse(str(cached_cover), media_type="image/webp")
+        return FileResponse(
+            str(cached_cover), media_type="image/webp", headers=UNTRUSTED_ASSET_HEADERS
+        )
 
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
@@ -1082,13 +1093,17 @@ async def get_document_cover(document_id: str) -> Response:
                 _extract_epub_cover_sync, file_path, str(cached_cover)
             )
             if success and cached_cover.is_file():
-                return FileResponse(str(cached_cover), media_type="image/webp")
+                return FileResponse(
+                    str(cached_cover), media_type="image/webp", headers=UNTRUSTED_ASSET_HEADERS
+                )
 
         # 2. For PDF (or EPUB fallback), try rendering page 0
         if doc_format in ("pdf", "epub") and file_path and Path(file_path).is_file():
             success = await asyncio.to_thread(_render_cover_sync, file_path, str(cached_cover))
             if success and cached_cover.is_file():
-                return FileResponse(str(cached_cover), media_type="image/webp")
+                return FileResponse(
+                    str(cached_cover), media_type="image/webp", headers=UNTRUSTED_ASSET_HEADERS
+                )
 
         # 2. If article/figures exist in ImageModel
         img_row = await DocumentRepo(session).first_figure_path(document_id)
@@ -1099,7 +1114,9 @@ async def get_document_cover(document_id: str) -> Response:
                 ext = img_abs.suffix.lstrip(".").lower()
                 valid_exts = ("png", "jpg", "jpeg", "webp")
                 media_type = f"image/{ext}" if ext in valid_exts else "image/png"
-                return FileResponse(str(img_abs), media_type=media_type)
+                return FileResponse(
+                    str(img_abs), media_type=media_type, headers=UNTRUSTED_ASSET_HEADERS
+                )
 
         # 3. Check for local mirrored article images
         article_img_dir = (library_root(settings) / "images" / document_id).resolve()
@@ -1116,14 +1133,18 @@ async def get_document_cover(document_id: str) -> Response:
                 ext = first_img.suffix.lstrip(".").lower()
                 valid_exts = ("png", "jpg", "jpeg", "webp")
                 media_type = f"image/{ext}" if ext in valid_exts else "image/png"
-                return FileResponse(str(first_img), media_type=media_type)
+                return FileResponse(
+                    str(first_img), media_type=media_type, headers=UNTRUSTED_ASSET_HEADERS
+                )
 
     # No cover is an expected answer, not a failure: the tile falls back on any empty
     # response, and a 404 here was logged as a warning for every coverless document.
     return Response(status_code=204)
 
 
-@router.get("/{document_id}/pdf-meta", response_model=PDFMetaResponse)
+@router.get(
+    "/{document_id}/pdf-meta", response_model=PDFMetaResponse, dependencies=[device_scope("read")]
+)
 async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
     """Return PDF metadata: page count and whether a TOC (sections) exists.
 
@@ -1148,7 +1169,9 @@ async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
 # EPUB chapter viewer endpoints
 
 
-@router.get("/{document_id}/epub/toc", response_model=EpubTocResponse)
+@router.get(
+    "/{document_id}/epub/toc", response_model=EpubTocResponse, dependencies=[device_scope("read")]
+)
 async def get_epub_toc(document_id: str) -> EpubTocResponse:
     """Return the chapter table-of-contents for an EPUB document.
 
@@ -1183,7 +1206,11 @@ async def get_epub_toc(document_id: str) -> EpubTocResponse:
     )
 
 
-@router.get("/{document_id}/epub/chapter/{chapter_index}", response_model=EpubChapterResponse)
+@router.get(
+    "/{document_id}/epub/chapter/{chapter_index}",
+    response_model=EpubChapterResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterResponse:
     """Return sanitized HTML for a single EPUB chapter.
 
@@ -1265,10 +1292,14 @@ def _read_epub_image_sync(epub_path: str, clean_path: str) -> tuple[bytes, str] 
         return z.read(matched), mime
 
 
-@router.get("/{document_id}/asset/{asset_path:path}")
+@router.get("/{document_id}/asset/{asset_path:path}", dependencies=[device_scope("read")])
 # One route for both methods gave them one OpenAPI operation id, which the generated
 # client types declare twice.
-@router.head("/{document_id}/asset/{asset_path:path}", include_in_schema=False)
+@router.head(
+    "/{document_id}/asset/{asset_path:path}",
+    include_in_schema=False,
+    dependencies=[device_scope("read")],
+)
 async def get_document_asset(document_id: str, asset_path: str) -> Response:
     """Serve an embedded image from a document (its EPUB archive or extracted images)."""
     async with get_session_factory()() as session:
@@ -1291,7 +1322,7 @@ async def get_document_asset(document_id: str, asset_path: str) -> Response:
             return Response(
                 content=data,
                 media_type=mime,
-                headers={"Cache-Control": "private, max-age=86400"},
+                headers={"Cache-Control": "private, max-age=86400", **UNTRUSTED_ASSET_HEADERS},
             )
 
     settings = get_settings()
@@ -1304,9 +1335,9 @@ async def get_document_asset(document_id: str, asset_path: str) -> Response:
         and mime is not None
         and mime.startswith("image/")
     ):
-        return FileResponse(str(candidate), media_type=mime)
+        return FileResponse(str(candidate), media_type=mime, headers=UNTRUSTED_ASSET_HEADERS)
 
-    raise HTTPException(status_code=404, detail="Asset not found")
+    raise NotFound("Asset not found")
 
 
 def _schedule_library_summary_refresh() -> None:
@@ -1578,7 +1609,7 @@ async def reparse_document(document_id: str, body: ReparseRequest) -> ReparseRes
     )
 
 
-@router.get("/{document_id}/status")
+@router.get("/{document_id}/status", dependencies=[device_scope("read")])
 async def get_document_status(document_id: str):
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
@@ -1601,7 +1632,11 @@ async def get_document_status(document_id: str):
     }
 
 
-@router.get("/{document_id}/diagnostics", response_model=DocumentDiagnostics)
+@router.get(
+    "/{document_id}/diagnostics",
+    response_model=DocumentDiagnostics,
+    dependencies=[device_scope("read")],
+)
 async def get_document_diagnostics(document_id: str):
     """Return per-store counts for the given document.
 
@@ -1644,7 +1679,11 @@ async def get_document_diagnostics(document_id: str):
 # In-document FTS5 search
 
 
-@router.get("/{document_id}/search", response_model=list[DocumentSectionSearchResult])
+@router.get(
+    "/{document_id}/search",
+    response_model=list[DocumentSectionSearchResult],
+    dependencies=[device_scope("read")],
+)
 async def search_document_sections(
     document_id: str,
     q: str = Query(default="", min_length=0),
@@ -1673,7 +1712,7 @@ async def search_document_sections(
     return [DocumentSectionSearchResult(**r) for r in results]
 
 
-@router.get("/{document_id}/conversation")
+@router.get("/{document_id}/conversation", dependencies=[device_scope("read")])
 async def get_conversation_metadata(document_id: str) -> dict:
     """Return speaker roster and timeline for a conversation document.
 
@@ -1698,7 +1737,11 @@ async def get_conversation_metadata(document_id: str) -> dict:
     return metadata
 
 
-@router.get("/{document_id}/code_snippets", response_model=list[CodeSnippetItem])
+@router.get(
+    "/{document_id}/code_snippets",
+    response_model=list[CodeSnippetItem],
+    dependencies=[device_scope("read")],
+)
 async def get_code_snippets(document_id: str) -> list[CodeSnippetItem]:
     """Return extracted code snippets for a document.
 
@@ -1723,7 +1766,11 @@ async def get_code_snippets(document_id: str) -> list[CodeSnippetItem]:
     ]
 
 
-@router.get("/{document_id}/objectives", response_model=LearningObjectivesResponse)
+@router.get(
+    "/{document_id}/objectives",
+    response_model=LearningObjectivesResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_objectives(document_id: str) -> LearningObjectivesResponse:
     """Return extracted learning objectives for a document.
 
@@ -1790,7 +1837,11 @@ async def update_objective(
 # Document learning progress
 
 
-@router.get("/{document_id}/progress", response_model=DocumentProgressResponse)
+@router.get(
+    "/{document_id}/progress",
+    response_model=DocumentProgressResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_document_progress(document_id: str) -> DocumentProgressResponse:
     """Return learning objective coverage progress for a document.
 
@@ -1891,7 +1942,11 @@ async def save_reading_position(
     return _position_response(row)
 
 
-@router.get("/{document_id}/position", response_model=ReadingPositionResponse)
+@router.get(
+    "/{document_id}/position",
+    response_model=ReadingPositionResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_reading_position(document_id: str) -> ReadingPositionResponse:
     """Return the last saved reading position for a document.
 

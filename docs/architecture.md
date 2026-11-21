@@ -64,7 +64,8 @@ another library's is `<DATA_DIR>/libraries/<id>`. The current library rides in a
 `get_session_factory()` and `get_lancedb_service()` resolve it, so code opens a store without
 naming the library. `RequestAuthMiddleware` runs each request in its principal's library: the
 app's own origin is the **active library**, and a paired device is the library recorded beside it
-in the default library's `devices` table.
+in the default library's `devices` table. What a device may do there is its `scopes` (`read`,
+`notes:write`, `reviews:write`); a route admits a device only by declaring one (I-79).
 
 | Machine-wide, whatever library is active | Where |
 |---|---|

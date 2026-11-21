@@ -25,8 +25,10 @@ EVIL = {"Origin": "https://evil.example"}
 @pytest.fixture(autouse=True)
 def _no_active_code():
     devices._active_code = None
+    devices._attempts.clear()
     yield
     devices._active_code = None
+    devices._attempts.clear()
 
 
 @pytest.fixture
@@ -83,10 +85,10 @@ async def test_a_paired_device_is_admitted_until_revoked(client):
     device_id, token = await _pair(client)
     bearer = {**EVIL, "Authorization": f"Bearer {token}"}
 
-    assert (await client.get("/tags", headers=bearer)).status_code == 200
+    assert (await client.get("/notes", headers=bearer)).status_code == 200
 
     assert (await client.delete(f"/devices/{device_id}")).status_code == 204
-    resp = await client.get("/tags", headers=bearer)
+    resp = await client.get("/notes", headers=bearer)
     assert resp.status_code == 401
     listed = (await client.get("/devices")).json()
     assert listed[0]["id"] == device_id and listed[0]["revoked_at"] is not None
@@ -131,19 +133,26 @@ async def test_the_code_is_read_forgivingly(client):
     assert resp.status_code == 201
 
 
+async def _guess_from(address: str, code: str) -> int:
+    # One client may not make five attempts (#532), so the guesses come from several.
+    transport = ASGITransport(app=app, client=(address, 50000))
+    async with AsyncClient(transport=transport, base_url=OWN) as c:
+        resp = await c.post("/devices/pair", json={"code": code, "name": "x"})
+    return resp.status_code
+
+
 async def test_five_wrong_guesses_void_the_code(client):
     code = (await client.post("/devices/pairing-code")).json()["code"]
-    for _ in range(5):
-        wrong = await client.post("/devices/pair", json={"code": "AAAA-AAAA", "name": "x"})
-        assert wrong.status_code == 403
+    for i in range(5):
+        assert await _guess_from(f"127.0.0.{i + 2}", "AAAA-AAAA") == 403
     resp = await client.post("/devices/pair", json={"code": code, "name": "x"})
     assert resp.status_code == 403
 
 
 async def test_four_wrong_guesses_leave_the_code_usable(client):
     code = (await client.post("/devices/pairing-code")).json()["code"]
-    for _ in range(4):
-        await client.post("/devices/pair", json={"code": "AAAA-AAAA", "name": "x"})
+    for i in range(4):
+        assert await _guess_from(f"127.0.0.{i + 2}", "AAAA-AAAA") == 403
     resp = await client.post("/devices/pair", json={"code": code, "name": "x"})
     assert resp.status_code == 201
 
@@ -221,7 +230,7 @@ async def test_a_client_beyond_loopback_is_admitted_with_a_token(client, remote)
     _, token = await _pair(client)
 
     assert (
-        await remote.get("/tags", headers={"Authorization": f"Bearer {token}"})
+        await remote.get("/notes", headers={"Authorization": f"Bearer {token}"})
     ).status_code == 200
     assert (await remote.post("/devices/pairing-code")).status_code == 401
 
@@ -236,3 +245,41 @@ def test_only_a_loopback_address_is_loopback():
     assert is_loopback(("127.0.0.1", 1)) and is_loopback(("::1", 1))
     assert not is_loopback(("172.17.0.1", 1))  # Docker's gateway: the published port's view
     assert not is_loopback(("testclient", 1)) and not is_loopback(None)
+
+
+@pytest.fixture
+async def proxied(memory_db):
+    """A same-host reverse proxy (tailscale serve, Caddy): it connects from loopback."""
+    served = RequestAuthMiddleware(
+        app,
+        api_prefix="",
+        app_origins=frozenset(),
+        pair_path="/devices/pair",
+        remote_needs_token=True,
+    )
+    transport = ASGITransport(app=served, client=("127.0.0.1", 51000))
+    async with AsyncClient(transport=transport, base_url=OWN) as c:
+        yield c
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Host": "luminary.tailnet.ts.net"},
+        {"Forwarded": "for=203.0.113.7"},
+        {"X-Forwarded-For": "203.0.113.7"},
+        {"X-Forwarded-Host": "luminary.tailnet.ts.net"},
+        {"X-Real-IP": "203.0.113.7"},
+    ],
+)
+async def test_a_request_through_a_proxy_here_needs_a_token(proxied, memory_db, headers):
+    resp = await proxied.patch("/settings", json={"planted": "yes"}, headers=headers)
+
+    assert resp.status_code == 401, resp.text
+    async with memory_db.factory() as session:
+        assert await session.get(SettingsModel, "planted") is None
+
+
+async def test_the_server_itself_needs_no_token_with_remote_serving_on(proxied):
+    assert (await proxied.get("/devices")).status_code == 200
+    assert (await proxied.get("/devices", headers={"Host": "localhost:7820"})).status_code == 200

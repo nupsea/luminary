@@ -356,6 +356,29 @@ entitlement, and an entitlements plist may carry no XML comment. `verify_signed.
 the built artefact. A feature reaching a camera, outside files or the network in a new way needs the
 same pair.
 
+**I-79. A route answers a paired device only if it declares a device scope; a new route is the app's alone.**
+The middleware runs before routing and sees only a path, and the surface manifest lists whole
+routers, so neither can say what a phone's token may do: before #532 it reached everything but
+two routers, `PATCH /settings/llm` included, which sends every later question to the token
+holder's key. `authorize_route` is an app-wide dependency that reads the matched route and
+refuses a device unless the route declares a scope (`device_scope`) the token holds; the app's own
+origin passes. A scope this build does not know grants nothing, and FastAPI's schema and docs
+routes are re-registered as API routes so none escapes the check. Behind a same-host proxy
+every request connects from 127.0.0.1: a forwarding header makes a request remote in every
+configuration, and with `LUMINARY_ALLOWED_HOSTS` set so does a non-loopback address or `Host`.
+A proxy that rewrites `Host` to loopback and forwards nothing (nginx's default `proxy_pass`)
+cannot be told from this computer and is unsupported.
+`tests/test_route_scopes.py` pins every route a device reaches and fails CI if one is added,
+dropped, if a route skips the check, or if a local-only class answers a token;
+`test_device_auth.py::test_a_request_through_a_proxy_here_needs_a_token` guards the proxy case.
+
+**I-80. A file whose bytes a user or an imported source chose is served as an inert picture.**
+The app's origin is the tokenless local principal (I-79), so an SVG opened there runs its script
+with every right the app has. A note asset keeps only an image extension (an upload named
+`.html` was stored and served back as one), and note, article, extracted and EPUB images go out
+with `Content-Security-Policy: sandbox` and `nosniff` (`runtime/asset_response.py`). An `<img>`
+ignores both, so nothing renders differently. `tests/test_images_api.py` fails CI if either goes.
+
 ## Cross-platform
 
 **I-54. `os.kill` is not a liveness probe on Windows: every signal but a console event terminates the target.**

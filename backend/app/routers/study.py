@@ -34,6 +34,7 @@ from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
 from app.repos.study_repo import DueScope, StudyRepo, get_study_repo
 from app.routers.flashcards import FlashcardResponse, _to_response
+from app.runtime.request_auth import device_scope
 from app.schemas.study import (
     AppendSessionCardsRequest,
     AppendSessionCardsResponse,
@@ -115,7 +116,7 @@ router = APIRouter(prefix="/study", tags=["study"])
 _RATING_INT_MAP: dict[int, str] = {1: "again", 2: "hard", 3: "good", 4: "easy"}
 
 
-@router.get("/due-count", response_model=DueCountResponse)
+@router.get("/due-count", response_model=DueCountResponse, dependencies=[device_scope("read")])
 async def get_due_count(
     collection_id: str | None = Query(default=None),
     tag: str | None = Query(default=None),
@@ -136,7 +137,7 @@ async def get_due_count(
     return DueCountResponse(due_today=count)
 
 
-@router.get("/due", response_model=list[FlashcardResponse])
+@router.get("/due", response_model=list[FlashcardResponse], dependencies=[device_scope("read")])
 async def get_due_cards(
     document_id: str | None = None,
     collection_id: str | None = Query(default=None),
@@ -227,7 +228,9 @@ async def assemble_study(
     )
 
 
-@router.get("/session-plan", response_model=SessionPlanResponse)
+@router.get(
+    "/session-plan", response_model=SessionPlanResponse, dependencies=[device_scope("read")]
+)
 async def get_session_plan(
     minutes: int = Query(default=20, ge=5, le=120),
     session: AsyncSession = Depends(get_db),
@@ -267,7 +270,9 @@ async def get_session_plan(
     return SessionPlanResponse(total_minutes=minutes, items=items)
 
 
-@router.get("/gaps/{document_id}", response_model=list[GapResult])
+@router.get(
+    "/gaps/{document_id}", response_model=list[GapResult], dependencies=[device_scope("read")]
+)
 async def get_gaps(
     document_id: str,
     repo: StudyRepo = Depends(get_study_repo),
@@ -282,7 +287,7 @@ async def get_gaps(
     return _compute_gaps(weak_cards, chunk_to_section)
 
 
-@router.get("/sessions/open", response_model=SessionResponse)
+@router.get("/sessions/open", response_model=SessionResponse, dependencies=[device_scope("read")])
 async def get_open_session(
     mode: str,
     document_id: str | None = None,
@@ -305,7 +310,12 @@ async def get_open_session(
     return SessionResponse.model_validate(sess)
 
 
-@router.post("/sessions/start", response_model=SessionResponse, status_code=201)
+@router.post(
+    "/sessions/start",
+    response_model=SessionResponse,
+    status_code=201,
+    dependencies=[device_scope("reviews:write")],
+)
 async def start_session(
     req: StartSessionRequest,
     repo: StudyRepo = Depends(get_study_repo),
@@ -341,7 +351,11 @@ async def _write_back_concept_mastery(
     await session.commit()
 
 
-@router.post("/sessions/{session_id}/end", response_model=SessionSummary)
+@router.post(
+    "/sessions/{session_id}/end",
+    response_model=SessionSummary,
+    dependencies=[device_scope("reviews:write")],
+)
 async def end_session(
     session_id: str,
     repo: StudyRepo = Depends(get_study_repo),
@@ -406,7 +420,9 @@ async def end_session(
     )
 
 
-@router.post("/sessions/{session_id}/reopen", status_code=204)
+@router.post(
+    "/sessions/{session_id}/reopen", status_code=204, dependencies=[device_scope("reviews:write")]
+)
 async def reopen_session(
     session_id: str,
     repo: StudyRepo = Depends(get_study_repo),
@@ -443,7 +459,9 @@ async def delete_session(
 
 
 @router.get(
-    "/collections/{collection_id}/dashboard", response_model=StudyCollectionDashboardResponse
+    "/collections/{collection_id}/dashboard",
+    response_model=StudyCollectionDashboardResponse,
+    dependencies=[device_scope("read")],
 )
 async def get_collection_study_dashboard(
     collection_id: str,
@@ -453,7 +471,7 @@ async def get_collection_study_dashboard(
     return await collection_dashboard(session, collection_id)
 
 
-@router.get("/sessions", response_model=SessionListResponse)
+@router.get("/sessions", response_model=SessionListResponse, dependencies=[device_scope("read")])
 async def list_sessions(
     document_id: str | None = None,
     collection_id: str | None = Query(
@@ -513,7 +531,11 @@ async def list_sessions(
     return SessionListResponse(items=items, total=total, page=page, page_size=page_size)
 
 
-@router.get("/sessions/{session_id}/cards", response_model=list[SessionCardDetail])
+@router.get(
+    "/sessions/{session_id}/cards",
+    response_model=list[SessionCardDetail],
+    dependencies=[device_scope("read")],
+)
 async def get_session_cards(
     session_id: str,
     db: AsyncSession = Depends(get_db),
@@ -583,6 +605,7 @@ async def append_session_cards(
 @router.get(
     "/sessions/{session_id}/remaining-cards",
     response_model=SessionRemainingResponse,
+    dependencies=[device_scope("read")],
 )
 async def get_session_remaining_cards(
     session_id: str,
@@ -652,7 +675,11 @@ async def teachback_async(
     return TeachbackSubmitResponse(id=tb_id)
 
 
-@router.get("/teachback/results", response_model=TeachbackResultsBatchResponse)
+@router.get(
+    "/teachback/results",
+    response_model=TeachbackResultsBatchResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_teachback_results(
     ids: str = Query(..., description="Comma-separated teachback result IDs"),
     session: AsyncSession = Depends(get_db),
@@ -667,6 +694,7 @@ async def get_teachback_results(
 @router.get(
     "/sessions/{session_id}/teachback-results",
     response_model=TeachbackResultsBatchResponse,
+    dependencies=[device_scope("read")],
 )
 async def get_session_teachback_results(
     session_id: str,
@@ -676,7 +704,9 @@ async def get_session_teachback_results(
     return await teachback_service.results(session, session_id=session_id)
 
 
-@router.get("/stats/{document_id}", response_model=StudyStatsResponse)
+@router.get(
+    "/stats/{document_id}", response_model=StudyStatsResponse, dependencies=[device_scope("read")]
+)
 async def get_study_stats(
     document_id: str,
     db: AsyncSession = Depends(get_db),
@@ -776,7 +806,7 @@ async def get_study_stats(
     )
 
 
-@router.get("/history", response_model=list[DailyHistoryItem])
+@router.get("/history", response_model=list[DailyHistoryItem], dependencies=[device_scope("read")])
 async def get_study_history(
     document_id: str | None = None,
     days: int = 90,
@@ -818,7 +848,9 @@ async def get_study_history(
     ]
 
 
-@router.get("/struggling", response_model=list[StrugglingCardItem])
+@router.get(
+    "/struggling", response_model=list[StrugglingCardItem], dependencies=[device_scope("read")]
+)
 async def get_struggling_cards(
     document_id: str | None = None,
     again_threshold: int = Query(default=3, ge=1),
@@ -841,7 +873,7 @@ _DECAY_DEBT_WINDOW_DAYS = 7
 _DECAY_DEBT_LIMIT = 10
 
 
-@router.get("/decay-debt", response_model=DecayDebtResponse)
+@router.get("/decay-debt", response_model=DecayDebtResponse, dependencies=[device_scope("read")])
 async def get_decay_debt(
     limit: int = Query(default=_DECAY_DEBT_LIMIT, ge=1, le=50),
     session: AsyncSession = Depends(get_db),
@@ -899,14 +931,22 @@ async def get_decay_debt(
     return DecayDebtResponse(items=items[:limit], total_at_risk=total_at_risk)
 
 
-@router.get("/misconception-stats", response_model=MisconceptionStatsResponse)
+@router.get(
+    "/misconception-stats",
+    response_model=MisconceptionStatsResponse,
+    dependencies=[device_scope("read")],
+)
 async def misconception_stats(
     session: AsyncSession = Depends(get_db),
 ) -> MisconceptionStatsResponse:
     return MisconceptionStatsResponse(**await get_misconception_stats(session))
 
 
-@router.get("/calibration-stats", response_model=CalibrationStatsResponse)
+@router.get(
+    "/calibration-stats",
+    response_model=CalibrationStatsResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_calibration_stats(
     days: int = Query(default=30, ge=7, le=90),
     session: AsyncSession = Depends(get_db),
@@ -943,7 +983,9 @@ async def get_calibration_stats(
     )
 
 
-@router.get("/section-heatmap", response_model=SectionHeatmapResponse)
+@router.get(
+    "/section-heatmap", response_model=SectionHeatmapResponse, dependencies=[device_scope("read")]
+)
 async def get_section_heatmap(
     document_id: str,
     session: AsyncSession = Depends(get_db),
@@ -1023,7 +1065,11 @@ async def session_review(
     )
 
 
-@router.get("/topics/{document_id}", response_model=DocumentTopicsResponse)
+@router.get(
+    "/topics/{document_id}",
+    response_model=DocumentTopicsResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_document_topics(
     document_id: str, session: AsyncSession = Depends(get_db)
 ) -> DocumentTopicsResponse:
@@ -1036,7 +1082,9 @@ async def get_document_topics(
     return DocumentTopicsResponse(**data)
 
 
-@router.get("/sections/{document_id}", response_model=list[TopicItem])
+@router.get(
+    "/sections/{document_id}", response_model=list[TopicItem], dependencies=[device_scope("read")]
+)
 async def get_document_sections(
     document_id: str,
     q: str | None = Query(default=None),

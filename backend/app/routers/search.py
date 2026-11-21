@@ -9,11 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.repos.document_kind_repo import DocumentKindRepo
+from app.runtime.request_auth import device_scope
 from app.services.retriever import HybridRetriever, get_retriever
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/search", tags=["search"])
+router = APIRouter(prefix="/search", tags=["search"], dependencies=[device_scope("read")])
 
 
 def _parse_date(s: str) -> date | None:

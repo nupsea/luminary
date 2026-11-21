@@ -42,6 +42,10 @@ class Forbidden(LuminaryError):
     status_code = 403
 
 
+class TooManyRequests(LuminaryError):
+    status_code = 429
+
+
 class DependencyUnavailable(LuminaryError):
     """A required local component (Ollama, ffmpeg, a model) is not usable."""
 
