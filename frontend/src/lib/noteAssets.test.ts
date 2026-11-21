@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { apiFetch, configureTransport } from "./apiClient"
+import { configureTransport } from "./apiClient"
 import { API_BASE } from "./config"
-import { isWithheldImage, luminaryAssetPath, readShellClipboardImage, resolveLuminaryAssetUrl } from "./noteAssets"
+import { fetchNoteAsset, isWithheldImage, readShellClipboardImage, resolveLuminaryAssetUrl } from "./noteAssets"
 
 type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
 
@@ -70,12 +70,24 @@ describe("note asset URLs under a relative base", () => {
   afterEach(() => configureTransport({ baseUrl: API_BASE }))
 
   // Public mode serves the API under /api; feeding a resolved URL back to apiFetch made /api/api/...
-  it("prefixes the base once, for src= and for apiFetch", async () => {
-    configureTransport({ baseUrl: "/api" })
-    expect(resolveLuminaryAssetUrl("__LUMINARY_IMG__/notes/a.svg")).toBe("/api/images/local/notes/a.svg")
+  it("prefixes the base once, for src= and for a fetch", async () => {
     const stub = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }))
     configureTransport({ baseUrl: "/api", fetch: stub as unknown as typeof fetch })
-    await apiFetch(luminaryAssetPath("__LUMINARY_IMG__/notes/a.excalidraw.json"))
+    expect(resolveLuminaryAssetUrl("__LUMINARY_IMG__/notes/a.svg")).toBe("/api/images/local/notes/a.svg")
+    await fetchNoteAsset("__LUMINARY_IMG__/notes/a.excalidraw.json", { cache: "no-store" })
     expect(stub.mock.calls[0][0]).toBe("/api/images/local/notes/a.excalidraw.json")
+    expect(stub.mock.calls[0][1]).toMatchObject({ cache: "no-store" })
+  })
+
+  it("leaves a path without the asset token unchanged", () => {
+    configureTransport({ baseUrl: "/api" })
+    for (const path of ["data:image/svg+xml;base64,AAAA", "blob:http://localhost/x", "foo.svg"]) {
+      expect(resolveLuminaryAssetUrl(path)).toBe(path)
+    }
+  })
+
+  it("drops a trailing slash from the base", () => {
+    configureTransport({ baseUrl: "/api/" })
+    expect(resolveLuminaryAssetUrl("__LUMINARY_IMG__/a.png")).toBe("/api/images/local/a.png")
   })
 })

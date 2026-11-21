@@ -18,7 +18,8 @@ let transport: ApiTransport = { baseUrl: API_BASE }
 /** Replace the transport; the desktop app keeps the default (same origin, no token).
  *  Call before the first render: components memoise URLs built from the base. */
 export function configureTransport(next: ApiTransport): void {
-  transport = next
+  // Paths start with "/", so a base ending in one would make "//".
+  transport = { ...next, baseUrl: next.baseUrl.replace(/\/+$/, "") }
 }
 
 export class ApiError extends Error {

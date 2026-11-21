@@ -1,4 +1,4 @@
-import { apiFetch, apiUrl } from "@/lib/apiClient"
+import { apiFetch, apiUrl, type RequestOptions } from "@/lib/apiClient"
 import { tauriInvoke } from "@/lib/tauriBridge"
 
 export interface NoteAssetUpload {
@@ -63,14 +63,20 @@ export async function uploadNoteAsset(file: File): Promise<NoteAssetUpload> {
   return res.json() as Promise<NoteAssetUpload>
 }
 
-/** The API path of a note asset, for apiFetch: `__LUMINARY_IMG__/a/b` -> `/images/local/a/b`. */
-export function luminaryAssetPath(path: string): string {
-  return path.replace(/^__LUMINARY_IMG__\//, "/images/local/")
+const ASSET_TOKEN = /^__LUMINARY_IMG__\//
+
+function luminaryAssetPath(path: string): string {
+  return path.replace(ASSET_TOKEN, "/images/local/")
 }
 
-/** The note asset's URL, for `src=`. Never pass it to apiFetch, which would prefix the base twice. */
+/** The note asset's URL, for `src=`. A path without the token (data:, blob:, hand-edited) is left alone. */
 export function resolveLuminaryAssetUrl(path: string): string {
-  return apiUrl(luminaryAssetPath(path))
+  return ASSET_TOKEN.test(path) ? apiUrl(luminaryAssetPath(path)) : path
+}
+
+/** Fetch a note asset through the transport; a resolved `src=` URL would get the base twice. */
+export function fetchNoteAsset(path: string, init?: RequestOptions): Promise<Response> {
+  return apiFetch(luminaryAssetPath(path), init)
 }
 
 /**

@@ -29,8 +29,7 @@ import {
   fitAnnotationImage,
   type ImageSize,
 } from "@/lib/noteDiagrams"
-import { apiFetch } from "@/lib/apiClient"
-import { luminaryAssetPath, uploadNoteAsset } from "@/lib/noteAssets"
+import { fetchNoteAsset, uploadNoteAsset } from "@/lib/noteAssets"
 import { cn } from "@/lib/utils"
 
 const ExcalidrawCanvas = lazy(() =>
@@ -154,7 +153,7 @@ function naturalSize(dataURL: string): Promise<{ width: number; height: number }
 
 async function loadAnnotationScene(imagePath: string): Promise<ExcalidrawInitialDataState> {
   // no-store: the note's <img> cached this response without CORS headers (no Vary: Origin).
-  const res = await apiFetch(luminaryAssetPath(imagePath), { cache: "no-store" })
+  const res = await fetchNoteAsset(imagePath, { cache: "no-store" })
   if (!res.ok) throw new Error(`Could not load the image: ${res.status}`)
   const blob = await res.blob()
   const dataURL = await readAsDataURL(blob)
@@ -180,7 +179,7 @@ async function loadAnnotationScene(imagePath: string): Promise<ExcalidrawInitial
 }
 
 async function loadSavedScene(scenePath: string): Promise<ExcalidrawInitialDataState> {
-  const res = await apiFetch(luminaryAssetPath(scenePath))
+  const res = await fetchNoteAsset(scenePath)
   if (!res.ok) throw new Error(`Could not load diagram scene: ${res.status}`)
   const data = (await res.json()) as ExcalidrawInitialDataState
   return {
