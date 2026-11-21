@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, Response
 
 from app.config import Settings, get_settings
 from app.database import get_session_factory
+from app.exceptions import NotFound
 from app.models import (
     DocumentModel,
     LearningObjectiveModel,
@@ -34,6 +35,7 @@ from app.repos.document_list_repo import (
 )
 from app.repos.document_repo import DocumentRepo
 from app.repos.summary_repo import SummaryRepo
+from app.runtime.asset_response import UNTRUSTED_ASSET_HEADERS
 from app.runtime.request_auth import device_scope
 from app.schemas.documents import (
     AssignCollectionsRequest,
@@ -1310,7 +1312,7 @@ async def get_document_asset(document_id: str, asset_path: str) -> Response:
             return Response(
                 content=data,
                 media_type=mime,
-                headers={"Cache-Control": "private, max-age=86400"},
+                headers={"Cache-Control": "private, max-age=86400", **UNTRUSTED_ASSET_HEADERS},
             )
 
     settings = get_settings()
@@ -1323,9 +1325,9 @@ async def get_document_asset(document_id: str, asset_path: str) -> Response:
         and mime is not None
         and mime.startswith("image/")
     ):
-        return FileResponse(str(candidate), media_type=mime)
+        return FileResponse(str(candidate), media_type=mime, headers=UNTRUSTED_ASSET_HEADERS)
 
-    raise HTTPException(status_code=404, detail="Asset not found")
+    raise NotFound("Asset not found")
 
 
 def _schedule_library_summary_refresh() -> None:

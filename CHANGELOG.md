@@ -7,8 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
-- **A paired device can do only what a phone needs.** Its token reads the library, writes notes and records reviews; settings, setup, connectors, the blog, admin, document deletes, spaces and devices answer only to Luminary on the computer itself. Before, a token reached nearly every route, including the one that switches answers to a cloud key. Devices paired earlier keep exactly those three permissions (#532).
-- **One address can no longer void the pairing code by guessing.** It gets four tries per five minutes, one fewer than voids a code (#532).
+- **A paired device can do only what a phone needs.** Its token reads the library, writes notes and records reviews, and asks with the computer's own model, never one it names or web search; settings, setup, connectors, the blog, admin, deletes, spaces and devices answer only to Luminary on the computer itself. Before, a token reached nearly every route, including the one that switches answers to a cloud key. Devices paired earlier keep exactly those three permissions (#532).
+- **One address can no longer void the pairing code by guessing.** It gets four attempts in any five minutes, one fewer than voids a code; an IPv6 address counts by its /64 (#532).
+- **An uploaded file can no longer run script as Luminary.** A note image keeps only an image extension, and stored images are served so that opening one directly runs nothing.
+- **A server behind a reverse proxy on the same machine no longer treats proxied requests as its own.** With `LUMINARY_ALLOWED_HOSTS` set, a request that names another host or carries a forwarding header needs a device token.
 
 ## [0.18.2] - 2026-11-21
 

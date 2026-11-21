@@ -451,7 +451,8 @@ async def patch_note(
     return await _apply_note_update(note_id, req, session, repo)
 
 
-@router.delete("/{note_id}", status_code=204, dependencies=[device_scope("notes:write")])
+# Not a device's: a delete is a hard delete, which a phone's cache cannot learn of (#450).
+@router.delete("/{note_id}", status_code=204)
 async def delete_note(
     note_id: str,
     session: AsyncSession = Depends(get_db),

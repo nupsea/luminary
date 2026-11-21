@@ -245,3 +245,41 @@ def test_only_a_loopback_address_is_loopback():
     assert is_loopback(("127.0.0.1", 1)) and is_loopback(("::1", 1))
     assert not is_loopback(("172.17.0.1", 1))  # Docker's gateway: the published port's view
     assert not is_loopback(("testclient", 1)) and not is_loopback(None)
+
+
+@pytest.fixture
+async def proxied(memory_db):
+    """A same-host reverse proxy (tailscale serve, Caddy): it connects from loopback."""
+    served = RequestAuthMiddleware(
+        app,
+        api_prefix="",
+        app_origins=frozenset(),
+        pair_path="/devices/pair",
+        remote_needs_token=True,
+    )
+    transport = ASGITransport(app=served, client=("127.0.0.1", 51000))
+    async with AsyncClient(transport=transport, base_url=OWN) as c:
+        yield c
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Host": "luminary.tailnet.ts.net"},
+        {"Forwarded": "for=203.0.113.7"},
+        {"X-Forwarded-For": "203.0.113.7"},
+        {"X-Forwarded-Host": "luminary.tailnet.ts.net"},
+        {"X-Real-IP": "203.0.113.7"},
+    ],
+)
+async def test_a_request_through_a_proxy_here_needs_a_token(proxied, memory_db, headers):
+    resp = await proxied.patch("/settings", json={"planted": "yes"}, headers=headers)
+
+    assert resp.status_code == 401, resp.text
+    async with memory_db.factory() as session:
+        assert await session.get(SettingsModel, "planted") is None
+
+
+async def test_the_server_itself_needs_no_token_with_remote_serving_on(proxied):
+    assert (await proxied.get("/devices")).status_code == 200
+    assert (await proxied.get("/devices", headers={"Host": "localhost:7820"})).status_code == 200

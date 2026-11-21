@@ -362,9 +362,20 @@ routers, so neither can say what a phone's token may do: before #532 it reached 
 two routers, `PATCH /settings/llm` included, which sends every later question to the token
 holder's key. `authorize_route` is an app-wide dependency that reads the matched route and
 refuses a device unless the route declares a scope (`device_scope`) the token holds; the app's own
-origin passes. A scope this build does not know grants nothing.
+origin passes. A scope this build does not know grants nothing, and FastAPI's schema and docs
+routes are re-registered as API routes so none escapes the check. Behind a same-host proxy
+every request connects from 127.0.0.1, so with `LUMINARY_ALLOWED_HOSTS` set a request is remote
+if its address, its `Host` or any forwarding header says so.
 `tests/test_route_scopes.py` pins every route a device reaches and fails CI if one is added,
-dropped, or a local-only class answers a token.
+dropped, if a route skips the check, or if a local-only class answers a token;
+`test_device_auth.py::test_a_request_through_a_proxy_here_needs_a_token` guards the proxy case.
+
+**I-80. A file whose bytes a user or an imported source chose is served as an inert picture.**
+The app's origin is the tokenless local principal (I-79), so an SVG opened there runs its script
+with every right the app has. A note asset keeps only an image extension (an upload named
+`.html` was stored and served back as one), and note, article, extracted and EPUB images go out
+with `Content-Security-Policy: sandbox` and `nosniff` (`runtime/asset_response.py`). An `<img>`
+ignores both, so nothing renders differently. `tests/test_images_api.py` fails CI if either goes.
 
 ## Cross-platform
 

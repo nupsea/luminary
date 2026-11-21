@@ -3,13 +3,14 @@
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.exceptions import Forbidden
 from app.runtime.qa_stream import get_qa_service
-from app.runtime.request_auth import device_scope
+from app.runtime.request_auth import device_scope, is_device
 from app.services.intent import (
     LLM_FALLBACK_BELOW,
     _llm_classify_fallback,
@@ -70,7 +71,10 @@ def _normalize_classify_route(intent: str) -> Literal["summary", "graph", "compa
 
 
 @router.post("", dependencies=[device_scope("read")])
-async def ask_question(req: QARequest) -> StreamingResponse:
+async def ask_question(req: QARequest, request: Request) -> StreamingResponse:
+    # Either would let a phone decide where the library's passages go; the host decides.
+    if is_device(request) and (req.model or req.web_enabled):
+        raise Forbidden("A paired device asks with this computer's model, without web search.")
     svc = get_qa_service()
     history = [m.model_dump() for m in req.messages] if req.messages else []
     return StreamingResponse(

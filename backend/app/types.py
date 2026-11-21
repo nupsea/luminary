@@ -543,7 +543,8 @@ DEFAULT_LIBRARY = "default"
 # `ingest` joins with the capture extension (0.21.0).
 DeviceScope = Literal["read", "notes:write", "reviews:write"]
 DEVICE_SCOPES: tuple[DeviceScope, ...] = ("read", "notes:write", "reviews:write")
-DEFAULT_DEVICE_SCOPES: tuple[DeviceScope, ...] = DEVICE_SCOPES
+# Spelled out: a scope added above is granted only when this line says so.
+DEFAULT_DEVICE_SCOPES: tuple[DeviceScope, ...] = ("read", "notes:write", "reviews:write")
 
 
 @dataclass(frozen=True)

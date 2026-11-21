@@ -8,8 +8,12 @@ origin needs a paired device's bearer token (`services/devices.py`). A request w
 evals); a browser marks the cross-site kind with `Sec-Fetch-Site`, and that one is refused.
 
 Those headers are only evidence on loopback. A server that answers beyond it
-(`LUMINARY_ALLOWED_HOSTS`, #511) admits a non-loopback client by token alone, since a direct
-client writes whatever `Origin` and `Host` it likes.
+(`LUMINARY_ALLOWED_HOSTS`, #511) admits a client from beyond loopback by token alone, since a
+direct client writes whatever `Origin` and `Host` it likes. A same-host reverse proxy
+(`tailscale serve`, Caddy) connects from 127.0.0.1, so a request is from beyond loopback if
+its address is not loopback, OR it names a host that is not, OR it carries a forwarding header.
+uvicorn, launched without `--proxy-headers` flags everywhere, already rewrites the address
+from `X-Forwarded-For` when the connection is from 127.0.0.1 (`FORWARDED_ALLOW_IPS`).
 
 What an admitted device may then do is decided after routing (#532): a route is the app's
 alone unless it declares a device scope (`device_scope`), and `authorize_route`, an app-wide
@@ -26,6 +30,7 @@ from __future__ import annotations
 
 import dataclasses
 import ipaddress
+from urllib.parse import urlsplit
 
 from fastapi import Depends, Request
 from fastapi.params import Depends as DependsParam
@@ -54,6 +59,10 @@ _REMOTE = "Requests from another machine need a paired device's token."
 _LOCAL_ONLY = "Only Luminary on this computer can do this; a paired device cannot."
 
 
+_LOOPBACK_NAMES = frozenset({"127.0.0.1", "localhost", "::1"})
+_FORWARDING_HEADERS = ("forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip")
+
+
 def is_loopback(client: tuple[str, int] | None) -> bool:
     if client is None:
         return False
@@ -61,6 +70,23 @@ def is_loopback(client: tuple[str, int] | None) -> bool:
         return ipaddress.ip_address(client[0]).is_loopback
     except ValueError:
         return False
+
+
+def from_beyond_loopback(scope: Scope) -> bool:
+    """Whether the request came from another machine, directly or through a proxy here."""
+    if not is_loopback(scope.get("client")):
+        return True
+    headers = Headers(scope=scope)
+    host = urlsplit(f"//{headers.get('host', '')}").hostname or ""
+    if host not in _LOOPBACK_NAMES:
+        return True
+    return any(name in headers for name in _FORWARDING_HEADERS)
+
+
+def require_this_computer(request: Request) -> None:
+    """For a route outside the guarded API (the schema): this computer only, never a device."""
+    if is_device(request) or from_beyond_loopback(request.scope):
+        raise Forbidden(_LOCAL_ONLY)
 
 
 class _DeviceAccess:
@@ -85,6 +111,11 @@ def route_scopes(route: APIRoute) -> list[DeviceScope]:
         for dep in route.dependant.dependencies
         if isinstance(dep.call, _DeviceAccess)
     ]
+
+
+def is_device(request: Request) -> bool:
+    principal: Principal | None = getattr(request.state, "principal", None)
+    return principal is not None and principal.kind == "device"
 
 
 def authorize_route(request: Request) -> None:
@@ -154,7 +185,7 @@ class RequestAuthMiddleware:
             return (principal, None) if principal is not None else (None, _NOT_ADMITTED)
         if scope["path"] == self.pair_path:
             return None, None
-        if self.remote_needs_token and not is_loopback(scope.get("client")):
+        if self.remote_needs_token and from_beyond_loopback(scope):
             return None, _REMOTE
         own_origin = f"{scope.get('scheme', 'http')}://{headers.get('host', '')}"
         if needs_token(

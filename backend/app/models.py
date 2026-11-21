@@ -1,4 +1,3 @@
-import json
 import logging
 from datetime import UTC, date, datetime
 
@@ -1623,7 +1622,8 @@ class DeviceModel(Base):
         JSON,
         nullable=False,
         default=lambda: list(DEFAULT_DEVICE_SCOPES),
-        server_default=json.dumps(list(DEFAULT_DEVICE_SCOPES)),
+        # The literal the migration wrote, so a later default never rewrites the schema.
+        server_default='["read", "notes:write", "reviews:write"]',
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)

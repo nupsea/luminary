@@ -8,6 +8,7 @@ returned once and only its SHA-256 is stored; a 256-bit random secret needs no s
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import secrets
 import time
 from collections import deque
@@ -31,10 +32,10 @@ _MAX_FAILED_ATTEMPTS = 5
 _TOKEN_PREFIX = "lum_"  # noqa: S105 - a public marker that makes a leaked token greppable
 # A request per device would otherwise be a write per request.
 _TOUCH_INTERVAL = timedelta(seconds=60)
-# Attempts one client address may make per code lifetime: one fewer than voids the code,
-# so a single LAN client cannot keep voiding the codes the user shows, and a typo or two pairs.
+# Attempts one client may make in any window as long as a code lives (five minutes): one
+# fewer than voids a code, so one LAN client cannot void the codes shown, and a typo still pairs.
 _MAX_ATTEMPTS_PER_CLIENT = _MAX_FAILED_ATTEMPTS - 1
-# Bounds memory; past it the table starts again empty.
+# Bounds memory; past it the least recently active client is forgotten, never all of them.
 _MAX_TRACKED_CLIENTS = 1024
 
 
@@ -92,13 +93,27 @@ def _consume_code(code: str) -> str:
     return active.library
 
 
-def _count_attempt(client: str) -> None:
+def _client_key(address: str) -> str:
+    """An IPv6 client is its /64: one host holds a whole prefix and can rotate within it."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return address
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            return str(ip.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False))
+    return str(ip)
+
+
+def _count_attempt(address: str) -> None:
     now = time.monotonic()
-    window = _attempts.get(client)
-    if window is None:
-        if len(_attempts) >= _MAX_TRACKED_CLIENTS:
-            _attempts.clear()
-        window = _attempts[client] = deque()
+    client = _client_key(address)
+    # Popped and re-inserted, so the dict's order is least recently active first.
+    window = _attempts.pop(client, None) or deque()
+    if len(_attempts) >= _MAX_TRACKED_CLIENTS:
+        del _attempts[next(iter(_attempts))]
+    _attempts[client] = window
     while window and now - window[0] > _CODE_TTL_S:
         window.popleft()
     if len(window) >= _MAX_ATTEMPTS_PER_CLIENT:

@@ -234,6 +234,29 @@ async def test_upload_note_svg_and_serve_local(test_db):
 
     assert served.status_code == 200
     assert served.headers["content-type"].startswith("image/svg")
+    # Opened directly, the SVG must not run script on the app's origin.
+    assert served.headers["content-security-policy"].startswith("sandbox;")
+    assert "default-src 'none'" in served.headers["content-security-policy"]
+    assert served.headers["x-content-type-options"] == "nosniff"
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["page.html", "page.htm", "diagram.svg.html", "script.js", "data.xml", "frame.xhtml"],
+)
+@pytest.mark.asyncio
+async def test_a_note_asset_that_is_not_an_image_type_is_refused(test_db, name):
+    """A client-chosen extension decides how the file is served back; only image types are kept."""
+    _, _, tmp_path = test_db
+    payload = b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        upload = await client.post(
+            "/images/notes", files={"file": (name, payload, "image/svg+xml")}
+        )
+
+    assert upload.status_code == 422, upload.text
+    stored = tmp_path / "images" / "notes"
+    assert not stored.exists() or not any(stored.iterdir())
 
 
 @pytest.mark.asyncio
@@ -265,7 +288,7 @@ async def test_upload_note_excalidraw_scene_and_serve_local(test_db):
 
 
 @pytest.mark.asyncio
-async def test_upload_invalid_note_excalidraw_scene_returns_400(test_db):
+async def test_upload_invalid_note_excalidraw_scene_is_refused(test_db):
     """Only valid Excalidraw scene JSON is accepted as an editable diagram asset."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         upload = await client.post(
@@ -273,7 +296,7 @@ async def test_upload_invalid_note_excalidraw_scene_returns_400(test_db):
             files={"file": ("diagram.excalidraw.json", b'{"not":"a scene"}', "application/json")},
         )
 
-    assert upload.status_code == 400
+    assert upload.status_code == 422
 
 
 @pytest.mark.asyncio

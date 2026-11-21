@@ -8,7 +8,8 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from pydantic import BaseModel, RootModel
 from pythonjsonlogger.json import JsonFormatter
@@ -67,6 +68,7 @@ from app.runtime.request_auth import (
     RequestAuthMiddleware,
     authorize_route,
     device_scope,
+    require_this_computer,
 )
 from app.services.background import all_pending, clear_registries, task_registry
 from app.services.chapter_backfill import ChapterBackfill
@@ -356,8 +358,16 @@ def _restrict_permissions(data_dir: Path) -> None:
             logger.warning("Could not restrict permissions on %s: %s", path, exc)
 
 
-# Default-deny for devices: a route a device may call declares its scope (I-79).
-app = FastAPI(title="Luminary", lifespan=lifespan, dependencies=[Depends(authorize_route)])
+# Default-deny for devices: a route a device may call declares its scope (I-79). FastAPI's
+# own schema and docs routes would bypass that, so they are registered below as API routes.
+app = FastAPI(
+    title="Luminary",
+    lifespan=lifespan,
+    dependencies=[Depends(authorize_route)],
+    openapi_url=None,
+    docs_url=None,
+    redoc_url=None,
+)
 
 
 @app.exception_handler(LuminaryError)
@@ -465,17 +475,17 @@ misc_router = APIRouter()
 # and know nothing about /api; the SPA calls them through its own /api base. When
 # these lived only at the root, the About dialog's version request for
 # /api/health hit serve_spa's 404-for-api/ guard in every shipped build.
-probe_router = APIRouter(dependencies=[device_scope("read")])
+probe_router = APIRouter()
 
 
-@probe_router.get("/health")
+@probe_router.get("/health", dependencies=[device_scope("read")])
 async def health():
     # `mode` decides which surfaces are mounted; the smoke harness reads it to
     # skip scripts for surfaces this server does not serve.
     return {"status": "ok", "version": _APP_VERSION, "mode": _mode}
 
 
-@probe_router.get("/healthz")
+@probe_router.get("/healthz", dependencies=[device_scope("read")])
 async def healthz():
     """Lightweight liveness probe for containers and monitors (no DB)."""
     from datetime import UTC, datetime
@@ -483,6 +493,7 @@ async def healthz():
     return {"status": "ok", "timestamp": datetime.now(UTC).isoformat()}
 
 
+# Not a device's: a phase's detail can carry an error naming paths on this computer.
 @probe_router.get("/setup/status")
 async def setup_status():
     """What startup has actually finished, as opposed to /health's 200."""
@@ -582,6 +593,25 @@ async def read_storage(settings: Settings = Depends(get_settings)) -> dict:
 
 
 app.include_router(misc_router, prefix=_API_PREFIX)
+
+# At the origin root in every mode, where smoke reads it (`smoke_openapi`); the middleware does
+# not guard the root in public mode, so this computer is checked here.
+schema_router = APIRouter(include_in_schema=False, dependencies=[Depends(require_this_computer)])
+
+
+@schema_router.get("/openapi.json")
+async def openapi_schema() -> JSONResponse:
+    return JSONResponse(app.openapi())
+
+
+if _mode == "full":
+
+    @schema_router.get("/docs")
+    async def swagger_docs() -> HTMLResponse:
+        return get_swagger_ui_html(openapi_url="/openapi.json", title="Luminary API")
+
+
+app.include_router(schema_router)
 app.include_router(probe_router, prefix=_API_PREFIX)
 if _API_PREFIX:
     app.include_router(probe_router, include_in_schema=False)

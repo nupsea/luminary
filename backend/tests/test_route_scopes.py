@@ -10,13 +10,15 @@ from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text, update
 
+import app.routers.qa as qa_router
 import app.services.blog_service as blog_service
 import app.services.devices as devices
 from app.db_init import init_database
+from app.exceptions import TooManyRequests
 from app.main import app
 from app.models import DeviceModel, NoteModel
-from app.runtime.request_auth import route_scopes
-from app.types import DEVICE_SCOPES
+from app.runtime.request_auth import authorize_route, require_this_computer, route_scopes
+from app.types import DEFAULT_DEVICE_SCOPES, DEVICE_SCOPES
 from tests.test_drop_content_type_migration import _migrate
 
 OWN = "http://127.0.0.1:7820"
@@ -27,7 +29,6 @@ BEFORE_SCOPES = "7f6bcd0f8881"
 # Everything a device can reach. A change here is a change to what a lost phone can do.
 DEVICE_ROUTES = {
     # notes:write
-    ("DELETE", "/notes/{note_id}", "notes:write"),
     ("DELETE", "/notes/{note_id}/links/{target_note_id}", "notes:write"),
     ("PATCH", "/notes/{note_id}", "notes:write"),
     ("POST", "/images/notes", "notes:write"),
@@ -87,7 +88,6 @@ DEVICE_ROUTES = {
     ("GET", "/sections/{document_id}/chapters", "read"),
     ("GET", "/sections/{document_id}/content", "read"),
     ("GET", "/sections/{document_id}/content/{section_id}", "read"),
-    ("GET", "/setup/status", "read"),
     ("GET", "/study/calibration-stats", "read"),
     ("GET", "/study/collections/{collection_id}/dashboard", "read"),
     ("GET", "/study/decay-debt", "read"),
@@ -219,7 +219,8 @@ async def test_a_device_reads_writes_notes_and_reviews_within_its_scopes(client)
         "/study/sessions/start", json={"document_id": None, "mode": "flashcard"}, headers=device
     )
     assert started.status_code in (200, 201), started.text
-    assert (await client.delete(f"/notes/{note_id}", headers=device)).status_code == 204
+    refused = await client.delete(f"/notes/{note_id}", headers=device)
+    assert refused.status_code == 403 and refused.json()["detail"] == LOCAL_ONLY
 
 
 async def test_a_device_without_a_scope_is_refused_what_it_needs(client, memory_db):
@@ -299,3 +300,91 @@ async def test_the_attempt_window_reopens_after_a_code_lifetime(client, monkeypa
     code = (await client.post("/devices/pairing-code")).json()["code"]
     resp = await client.post("/devices/pair", json={"code": code, "name": "phone"})
     assert resp.status_code == 201, resp.text
+
+
+def test_every_route_is_behind_the_device_check():
+    # A route outside APIRoute (FastAPI's own docs were) never meets authorize_route.
+    for route in app.routes:
+        assert isinstance(route, APIRoute), f"{route.path} is not an API route"
+        calls = {d.call for d in route.dependant.dependencies}
+        assert authorize_route in calls, f"{route.path} skips authorize_route"
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Authorization": "device"},
+        {"Host": "luminary.lan:7820"},
+        {"X-Forwarded-For": "203.0.113.7"},
+    ],
+)
+async def test_the_schema_answers_only_this_computer(client, headers):
+    assert (await client.get("/openapi.json")).status_code == 200
+    if headers.get("Authorization") == "device":
+        headers = await _device(client)
+    resp = await client.get("/openapi.json", headers=headers)
+    assert resp.status_code == 403, resp.text
+    assert any(
+        d.call is require_this_computer
+        for r in app.routes
+        if isinstance(r, APIRoute) and r.path == "/openapi.json"
+        for d in r.dependant.dependencies
+    )
+
+
+@pytest.mark.parametrize("body", [{"model": "gpt-4o"}, {"web_enabled": True}])
+async def test_a_device_cannot_choose_where_its_question_goes(client, monkeypatch, body):
+    asked: list[object] = []
+
+    class _QA:
+        async def stream_answer(self, question, document_ids, scope, model, *_a, **_kw):
+            asked.append(model)
+            yield "data: done\n\n"
+
+    monkeypatch.setattr(qa_router, "get_qa_service", lambda: _QA())
+    device = await _device(client)
+
+    refused = await client.post("/qa", json={"question": "q", **body}, headers=device)
+    assert refused.status_code == 403, refused.text
+    assert asked == []
+
+    plain = await client.post("/qa", json={"question": "q"}, headers=device)
+    assert plain.status_code == 200, plain.text
+    assert asked == [None]
+    # The app itself still picks its model.
+    assert (await client.post("/qa", json={"question": "q", **body})).status_code == 200
+
+
+def test_the_default_scopes_are_named_not_derived():
+    # Aliased to DEVICE_SCOPES, every scope added later would reach every new pairing.
+    assert DEFAULT_DEVICE_SCOPES == ("read", "notes:write", "reviews:write")
+    assert set(DEFAULT_DEVICE_SCOPES) <= set(DEVICE_SCOPES)
+
+
+def test_an_ipv6_client_is_its_64_and_a_mapped_v4_is_the_v4():
+    key = devices._client_key
+    assert key("2001:db8:1:2::a") == key("2001:db8:1:2:ffff::1") == "2001:db8:1:2::/64"
+    assert key("2001:db8:1:3::a") != key("2001:db8:1:2::a")
+    assert key("::ffff:192.0.2.1") == key("192.0.2.1") == "192.0.2.1"
+
+
+def test_a_rotating_ipv6_host_shares_one_window():
+    for i in range(devices._MAX_ATTEMPTS_PER_CLIENT):
+        devices._count_attempt(f"2001:db8:1:2::{i + 1:x}")
+    with pytest.raises(TooManyRequests):
+        devices._count_attempt("2001:db8:1:2::ffff")
+
+
+def test_a_full_table_forgets_the_least_recent_client_only(monkeypatch):
+    monkeypatch.setattr(devices, "_MAX_TRACKED_CLIENTS", 3)
+    for _ in range(devices._MAX_ATTEMPTS_PER_CLIENT):
+        devices._count_attempt("192.0.2.1")
+    devices._count_attempt("192.0.2.2")
+    devices._count_attempt("192.0.2.3")
+    devices._count_attempt("192.0.2.4")  # evicts .1, the least recently active
+
+    assert set(devices._attempts) == {"192.0.2.2", "192.0.2.3", "192.0.2.4"}
+    for _ in range(devices._MAX_ATTEMPTS_PER_CLIENT - 1):
+        devices._count_attempt("192.0.2.2")
+    with pytest.raises(TooManyRequests):
+        devices._count_attempt("192.0.2.2")
