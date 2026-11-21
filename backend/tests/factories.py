@@ -20,6 +20,19 @@ def _row(model, values: dict):
     return model(**{**defaults, **values})
 
 
+def set_values(row) -> dict:
+    """The columns a factory row sets, for a Core insert into an older schema.
+
+    The ORM names every column the models have now, which a schema migrated down to before
+    a later column does not have.
+    """
+    return {
+        c.name: getattr(row, c.key)
+        for c in type(row).__table__.columns
+        if getattr(row, c.key) is not None
+    }
+
+
 def _id(fields: dict) -> str:
     return fields.pop("id", None) or str(uuid.uuid4())
 
