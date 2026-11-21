@@ -44,6 +44,7 @@ describe("fetchSessionCards", () => {
     expect(result).toEqual(mockData)
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining("/study/sessions/session-123/cards"),
+      expect.objectContaining({ body: undefined }),
     )
   })
 

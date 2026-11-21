@@ -9,11 +9,10 @@ import { ALWAYS_LOCAL, ENGINE_MODES, engineMode } from "@/lib/engineModes"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
-import { apiGet, apiPatch, apiPost } from "@/lib/apiClient"
+import { apiFetch, apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 import { RoutingTable } from "@/components/settings/RoutingTable"
 import { CloudProviderSettings } from "@/components/settings/CloudProviderSettings"
 import { invalidateKeyedQueries, saveProviderKey } from "@/lib/cloudKeys"
-import { API_BASE } from "@/lib/config"
 import { getTheme, setTheme, type Theme } from "@/lib/theme"
 import { DevicesSettings } from "@/components/settings/DevicesSettings"
 import { LibraryManager } from "@/components/libraries/LibraryManager"
@@ -343,13 +342,9 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
     setPullLines([])
 
     try {
-      // SSE stream: progress lines arrive via res.body.getReader();
-      // apiClient's JSON path doesn't apply.
-      // eslint-disable-next-line no-restricted-syntax
-      const res = await fetch(`${API_BASE}/settings/ollama/pull`, {
+      const res = await apiFetch("/settings/ollama/pull", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model }),
+        body: { model },
       })
       if (!res.ok || !res.body) throw new Error("Pull request failed")
 

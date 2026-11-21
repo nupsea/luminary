@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react"
 import type { ExplainMode } from "@/components/reader/SelectionActionBar"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 
-import { API_BASE } from "@/lib/config"
+import { apiFetch } from "@/lib/apiClient"
 
 const MODE_LABELS: Record<ExplainMode | "formal", string> = {
   define: "Definition",
@@ -52,13 +52,9 @@ export function ExplanationPanel({
 
     void (async () => {
       try {
-        // SSE stream: tokens arrive via res.body.getReader(); apiClient's
-        // JSON path doesn't apply.
-        // eslint-disable-next-line no-restricted-syntax
-        const res = await fetch(`${API_BASE}/explain`, {
+        const res = await apiFetch("/explain", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, document_id: documentId, mode }),
+          body: { text, document_id: documentId, mode },
           signal: controller.signal,
         })
         if (!res.ok || !res.body) {

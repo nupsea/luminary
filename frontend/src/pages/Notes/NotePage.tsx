@@ -43,9 +43,8 @@ import { VoiceRecordButton } from "@/components/VoiceRecordButton"
 import { setImageSizeInMarkdown } from "@/components/notes/markdownEditorCommands"
 import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkCompletion"
 import { Skeleton } from "@/components/ui/skeleton"
-import { apiGet } from "@/lib/apiClient"
+import { apiBaseUrl, apiGet } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
-import { API_BASE } from "@/lib/config"
 import {
   EMPTY_DRAFT,
   NEW_NOTE_KEY,
@@ -136,7 +135,7 @@ export default function NotePage() {
   editContentRef.current = editContent
 
   const handleSetImageSize = useCallback((src: string, size: ImageSize) => {
-    setEditContent(setImageSizeInMarkdown(editContentRef.current, src, size, API_BASE))
+    setEditContent(setImageSizeInMarkdown(editContentRef.current, src, size, apiBaseUrl()))
   }, [])
 
   const propsRailOpen = useNoteEditorUi((s) => s.propsRailOpen)

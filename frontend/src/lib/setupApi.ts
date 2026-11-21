@@ -2,8 +2,7 @@
 
 import type { QueryClient } from "@tanstack/react-query"
 
-import { apiDelete, apiGet, apiPost } from "@/lib/apiClient"
-import { API_BASE } from "@/lib/config"
+import { apiDelete, apiFetch, apiGet, apiPost } from "@/lib/apiClient"
 
 export type PhaseState =
   | "pending"
@@ -149,7 +148,7 @@ export interface InstallProgress {
 /**
  * Install a component, calling `onProgress` as it streams.
  *
- * Server-sent events rather than apiClient: this reports byte counts over
+ * Server-sent events rather than JSON: this reports byte counts over
  * minutes, and a download of several gigabytes has to show movement.
  */
 export async function installComponent(
@@ -166,7 +165,7 @@ export async function streamInstall(
   onProgress: (event: InstallProgress) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const resp = await fetch(`${API_BASE}${path}`, {
+  const resp = await apiFetch(path, {
     method: "POST",
     signal,
   })

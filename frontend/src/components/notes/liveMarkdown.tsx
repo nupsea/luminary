@@ -28,7 +28,7 @@ import {
 } from "@/lib/noteDiagrams"
 import { mathRanges } from "./mathSource"
 import { moveBlockOrLineSpec, setImageSizeInMarkdown } from "./markdownEditorCommands"
-import { API_BASE } from "@/lib/config"
+import { apiBaseUrl } from "@/lib/apiClient"
 import { cn } from "@/lib/utils"
 
 import {
@@ -284,7 +284,7 @@ function RenderedBlockContent({
   }
 
   const annotateImage = (src: string) => {
-    const target = onAnnotateImage && annotationTarget(source, src, API_BASE)
+    const target = onAnnotateImage && annotationTarget(source, src, apiBaseUrl())
     if (!target) return
     const base = view.posAtDOM(host)
     onAnnotateImage({ ...target, start: target.start + base, end: target.end + base })
@@ -413,7 +413,7 @@ function RenderedBlockContent({
           const startLine = view.state.doc.lineAt(blockPos)
           const lineCount = source.split("\n").length
           const lastLine = view.state.doc.line(Math.min(startLine.number + lineCount - 1, view.state.doc.lines))
-          const newBlockText = setImageSizeInMarkdown(source, src, size, API_BASE)
+          const newBlockText = setImageSizeInMarkdown(source, src, size, apiBaseUrl())
           if (newBlockText !== source) {
             view.dispatch({ changes: { from: startLine.from, to: lastLine.to, insert: newBlockText } })
             view.focus()

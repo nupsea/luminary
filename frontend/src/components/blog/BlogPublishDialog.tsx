@@ -28,8 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { ApiError } from "@/lib/apiClient"
-import { API_BASE } from "@/lib/config"
+import { apiBaseUrl, ApiError } from "@/lib/apiClient"
 import {
   blogLivePreview,
   blogLivePreviewCleanup,
@@ -171,7 +170,7 @@ export function BlogPublishDialog({
     for (const a of draft.assets) {
       const token = `/${kind}/${slug}/${a.dest_filename}`
       if (a.kind === "copy" && a.doc_id && a.filename) {
-        md = md.replaceAll(token, `${API_BASE}/images/local/${a.doc_id}/${a.filename}`)
+        md = md.replaceAll(token, `${apiBaseUrl()}/images/local/${a.doc_id}/${a.filename}`)
       } else if (a.kind === "mermaid" && a.key && mermaidSvgs[a.key]) {
         md = md.replaceAll(token, svgToDataUri(mermaidSvgs[a.key]))
       }

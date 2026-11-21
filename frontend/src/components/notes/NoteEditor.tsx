@@ -9,7 +9,7 @@ import {
 import { setImageSizeInMarkdown } from "@/components/notes/markdownEditorCommands"
 import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkCompletion"
 import { type SlashCommandConfig } from "@/components/notes/slashCommands"
-import { API_BASE } from "@/lib/config"
+import { apiBaseUrl } from "@/lib/apiClient"
 import { uploadNoteAsset } from "@/lib/noteAssets"
 import { annotationTarget, isAnnotatedImage, replaceExcalidrawDiagram, type AnnotationTarget } from "@/lib/noteDiagrams"
 
@@ -55,7 +55,7 @@ export function NoteEditor({
 
   const handleSetImageSize = useCallback(
     (src: string, size: ImageSize) => {
-      onContentChange(setImageSizeInMarkdown(contentRef.current, src, size, API_BASE))
+      onContentChange(setImageSizeInMarkdown(contentRef.current, src, size, apiBaseUrl()))
     },
     [onContentChange],
   )
@@ -75,7 +75,7 @@ export function NoteEditor({
   }
 
   function handleAnnotateImage(src: string) {
-    const ref = annotationTarget(contentRef.current, src, API_BASE)
+    const ref = annotationTarget(contentRef.current, src, apiBaseUrl())
     if (ref) openDiagramEditor(ref)
   }
 
