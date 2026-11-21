@@ -60,8 +60,8 @@ class FSRSService:
             db_card.last_review.replace(tzinfo=UTC).isoformat() if db_card.last_review else None
         )
 
-        # The stored step, not 0: rebuilt at 0, Good never reached the last learning step (#533).
-        # Only a review card has no step; any other state is rebuilt as Learning or Relearning.
+        # Rebuilt at step 0, Good never reached the last learning step (#533). Only a review
+        # card has no step; every other state is rebuilt as Learning or Relearning.
         step = None if db_card.fsrs_state == "review" else (db_card.fsrs_step or 0)
 
         return Card.from_dict(
