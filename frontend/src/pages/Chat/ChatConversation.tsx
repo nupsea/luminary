@@ -519,10 +519,9 @@ export function ChatConversation({
         .slice(-6)
         .map((m) => ({ role: m.role, content: m.text }))
 
-      const res = await apiFetch(`/qa`, {
+      const res = await apiFetch("/qa", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           question,
           document_ids: documentIds,
           scope: effScope,
@@ -532,7 +531,7 @@ export function ChatConversation({
           creative: creativeEnabled,
           direct: directEnabled,
           suggested: opts?.suggested || undefined,
-        }),
+        },
       })
       if (!res.ok || !res.body) throw new Error("QA request failed")
 

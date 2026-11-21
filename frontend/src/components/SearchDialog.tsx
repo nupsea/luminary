@@ -87,15 +87,14 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
     setAskCitations([])
     setAskStreaming(true)
     try {
-      const res = await apiFetch(`/qa`, {
+      const res = await apiFetch("/qa", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           question: askQuestion,
           document_ids: activeDocumentId ? [activeDocumentId] : null,
           scope: activeDocumentId ? "single" : "all",
           socratic: socraticMode,
-        }),
+        },
       })
       if (!res.ok || !res.body) throw new Error("QA failed")
       const reader = res.body.getReader()

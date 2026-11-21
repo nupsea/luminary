@@ -52,10 +52,9 @@ export function ExplanationPanel({
 
     void (async () => {
       try {
-        const res = await apiFetch(`/explain`, {
+        const res = await apiFetch("/explain", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, document_id: documentId, mode }),
+          body: { text, document_id: documentId, mode },
           signal: controller.signal,
         })
         if (!res.ok || !res.body) {

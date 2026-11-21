@@ -102,15 +102,14 @@ export async function startSession(
   collectionId: string | null = null,
   plannedCardIds: string[] | null = null,
 ): Promise<string> {
-  const res = await apiFetch(`/study/sessions/start`, {
+  const res = await apiFetch("/study/sessions/start", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+    body: {
       document_id: documentId,
       collection_id: collectionId,
       mode,
       planned_card_ids: plannedCardIds,
-    }),
+    },
   })
   if (!res.ok) throw new Error("Failed to start session")
   const data = (await res.json()) as { id: string }
@@ -126,7 +125,8 @@ export interface SessionRemainingState {
 export async function fetchSessionRemainingCards(
   sessionId: string,
 ): Promise<SessionRemainingState> {
-  const res = await apiFetch(`/study/sessions/${encodeURIComponent(sessionId)}/remaining-cards`,
+  const res = await apiFetch(
+    `/study/sessions/${encodeURIComponent(sessionId)}/remaining-cards`,
   )
   if (!res.ok) return { answered_count: 0, planned_count: 0, cards: [] }
   return res.json() as Promise<SessionRemainingState>
@@ -185,12 +185,11 @@ export async function submitReview(
 ): Promise<void> {
   await apiFetch(`/flashcards/${cardId}/review`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+    body: {
       rating,
       session_id: sessionId,
       ...(predictedRating !== undefined && { predicted_rating: predictedRating }),
-    }),
+    },
   })
 }
 
@@ -199,7 +198,8 @@ export async function endSession(sessionId: string): Promise<void> {
 }
 
 export async function reopenSession(sessionId: string): Promise<void> {
-  await apiFetch(`/study/sessions/${encodeURIComponent(sessionId)}/reopen`,
+  await apiFetch(
+    `/study/sessions/${encodeURIComponent(sessionId)}/reopen`,
     { method: "POST" },
   )
 }
@@ -220,11 +220,11 @@ export async function appendSessionCards(
   cardIds: string[],
 ): Promise<{ added: number; plannedCount: number } | null> {
   if (cardIds.length === 0) return { added: 0, plannedCount: 0 }
-  const res = await apiFetch(`/study/sessions/${encodeURIComponent(sessionId)}/cards`,
+  const res = await apiFetch(
+    `/study/sessions/${encodeURIComponent(sessionId)}/cards`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ card_ids: cardIds }),
+      body: { card_ids: cardIds },
     },
   )
   if (!res.ok) return null
@@ -252,7 +252,8 @@ export interface SessionCardDetail {
 export async function fetchSessionCards(
   sessionId: string,
 ): Promise<SessionCardDetail[]> {
-  const res = await apiFetch(`/study/sessions/${encodeURIComponent(sessionId)}/cards`,
+  const res = await apiFetch(
+    `/study/sessions/${encodeURIComponent(sessionId)}/cards`,
   )
   if (!res.ok) {
     throw new Error(`Failed to fetch cards for session ${sessionId}: ${res.status}`)
@@ -285,7 +286,8 @@ export async function fetchMaterialHeadroom(
   sectionId?: string | null,
 ): Promise<MaterialHeadroom | null> {
   const qs = sectionId ? `?section_id=${encodeURIComponent(sectionId)}` : ""
-  const res = await apiFetch(`/flashcards/${encodeURIComponent(documentId)}/headroom${qs}`,
+  const res = await apiFetch(
+    `/flashcards/${encodeURIComponent(documentId)}/headroom${qs}`,
   )
   if (!res.ok) return null
   return res.json() as Promise<MaterialHeadroom>
@@ -293,14 +295,16 @@ export async function fetchMaterialHeadroom(
 
 /** Deletes the session only if no attempt was made in it; the server decides. */
 export async function discardUnusedSession(sessionId: string): Promise<void> {
-  const res = await apiFetch(`/study/sessions/${encodeURIComponent(sessionId)}?if_unused=true`,
+  const res = await apiFetch(
+    `/study/sessions/${encodeURIComponent(sessionId)}?if_unused=true`,
     { method: "DELETE" },
   )
   if (!res.ok) throw new Error("Failed to discard session")
 }
 
 export async function deleteStudySession(sessionId: string): Promise<void> {
-  const res = await apiFetch(`/study/sessions/${encodeURIComponent(sessionId)}`,
+  const res = await apiFetch(
+    `/study/sessions/${encodeURIComponent(sessionId)}`,
     { method: "DELETE" },
   )
   if (!res.ok) throw new Error("Failed to delete session")
@@ -310,7 +314,8 @@ export async function fetchSourceContext(
   cardId: string,
 ): Promise<SourceContext | null> {
   try {
-    const res = await apiFetch(`/flashcards/${encodeURIComponent(cardId)}/source-context`,
+    const res = await apiFetch(
+      `/flashcards/${encodeURIComponent(cardId)}/source-context`,
     )
     if (!res.ok) return null
     return res.json() as Promise<SourceContext>
@@ -328,14 +333,13 @@ export async function submitTeachbackAsync(
   userExplanation: string,
   sessionId: string | null = null,
 ): Promise<{ id: string }> {
-  const res = await apiFetch(`/study/teachback/async`, {
+  const res = await apiFetch("/study/teachback/async", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+    body: {
       flashcard_id: flashcardId,
       user_explanation: userExplanation,
       session_id: sessionId,
-    }),
+    },
   })
   if (!res.ok) throw new Error("Teachback submit failed")
   return res.json() as Promise<{ id: string }>
@@ -354,7 +358,8 @@ export async function fetchTeachbackResults(
 export async function fetchSessionTeachbackResults(
   sessionId: string,
 ): Promise<TeachbackResultItem[]> {
-  const res = await apiFetch(`/study/sessions/${encodeURIComponent(sessionId)}/teachback-results`,
+  const res = await apiFetch(
+    `/study/sessions/${encodeURIComponent(sessionId)}/teachback-results`,
   )
   if (!res.ok) return []
   const data = (await res.json()) as { results: TeachbackResultItem[] }
@@ -401,15 +406,14 @@ export async function generateDocumentFlashcards(
   count: number = 10,
   difficulty: Difficulty = "medium",
 ): Promise<number> {
-  const res = await apiFetch(`/flashcards/generate`, {
+  const res = await apiFetch("/flashcards/generate", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+    body: {
       document_id: documentId,
       scope: "full",
       count,
       difficulty,
-    }),
+    },
   })
   if (!res.ok) {
     let msg = ""
@@ -474,10 +478,9 @@ export async function generateCollectionFlashcards(
         result.documentsProcessed += 1
       } else {
         // Per-note call (note_ids path) so each note gets its own share.
-        const res = await apiFetch(`/notes/flashcards/generate`, {
+        const res = await apiFetch("/notes/flashcards/generate", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ note_ids: [source.id], count, difficulty }),
+          body: { note_ids: [source.id], count, difficulty },
         })
         if (!res.ok) {
           result.errors.push(`Note generation failed (HTTP ${res.status})`)
@@ -546,16 +549,15 @@ export async function regenerateCollectionFlashcards(
     const count = targets[i]
     if (count <= 0) continue
     try {
-      const res = await apiFetch(`/flashcards/regenerate`, {
+      const res = await apiFetch("/flashcards/regenerate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           ...(source.type === "document"
             ? { document_id: source.id }
             : { note_id: source.id }),
           count,
           difficulty,
-        }),
+        },
       })
       if (!res.ok) {
         let msg = `HTTP ${res.status}`

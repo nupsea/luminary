@@ -87,8 +87,7 @@ export function SummaryPanel({ documentId, form }: SummaryPanelProps) {
     try {
       const res = await apiFetch(`/summarize/${documentId}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, model: null, force_refresh: forceRefresh }),
+        body: { mode, model: null, force_refresh: forceRefresh },
       })
       if (!res.ok || !res.body) throw new Error("Summarization failed")
       const reader = res.body.getReader()

@@ -342,10 +342,9 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
     setPullLines([])
 
     try {
-      const res = await apiFetch(`/settings/ollama/pull`, {
+      const res = await apiFetch("/settings/ollama/pull", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model }),
+        body: { model },
       })
       if (!res.ok || !res.body) throw new Error("Pull request failed")
 

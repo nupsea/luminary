@@ -219,8 +219,7 @@ export function FeynmanPanel({
     try {
       const res = await apiFetch(`/feynman/sessions/${sessionId}/message`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: userText }),
+        body: { content: userText },
         signal: controller.signal,
       })
 
