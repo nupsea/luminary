@@ -49,8 +49,9 @@ async def test_a_new_card_reaches_review_on_good_good(memory_db):
 
 
 async def test_a_lapsed_review_card_returns_to_review(memory_db):
-    # fsrs's one relearning step graduates on the first Good, so this holds with the step
-    # hard-coded too; it pins that relearning keeps working with the stored step.
+    """A regression pin, not evidence of the fix: fsrs has one relearning step, so Good
+    graduates a relearning card even at a hard-coded step 0. It fails on the old code only
+    because a review card then stored step 0, not None."""
     card = _card(fsrs_state="new")
     async with memory_db.factory() as session:
         session.add(card)
@@ -97,6 +98,8 @@ async def test_the_upgrade_infers_the_step_and_moves_no_due_date(memory_db):
         "hard": _card(fsrs_state="learning", last_review=reviewed, due_date=due),
         # The newest event is an older review (the last one was made outside a session).
         "stale": _card(fsrs_state="learning", last_review=reviewed, due_date=due),
+        # A Good 30 s after the last review is another review: past the 5 s window.
+        "near": _card(fsrs_state="learning", last_review=reviewed, due_date=due),
         "no_event": _card(fsrs_state="learning", last_review=reviewed, due_date=due),
         "relearning": _card(fsrs_state="relearning", last_review=reviewed, due_date=due),
         "review": _card(fsrs_state="review", last_review=reviewed, due_date=due + timedelta(3)),
@@ -111,6 +114,7 @@ async def test_the_upgrade_infers_the_step_and_moves_no_due_date(memory_db):
                 _event(cards["again"].id, "again", reviewed + timedelta(milliseconds=40)),
                 _event(cards["hard"].id, "hard", reviewed + timedelta(milliseconds=40)),
                 _event(cards["stale"].id, "good", reviewed - timedelta(hours=2)),
+                _event(cards["near"].id, "good", reviewed + timedelta(seconds=30)),
                 _event(cards["relearning"].id, "good", reviewed + timedelta(milliseconds=40)),
             ]
         )
@@ -132,6 +136,7 @@ async def test_the_upgrade_infers_the_step_and_moves_no_due_date(memory_db):
         "again": 0,
         "hard": 0,
         "stale": 0,
+        "near": 0,
         "no_event": 0,
         "relearning": 0,
         "review": None,

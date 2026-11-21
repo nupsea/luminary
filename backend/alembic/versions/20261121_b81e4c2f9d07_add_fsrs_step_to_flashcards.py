@@ -7,7 +7,7 @@ Create Date: 2026-11-21 18:00:00.000000
 Before this, every review rebuilt the card at learning step 0 (#533), so the step a card is
 at follows from its last review alone: a learning card whose last review was Good is at
 step 1; any other learning or relearning card is at step 0. The last review is known only
-when the card's newest review event was written with it (within a minute of
+when the card's newest review event was written with it (within 5 s of
 `last_review`); review events exist only for reviews made in a study session. Every other
 card gets NULL, which fsrs uses outside learning. No due date changes.
 """
@@ -34,8 +34,8 @@ def upgrade() -> None:
     # db_init's legacy bridge builds pre-Alembic databases from the live models.
     if not _has_column("flashcards", "fsrs_step"):
         op.add_column("flashcards", sa.Column("fsrs_step", sa.Integer(), nullable=True))
-    # A review event is written just after the review it records, in the same request, so
-    # an event within 60 s of `last_review` is that review.
+    # The event a review writes lands ~40 ms after `last_review` in the same request; 5 s
+    # stays under fsrs's shortest learning step (1 min), which a wider window could straddle.
     op.execute(
         """
         WITH last_event AS (
@@ -54,7 +54,7 @@ def upgrade() -> None:
                   AND e.rating = 'good'
                   AND flashcards.last_review IS NOT NULL
                   AND ABS(julianday(e.reviewed_at) - julianday(flashcards.last_review)) * 86400
-                      <= 60
+                      <= 5
             ) THEN 1
             ELSE 0
         END
