@@ -1,4 +1,4 @@
-import { EMPTY_THREAD, migrateChatThreads, withThread, type ChatPreload, type ChatThread } from "./store/chatThreads"
+import { EMPTY_THREAD, migrateChatThreads, settleThreads, withThread, type ChatPreload, type ChatThread } from "./store/chatThreads"
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { libraryScopedStorage } from "./lib/libraryScope"
@@ -145,6 +145,11 @@ export const useAppStore = create<AppState>()(
           return migrateChatThreads(persisted as Record<string, unknown>) as unknown as AppState
         }
         return persisted as AppState
+      },
+      // Shallow, as the default merge is, with every conversation settled.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<AppState>
+        return { ...current, ...p, chatThreads: settleThreads(p.chatThreads ?? current.chatThreads) }
       },
       partialize: (state) => ({
         chatThreads: state.chatThreads,

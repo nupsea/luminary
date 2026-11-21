@@ -99,3 +99,47 @@ export function preloadIsFor(
   if (!preload) return false
   return (preload.threadKey ?? PAGE_THREAD) === threadKey
 }
+
+export const UNANSWERED =
+  "The answer did not finish. The engine stopped or the app closed before it completed."
+
+interface Turn {
+  id: string
+  role: "user" | "assistant"
+  text: string
+  isStreaming?: boolean
+  error?: string
+  failedQuestion?: string
+}
+
+/**
+ * With no stream in flight, a turn still marked streaming, or a question with no
+ * reply after it, will never be answered. Each becomes a failed turn the user can retry.
+ */
+export function settleUnanswered<T extends Turn>(messages: T[]): T[] {
+  const open = messages.some((m) => m.isStreaming) || messages[messages.length - 1]?.role === "user"
+  if (!open) return messages
+  const settled = messages.map((m, i) =>
+    m.isStreaming
+      ? { ...m, isStreaming: false, text: "", error: UNANSWERED, failedQuestion: questionBefore(messages, i) }
+      : m,
+  )
+  const last = settled[settled.length - 1]
+  if (last.role !== "user") return settled
+  const failed = { id: crypto.randomUUID(), role: "assistant", text: "", error: UNANSWERED, failedQuestion: last.text }
+  return [...settled, failed as T]
+}
+
+function questionBefore(messages: Turn[], index: number): string | undefined {
+  for (let i = index - 1; i >= 0; i--) {
+    if (messages[i].role === "user") return messages[i].text
+  }
+  return undefined
+}
+
+/** No stream survives a page load, so every stored thread is settled as it is read back. */
+export function settleThreads(threads: Record<string, ChatThread>): Record<string, ChatThread> {
+  return Object.fromEntries(
+    Object.entries(threads).map(([key, t]) => [key, { ...t, messages: settleUnanswered(t.messages) }]),
+  )
+}

@@ -6,7 +6,10 @@ import {
   docThreadKey,
   migrateChatThreads,
   preloadIsFor,
+  settleThreads,
+  settleUnanswered,
   threadOf,
+  UNANSWERED,
   withThread,
 } from "./chatThreads"
 
@@ -103,5 +106,35 @@ describe("preloadIsFor", () => {
   it("is false when there is nothing waiting", () => {
     expect(preloadIsFor(null, PAGE_THREAD)).toBe(false)
     expect(preloadIsFor(undefined, docKey)).toBe(false)
+  })
+})
+
+describe("settleUnanswered", () => {
+  const user = (text: string) => ({ id: `u-${text}`, role: "user" as const, text })
+  const answer = (text: string) => ({ id: `a-${text}`, role: "assistant" as const, text })
+
+  it("adds a retryable failed turn after a question the session holds no answer for", () => {
+    const settled = settleUnanswered([user("q1"), answer("a1"), user("q2")])
+    expect(settled).toHaveLength(4)
+    expect(settled[3]).toMatchObject({ role: "assistant", error: UNANSWERED, failedQuestion: "q2" })
+  })
+
+  it("turns a stream left open into a failed turn carrying its own question", () => {
+    const open = { id: "a2", role: "assistant" as const, text: "partial", isStreaming: true }
+    const settled = settleUnanswered([user("q1"), answer("a1"), user("q2"), open])
+    expect(settled).toHaveLength(4)
+    expect(settled[3]).toMatchObject({ isStreaming: false, text: "", error: UNANSWERED, failedQuestion: "q2" })
+  })
+
+  it("leaves an answered conversation as it is", () => {
+    const messages = [user("q1"), answer("a1")]
+    expect(settleUnanswered(messages)).toBe(messages)
+    expect(settleUnanswered([])).toEqual([])
+  })
+
+  it("settles every stored thread as the store is read back", () => {
+    const open = { id: "a1", role: "assistant", text: "", isStreaming: true }
+    const threads = settleThreads({ [docThreadKey("d")]: { ...EMPTY_THREAD, messages: [user("q1"), open] } })
+    expect(threads[docThreadKey("d")].messages[1]).toMatchObject({ isStreaming: false, failedQuestion: "q1" })
   })
 })
