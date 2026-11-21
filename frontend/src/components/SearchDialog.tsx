@@ -21,7 +21,7 @@ import {
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
-import { API_BASE } from "@/lib/config"
+import { apiFetch } from "@/lib/apiClient"
 
 interface SearchDialogProps {
   open: boolean
@@ -87,10 +87,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
     setAskCitations([])
     setAskStreaming(true)
     try {
-      // SSE stream: tokens arrive via res.body.getReader(); apiClient's
-      // JSON path doesn't apply.
-      // eslint-disable-next-line no-restricted-syntax
-      const res = await fetch(`${API_BASE}/qa`, {
+      const res = await apiFetch(`/qa`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

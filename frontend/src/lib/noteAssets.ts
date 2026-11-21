@@ -1,4 +1,4 @@
-import { API_BASE } from "@/lib/config"
+import { apiFetch, apiUrl } from "@/lib/apiClient"
 import { tauriInvoke } from "@/lib/tauriBridge"
 
 export interface NoteAssetUpload {
@@ -55,7 +55,7 @@ export async function uploadNoteAsset(file: File): Promise<NoteAssetUpload> {
   }
   formData.append("file", normalized, filename)
 
-  const res = await fetch(`${API_BASE}/images/notes`, {
+  const res = await apiFetch("/images/notes", {
     method: "POST",
     body: formData,
   })
@@ -64,7 +64,7 @@ export async function uploadNoteAsset(file: File): Promise<NoteAssetUpload> {
 }
 
 export function resolveLuminaryAssetUrl(path: string): string {
-  return path.replace(/^__LUMINARY_IMG__\//, `${API_BASE}/images/local/`)
+  return path.replace(/^__LUMINARY_IMG__\//, apiUrl("/images/local/"))
 }
 
 /**

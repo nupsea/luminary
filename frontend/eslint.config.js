@@ -5,11 +5,16 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
-const NO_RAW_FETCH = {
-  selector: 'CallExpression[callee.type="Identifier"][callee.name="fetch"]',
-  message:
-    'Use the apiClient (request / apiGet / apiPost / ...) from "@/lib/apiClient" instead of raw fetch(). The only legitimate exceptions are SSE streaming, binary downloads, and local-asset reads; add `// eslint-disable-next-line no-restricted-syntax` on the line and a short comment explaining why.',
-}
+// One transport, so a paired device's token and base URL apply to every request (#447).
+const RAW_FETCH_MESSAGE =
+  'Call the backend through "@/lib/apiClient": request / apiGet / apiPost for JSON, apiFetch for streams, downloads and asset reads, apiUrl for src= URLs. Raw fetch() bypasses the transport.'
+const NO_RAW_FETCH = [
+  { selector: 'CallExpression[callee.type="Identifier"][callee.name="fetch"]', message: RAW_FETCH_MESSAGE },
+  {
+    selector: 'CallExpression > MemberExpression.callee[object.name=/^(window|globalThis|self)$/][property.name="fetch"]',
+    message: RAW_FETCH_MESSAGE,
+  },
+]
 
 // I-67
 const NO_INLINE_INNER_HTML = {
@@ -47,16 +52,21 @@ export default defineConfig([
     },
   },
   {
-    // Forbid raw fetch() outside src/lib/**. Migrations under audit #12
-    // funnel all network calls through src/lib/apiClient.ts.
     files: ['src/**/*.{ts,tsx}'],
-    ignores: ['src/lib/**'],
+    ignores: ['src/lib/apiClient.ts', 'src/**/*.test.{ts,tsx}'],
     rules: {
       // An error, not a warning: as a warning it sat inside the --max-warnings
-      // budget and the count roughly doubled while nothing ever failed. Every
-      // legitimate exception carries an inline disable comment and a reason, so
-      // adding one is a decision someone makes rather than a number that drifts.
-      'no-restricted-syntax': ['error', NO_RAW_FETCH, NO_INLINE_INNER_HTML],
+      // budget and the count roughly doubled while nothing ever failed.
+      'no-restricted-syntax': ['error', ...NO_RAW_FETCH, NO_INLINE_INNER_HTML],
+      // The base URL is the transport's, read at runtime; the build-time constant is its default.
+      'no-restricted-imports': [
+        'error',
+        ...['@/lib/config', './config'].map((name) => ({
+          name,
+          importNames: ['API_BASE'],
+          message: 'Build URLs with apiUrl / apiBaseUrl from "@/lib/apiClient"; API_BASE is only the transport default.',
+        })),
+      ],
     },
   },
 ])

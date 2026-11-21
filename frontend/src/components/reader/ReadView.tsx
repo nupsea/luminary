@@ -2,9 +2,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { apiGet, apiPost } from "@/lib/apiClient"
+import { apiGet, apiPost, apiUrl } from "@/lib/apiClient"
 import { renderPage } from "@/lib/pageRender"
-import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import type { components } from "@/types/api"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
@@ -134,7 +133,7 @@ const SectionFigures = memo(({ images }: { images: DocumentImage[] }) => {
       {images.map((img) => (
         <figure key={img.id} className="rounded-lg border border-border bg-muted/20 p-3">
           <img
-            src={`${API_BASE}/images/${img.id}/raw`}
+            src={apiUrl(`/images/${img.id}/raw`)}
             alt={img.description || "Figure from this document"}
             loading="lazy"
             className="mx-auto max-h-[520px] w-auto max-w-full rounded"

@@ -3,7 +3,8 @@ import * as pdfjsLib from "pdfjs-dist"
 import type { PDFDocumentProxy } from "pdfjs-dist"
 import "pdfjs-dist/web/pdf_viewer.css"
 import { Bookmark, ChevronLeft, ChevronRight, Minus, Moon, PanelLeftClose, PanelLeftOpen, Plus, Search, Sun } from "lucide-react"
-import { API_BASE, PDFJS_WORKER_URL } from "@/lib/config"
+import { apiUrl } from "@/lib/apiClient"
+import { PDFJS_WORKER_URL } from "@/lib/config"
 import { useIsDark } from "@/hooks/useIsDark"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
 import { PanelResizer } from "./PanelResizer"
@@ -312,7 +313,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       closeSearch()
 
       const task = pdfjsLib.getDocument({
-        url: `${API_BASE}/documents/${documentId}/file`,
+        url: apiUrl(`/documents/${documentId}/file`),
         // Enable HTTP range requests so pdfjs can fetch only the byte ranges
         // it needs (e.g. xref table + first page) instead of downloading the
         // entire PDF before showing anything. Dramatically speeds up large PDFs.

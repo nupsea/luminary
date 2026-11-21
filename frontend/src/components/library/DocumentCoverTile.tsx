@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react"
-import { API_BASE } from "@/lib/config"
+import { apiUrl } from "@/lib/apiClient"
 import { isYouTubeDoc, getYouTubeThumbnail, KIND_ICONS, KIND_LABELS } from "./utils"
 import type { DocumentListItem } from "./types"
 import { cn } from "@/lib/utils"
@@ -181,7 +181,7 @@ export function DocumentCoverTile({ doc, className }: DocumentCoverTileProps) {
       const yt = getYouTubeThumbnail(doc.source_url)
       if (yt) return yt
     }
-    return `${API_BASE}/documents/${doc.id}/cover`
+    return apiUrl(`/documents/${doc.id}/cover`)
   }, [isYouTube, doc.source_url, doc.id])
 
   return (

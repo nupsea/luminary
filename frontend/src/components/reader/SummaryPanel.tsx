@@ -2,8 +2,7 @@ import { Check, Copy, Loader2, RefreshCw } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { apiGet } from "@/lib/apiClient"
-import { API_BASE } from "@/lib/config"
+import { apiFetch, apiGet } from "@/lib/apiClient"
 import { modelUnavailableMessage } from "@/lib/engineModes"
 import { cn } from "@/lib/utils"
 
@@ -86,10 +85,7 @@ export function SummaryPanel({ documentId, form }: SummaryPanelProps) {
     setStreaming((s) => ({ ...s, [mode]: true }))
     setSummaries((s) => ({ ...s, [mode]: "" }))
     try {
-      // SSE stream: tokens arrive via res.body.getReader(); apiClient's
-      // JSON path doesn't apply.
-      // eslint-disable-next-line no-restricted-syntax
-      const res = await fetch(`${API_BASE}/summarize/${documentId}`, {
+      const res = await apiFetch(`/summarize/${documentId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode, model: null, force_refresh: forceRefresh }),

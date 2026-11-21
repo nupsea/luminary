@@ -29,6 +29,7 @@ import {
   fitAnnotationImage,
   type ImageSize,
 } from "@/lib/noteDiagrams"
+import { apiFetch } from "@/lib/apiClient"
 import { resolveLuminaryAssetUrl, uploadNoteAsset } from "@/lib/noteAssets"
 import { cn } from "@/lib/utils"
 
@@ -152,10 +153,8 @@ function naturalSize(dataURL: string): Promise<{ width: number; height: number }
 }
 
 async function loadAnnotationScene(imagePath: string): Promise<ExcalidrawInitialDataState> {
-  // Local asset URL, not an API endpoint -- apiClient's prefix would be wrong here.
   // no-store: the note's <img> cached this response without CORS headers (no Vary: Origin).
-  // eslint-disable-next-line no-restricted-syntax
-  const res = await fetch(resolveLuminaryAssetUrl(imagePath), { cache: "no-store" })
+  const res = await apiFetch(resolveLuminaryAssetUrl(imagePath), { cache: "no-store" })
   if (!res.ok) throw new Error(`Could not load the image: ${res.status}`)
   const blob = await res.blob()
   const dataURL = await readAsDataURL(blob)
@@ -181,8 +180,7 @@ async function loadAnnotationScene(imagePath: string): Promise<ExcalidrawInitial
 }
 
 async function loadSavedScene(scenePath: string): Promise<ExcalidrawInitialDataState> {
-  // eslint-disable-next-line no-restricted-syntax
-  const res = await fetch(resolveLuminaryAssetUrl(scenePath))
+  const res = await apiFetch(resolveLuminaryAssetUrl(scenePath))
   if (!res.ok) throw new Error(`Could not load diagram scene: ${res.status}`)
   const data = (await res.json()) as ExcalidrawInitialDataState
   return {

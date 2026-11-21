@@ -19,8 +19,7 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { RubricCard, type Rubric } from "@/components/RubricCard"
 import { computeExplanationDiff, splitSentences, type DiffSegment } from "@/lib/explanationDiff"
 
-import { ApiError, apiGet, apiPost, detailFromError } from "@/lib/apiClient"
-import { API_BASE } from "@/lib/config"
+import { ApiError, apiFetch, apiGet, apiPost, detailFromError } from "@/lib/apiClient"
 import { modelUnavailableMessage } from "@/lib/engineModes"
 import {
   fetchSummary,
@@ -218,10 +217,7 @@ export function FeynmanPanel({
     setMessages((prev) => [...prev, { role: "tutor", content: "" }])
 
     try {
-      // SSE stream: tokens arrive via res.body.getReader(); apiClient's
-      // JSON path doesn't apply.
-      // eslint-disable-next-line no-restricted-syntax
-      const res = await fetch(`${API_BASE}/feynman/sessions/${sessionId}/message`, {
+      const res = await apiFetch(`/feynman/sessions/${sessionId}/message`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: userText }),
@@ -338,10 +334,7 @@ export function FeynmanPanel({
     setDiffSegments([])
 
     try {
-      // SSE stream: tokens arrive via res.body.getReader(); apiClient's
-      // JSON path doesn't apply.
-      // eslint-disable-next-line no-restricted-syntax
-      const res = await fetch(`${API_BASE}/feynman/sessions/${sessionId}/model-explanation`, {
+      const res = await apiFetch(`/feynman/sessions/${sessionId}/model-explanation`, {
         method: "POST",
       })
       if (!res.ok || !res.body) {

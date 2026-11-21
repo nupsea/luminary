@@ -1,7 +1,24 @@
-// apiClient — single fetch entry point. All *Api.ts modules use request<T> instead of fetch directly.
-// Centralises: base URL, JSON encode/decode, query params, ApiError mapping, 204 handling.
+// apiClient — the only module that calls fetch (enforced by eslint.config.js).
+// Centralises: transport (base URL + auth headers), JSON encode/decode, query params,
+// ApiError mapping, 204 handling.
 
 import { API_BASE } from "@/lib/config"
+
+/** Where requests go and what every one of them carries. Set once at boot. */
+export interface ApiTransport {
+  baseUrl: string
+  /** Headers added to every request unless the caller set the same name, e.g. a device token. */
+  headers?: () => HeadersInit
+  /** A fetch to use instead of the global one, e.g. a native client that pins the server's certificate. */
+  fetch?: typeof fetch
+}
+
+let transport: ApiTransport = { baseUrl: API_BASE }
+
+/** Replace the transport; the desktop app keeps the default (same origin, no token). */
+export function configureTransport(next: ApiTransport): void {
+  transport = next
+}
 
 export class ApiError extends Error {
   readonly status: number
@@ -72,8 +89,17 @@ export interface RequestOptions extends Omit<RequestInit, "body"> {
   params?: QueryParams
 }
 
+export function apiBaseUrl(): string {
+  return transport.baseUrl
+}
+
+/** The absolute URL of an API path, for `src=` and other places that cannot carry headers. */
+export function apiUrl(path: string): string {
+  return path.startsWith("http") ? path : `${transport.baseUrl}${path}`
+}
+
 function buildUrl(path: string, params?: QueryParams): string {
-  const base = path.startsWith("http") ? path : `${API_BASE}${path}`
+  const base = apiUrl(path)
   if (!params) return base
   const url = new URL(base, window.location.origin)
   for (const [key, value] of Object.entries(params)) {
@@ -93,22 +119,37 @@ function isPlainBody(body: unknown): boolean {
   )
 }
 
-// Returns parsed JSON, or `null` for 204 No Content. Throws `ApiError` on non-2xx.
-export async function request<T>(
+/**
+ * The raw `Response`, whatever its status: for streams (SSE over fetch), binary
+ * downloads and callers that map statuses to their own messages.
+ */
+export async function apiFetch(
   path: string,
   { body, params, headers, ...init }: RequestOptions = {},
-): Promise<T> {
+): Promise<Response> {
   const hasBody = body !== undefined && body !== null
   const encoded = hasBody && !isPlainBody(body) ? JSON.stringify(body) : (body as BodyInit | null | undefined)
   const finalHeaders = new Headers(headers)
   if (hasBody && !isPlainBody(body) && !finalHeaders.has("Content-Type")) {
     finalHeaders.set("Content-Type", "application/json")
   }
-  const res = await fetch(buildUrl(path, params), {
+  if (transport.headers) {
+    new Headers(transport.headers()).forEach((value, name) => {
+      if (!finalHeaders.has(name)) finalHeaders.set(name, value)
+    })
+  }
+  // Looked up per call, not captured at import, so a replaced global fetch is the one used.
+  const send = transport.fetch ?? fetch
+  return send(buildUrl(path, params), {
     ...init,
     headers: finalHeaders,
     body: encoded ?? undefined,
   })
+}
+
+// Returns parsed JSON, or `null` for 204 No Content. Throws `ApiError` on non-2xx.
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const res = await apiFetch(path, options)
   if (!res.ok) {
     const errBody = await res.text().catch(() => "")
     throw new ApiError(res.status, res.statusText, errBody)

@@ -35,8 +35,7 @@ import { useAppStore } from "@/store"
 import { PAGE_THREAD, preloadIsFor, threadOf } from "@/store/chatThreads"
 import { buildModelOptions, cloudOverrideAllowed, effectiveDefaultModel, shouldClearPrivateModeOverride } from "@/lib/chatSettingsUtils"
 
-import { API_BASE } from "@/lib/config"
-import { apiGet } from "@/lib/apiClient"
+import { apiFetch, apiGet, apiUrl } from "@/lib/apiClient"
 import { buildCitationTarget, targetToStateValue } from "@/lib/citation"
 
 import { AnswerReceiptLine } from "./AnswerReceiptLine"
@@ -520,10 +519,7 @@ export function ChatConversation({
         .slice(-6)
         .map((m) => ({ role: m.role, content: m.text }))
 
-      // SSE stream: tokens arrive via res.body.getReader(); apiClient's
-      // JSON path doesn't apply.
-      // eslint-disable-next-line no-restricted-syntax
-      const res = await fetch(`${API_BASE}/qa`, {
+      const res = await apiFetch(`/qa`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1187,7 +1183,7 @@ export function ChatConversation({
                         {msg.image_ids.map((id) => (
                           <img
                             key={id}
-                            src={`${API_BASE}/images/${id}/raw`}
+                            src={apiUrl(`/images/${id}/raw`)}
                             alt="Diagram from document"
                             className="h-24 w-auto rounded border border-border object-contain"
                             loading="lazy"
