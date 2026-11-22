@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **A card you are learning now graduates when you answer Good.** Every review restarted the card at its first learning step, so Good, Good kept it in learning and only Easy moved it on; the dev library had 88 cards stuck in learning and 3 in review. The step is now kept between reviews. On upgrade, a learning card whose last study-session review was Good resumes at the second step and every other learning or relearning card at the first; no due date changes until the card's next review (#533).
+- **An answer still arriving when you leave a document is there when you come back.** Returning reloaded the conversation from the server, which saves the answer only once it finishes, so the question showed alone. A question left without an answer, from a closed app or an engine that stopped mid-answer, now offers Retry (#539).
 
 ## [0.18.2] - 2026-11-21
 
