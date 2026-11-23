@@ -7,12 +7,12 @@ the same answer, keep every row that hangs off a document, and drop both columns
 
 import sqlite3
 
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy import insert, text
 
 from app.database import make_engine
 from app.db_init import _alembic_config, init_database
-from tests.factories import make_card
+from app.models import FlashcardModel
+from tests.factories import make_card, set_values
 
 BEFORE_DROP = "bb347838d5f8"
 
@@ -69,9 +69,10 @@ async def _legacy_library(db) -> None:
                         "domain": domain,
                     },
                 )
-        async with async_sessionmaker(engine)() as session:
-            session.add_all([make_card(document_id=doc_id) for doc_id, *_ in _LEGACY_ROWS])
-            await session.commit()
+        async with engine.begin() as conn:
+            for doc_id, *_ in _LEGACY_ROWS:
+                card = make_card(document_id=doc_id)
+                await conn.execute(insert(FlashcardModel.__table__).values(**set_values(card)))
     finally:
         await engine.dispose()
 
