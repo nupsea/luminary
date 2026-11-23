@@ -379,6 +379,14 @@ with every right the app has. A note asset keeps only an image extension (an upl
 with `Content-Security-Policy: sandbox` and `nosniff` (`runtime/asset_response.py`). An `<img>`
 ignores both, so nothing renders differently. `tests/test_images_api.py` fails CI if either goes.
 
+**I-81. Every write to `notes` and `documents` reaches the change feed in its own transaction, through triggers that never use an OR conflict clause.**
+Recording in the repos missed Core bulk statements and raw SQL, so triggers record each write
+(`models.change_feed_triggers`, and a frozen copy in revision `ac7d219e984f`). SQLite applies the
+outer statement's OR clause to a trigger's statements: under `INSERT OR IGNORE INTO notes`, a
+trigger's `INSERT OR REPLACE` became `OR IGNORE` and a re-created note kept its tombstone. The
+triggers delete the entity's row, then insert. `tests/test_change_feed.py` holds the bulk, raw and
+re-created cases and that the models and the migration install the same triggers.
+
 ## Cross-platform
 
 **I-54. `os.kill` is not a liveness probe on Windows: every signal but a console event terminates the target.**

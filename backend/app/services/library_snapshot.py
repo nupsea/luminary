@@ -28,12 +28,13 @@ from pathlib import Path
 from typing import IO, Any
 
 from app.database import get_engine, get_session_factory
-from app.db_init import known_revision
+from app.db_init import known_revision, open_library
 from app.exceptions import Conflict, InvalidInput
 from app.library import DEFAULT_LIBRARY, current_library, use_library, valid_library
 from app.paths import app_version
 from app.repos.document_repo import DocumentRepo
 from app.repos.snapshot_repo import SnapshotCopyRepo
+from app.services.change_feed import renew_epoch
 from app.services.model_prefetch import EMBEDDER_REPO
 from app.services.settings_service import API_KEY_FIELDS
 from app.services.vector_store import EMBEDDING_DIM, get_lancedb_service
@@ -149,7 +150,7 @@ class _Reader:
 
 
 async def restore_snapshot(archive: Path, library: str) -> Manifest:
-    """Restore *archive* as *library*, a new library; it migrates to head when next opened."""
+    """Restore *archive* as *library*, a new library, migrated to head."""
     library = valid_library(library)
     if library == DEFAULT_LIBRARY:
         raise InvalidInput("a snapshot restores into a new library, never the default one")
@@ -159,6 +160,10 @@ async def restore_snapshot(archive: Path, library: str) -> Manifest:
     manifest = await asyncio.to_thread(_extract, archive, root)
     with use_library(library):
         await asyncio.to_thread(get_lancedb_service().pin_versions, manifest.vector_versions)
+    # The copy carries the epoch it was taken with, so a cursor from that library resyncs.
+    await open_library(library)
+    with use_library(library):
+        await renew_epoch()
     return manifest
 
 
