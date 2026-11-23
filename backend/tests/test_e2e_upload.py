@@ -401,15 +401,17 @@ async def test_http_corrupt_upload_terminates(upload_db):
 
 
 @pytest.mark.integration_http
-async def test_http_upload_from_a_device_builds_only_its_library(upload_db):
-    """The pipeline a device starts writes chunks, vectors and graph rows to its library (#388)."""
+async def test_http_upload_into_another_library_builds_only_it(upload_db):
+    """The pipeline an upload starts writes chunks, vectors and graph rows to the library it was
+    made in (#388). A device may not upload (#532), so the app makes it with that library open."""
     from sqlalchemy import func, select
 
     import app.services.devices as devices
     from app.library import use_library
     from app.models import ChunkModel, DocumentModel, GraphEntityModel
-    from tests.test_library_binding import _pair_into
+    from tests.test_library_binding import _app_in, _pair_into
     from tests.test_library_context import _close
+    from tests.test_route_scopes import LOCAL_ONLY
 
     async def stored(doc_id: str) -> dict[str, int]:
         async with db_module.get_session_factory()() as session:
@@ -428,20 +430,29 @@ async def test_http_upload_from_a_device_builds_only_its_library(upload_db):
             transport=ASGITransport(app=app), base_url="http://127.0.0.1:7820"
         ) as client:
             device = await _pair_into(client, "second")
-            with (FIXTURES_DIR / "art_of_unix_ch1.txt").open("rb") as fh:
-                resp = await client.post(
-                    "/documents/ingest",
-                    files={"file": ("art_of_unix_ch1.txt", fh, "text/plain")},
-                    headers=device,
-                )
-            assert resp.status_code == 200, resp.text
-            doc_id = resp.json()["document_id"]
-            for _ in range(1000):
-                await asyncio.sleep(0.05)
-                final = (await client.get(f"/documents/{doc_id}/status", headers=device)).json()
-                if final["done"]:
-                    break
-            assert final["stage"] == "complete", final
+            refused = await client.post(
+                "/documents/ingest",
+                files={"file": ("x.txt", b"x", "text/plain")},
+                headers=device,
+            )
+            assert refused.status_code == 403 and refused.json()["detail"] == LOCAL_ONLY
+
+            with _app_in("second"):
+                with (FIXTURES_DIR / "art_of_unix_ch1.txt").open("rb") as fh:
+                    resp = await client.post(
+                        "/documents/ingest",
+                        files={"file": ("art_of_unix_ch1.txt", fh, "text/plain")},
+                    )
+                assert resp.status_code == 200, resp.text
+                doc_id = resp.json()["document_id"]
+                for _ in range(1000):
+                    await asyncio.sleep(0.05)
+                    final = (await client.get(f"/documents/{doc_id}/status")).json()
+                    if final["done"]:
+                        break
+                assert final["stage"] == "complete", final
+            # The device reads it in its library; the default library has no such document.
+            assert (await client.get(f"/documents/{doc_id}", headers=device)).status_code == 200
             assert (await client.get(f"/documents/{doc_id}")).status_code == 404
 
         with use_library("second"):
@@ -449,6 +460,7 @@ async def test_http_upload_from_a_device_builds_only_its_library(upload_db):
         ours = await stored(doc_id)
     finally:
         devices._active_code = None
+        devices._attempts.clear()
         await _close("second")
 
     assert theirs["documents"] == 1

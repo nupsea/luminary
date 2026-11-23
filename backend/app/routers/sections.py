@@ -9,6 +9,7 @@ from app.database import get_session_factory
 from app.exceptions import NotFound
 from app.models import SectionModel
 from app.repos.document_repo import DocumentRepo
+from app.runtime.request_auth import device_scope
 from app.schemas.flashcards import FlashcardResponse
 from app.services.chapter_cards import chapter_overview, practise_chapter
 from app.services.flashcards_router_service import to_response
@@ -85,7 +86,9 @@ class SectionResponse(BaseModel):
     parent_section_id: str | None = None
 
 
-@router.get("/{document_id}", response_model=list[SectionResponse])
+@router.get(
+    "/{document_id}", response_model=list[SectionResponse], dependencies=[device_scope("read")]
+)
 async def get_sections(document_id: str) -> list[SectionResponse]:
     """Return sections for a document with accurate chunk_count per section."""
     async with get_session_factory()() as session:
@@ -144,7 +147,11 @@ def _assemble(section: SectionModel, chunk_texts: list[str]) -> tuple[str, str]:
     return "", "empty"
 
 
-@router.get("/{document_id}/content/{section_id}", response_model=SectionContentItem)
+@router.get(
+    "/{document_id}/content/{section_id}",
+    response_model=SectionContentItem,
+    dependencies=[device_scope("read")],
+)
 async def get_one_section_content(document_id: str, section_id: str) -> SectionContentItem:
     """One section with its text entire, however long it is.
 
@@ -180,7 +187,9 @@ async def get_one_section_content(document_id: str, section_id: str) -> SectionC
     )
 
 
-@router.get("/{document_id}/content", response_model=SectionContentPage)
+@router.get(
+    "/{document_id}/content", response_model=SectionContentPage, dependencies=[device_scope("read")]
+)
 async def get_section_content(
     document_id: str,
     offset: int = Query(default=0, ge=0),
@@ -281,7 +290,9 @@ class ChapterPracticeRequest(BaseModel):
     count: int | None = Field(default=None, ge=1)
 
 
-@router.get("/{document_id}/chapters", response_model=ChapterList)
+@router.get(
+    "/{document_id}/chapters", response_model=ChapterList, dependencies=[device_scope("read")]
+)
 async def get_chapters(document_id: str) -> ChapterList:
     """The document's chapters in reading order, with their card counts (#231)."""
     async with get_session_factory()() as session:

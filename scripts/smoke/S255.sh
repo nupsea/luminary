@@ -10,9 +10,10 @@
 #   2. a foreign origin is refused (401) without a token
 #   3. the app (no Origin) can show a pairing code
 #   4. a foreign origin pairs with that code and gets a token
-#   5. that token admits the foreign origin
-#   6. the device is listed, then revoked
-#   7. the revoked token is refused
+#   5. that token admits the foreign origin to a read its scopes allow
+#   6. that token is refused a route only the app may call (#532)
+#   7. the device is listed, then revoked
+#   8. the revoked token is refused
 #
 # Leaves one revoked device named "smoke-S255" in the list.
 set -euo pipefail
@@ -38,7 +39,7 @@ json_field() {
 HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/health")
 check "backend healthy" "200" "$HTTP"
 
-HTTP=$(curl -s -o /dev/null -w "%{http_code}" -H "$EVIL" "$BASE/tags")
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" -H "$EVIL" "$BASE/notes")
 check "an unpaired origin is refused" "401" "$HTTP"
 
 CODE=$(curl -sf -X POST "$BASE/devices/pairing-code" | json_field code)
@@ -50,8 +51,13 @@ TOKEN=$(echo "$PAIRED" | json_field token)
 DEVICE_ID=$(echo "$PAIRED" | json_field device_id)
 check "pairing returns a token" "lum_" "${TOKEN:0:4}"
 
-HTTP=$(curl -s -o /dev/null -w "%{http_code}" -H "$EVIL" -H "Authorization: Bearer $TOKEN" "$BASE/tags")
-check "the paired origin is admitted" "200" "$HTTP"
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" -H "$EVIL" -H "Authorization: Bearer $TOKEN" "$BASE/notes")
+check "the paired origin is admitted to a read" "200" "$HTTP"
+
+# Refused before the handler runs, so the empty body changes nothing.
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH -H "$EVIL" -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" -d '{}' "$BASE/settings/llm")
+check "the paired origin is refused the engine settings" "403" "$HTTP"
 
 LISTED=$(curl -sf "$BASE/devices" | python3 -c "
 import json, sys
@@ -61,7 +67,7 @@ check "the device is listed" "True" "$LISTED"
 HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$BASE/devices/$DEVICE_ID")
 check "the device is revoked" "204" "$HTTP"
 
-HTTP=$(curl -s -o /dev/null -w "%{http_code}" -H "$EVIL" -H "Authorization: Bearer $TOKEN" "$BASE/tags")
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" -H "$EVIL" -H "Authorization: Bearer $TOKEN" "$BASE/notes")
 check "a revoked token is refused" "401" "$HTTP"
 
 exit $FAIL

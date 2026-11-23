@@ -19,6 +19,7 @@ from app.models import (
 )
 from app.repos.collection_repo import CollectionRepo
 from app.repos.note_repo import NoteRepo, get_note_repo
+from app.runtime.request_auth import device_scope
 from app.schemas.membership import CollectionRef
 from app.schemas.notes import (
     BatchAcceptItem,
@@ -178,7 +179,9 @@ __all__ = [
 ]
 
 
-@router.post("", response_model=NoteResponse, status_code=201)
+@router.post(
+    "", response_model=NoteResponse, status_code=201, dependencies=[device_scope("notes:write")]
+)
 async def create_note(
     req: NoteCreateRequest,
     session: AsyncSession = Depends(get_db),
@@ -265,7 +268,7 @@ async def create_note(
     return _to_response(note, source_document_ids=req.source_document_ids)
 
 
-@router.get("/search", response_model=NoteSearchResponse)
+@router.get("/search", response_model=NoteSearchResponse, dependencies=[device_scope("read")])
 async def search_notes(
     q: str = Query(..., min_length=1),
     k: int = Query(default=10, ge=1, le=50),
@@ -291,7 +294,7 @@ async def search_notes(
     )
 
 
-@router.get("/groups", response_model=GroupsResponse)
+@router.get("/groups", response_model=GroupsResponse, dependencies=[device_scope("read")])
 async def get_groups(session: AsyncSession = Depends(get_db)) -> GroupsResponse:
     """Return distinct group names (with counts) and distinct tags (with counts)."""
     repo = NoteRepo(session)
@@ -305,7 +308,7 @@ async def get_groups(session: AsyncSession = Depends(get_db)) -> GroupsResponse:
     )
 
 
-@router.get("", response_model=list[NoteResponse])
+@router.get("", response_model=list[NoteResponse], dependencies=[device_scope("read")])
 async def list_notes(
     document_id: str | None = Query(default=None),
     group: str | None = Query(default=None),
@@ -426,7 +429,7 @@ async def _apply_note_update(
     )
 
 
-@router.put("/{note_id}", response_model=NoteResponse)
+@router.put("/{note_id}", response_model=NoteResponse, dependencies=[device_scope("notes:write")])
 async def update_note(
     note_id: str,
     req: NoteUpdateRequest,
@@ -437,7 +440,7 @@ async def update_note(
     return await _apply_note_update(note_id, req, session, repo)
 
 
-@router.patch("/{note_id}", response_model=NoteResponse)
+@router.patch("/{note_id}", response_model=NoteResponse, dependencies=[device_scope("notes:write")])
 async def patch_note(
     note_id: str,
     req: NoteUpdateRequest,
@@ -448,6 +451,7 @@ async def patch_note(
     return await _apply_note_update(note_id, req, session, repo)
 
 
+# Not a device's: a delete is a hard delete, which a phone's cache cannot learn of (#450).
 @router.delete("/{note_id}", status_code=204)
 async def delete_note(
     note_id: str,
@@ -465,7 +469,9 @@ async def delete_note(
     logger.info("Deleted note", extra={"note_id": note_id})
 
 
-@router.get("/{note_id}/entities", response_model=list[NoteEntityItem])
+@router.get(
+    "/{note_id}/entities", response_model=list[NoteEntityItem], dependencies=[device_scope("read")]
+)
 async def get_note_entities(note_id: str) -> list[NoteEntityItem]:
     """Return the entities a note is about: named in its text, or matched by a tag."""
 
@@ -473,7 +479,7 @@ async def get_note_entities(note_id: str) -> list[NoteEntityItem]:
     return [NoteEntityItem(**e) for e in entities]
 
 
-@router.get("/{note_id}/export")
+@router.get("/{note_id}/export", dependencies=[device_scope("read")])
 async def export_note(
     note_id: str,
     format: str = "markdown",
@@ -498,7 +504,7 @@ async def export_note(
     )
 
 
-@router.get("/flashcards/generate/preview")
+@router.get("/flashcards/generate/preview", dependencies=[device_scope("read")])
 async def preview_note_flashcard_generation(
     collection_id: str,
     session: AsyncSession = Depends(get_db),
@@ -564,7 +570,9 @@ async def generate_note_flashcards(
     return [NoteFlashcardItem.model_validate(c) for c in cards]
 
 
-@router.get("/flashcards", response_model=list[NoteFlashcardItem])
+@router.get(
+    "/flashcards", response_model=list[NoteFlashcardItem], dependencies=[device_scope("read")]
+)
 async def list_note_flashcards(
     session: AsyncSession = Depends(get_db),
 ) -> list[NoteFlashcardItem]:
@@ -617,7 +625,11 @@ async def trigger_cluster(
     return {"queued": True, "total_notes": total_notes}
 
 
-@router.get("/cluster/suggestions", response_model=list[ClusterSuggestionResponse])
+@router.get(
+    "/cluster/suggestions",
+    response_model=list[ClusterSuggestionResponse],
+    dependencies=[device_scope("read")],
+)
 async def list_cluster_suggestions(
     session: AsyncSession = Depends(get_db),
 ) -> list[ClusterSuggestionResponse]:
@@ -718,7 +730,9 @@ async def reject_cluster_suggestion(
 # NOTE: /autocomplete before /{note_id} — prevents FastAPI treating "autocomplete" as a note ID.
 
 
-@router.get("/autocomplete", response_model=list[NoteAutocompleteItem])
+@router.get(
+    "/autocomplete", response_model=list[NoteAutocompleteItem], dependencies=[device_scope("read")]
+)
 async def autocomplete_notes(
     q: str = Query(default="", max_length=200),
     repo: NoteRepo = Depends(get_note_repo),
@@ -743,7 +757,12 @@ async def autocomplete_notes(
     ]
 
 
-@router.post("/{note_id}/links", response_model=NoteLinkItem, status_code=201)
+@router.post(
+    "/{note_id}/links",
+    response_model=NoteLinkItem,
+    status_code=201,
+    dependencies=[device_scope("notes:write")],
+)
 async def create_note_link(
     note_id: str,
     req: NoteLinkCreateRequest,
@@ -779,7 +798,9 @@ async def create_note_link(
     )
 
 
-@router.delete("/{note_id}/links/{target_note_id}", status_code=204)
+@router.delete(
+    "/{note_id}/links/{target_note_id}", status_code=204, dependencies=[device_scope("notes:write")]
+)
 async def delete_note_link(
     note_id: str,
     target_note_id: str,
@@ -798,7 +819,9 @@ async def delete_note_link(
     await repo.delete_link(link)
 
 
-@router.get("/{note_id}/links", response_model=NoteLinksResponse)
+@router.get(
+    "/{note_id}/links", response_model=NoteLinksResponse, dependencies=[device_scope("read")]
+)
 async def get_note_links(
     note_id: str,
     repo: NoteRepo = Depends(get_note_repo),
@@ -835,7 +858,7 @@ async def get_note_links(
     return NoteLinksResponse(outgoing=outgoing, incoming=incoming)
 
 
-@router.get("/{note_id}", response_model=NoteResponse)
+@router.get("/{note_id}", response_model=NoteResponse, dependencies=[device_scope("read")])
 async def get_note(
     note_id: str,
     repo: NoteRepo = Depends(get_note_repo),

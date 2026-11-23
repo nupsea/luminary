@@ -14,15 +14,18 @@ import logging
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.config import get_settings
 from app.database import get_session_factory
+from app.exceptions import InvalidInput, LuminaryError, NotFound
 from app.models import DocumentModel, ImageModel
 from app.repos._helpers import get_or_404
 from app.repos.enrichment_repo import EnrichmentRepo
+from app.runtime.asset_response import UNTRUSTED_ASSET_HEADERS
+from app.runtime.request_auth import device_scope
 from app.storage import library_root
 
 logger = logging.getLogger(__name__)
@@ -81,7 +84,47 @@ class EnrichmentQueueSummary(BaseModel):
     active: bool
 
 
-@router.post("/images/notes", response_model=UploadResponse)
+# What a local image is served as. Anything else could be served back as a document on the
+# app's origin, so a note may hold only these (HEIC is an iPhone's default photo format).
+_IMAGE_TYPES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "jfif": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "bmp": "image/bmp",
+    "tiff": "image/tiff",
+    "tif": "image/tiff",
+    "svg": "image/svg+xml",
+    "avif": "image/avif",
+    "heic": "image/heic",
+    "heif": "image/heif",
+    "ico": "image/x-icon",
+}
+_NOTE_IMAGE_EXTENSIONS = frozenset(f".{ext}" for ext in _IMAGE_TYPES)
+_SCENE_SUFFIX = ".excalidraw.json"
+
+
+def _note_asset_extension(filename: str, mime: str) -> str:
+    if filename.endswith(_SCENE_SUFFIX) and mime in {"application/json", "text/json"}:
+        return _SCENE_SUFFIX
+    if not mime.startswith("image/"):
+        raise InvalidInput("Only image files or Excalidraw JSON scenes are allowed")
+    ext = Path(filename).suffix.lower()
+    if not ext:
+        # A pasted clipboard image arrives as "blob": name it from its type.
+        subtype = mime.rsplit("/", maxsplit=1)[-1].split("+", maxsplit=1)[0].lower()
+        ext = ".jpg" if subtype == "jpeg" else f".{subtype}"
+        return ext if ext in _NOTE_IMAGE_EXTENSIONS else ".png"
+    if ext not in _NOTE_IMAGE_EXTENSIONS:
+        raise InvalidInput(f"A note cannot hold a {ext} file; use an image.")
+    return ext
+
+
+@router.post(
+    "/images/notes", response_model=UploadResponse, dependencies=[device_scope("notes:write")]
+)
 async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
     """Upload a note asset such as an image, SVG diagram, or Excalidraw scene.
 
@@ -95,24 +138,8 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
 
     mime = file.content_type or ""
     filename = file.filename or "asset"
-    ext = Path(filename).suffix.lower()
-    is_excalidraw_scene = mime in {"application/json", "text/json"} and filename.endswith(
-        ".excalidraw.json"
-    )
-    if not mime.startswith("image/") and not is_excalidraw_scene:
-        raise HTTPException(
-            status_code=400,
-            detail="Only image files or Excalidraw JSON scenes are allowed",
-        )
-
-    if ext == ".json" and filename.endswith(".excalidraw.json"):
-        ext = ".excalidraw.json"
-    elif not ext and mime.startswith("image/"):
-        subtype = mime.split("/")[-1].split("+")[0].lower()
-        if subtype == "jpeg":
-            subtype = "jpg"
-        allowed_subtypes = {"png", "jpg", "gif", "webp", "svg", "bmp", "tiff", "tif"}
-        ext = f".{subtype}" if subtype in allowed_subtypes else ".png"
+    ext = _note_asset_extension(filename, mime)
+    is_excalidraw_scene = ext == _SCENE_SUFFIX
     unique_filename = f"{uuid.uuid4()}{ext}"
     target_path = notes_img_dir / unique_filename
 
@@ -122,19 +149,15 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
             try:
                 scene = json.loads(content)
             except json.JSONDecodeError as exc:
-                raise HTTPException(
-                    status_code=400, detail="Invalid Excalidraw JSON scene"
-                ) from exc
+                raise InvalidInput("Invalid Excalidraw JSON scene") from exc
             if not isinstance(scene, dict) or not isinstance(scene.get("elements"), list):
-                raise HTTPException(  # noqa: TRY301
-                    status_code=400, detail="Invalid Excalidraw JSON scene"
-                )
+                raise InvalidInput("Invalid Excalidraw JSON scene")  # noqa: TRY301
         await asyncio.to_thread(target_path.write_bytes, content)
-    except HTTPException:
+    except LuminaryError:
         raise
     except Exception as exc:
         logger.exception("Failed to save note image")
-        raise HTTPException(status_code=500, detail="Failed to save image file") from exc
+        raise LuminaryError("Failed to save image file") from exc
 
     # Returns the pseudo-path that MarkdownRenderer.tsx resolves to API_BASE
     return UploadResponse(
@@ -143,7 +166,11 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
     )
 
 
-@router.get("/documents/{document_id}/images", response_model=ImageListResponse)
+@router.get(
+    "/documents/{document_id}/images",
+    response_model=ImageListResponse,
+    dependencies=[device_scope("read")],
+)
 async def get_document_images(
     document_id: str,
     page: int = 1,
@@ -186,7 +213,7 @@ async def get_document_images(
     )
 
 
-@router.get("/images/{image_id}/raw")
+@router.get("/images/{image_id}/raw", dependencies=[device_scope("read")])
 async def serve_image_raw(image_id: str) -> FileResponse:
     """Serve the raw PNG file for an extracted image.
 
@@ -199,12 +226,12 @@ async def serve_image_raw(image_id: str) -> FileResponse:
     settings = get_settings()
     abs_path = library_root(settings) / img.path
     if not abs_path.exists():
-        raise HTTPException(status_code=404, detail="Image file not found on disk")
+        raise NotFound("Image file not found on disk")
 
-    return FileResponse(str(abs_path), media_type="image/png")
+    return FileResponse(str(abs_path), media_type="image/png", headers=UNTRUSTED_ASSET_HEADERS)
 
 
-@router.get("/images/local/{doc_id}/{filename}")
+@router.get("/images/local/{doc_id}/{filename}", dependencies=[device_scope("read")])
 async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
     """Serve a locally mirrored image for an article."""
     settings = get_settings()
@@ -215,20 +242,11 @@ async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
     root = (library_root(settings) / "images").resolve()
     abs_path = (root / doc_id / filename).resolve()
     if not abs_path.is_relative_to(root) or not abs_path.is_file():
-        raise HTTPException(status_code=404, detail="Local image not found")
+        raise NotFound("Local image not found")
 
-    # Detect media type from extension
     ext = filename.rsplit(".", maxsplit=1)[-1].lower()
-    if ext == "svg":
-        media_type = "image/svg+xml"
-    elif ext == "json":
-        media_type = "application/json"
-    elif ext in ["tiff", "tif"]:
-        media_type = "image/tiff"
-    else:
-        common_types = {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
-        media_type = f"image/{ext}" if ext in common_types else "image/png"
-    return FileResponse(str(abs_path), media_type=media_type)
+    media_type = "application/json" if ext == "json" else _IMAGE_TYPES.get(ext, "image/png")
+    return FileResponse(str(abs_path), media_type=media_type, headers=UNTRUSTED_ASSET_HEADERS)
 
 
 @router.post("/documents/{document_id}/images/reextract", response_model=ReextractResponse)

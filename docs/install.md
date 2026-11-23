@@ -133,7 +133,18 @@ docker exec <container> python -m app.scripts.pairing_code
 ```
 
 The device sends the code to `POST /api/devices/pair` and gets back the token to send as
-`Authorization: Bearer <token>`. A browser cannot pair yet, so the app's pages are usable only on
+`Authorization: Bearer <token>`. One address (an IPv6 address by its /64) may make four pairing
+attempts in any five minutes. A token reads the library (documents, sections, notes, cards,
+study, search and Ask with the server's own model), writes notes and records card reviews, and
+nothing else: settings, setup, connectors, the blog, admin, deletes, spaces and devices answer
+only to Luminary on the server itself. A request carrying a forwarding header
+(`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Real-IP`) always needs a token, and with
+`LUMINARY_ALLOWED_HOSTS` set so does one naming another host. A reverse proxy on the server
+(`tailscale serve`, Caddy) connects from loopback, so it must keep the client's `Host` or send
+`X-Forwarded-For`. One that rewrites `Host` to loopback and sends neither, as nginx's default
+`proxy_pass` does, makes every request look like the server's own and is not supported. To run
+`make smoke` against such a server, set `LUMINARY_TOKEN` to a paired device's token for the
+schema read. A browser cannot pair yet, so the app's pages are usable only on
 the server itself. Publishing the port beyond loopback without the setting leaves it guarded only
 by the `Host` header, which any client other than a browser can set to `127.0.0.1`.
 

@@ -539,14 +539,24 @@ def facets_for_kind(kind: EditableKind, form: str | None) -> dict[str, str]:
 DEFAULT_LIBRARY = "default"
 
 
+# What a paired device may do; a route declares the one it needs (`runtime/request_auth.py`).
+# `ingest` joins with the capture extension (0.21.0).
+DeviceScope = Literal["read", "notes:write", "reviews:write"]
+DEVICE_SCOPES: tuple[DeviceScope, ...] = ("read", "notes:write", "reviews:write")
+# Spelled out: a scope added above is granted only when this line says so.
+DEFAULT_DEVICE_SCOPES: tuple[DeviceScope, ...] = ("read", "notes:write", "reviews:write")
+
+
 @dataclass(frozen=True)
 class Principal:
     """Who a request acts for, and the library its work runs in. `local` is the app's own
-    origin on loopback; `device` carries a paired device's token."""
+    origin on loopback and may do anything; `device` carries a paired device's token and
+    may do what its `scopes` allow."""
 
     kind: Literal["local", "device"]
     device_id: str | None = None
     library: str = DEFAULT_LIBRARY
+    scopes: frozenset[str] = frozenset()
 
 
 LOCAL_PRINCIPAL = Principal(kind="local")

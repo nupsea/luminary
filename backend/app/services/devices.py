@@ -8,17 +8,19 @@ returned once and only its SHA-256 is stored; a 256-bit random secret needs no s
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import secrets
 import time
+from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from app.exceptions import Forbidden, InvalidInput
+from app.exceptions import Forbidden, InvalidInput, TooManyRequests
 from app.library import current_library
 from app.models import DeviceModel
 from app.repos.device_repo import DeviceRepo
-from app.types import Principal
+from app.types import DEFAULT_DEVICE_SCOPES, DEVICE_SCOPES, Principal
 
 # Unambiguous when read off a screen: no 0/O, 1/I/L.
 _CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -30,6 +32,11 @@ _MAX_FAILED_ATTEMPTS = 5
 _TOKEN_PREFIX = "lum_"  # noqa: S105 - a public marker that makes a leaked token greppable
 # A request per device would otherwise be a write per request.
 _TOUCH_INTERVAL = timedelta(seconds=60)
+# Attempts one client may make in any window as long as a code lives (five minutes): one
+# fewer than voids a code, so one LAN client cannot void the codes shown, and a typo still pairs.
+_MAX_ATTEMPTS_PER_CLIENT = _MAX_FAILED_ATTEMPTS - 1
+# Bounds memory; past it the least recently active client is forgotten, never all of them.
+_MAX_TRACKED_CLIENTS = 1024
 
 
 @dataclass
@@ -44,6 +51,7 @@ class _PairingCode:
 # Process memory: one worker serves every request, and a restart only voids a
 # code that lives five minutes anyway. Issuing a code replaces the previous one.
 _active_code: _PairingCode | None = None
+_attempts: dict[str, deque[float]] = {}
 
 
 def hash_secret(secret: str) -> str:
@@ -85,13 +93,44 @@ def _consume_code(code: str) -> str:
     return active.library
 
 
-async def pair(repo: DeviceRepo, code: str, name: str) -> tuple[DeviceModel, str]:
+def _client_key(address: str) -> str:
+    """An IPv6 client is its /64: one host holds a whole prefix and can rotate within it."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return address
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            return str(ip.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False))
+    return str(ip)
+
+
+def _count_attempt(address: str) -> None:
+    now = time.monotonic()
+    client = _client_key(address)
+    # Popped and re-inserted, so the dict's order is least recently active first.
+    window = _attempts.pop(client, None) or deque()
+    if len(_attempts) >= _MAX_TRACKED_CLIENTS:
+        del _attempts[next(iter(_attempts))]
+    _attempts[client] = window
+    while window and now - window[0] > _CODE_TTL_S:
+        window.popleft()
+    if len(window) >= _MAX_ATTEMPTS_PER_CLIENT:
+        raise TooManyRequests("Too many pairing attempts from this device. Wait a few minutes.")
+    window.append(now)
+
+
+async def pair(repo: DeviceRepo, code: str, name: str, client: str) -> tuple[DeviceModel, str]:
     name = name.strip()
     if not name:
         raise InvalidInput("A device needs a name, so it can be told apart when revoking.")
+    _count_attempt(client)
     library = _consume_code(code)
     token = _TOKEN_PREFIX + secrets.token_urlsafe(32)
-    device = await repo.create(name=name, token_hash=hash_secret(token), library=library)
+    device = await repo.create(
+        name=name, token_hash=hash_secret(token), library=library, scopes=DEFAULT_DEVICE_SCOPES
+    )
     return device, token
 
 
@@ -106,7 +145,9 @@ async def resolve_token(repo: DeviceRepo, token: str) -> Principal | None:
         seen = seen.replace(tzinfo=UTC)
     if seen is None or now - seen > _TOUCH_INTERVAL:
         await repo.touch(device, now)
-    return Principal(kind="device", device_id=device.id, library=device.library)
+    # A scope this build does not know grants nothing.
+    scopes = frozenset(device.scopes or ()) & frozenset(DEVICE_SCOPES)
+    return Principal(kind="device", device_id=device.id, library=device.library, scopes=scopes)
 
 
 async def list_devices(repo: DeviceRepo) -> Sequence[DeviceModel]:
