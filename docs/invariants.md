@@ -339,9 +339,11 @@ skill.
 A licence is invisible in the code and in `uv add`, and the repository's `LICENSE` says nothing about
 what an installer contains: AGPL-3.0 PyMuPDF and ebooklib shipped under an Apache-2.0 label (#378).
 `scripts/check_licences.py`, in `make ci`, reads the licence of everything the installers install
-(`uv export --group full`, non-dev `package-lock.json` entries) and fails on a licence neither allowed
-nor excepted. An exception holds only for the exact string it records, so a relicensing bump fails
-too. `tests/test_check_licences.py` fails CI if a copyleft licence passes without one.
+(`uv export --group full`, non-dev `package-lock.json` entries, and the crates the desktop shell
+links or builds with on each shipped target) and fails on a licence neither allowed nor excepted. An
+SPDX expression passes only if every licence it names is allowed, so `MIT AND Custom` fails. An
+exception holds only for the exact string it records, so a relicensing bump fails too.
+`tests/test_check_licences.py` fails CI if a copyleft licence passes without one.
 
 ## Privacy & Local-First
 
