@@ -527,20 +527,19 @@ async def _store_verdict(
     # summary reads; it just does not move the card's schedule.
     first_attempt = await _is_first_attempt(session, tb_row)
     if first_attempt:
-        fsrs = get_fsrs_service()
-        await fsrs.schedule(card_id, rating, session)
-
-        # ReviewEventModel so end_session tallies include this card.
-        # One event per card per session, for the same reason.
+        # ReviewEventModel so end_session tallies include this card, one per card per session;
+        # added first so the schedule's commit carries it.
         if session_id:
-            event = ReviewEventModel(
-                id=str(uuid.uuid4()),
-                session_id=session_id,
-                flashcard_id=card_id,
-                rating=rating,
-                is_correct=rating != "again",
+            session.add(
+                ReviewEventModel(
+                    id=str(uuid.uuid4()),
+                    session_id=session_id,
+                    flashcard_id=card_id,
+                    rating=rating,
+                    is_correct=rating != "again",
+                )
             )
-            session.add(event)
+        await get_fsrs_service().schedule(card_id, rating, session)
 
     # Self-heal session tally: if the parent session has already
     # been ended by the user (e.g. they navigated away mid-eval)

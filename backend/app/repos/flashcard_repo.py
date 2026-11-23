@@ -51,9 +51,10 @@ _CARD_CHILD_TABLES: tuple[type, ...] = (
 
 # `review_events` is deliberately NOT in that list. It is the activity record --
 # streaks, XP and per-day accuracy read it -- and it records what the learner did,
-# not what the card says. Deleting a card must not rewrite the history of the days
-# it was studied, so these rows keep a flashcard_id that no longer resolves and
-# every reader of them has to tolerate that. Same rule as
+# not what the card says; `card_state_events`, the card's schedule log (#453), stays
+# too. Deleting a card must not rewrite the history of the days it was studied, so
+# these rows keep a flashcard_id that no longer resolves and every reader of them
+# has to tolerate that. Same rule as
 # `document_deletion_service._LEARNER_RECORD_TABLES`.
 
 

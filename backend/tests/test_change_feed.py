@@ -211,4 +211,4 @@ async def test_the_migration_and_the_models_install_the_same_triggers(memory_db,
         assert await triggers(migrated) == from_models
     finally:
         await migrated.dispose()
-    assert len(from_models) == 6
+    assert len(from_models) == 8  # 6 change feed (#450), 2 card state (#453)

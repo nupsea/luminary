@@ -13,7 +13,7 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from app.models import Base, MisconceptionModel, ReviewEventModel
+from app.models import Base, CardStateEventModel, MisconceptionModel, ReviewEventModel
 from app.repos.flashcard_repo import _CARD_CHILD_TABLES, FlashcardRepo
 from tests.factories import make_card
 
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.usefixtures("card_documents")
 
 # Records what the learner did rather than what the card said. Deleting a card
 # must not rewrite the history of the days it was studied.
-_CARD_LEARNER_RECORD_TABLES = (ReviewEventModel,)
+_CARD_LEARNER_RECORD_TABLES = (ReviewEventModel, CardStateEventModel)
 
 
 def _models_with_flashcard_id() -> set[type]:

@@ -119,6 +119,8 @@ class ReviewRequest(BaseModel):
     rating: Literal["again", "hard", "good", "easy"]
     session_id: str | None = None
     predicted_rating: Literal["again", "hard", "good", "easy"] | None = None
+    # The device's own order for its reviews, so a merge replays them as they happened (#453).
+    client_seq: int | None = None
 
 
 class GenerateTechnicalRequest(BaseModel):

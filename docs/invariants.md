@@ -389,6 +389,13 @@ trigger's `INSERT OR REPLACE` became `OR IGNORE` and a re-created note kept its 
 triggers delete the entity's row, then insert. `tests/test_change_feed.py` holds the bulk, raw and
 re-created cases and that the models and the migration install the same triggers.
 
+**I-82. Only the scheduler writes `last_review`; a change to a card's schedule that leaves it alone is logged by trigger.**
+`FSRSService.schedule` logs each review in `card_state_events` with its rating. Every other
+schedule change (creation, a bulk release of held cards, an archive) is logged by the triggers in
+`models.card_state_triggers`, which fire only when `last_review` is unchanged, so a review is
+never logged twice. A second writer of `last_review` would silence the trigger for its changes.
+`tests/test_card_state_log.py` fires on a duplicate row and on a missing review row.
+
 ## Cross-platform
 
 **I-54. `os.kill` is not a liveness probe on Windows: every signal but a console event terminates the target.**
