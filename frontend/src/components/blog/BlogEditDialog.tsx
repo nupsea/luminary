@@ -17,8 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { ApiError } from "@/lib/apiClient"
-import { API_BASE } from "@/lib/config"
+import { apiBaseUrl, ApiError } from "@/lib/apiClient"
 import {
   deleteBlogPost,
   getBlogConfig,
@@ -100,8 +99,8 @@ export function BlogEditDialog({
   const previewBody = useMemo(
     () =>
       body
-        .replaceAll(`/${kind}/${slug}/`, `${API_BASE}/blog/asset/${kind}/${slug}/`)
-        .replaceAll("__LUMINARY_IMG__/", `${API_BASE}/images/local/`),
+        .replaceAll(`/${kind}/${slug}/`, `${apiBaseUrl()}/blog/asset/${kind}/${slug}/`)
+        .replaceAll("__LUMINARY_IMG__/", `${apiBaseUrl()}/images/local/`),
     [body, slug, kind],
   )
 

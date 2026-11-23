@@ -946,8 +946,10 @@ Then Checkpoint C.
 
 ### 8. Components separated for mobile — 0.19.0
 
-**Frontend.** 56 raw `fetch(` calls in 30 files still bypass `lib/apiClient.ts` (2026-11-03, excluding
-tests). They move onto it first (#447), so the phone has one place to add its token and its cache.
+**Frontend.** Every API call goes through `lib/apiClient.ts`'s transport (base URL, headers and
+fetch, set at boot); media URLs (`img`, `audio`, `video`, pdf.js) take only its base. So the phone
+has one place for its token, its native client and its cache. ESLint fails on `fetch` or `API_BASE`
+anywhere else (#447, in progress).
 Then `packages/api` (client plus types), `packages/domain` (hooks and state) and `packages/ui` are
 extracted, and desktop and mobile become thin shells (#448). That extraction waits for #436, which
 deletes the O'Reilly screens. `surface-manifest.json` gains a `mobile` mode: a third mode, not a fork

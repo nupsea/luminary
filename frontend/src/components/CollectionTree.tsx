@@ -27,8 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/apiClient"
-import { API_BASE } from "@/lib/config"
+import { apiDelete, apiFetch, apiGet, apiPost, apiPut } from "@/lib/apiClient"
 import { useAppStore } from "@/store"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import { NOTE_DRAG_MIME } from "@/lib/collectionUtils"
@@ -153,11 +152,7 @@ function CollectionTreeItemRow({
       format === "markdown" ? "Preparing Markdown vault..." : "Preparing Anki deck..."
     )
     try {
-      const url = `${API_BASE}/collections/${item.id}/export?format=${format}`
-      // Binary download: we need res.blob() + res.headers.get("content-disposition")
-      // for the filename; apiClient's JSON path doesn't apply.
-      // eslint-disable-next-line no-restricted-syntax
-      const res = await fetch(url)
+      const res = await apiFetch(`/collections/${item.id}/export?format=${format}`)
       if (!res.ok) throw new Error(`Export failed: ${res.status}`)
       const blob = await res.blob()
       const disposition = res.headers.get("content-disposition") ?? ""

@@ -1,4 +1,4 @@
-import { API_BASE } from "@/lib/config"
+import { apiFetch, apiUrl, type RequestOptions } from "@/lib/apiClient"
 import { tauriInvoke } from "@/lib/tauriBridge"
 
 export interface NoteAssetUpload {
@@ -55,7 +55,7 @@ export async function uploadNoteAsset(file: File): Promise<NoteAssetUpload> {
   }
   formData.append("file", normalized, filename)
 
-  const res = await fetch(`${API_BASE}/images/notes`, {
+  const res = await apiFetch("/images/notes", {
     method: "POST",
     body: formData,
   })
@@ -63,8 +63,20 @@ export async function uploadNoteAsset(file: File): Promise<NoteAssetUpload> {
   return res.json() as Promise<NoteAssetUpload>
 }
 
+const ASSET_TOKEN = /^__LUMINARY_IMG__\//
+
+function luminaryAssetPath(path: string): string {
+  return path.replace(ASSET_TOKEN, "/images/local/")
+}
+
+/** The note asset's URL, for `src=`. A path without the token (data:, blob:, hand-edited) is left alone. */
 export function resolveLuminaryAssetUrl(path: string): string {
-  return path.replace(/^__LUMINARY_IMG__\//, `${API_BASE}/images/local/`)
+  return ASSET_TOKEN.test(path) ? apiUrl(luminaryAssetPath(path)) : path
+}
+
+/** Fetch a note asset through the transport; a resolved `src=` URL would get the base twice. */
+export function fetchNoteAsset(path: string, init?: RequestOptions): Promise<Response> {
+  return apiFetch(luminaryAssetPath(path), init)
 }
 
 /**

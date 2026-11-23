@@ -21,7 +21,7 @@ import type { PluggableList } from "unified"
 import "katex/dist/katex.min.css"
 import { bracketMathToDollars } from "@/lib/bracketMath"
 import { copySource, rehypeMathCopySource } from "@/lib/copySource"
-import { API_BASE } from "@/lib/config"
+import { apiBaseUrl } from "@/lib/apiClient"
 import {
   findExcalidrawDiagrams,
   isAnnotatedImage,
@@ -88,8 +88,8 @@ function preprocessLinks(content: string): string {
     NOTE_LINK_MARKER_RE,
     (_m, id, text) => `\`[note:${id}|${text}]\``
   )
-  // Resolve local mirrored images: __LUMINARY_IMG__/doc_id/filename -> API_BASE/images/local/doc_id/filename
-  text = text.replace(/__LUMINARY_IMG__\//g, `${API_BASE}/images/local/`)
+  // Resolve local mirrored images: __LUMINARY_IMG__/doc_id/filename -> <api>/images/local/doc_id/filename
+  text = text.replace(/__LUMINARY_IMG__\//g, `${apiBaseUrl()}/images/local/`)
   return text
 }
 
@@ -245,7 +245,7 @@ function resolveImageUrl(src?: string, documentId?: string): string {
   }
   const clean = src.replace(/^\.?\//, "")
   if (documentId) {
-    return `${API_BASE}/documents/${documentId}/asset/${clean}`
+    return `${apiBaseUrl()}/documents/${documentId}/asset/${clean}`
   }
   return src
 }
@@ -264,7 +264,7 @@ interface MarkdownRendererContextValue {
 const MarkdownRendererContext = createContext<MarkdownRendererContextValue | null>(null)
 
 function isAnnotatableSrc(src: string): boolean {
-  return src.startsWith(`${API_BASE}/images/local/`)
+  return src.startsWith(`${apiBaseUrl()}/images/local/`)
 }
 
 function imageMenuTitle(ctx: MarkdownRendererContextValue | null, src: string): string {
@@ -288,7 +288,7 @@ const MarkdownImage = memo(function MarkdownImage({
   const hasMenu = Boolean(ctx?.onSetImageSize || ctx?.onAnnotateImage)
   const onOpenMenu = ctx?.onOpenMenu
   const onImageLoad = ctx?.onImageLoad
-  const localPrefix = `${API_BASE}/images/local/`
+  const localPrefix = `${apiBaseUrl()}/images/local/`
   const sourceUrl = src?.startsWith(localPrefix) ? "__LUMINARY_IMG__/" + src.slice(localPrefix.length) : resolvedSrc
   const source = copySource(`![${parsed.alt}${parsed.size ? `|${parsed.size}` : ""}](${sourceUrl})`)
 

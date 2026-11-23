@@ -7,9 +7,8 @@ import { toast } from "sonner"
 import type { ExplainMode } from "@/components/reader/SelectionActionBar"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import { KIND_ICONS, KIND_LABELS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
-import { ApiError, apiDelete, apiGet } from "@/lib/apiClient"
+import { ApiError, apiDelete, apiGet, apiUrl } from "@/lib/apiClient"
 import { deleteNote } from "@/lib/notesApi"
-import { API_BASE } from "@/lib/config"
 import { logger } from "@/lib/logger"
 import { toggleDocumentFavorite } from "@/pages/Learning/api"
 import { useTimeOnTask } from "@/lib/useTimeOnTask"
@@ -459,8 +458,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     isSectionHidden,
   } = useSectionListCollapse(doc?.sections, sectionMap, doc?.id)
 
-  const audioUrl = (isAudio && !isYouTube) ? `${API_BASE}/documents/${documentId}/audio` : null
-  const videoUrl = isVideo ? `${API_BASE}/documents/${documentId}/video` : null
+  const audioUrl = (isAudio && !isYouTube) ? apiUrl(`/documents/${documentId}/audio`) : null
+  const videoUrl = isVideo ? apiUrl(`/documents/${documentId}/video`) : null
 
   function handleAudioPlayPause() {
     const el = audioRef.current

@@ -5,7 +5,7 @@
 
 import { X } from "lucide-react"
 
-import { API_BASE } from "@/lib/config"
+import { apiUrl } from "@/lib/apiClient"
 import type { EntityType } from "@/lib/vizUtils"
 
 import { DEFAULT_COLOR, TYPE_COLORS } from "./constants"
@@ -55,7 +55,7 @@ export function NodePopover({
       {node.source_image_id && (
         <div className="mb-3">
           <img
-            src={`${API_BASE}/images/${node.source_image_id}/raw`}
+            src={apiUrl(`/images/${node.source_image_id}/raw`)}
             alt="Source diagram"
             className="w-full rounded-lg border border-border object-contain max-h-40"
             onError={(e) => {

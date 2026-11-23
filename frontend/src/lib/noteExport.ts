@@ -4,15 +4,12 @@
  */
 
 import { toast } from "sonner"
-import { API_BASE } from "@/lib/config"
+import { apiFetch } from "@/lib/apiClient"
 
 export async function downloadNoteMarkdown(noteId: string): Promise<void> {
   const toastId = toast.loading("Preparing Markdown export...")
   try {
-    const url = `${API_BASE}/notes/${noteId}/export?format=markdown`
-    // Binary download: we need res.blob() + res.headers.get("content-disposition")
-    // for the filename; apiClient's JSON path doesn't apply.
-    const res = await fetch(url)
+    const res = await apiFetch(`/notes/${noteId}/export?format=markdown`)
     if (!res.ok) throw new Error(`Export failed: ${res.status}`)
     const blob = await res.blob()
     const disposition = res.headers.get("content-disposition") ?? ""
