@@ -1044,7 +1044,7 @@ a read-only mirror) and one draft note per page in #173's inbox.
 | 2 | #544 | A `pages` media kind: every page with an image is kept, and one under 50 characters is shown but not chunked | A blank or short page never vanishes |
 | 3 | #545 | The Supernote connector, in `luminary-connectors`, reading `.note` through a vendored Apache-2.0 subset of supernotelib; the device's recognised text where the notebook has it | None of supernotelib's GPL or LGPL dependencies (potracer, svglib); a test fails on one. An unknown firmware fails loudly. Fixtures are notebooks the maintainer writes on purpose |
 | 4 | #546 | Notes per page: an unedited imported note updates in place; an edited one is never touched, and the new text arrives as a linked draft | Needs #451's `rev` and #173's inbox |
-| 5 | #547 | Pages without the device's text transcribed by the local vision model, off by default until an eval with human-transcribed goldens passes | I-81: text not taken from the source (the device's recognition included) is always shown marked and never counts as grounding evidence |
+| 5 | #547 | Pages without the device's text transcribed by the local vision model, off by default until an eval with human-transcribed goldens passes | A new invariant: text not taken from the source (the device's recognition included) is always shown marked and never counts as grounding evidence |
 | 6 | #548 | Settings: add a folder source with the native picker, see sync status, confirm a re-sync that would move highlights | A paired device can neither add a source nor read a folder path (I-79) |
 
 Supernote's own cloud API is not used: it is unofficial and its terms are unread. Private Cloud (a
