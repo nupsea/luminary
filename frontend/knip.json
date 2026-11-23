@@ -2,5 +2,5 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": ["scripts/*.mjs", "src/lib/strippedSurface.tsx", "src/mobile/main.tsx"],
   "ignore": ["src/types/api.ts", "src/components/ui/**"],
-  "ignoreDependencies": ["@tauri-apps/cli", "openapi-typescript", "playwright-core"]
+  "ignoreDependencies": ["openapi-typescript", "playwright-core"]
 }
