@@ -19,6 +19,7 @@ from app.models import (
 )
 from app.repos.collection_repo import CollectionRepo
 from app.repos.note_repo import NoteRepo, get_note_repo
+from app.runtime.idempotency import IdempotentRoute, idempotent
 from app.runtime.request_auth import device_scope
 from app.schemas.membership import CollectionRef
 from app.schemas.notes import (
@@ -72,6 +73,7 @@ from app.services.naming import normalize_tag_slug
 from app.services.note_graph import get_note_graph_service
 from app.services.note_search import get_note_search_service
 from app.services.note_title_generator import get_title_generator
+from app.services.notes_service import NoteChanged
 from app.services.notes_service import (
     auto_tag_and_store_note as _auto_tag_and_store_note,
 )
@@ -133,7 +135,7 @@ def _schedule_auto_tag(note_id: str, content: str) -> None:
     task.add_done_callback(_background_tasks.discard)
 
 
-router = APIRouter(prefix="/notes", tags=["notes"])
+router = APIRouter(prefix="/notes", tags=["notes"], route_class=IdempotentRoute)
 
 # Back-compat re-exports for tests and routers/tags.py that import these
 # private aliases from this module.
@@ -182,6 +184,7 @@ __all__ = [
 @router.post(
     "", response_model=NoteResponse, status_code=201, dependencies=[device_scope("notes:write")]
 )
+@idempotent
 async def create_note(
     req: NoteCreateRequest,
     session: AsyncSession = Depends(get_db),
@@ -357,6 +360,15 @@ async def _apply_note_update(
     note_id: str, req: NoteUpdateRequest, session: AsyncSession, repo: NoteRepo
 ) -> NoteResponse:
     note = await repo.get_or_404(note_id)
+    # Claimed before any change, in the same transaction, so two edits against one revision
+    # cannot both pass the check.
+    if not await repo.claim_revision(note_id, req.rev):
+        await session.rollback()
+        raise NoteChanged(
+            f"note {note_id} changed since revision {req.rev}",
+            note=_to_response(await repo.get_or_404(note_id)).model_dump(mode="json"),
+        )
+    await session.refresh(note, ["rev"])
 
     if req.content is not None:
         note.content = req.content
@@ -430,6 +442,7 @@ async def _apply_note_update(
 
 
 @router.put("/{note_id}", response_model=NoteResponse, dependencies=[device_scope("notes:write")])
+@idempotent
 async def update_note(
     note_id: str,
     req: NoteUpdateRequest,
@@ -441,6 +454,7 @@ async def update_note(
 
 
 @router.patch("/{note_id}", response_model=NoteResponse, dependencies=[device_scope("notes:write")])
+@idempotent
 async def patch_note(
     note_id: str,
     req: NoteUpdateRequest,
@@ -451,8 +465,9 @@ async def patch_note(
     return await _apply_note_update(note_id, req, session, repo)
 
 
-# Not a device's: a delete is a hard delete, which a phone's cache cannot learn of (#450).
-@router.delete("/{note_id}", status_code=204)
+# A phone's cache learns of it from the change feed's tombstone (#450).
+@router.delete("/{note_id}", status_code=204, dependencies=[device_scope("notes:write")])
+@idempotent
 async def delete_note(
     note_id: str,
     session: AsyncSession = Depends(get_db),

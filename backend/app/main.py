@@ -63,6 +63,7 @@ from app.routers.setup import router as setup_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
+from app.runtime.idempotency import prune_keys
 from app.runtime.library_work import serve_library, serving, stop_serving
 from app.runtime.request_auth import (
     DEV_APP_ORIGINS,
@@ -145,6 +146,7 @@ async def lifespan(app: FastAPI):
     await run_graph_import(str(library_root(settings)))
     await optimize_database(engine)
     await prune_tombstones()
+    await prune_keys()
 
     # NOTE: concept regeneration is a manual offline step (with the server stopped
     # so it does not starve the event loop):

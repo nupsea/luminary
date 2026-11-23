@@ -45,6 +45,15 @@ class NoteRepo:
     async def get_or_404(self, note_id: str, *, name: str = "Note") -> NoteModel:
         return await get_or_404(self.session, NoteModel, note_id, name=name)
 
+    async def claim_revision(self, note_id: str, seen: int | None) -> bool:
+        """Move the note to its next revision, if it is still at *seen* (any, when None). Not
+        committed: the edit that follows commits with it or rolls it back."""
+        stmt = update(NoteModel).where(NoteModel.id == note_id).values(rev=NoteModel.rev + 1)
+        if seen is not None:
+            stmt = stmt.where(NoteModel.rev == seen)
+        result = await self.session.execute(stmt.execution_options(synchronize_session=False))
+        return result.rowcount == 1
+
     async def find_for_dedup(
         self,
         *,

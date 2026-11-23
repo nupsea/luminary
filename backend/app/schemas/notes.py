@@ -40,6 +40,9 @@ class NoteUpdateRequest(BaseModel):
     # overwrite the user's choice. Empty string is a legal "clear to null".
     title: str | None = None
     is_favorite: bool | None = None
+    # The revision the client last read. Given, a stale edit is refused with 409 and the
+    # current note; absent, the edit applies whatever changed in between (#451).
+    rev: int | None = None
 
 
 class NoteResponse(BaseModel):
@@ -60,6 +63,7 @@ class NoteResponse(BaseModel):
     title_auto_generated: bool = True
     description: str | None = None
     is_favorite: bool = False
+    rev: int = 0
     created_at: datetime
     updated_at: datetime
 

@@ -42,6 +42,7 @@ from app.repos.collection_repo import CollectionRepo
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo, get_flashcard_repo
 from app.repos.study_repo import StudyRepo
+from app.runtime.idempotency import IdempotentRoute, idempotent
 from app.runtime.request_auth import device_scope
 from app.schemas.flashcards import (
     ArchiveMasteredResponse,
@@ -107,7 +108,7 @@ from app.streaming import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/flashcards", tags=["flashcards"])
+router = APIRouter(prefix="/flashcards", tags=["flashcards"], route_class=IdempotentRoute)
 
 # Strong references to fire-and-forget coverage update tasks (asyncio holds only weak refs).
 
@@ -919,6 +920,7 @@ async def delete_all_collection_flashcards(
     response_model=FlashcardResponse,
     dependencies=[device_scope("reviews:write")],
 )
+@idempotent
 async def review_flashcard(
     card_id: str,
     req: ReviewRequest,

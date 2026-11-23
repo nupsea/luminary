@@ -17,6 +17,7 @@ from typing import Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session_factory
+from app.exceptions import Conflict
 from app.models import NoteModel
 from app.repos.note_repo import NoteRepo
 from app.repos.tag_repo import TagRepo
@@ -58,9 +59,15 @@ def to_response(
         title_auto_generated=note.title_auto_generated,
         description=note.description,
         is_favorite=bool(note.is_favorite),
+        rev=note.rev or 0,
         created_at=note.created_at,
         updated_at=note.updated_at,
     )
+
+
+class NoteChanged(Conflict):
+    """An edit made against a revision the note has moved past. The body carries the current
+    note, so the client keeps its text as a conflict copy rather than losing it (#451)."""
 
 
 async def fts_insert(

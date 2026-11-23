@@ -10654,6 +10654,11 @@ export interface components {
              */
             is_favorite: boolean;
             /**
+             * Rev
+             * @default 0
+             */
+            rev: number;
+            /**
              * Created At
              * Format: date-time
              */
@@ -10716,6 +10721,8 @@ export interface components {
             title?: string | null;
             /** Is Favorite */
             is_favorite?: boolean | null;
+            /** Rev */
+            rev?: number | null;
         };
         /** NotesTimelinePoint */
         NotesTimelinePoint: {
