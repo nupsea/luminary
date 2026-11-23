@@ -32,13 +32,14 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { modelUnavailableMessage } from "@/lib/engineModes"
 import { useAppStore } from "@/store"
-import { PAGE_THREAD, preloadIsFor, threadOf } from "@/store/chatThreads"
+import { PAGE_THREAD, preloadIsFor, settleUnanswered, threadOf, UNANSWERED } from "@/store/chatThreads"
 import { buildModelOptions, cloudOverrideAllowed, effectiveDefaultModel, shouldClearPrivateModeOverride } from "@/lib/chatSettingsUtils"
 
 import { apiFetch, apiGet, apiUrl } from "@/lib/apiClient"
 import { buildCitationTarget, targetToStateValue } from "@/lib/citation"
 
 import { AnswerReceiptLine } from "./AnswerReceiptLine"
+import { beginTurn, endTurn, isTurnInFlight, useTurnInFlight } from "./turns"
 import { ChatEmptyState } from "./ChatEmptyState"
 import { DocumentScopeCombobox } from "./DocumentScopeCombobox"
 import { SuggestionPills } from "./SuggestionPills"
@@ -125,7 +126,7 @@ export function ChatConversation({
     [patchThread, threadKey],
   )
   const [model, setModel] = useState<string>("")
-  const [isStreaming, setIsStreaming] = useState(false)
+  const isStreaming = useTurnInFlight(threadKey)
   const qaError = thread.error
   const setQaError = useCallback(
     (err: string | null) => patchThread(threadKey, { error: err }),
@@ -318,7 +319,7 @@ export function ChatConversation({
     try {
       const sess = await getChatSession(id)
       const hydrated: ChatMessage[] = sess.messages.map(persistedToChatMessage)
-      setMessages(hydrated)
+      setMessages(settleUnanswered(hydrated))
       setScope(sess.scope)
       setSelectedDocId(sess.document_ids[0] ?? null)
       // The hydrated session owns the doc context now. Without this, restoring
@@ -340,6 +341,9 @@ export function ChatConversation({
   useEffect(() => {
     if (didInitialHydrate.current) return
     didInitialHydrate.current = true
+    // A turn still streaming into this thread must not be overwritten by the
+    // server's copy, which holds the question but not yet its answer.
+    if (isTurnInFlight(threadKey)) return
     const persistedId = here().sessionId
     if (persistedId) {
       void hydrateSession(persistedId)
@@ -442,7 +446,7 @@ export function ChatConversation({
     question: string,
     opts?: { reuseUserTurn?: boolean; suggested?: boolean },
   ) {
-    if (!question.trim() || isStreaming) return
+    if (!question.trim() || isTurnInFlight(threadKey)) return
     setInput("")
     if (textareaRef.current) textareaRef.current.style.height = "auto"
 
@@ -503,7 +507,10 @@ export function ChatConversation({
       const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", text: question }
       setMessages((m) => [...m, userMsg, assistantMsg])
     }
-    setIsStreaming(true)
+    beginTurn(threadKey)
+    // The turn stays in flight until its answer is saved, so a remount that
+    // reloads the session finds the answer, not a question without one.
+    let saved: Promise<unknown> = Promise.resolve()
 
     if (sessionId && !opts?.reuseUserTurn) {
       void appendChatMessage(sessionId, { role: "user", content: question }).catch(() => {})
@@ -631,7 +638,6 @@ export function ChatConversation({
                 errorCode === "llm_unavailable"
                   ? modelUnavailableMessage(payload["message"] as string | undefined)
                   : fallbackMsg
-              setIsStreaming(false)
               setMessages((m) =>
                 m.map((msg) =>
                   msg.id === assistantId
@@ -684,7 +690,6 @@ export function ChatConversation({
                     : msg,
                 ),
               )
-              setIsStreaming(false)
               // S195: refresh suggestion pills after each answered question
               const suggestDocId = effScope === "single" ? effSelectedDocId : null
               void qc.invalidateQueries({ queryKey: ["chat-suggestions", suggestDocId] })
@@ -701,7 +706,7 @@ export function ChatConversation({
                 const transparencyAtDone = (here().messages as ChatMessage[]).find(
                   (mm) => mm.id === assistantId,
                 )?.transparency
-                void appendChatMessage(sessionId, {
+                saved = appendChatMessage(sessionId, {
                   role: "assistant",
                   content: finalText,
                   extra: {
@@ -730,6 +735,14 @@ export function ChatConversation({
           }
         }
       }
+      // A stream that closes with neither `done` nor `error` left the turn open.
+      setMessages((m) =>
+        m.map((msg) =>
+          msg.id === assistantId && msg.isStreaming
+            ? { ...msg, isStreaming: false, text: "", error: UNANSWERED, failedQuestion: question }
+            : msg,
+        ),
+      )
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err)
       logger.error("[Chat] fetch failed", { endpoint: "/qa", error: errMsg })
@@ -744,7 +757,9 @@ export function ChatConversation({
             : msg,
         ),
       )
-      setIsStreaming(false)
+    } finally {
+      await saved
+      endTurn(threadKey)
     }
   }
 
