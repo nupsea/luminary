@@ -1,7 +1,7 @@
 """add fsrs_step to flashcards
 
 Revision ID: b81e4c2f9d07
-Revises: 7f6bcd0f8881
+Revises: 5c0d3e9a71b2
 Create Date: 2026-11-21 18:00:00.000000
 
 Before this, every review rebuilt the card at learning step 0 (#533), so the step a card is
@@ -20,7 +20,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "b81e4c2f9d07"
-down_revision: str | Sequence[str] | None = "7f6bcd0f8881"
+down_revision: str | Sequence[str] | None = "5c0d3e9a71b2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

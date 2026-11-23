@@ -19,7 +19,7 @@ from tests.test_drop_content_type_migration import _migrate
 
 pytestmark = pytest.mark.usefixtures("card_documents")
 
-BEFORE_STEP = "7f6bcd0f8881"
+BEFORE_STEP = "5c0d3e9a71b2"
 
 
 def _card(**kwargs) -> FlashcardModel:
