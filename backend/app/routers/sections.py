@@ -2,13 +2,14 @@ import logging
 import re
 from typing import Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from app.database import get_session_factory
 from app.exceptions import NotFound
 from app.models import SectionModel
 from app.repos.document_repo import DocumentRepo
+from app.runtime.cached_json import cached_json
 from app.runtime.request_auth import device_scope
 from app.schemas.flashcards import FlashcardResponse
 from app.services.chapter_cards import chapter_overview, practise_chapter
@@ -152,7 +153,7 @@ def _assemble(section: SectionModel, chunk_texts: list[str]) -> tuple[str, str]:
     response_model=SectionContentItem,
     dependencies=[device_scope("read")],
 )
-async def get_one_section_content(document_id: str, section_id: str) -> SectionContentItem:
+async def get_one_section_content(request: Request, document_id: str, section_id: str) -> Response:
     """One section with its text entire, however long it is.
 
     Declared above the windowed route so `content/{section_id}` is not matched by
@@ -173,17 +174,20 @@ async def get_one_section_content(document_id: str, section_id: str) -> SectionC
 
     texts = [c.text for c in chunks if c.section_id == section_id]
     content, source = _assemble(section, texts)
-    return SectionContentItem(
-        section_id=section.id,
-        heading=section.heading,
-        level=section.level,
-        section_order=section.section_order,
-        content=content,
-        page_start=section.page_start or 0,
-        page_end=section.page_end or 0,
-        content_source=source,
-        content_chars=len(content),
-        truncated=False,
+    return cached_json(
+        request,
+        SectionContentItem(
+            section_id=section.id,
+            heading=section.heading,
+            level=section.level,
+            section_order=section.section_order,
+            content=content,
+            page_start=section.page_start or 0,
+            page_end=section.page_end or 0,
+            content_source=source,
+            content_chars=len(content),
+            truncated=False,
+        ),
     )
 
 
@@ -191,10 +195,11 @@ async def get_one_section_content(document_id: str, section_id: str) -> SectionC
     "/{document_id}/content", response_model=SectionContentPage, dependencies=[device_scope("read")]
 )
 async def get_section_content(
+    request: Request,
     document_id: str,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=40, ge=1, le=200),
-) -> SectionContentPage:
+) -> Response:
     """A window of sections, each with its text.
 
     Bounded on two axes because a reader renders neither all of a long
@@ -207,7 +212,9 @@ async def get_section_content(
         repo = DocumentRepo(session)
         sections = await repo.sections_for_document(document_id)
         if not sections:
-            return SectionContentPage(items=[], total=0, offset=offset, limit=limit)
+            return cached_json(
+                request, SectionContentPage(items=[], total=0, offset=offset, limit=limit)
+            )
         total = len(sections)
         sections = sections[offset : offset + limit]
         chunks = await repo.chunks_for_document(document_id, by_section=True)
@@ -259,7 +266,9 @@ async def get_section_content(
         if item.truncated:
             item.content = item.content[:_INLINE_CONTENT_LIMIT]
 
-    return SectionContentPage(items=result, total=total, offset=offset, limit=limit)
+    return cached_json(
+        request, SectionContentPage(items=result, total=total, offset=offset, limit=limit)
+    )
 
 
 class ChapterItem(BaseModel):
