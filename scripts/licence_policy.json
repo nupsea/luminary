@@ -11,7 +11,11 @@
     "\\bCC0\\b",
     "Public Domain",
     "MPL-2\\.0",
-    "Mozilla Public License 2\\.0"
+    "Mozilla Public License 2\\.0",
+    "\\bUnicode-3\\.0\\b",
+    "\\bUnicode-DFS-2016\\b",
+    "\\bBSL-1\\.0\\b",
+    "\\bCNRI-Python\\b"
   ],
   "review": [
     "GPL",

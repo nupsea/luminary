@@ -40,6 +40,14 @@ def _policy(**over):
         ("BUSL-1.1", "review"),
         ("MITRE", "unrecognised"),
         ("Custom", "unrecognised"),
+        # SPDX expressions are judged by every licence they name (#534).
+        ("Apache-2.0 AND CNRI-Python", "allowed"),
+        ("(MIT OR Apache-2.0) AND Unicode-3.0", "allowed"),
+        ("Apache-2.0 WITH LLVM-exception OR MIT", "allowed"),
+        ("MIT/Apache-2.0", "allowed"),
+        ("MPL-2.0", "allowed"),
+        ("MIT AND Custom", "unrecognised"),
+        ("MIT OR Apache-2.0 OR LGPL-2.1-or-later", "review"),
     ],
 )
 def test_licence_strings_are_classified_by_the_policy(licence, verdict):
@@ -113,3 +121,32 @@ def test_every_exception_in_the_real_policy_carries_a_reason_and_an_issue():
         assert check_licences.classify(entry["licence"], REAL_POLICY) != "allowed", key
     for key, entry in REAL_POLICY["declared"].items():
         assert entry["source"].strip(), key
+
+
+def test_a_crate_ships_when_linked_or_built_with_never_as_a_dev_dependency():
+    def node(pid, *deps):
+        return {"id": pid, "deps": [{"pkg": d, "dep_kinds": [{"kind": k}]} for d, k in deps]}
+
+    meta = {
+        "workspace_members": ["app"],
+        "packages": [
+            {"id": i, "name": i, "version": "1.0.0", "license": f"{i}-licence"}
+            for i in ("app", "linked", "built", "tested", "transitive")
+        ],
+        "resolve": {
+            "nodes": [
+                node("app", ("linked", None), ("built", "build"), ("tested", "dev")),
+                node("linked", ("transitive", None)),
+                node("built"),
+                node("tested"),
+                node("transitive"),
+            ]
+        },
+    }
+    found: dict = {}
+    check_licences._crates_shipped(meta, found)
+    assert found == {
+        "built": "built-licence",
+        "linked": "linked-licence",
+        "transitive": "transitive-licence",
+    }

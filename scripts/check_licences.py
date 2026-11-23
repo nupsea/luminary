@@ -4,20 +4,25 @@
 Runs in `make ci`, so the PR that adds or bumps a dependency is the one that fails.
 
 The shipping set is what the installers install: `uv export --group full` (the same
-command `scripts/desktop/lib.sh` stages) and every non-dev package in
-`frontend/package-lock.json`. Dev tools never ship, so they are not checked.
+command `scripts/desktop/lib.sh` stages), every non-dev package in
+`frontend/package-lock.json`, and every crate the desktop shell links or builds with on a
+target the installers build (`cargo metadata --filter-platform`, #534). Dev tools never ship, so
+they are not checked.
 
 Each licence string must match an allowed pattern and no review pattern in
 `scripts/licence_policy.json`. A review-pattern licence ships only under an exception
 recording the exact string, a reason and an issue; when the string changes, the
-exception stops applying and the package fails until someone re-reads it. A package
-whose metadata states no licence, or that is not installed on this platform, needs a
-`declared` entry naming the licence and where it was read.
+exception stops applying and the package fails until someone re-reads it. An SPDX expression
+is judged by every licence it names, OR as much as AND, so an unrecognised licence beside a
+permissive one is caught rather than passed. A package whose metadata states no licence, or
+that is not installed on this platform, needs a `declared` entry naming the licence and where
+it was read.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -143,12 +148,122 @@ def python_dependants(name: str) -> list[str]:
     ][:5]
 
 
-def classify(licence: str, policy: dict) -> str:
+# What the installers build (`.github/workflows/desktop-installers.yml`, release-macos-app.yml).
+SHIPPED_TARGETS = ("aarch64-apple-darwin", "x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu")
+
+
+def shipping_rust() -> dict[str, str | None]:
+    """Crates the desktop shell links or builds with on a shipped target; never dev-dependencies."""
+    cargo = shutil.which("cargo")
+    if cargo is None:
+        raise FileNotFoundError("cargo")
+    found: dict[str, str | None] = {}
+    for target in SHIPPED_TARGETS:
+        out = subprocess.run(  # noqa: S603 -- fixed arguments, no user input
+            [
+                cargo,
+                "metadata",
+                "--format-version",
+                "1",
+                "--locked",
+                "--filter-platform",
+                target,
+                "--manifest-path",
+                str(REPO / "src-tauri" / "Cargo.toml"),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        _crates_shipped(json.loads(out), found)
+    return found
+
+
+def _crates_shipped(meta: dict, found: dict[str, str | None]) -> None:
+    packages = {p["id"]: p for p in meta["packages"]}
+    nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
+    members = set(meta["workspace_members"])
+    reached: set[str] = set()
+    stack = list(members)
+    while stack:
+        for dep in nodes[stack.pop()]["deps"]:
+            shipped = any(k["kind"] in (None, "build") for k in dep["dep_kinds"])
+            if shipped and dep["pkg"] not in reached:
+                reached.add(dep["pkg"])
+                stack.append(dep["pkg"])
+    for pid in sorted(reached - members):
+        crate = packages[pid]
+        name, licence = crate["name"], crate.get("license")
+        key = name if found.get(name, licence) == licence else f"{name}@{crate['version']}"
+        found[key] = licence
+
+
+def _classify_text(licence: str, policy: dict) -> str:
     if any(re.search(p, licence, re.IGNORECASE) for p in policy["review"]):
         return "review"
     if any(re.search(p, licence, re.IGNORECASE) for p in policy["allowed"]):
         return "allowed"
     return "unrecognised"
+
+
+_RANK = {"allowed": 0, "unrecognised": 1, "review": 2}
+_SPDX = re.compile(r"\(|\)|[A-Za-z0-9.+-]+")
+
+
+def _spdx_verdict(licence: str, policy: dict) -> str | None:
+    """The verdict of an SPDX expression, or None when *licence* is not one ("MIT License")."""
+    text = licence.replace("/", " OR ")
+    tokens = _SPDX.findall(text)
+    if "".join(tokens) != re.sub(r"\s+", "", text):
+        return None
+    pos = 0
+
+    def peek() -> str | None:
+        return tokens[pos] if pos < len(tokens) else None
+
+    def take() -> str:
+        nonlocal pos
+        pos += 1
+        return tokens[pos - 1]
+
+    def operand() -> str:
+        if peek() == "(":
+            take()
+            verdict = expression()
+            if take() != ")":
+                raise ValueError
+            return verdict
+        token = take()
+        if token in ("AND", "OR", "WITH", ")"):
+            raise ValueError
+        if peek() == "WITH":
+            take()
+            take()
+        return _classify_text(token, policy)
+
+    def conjunction() -> str:
+        verdicts = [operand()]
+        while peek() == "AND":
+            take()
+            verdicts.append(operand())
+        return max(verdicts, key=_RANK.__getitem__)
+
+    def expression() -> str:
+        verdicts = [conjunction()]
+        while peek() == "OR":
+            take()
+            verdicts.append(conjunction())
+        return max(verdicts, key=_RANK.__getitem__)
+
+    try:
+        verdict = expression()
+    except (ValueError, IndexError):
+        return None
+    return verdict if pos == len(tokens) else None
+
+
+def classify(licence: str, policy: dict) -> str:
+    return _spdx_verdict(licence, policy) or _classify_text(licence, policy)
 
 
 def check(shipped: dict[str, str | None], policy: dict) -> list[str]:
@@ -194,6 +309,14 @@ def main() -> int:
     policy = json.loads(POLICY.read_text(encoding="utf-8"))
     shipped = {f"python:{n}": python_licence(n) for n in shipping_python()}
     shipped |= {f"npm:{n}": lic for n, lic in shipping_npm().items()}
+    try:
+        shipped |= {f"rust:{n}": lic for n, lic in shipping_rust().items()}
+    except FileNotFoundError:
+        # CI always has cargo; a backend-only checkout may not, and is told so.
+        if os.environ.get("CI"):
+            print("FAIL cargo not found: the shipped Rust crates were not checked", file=sys.stderr)
+            return 1
+        print("note: cargo not found here, so the Rust crates were not checked", file=sys.stderr)
     problems = check(shipped, policy)
     if not problems:
         excepted = sum(k in policy["exceptions"] for k in shipped)
@@ -201,7 +324,7 @@ def main() -> int:
         return 0
     for p in problems:
         ecosystem, name = p.split(":", 2)[:2]
-        by = python_dependants(name) if ecosystem == "python" else npm_dependants(name)
+        by = {"python": python_dependants, "npm": npm_dependants}.get(ecosystem, lambda _: [])(name)
         print(
             f"FAIL {p}" + (f"\n     pulled in by: {', '.join(by)}" if by else ""), file=sys.stderr
         )
