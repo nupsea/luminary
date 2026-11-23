@@ -24,7 +24,8 @@ One process per request, started as `python -I -m luminary_source_sdk.serve <mod
 from the connector's own environment.
 
 - **Request.** One JSON line on stdin, at most 1 MiB:
-  `{"protocol": 1, "op", "input", "credentials", "dest"}`.
+  `{"protocol", "op", "input", "credentials", "dest"}`. The core sends protocol 1, which every SDK
+  answers; the SDK also answers protocol 2, which adds `list`.
 - **Answer.** Event lines on stdout: `progress` (`fraction` 0-1, `stage`), `log`, then exactly
   one `result` or `error` (`code`: `input`, `auth`, `source` or `internal`). `serve` moves the
   connector's own `print` to stderr, which the core logs.
@@ -40,6 +41,7 @@ from the connector's own environment.
 | `describe` | `Description` | At install; stored as `connector.json` |
 | `check` | `Account` (`valid`, `account`, `message`) | Before credentials are stored |
 | `preview` | `Preview`: a title, a detail, and `Choice`s of `Option`s | `Description.preview` is true, before a fetch |
+| `list` | `Listing`: `Item`s (`item_id`, `version`, `title`), a `cursor`, `complete` | Protocol 2, a `folder` or `account` source. **Provisional:** no core path calls it until the folder source (#459) |
 | `fetch` | `{"bundle": dest}` | Writes the bundle into `dest`, which must be empty |
 
 ## Description
@@ -54,6 +56,10 @@ Install refuses a connector whose `describe` breaks any of these rules
   template's `PLACEHOLDER_TERMS` is refused, by install and by the kit.
 - Each `url_prefixes` entry is a scheme, a host and a path (`https://doc.rust-lang.org/book/`).
   A pasted link goes to the first installed connector, by name, that claims it.
+- `protocol` is 1 or 2 (absent means 1) and `source.kind` is `url`, `folder` or `account`; a
+  `folder` or `account` source needs protocol 2. A `url` source is listed by nothing and fetched
+  from a pasted link, as before. `item_id` is stable across runs, and `version` is compared only
+  for equality.
 - `media` lists only `text`, `audio` and `youtube`; `tools` lists only `ffmpeg`. The core
   refuses a link before fetching when it cannot transcribe the media or find a tool. It passes
   each tool's path as `input["tools"][name]`.

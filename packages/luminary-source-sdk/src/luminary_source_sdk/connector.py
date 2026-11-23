@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from luminary_source_sdk.bundle import BundleWriter
-from luminary_source_sdk.protocol import Account, Description, Preview
+from luminary_source_sdk.protocol import Account, Description, Listing, Preview
 
 Report = Callable[[float, str], None]
 
@@ -34,6 +34,13 @@ class Connector:
         """What the link is and the choices before fetching it, e.g. a chapter list. Optional;
         set `Description.preview` when offered."""
         raise ConnectorError("input", "this connector offers no preview")
+
+    def list_items(
+        self, config: dict[str, Any], credentials: dict[str, Any], cursor: str | None
+    ) -> Listing:
+        """The items a `folder` or `account` source holds, from *cursor* on (protocol 2,
+        provisional). A `url` connector does not implement it."""
+        raise ConnectorError("input", "this connector lists nothing; it takes a link")
 
     def fetch(
         self,

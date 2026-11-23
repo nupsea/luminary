@@ -26,6 +26,8 @@ from app.exceptions import LuminaryError
 
 logger = logging.getLogger(__name__)
 
+# Every SDK answers protocol 1. Protocol 2 adds only `list`, which nothing here calls until the
+# folder source (#459).
 PROTOCOL_VERSION = 1
 # A whole book through a slow proxy; a fetch that outlasts this is stuck, not slow.
 FETCH_TIMEOUT_S = 60 * 60

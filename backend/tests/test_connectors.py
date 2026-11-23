@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import io
 import json
 import os
 import sys
@@ -223,8 +224,8 @@ def test_the_sdk_imports_only_the_standard_library():
 
 
 def test_the_sdk_declares_what_the_core_accepts(sdk):
-    assert (sdk.protocol.MEDIA, sdk.protocol.TOOLS) == (connectors.MEDIA, connectors.TOOLS)
-    assert sdk.PLACEHOLDER_TERMS == connectors.PLACEHOLDER_TERMS
+    for name in ("MEDIA", "TOOLS", "PROTOCOL_VERSIONS", "OPS", "INPUT_KINDS", "PLACEHOLDER_TERMS"):
+        assert getattr(sdk.protocol, name) == getattr(connectors, name), name
 
 
 @pytest.fixture
@@ -259,3 +260,83 @@ def test_the_sdk_refuses_a_path_that_leaves_the_bundle(sdk, tmp_path):
     writer = sdk.BundleWriter(tmp_path / "out")
     with pytest.raises(sdk.BundleError, match="not a safe path"):
         writer.add_asset("../outside.png", b"x")
+
+
+# --- protocol 2 (#541) ------------------------------------------------------------------------
+
+_V2 = {"name": "x", "terms": {"statement": "s", "url": "https://x/t"}}
+
+
+@pytest.mark.parametrize(
+    ("description", "message"),
+    [
+        ({**_V2, "protocol": 3}, "speaks protocol 3"),
+        ({**_V2, "protocol": 2, "source": {"kind": "ftp"}}, "x reads from 'ftp'"),
+        ({**_V2, "protocol": 1, "source": {"kind": "folder"}}, "which needs protocol 2"),
+    ],
+)
+def test_a_protocol_or_source_this_luminary_cannot_serve_is_refused(description, message):
+    with pytest.raises(connectors.ConnectorInstallFailed, match=message):
+        connectors._check_description("x", description)
+
+
+def test_a_description_from_before_protocol_2_still_installs():
+    connectors._check_description("x", dict(_V2))
+    connectors._check_description("x", {**_V2, "protocol": 2, "source": {"kind": "folder"}})
+
+
+def test_install_records_the_protocol_it_was_described_with(installed):
+    assert installed.description["protocol"] == 2
+    assert installed.description["source"]["kind"] == "url"
+
+
+_LISTING_SOURCE = """
+from luminary_source_sdk import Connector, Description, Item, Listing, Source, Terms
+
+class Notebooks(Connector):
+    def describe(self):
+        return Description(
+            name="notebooks", version="0.1.0", licence="Apache-2.0",
+            terms=Terms("Reads files the user picked.", "https://example.org/terms"),
+            source=Source(kind="folder", patterns=["*.note"]),
+        )
+
+    def list_items(self, config, credentials, cursor):
+        return Listing(items=[Item(item_id="a.note", version="v1", title=config["folder"])],
+                       cursor=None, complete=True)
+"""
+
+
+def _serve(sdk, tmp_path, monkeypatch, request: dict) -> dict:
+    (tmp_path / "notebooks_fixture.py").write_text(_LISTING_SOURCE, encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    from luminary_source_sdk.serve import handle
+
+    out = io.StringIO()
+    handle(json.dumps(request), "notebooks_fixture:Notebooks", out)
+    return json.loads(out.getvalue().splitlines()[-1])
+
+
+def test_a_protocol_2_sdk_answers_protocol_1_and_lists_only_under_2(sdk, tmp_path, monkeypatch):
+    described = _serve(sdk, tmp_path, monkeypatch, {"protocol": 1, "op": "describe"})
+    assert described["data"]["source"] == {
+        "kind": "folder",
+        "patterns": ["*.note"],
+        "max_file_bytes": None,
+    }
+    request = {"op": "list", "input": {"config": {"folder": "/notes"}, "cursor": None}}
+    listed = _serve(sdk, tmp_path, monkeypatch, {"protocol": 2, **request})
+    assert listed["data"] == {
+        "items": [{"item_id": "a.note", "version": "v1", "title": "/notes", "updated": None}],
+        "cursor": None,
+        "complete": True,
+    }
+    refused = _serve(sdk, tmp_path, monkeypatch, {"protocol": 1, **request})
+    assert refused == {"event": "error", "code": "internal", "message": "unknown op 'list'"}
+    unknown = _serve(sdk, tmp_path, monkeypatch, {"protocol": 3, "op": "describe"})
+    assert unknown["message"] == "protocol 3 is not supported"
+
+
+def test_a_url_connector_lists_nothing(sdk):
+    with pytest.raises(sdk.ConnectorError, match="takes a link"):
+        sdk.Connector().list_items({}, {}, None)

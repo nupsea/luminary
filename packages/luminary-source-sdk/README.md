@@ -52,6 +52,12 @@ the upload dialog. Two optional methods fill them in:
   (a chapter list, a caption track). Set `Description.preview=True`. The user's picks reach
   `fetch` as `input[choice.field]`, a list when `multiple`.
 
+A connector that reads a folder or an account rather than a pasted link sets
+`Description(source=Source(kind="folder", patterns=["*.note"]))` and implements
+`list_items(config, credentials, cursor)`, returning a `Listing` of `Item`s, each with a stable
+`item_id` and a `version` that changes when the item does. This is protocol 2 and provisional:
+Luminary calls it once the folder source lands (#459).
+
 Name it in the connector's `pyproject.toml`:
 
 ```toml
