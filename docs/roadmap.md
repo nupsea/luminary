@@ -54,6 +54,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 | Engine modes (private, hybrid, cloud), the engine offer, the privacy receipt, and the supported-host policy (0.10.0) | `engine-and-hosts.md` |
 | The docked reader panel: faces, per-type citations, docked chat and composer, live markdown, the in-reader practice loop (0.11.0) | `reader-panel.md`, `make verify-dock` |
 | Transcripts that spell their terms: the uploader's captions over speech recognition, Whisper primed with the video's metadata, a judged glossary pass, a personal vocabulary and a reader fix that rewrites text, index and vectors | `invariants.md` I-66, `services/transcript_correction.py`, `services/transcript_fix.py` |
+| Route-scope authorization: a paired device reaches only routes declaring a scope it holds, user assets served sandboxed (0.19.0) | `invariants.md` I-79, I-80, `install.md`, `backend/tests/test_route_scopes.py` |
 
 Notes and the recommender shipped without a surviving contract doc because their behaviour is
 adequately described by `architecture.md` plus the code. Their specs were deleted on
@@ -102,12 +103,12 @@ exit gate cannot pass without; tracking rules are in "Bugs to 1.0" below.
 | III. Cloud readiness | 0.16.0 | Device auth and pairing; the `content_type` retirement; chapter practice — **0.16.2 released; pairing merged (#260); chunking reads the measured form (#223, wire and column open); chapter card quality passed its gate (#305); the Practice panel's cards have not (#330)** | #160, #195, #221, #222, #226, #227, #229; #223 moved to 0.17.0, #162 to 0.18.0 | An unpaired origin or a revoked device is refused, proven by a test that fails when pairing is removed |
 | | 0.17.0 | An architecture that can take tenants; snapshot/restore; the re-embed rail — **0.17.0 released 2026-10-28: the library root (#388), snapshot and the resumable re-embed (#390), and per-library preferences with the shared-resource audit (#389) are built; a key per principal is deferred to the hosted work. Carried to 0.17.1: #211, and #231's page-range windows and macOS shell check.** No SQL is left outside `repos/` (79 statements to 0, #337 to #339), and every `DATA_DIR` join goes through `app/storage.py`. Closed with numbers: #100; #307 (topic F1 1.0 on d2l, 21/21 against thinkpython2's PDF bookmarks); #252 (thinkpython2's chapter cards drawn from pp. 1–22: 10 of 14 before, 0 of 14 and 0 of 17 on two fresh runs); #332 and #333 (1,040 misplaced paragraphs across 41 local books, now 0; the Federalist Papers 8 sections to 85); #286 (Usher stored as narrative on 5 of 5 fresh ingests). Open: #211, a `notes_fts` insert refused within milliseconds although `busy_timeout` is 5 s. SQLite refuses at once only when the refused connection already holds a read as it begins to write, and another connection is writing (reproduced on 3.46); which path leaves that read open is unknown, and the busy report now names the connection's preceding statements; #231 passed in the Linux shell, and finishing a chapter's cards now returns the reader to the reading place (#397); page-range windows and the macOS shell are untested | #211, #223, #231, #252, #286, #332, #333, #388, #389, #390 | Every request resolves a principal and a library; a second library is fully isolated in tests; a killed re-embed resumes; a snapshot restores |
 | | 0.18.0 | Your own server; sources become connectors; plus what Checkpoints A and B left open: the hardware session and the Practice panel's cards (§7). **#155 and #156 closed on AWS (2026-10-21).** **Checkpoint C. 0.18.0 released 2026-11-18:** the server refuses tokenless requests beyond loopback (#511, run in a container reached by LAN address); the core ships no connector, YouTube installs from the catalogue, and older documents open, cite and re-import (bundled app); a template-built connector passes the conformance kit. **0.18.1 released 2026-11-19:** a refusing provider is retried, named, and shown on the document (#514); stated heading levels survive part marks (#516); Spaces. **0.18.2 released 2026-11-21:** Quiet background work runs one unattended call at a time (#527, I-78); a keychain prompt no longer freezes the backend (#525); the reader's notices clear the text-size button (#526). **Carried:** the CPU-only server with a paid key (no paid key was available; #514's fix was tested on Gemini's recorded refusals); #330 to 0.19.0 (two rated runs at 38% and 42% kept and correct); #211 and #476 (20-run soak on 0.18.1: 17 passed, 3 lost a worker; the test timeout is ruled out); #438's PyPI publish, waiting on the trusted publisher. What each release did not exercise is listed in its CHANGELOG section | #24, #99, #155, #156, #162, #211, #231, #330, #334, #348, #354, #355, #356, #357, #358, #378, #382, #430, #431–#438, #465, #467 | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key; the core ships no connector, the YouTube connector installs from the catalogue and ingests a link, and documents imported before keep opening, citing and re-importing; a connector built from the template outside this repo passes the conformance kit; zero open `bug` issues milestoned to Phase I, II or III |
-| IV. Separation | 0.19.0 | Components separated for mobile; beside it, the Ask track (§9) | #447–#453 | A Tauri mobile shell builds in CI and its shared UI packages pass tsc and vitest; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient` |
-| V. Mobile | 0.20.0 | Topic notes and the draft inbox; mobile reading and note capture; the Ask track lands. **Checkpoint D** | #173, #454, #455; Ask track #66, #322, #440–#443 | A merge that leaves a source note out of every section is refused, a summary claim no source note supports is flagged, and undoing a merge restores every original; a phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated; follow-up retrieval moves on two documents with numbers before and after, and no suggested question gets a general-knowledge answer |
-| VI. Extras | 0.21.0 | Anki import; the capture extension; Luminary as a read-only MCP server; card review on mobile | #349, #367, #456, #457, #458 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; an MCP client receives passages only from collections the user scoped, and nothing with the setting off or without the token; an offline review on the phone merges without overwriting FSRS state |
+| IV. Separation | 0.19.0 | Components separated for mobile; beside it, the Ask track (§9) and the connector contract (§8). **Merged:** a paired device reaches only the routes that declare its scope, existing tokens narrowed on upgrade (#532, I-79, I-80); every request and API URL goes through one transport (#447); a learning card graduates on Good (#533); an Ask answer survives leaving the document (#539) | #447–#453, #532–#534, #539, #541–#543 | An Android debug build of the mobile shell succeeds in CI, and the mobile entry passes tsc and vitest under the api/domain/ui boundary rules; the backend change feed passes a contract test; no raw `fetch(` outside `apiClient`; no shipped Rust crate outside the licence policy; a connector is written, run and validated against protocol 2 without a backend checkout |
+| V. Mobile | 0.20.0 | Topic notes and the draft inbox; mobile reading and note capture; the Ask track lands; the Practice panel's cards (#330, carried from 0.19.0). **Checkpoint D** | #173, #330, #454, #455; Ask track #66, #322, #440–#443 | A merge that leaves a source note out of every section is refused, a summary claim no source note supports is flagged, and undoing a merge restores every original; a phone reads cached documents and writes notes offline; the notes reach the server on reconnect with none lost or duplicated; follow-up retrieval moves on two documents with numbers before and after, and no suggested question gets a general-knowledge answer |
+| VI. Extras | 0.21.0 | Anki import; the capture extension; Supernote notebooks from a synced folder, on a folder source; Luminary as a read-only MCP server; card review on mobile | #349, #367, #456, #457, #458, #459, #544–#548 | No imported card shows a grounding verdict it did not earn, and its schedule comes from FSRS state; three source types round-trip from the browser to a readable document; a notebook edited on the device updates the same document, a note the user edited is never overwritten by a re-sync, and text Luminary did not take from the source is shown marked; an MCP client receives passages only from collections the user scoped, and nothing with the setting off or without the token; an offline review on the phone merges without overwriting FSRS state |
 | VII. Models measured | 0.22.0 | Languages, the embedder, the reranker and figures, decided from measurements (§11) — **conditional** | #124, #377, #444, #445, #446 | Non-English degradation measured on the current stack first; every swap decided from its own numbers on two runs that agree, and a no-go is allowed and moves it to 1.1; at most one re-embed, through 0.17.0's rail |
 | | 1.0.0-rc → 1.0.0 | The release. **Checkpoint E** | | Zero open `bug` issues; every rung's exit gate green together, on one build; the code-quality targets met |
-| After 1.0 | 1.1.0 | Candidates. One moves onto a 0.x rung only by displacing planned work of equal size | #25, #103, #121, #137, #300, #314, #411, #459, #460 | Each candidate's own done-when |
+| After 1.0 | 1.1.0 | Candidates. One moves onto a 0.x rung only by displacing planned work of equal size | #25, #103, #121, #137, #300, #314, #411, #460 | Each candidate's own done-when |
 
 **1.0.0 itself carries no new features.** Work not on a rung above is 1.1, not 1.0.
 
@@ -126,17 +127,18 @@ is re-planned at every tag.
 | 1 | Connectors batch A (#431, #432; #430 fixed by #464); #435 begins | #211, #231 (0.17.1); the CI checks #24, #99, #355; #382; #330 run 1; #465 | 0.17.1 |
 | 2 | #435, then #434 and #433; #436 | #334; #330 run 2; the #348 spike; #440 | |
 | 3 | Connectors batch C (#437, #467, #438 with #348) | Checkpoint C's manual pass, with #162 and #231's last checks | 0.18.0, Checkpoint C |
-| 4 | #447; the backend half of 0.19.0 (#450–#453) | #441, #442 | |
-| 5 | #448, #449 | #443 | 0.19.0 |
+| 4 | #532 and #447 (done); #450, then #451; #533 (done); #453 | #441, #442; connector protocol 2 and SDK 0.2 (#541, #542) | |
+| 5 | #452; #448, #449 narrowed; #534; #535's design | #443; both connector repos on SDK 0.2 (#543) | 0.19.0 |
 | 6 | #173, #454 | #66; #377's February re-check | |
 | 7 | #455; Checkpoint D | #322 closes; #444 measured | 0.20.0, Checkpoint D |
-| 8 | #456, #457, #458, #349 | | 0.21.0 |
+| 8 | #456, #457, #458, #349; the folder source (#459), then Supernote (#544–#548) | | 0.21.0 |
 | 9 | #445 (the one re-embed), #446, #124 | Feature freeze | 0.22.0 |
 | 10 | 1.0.0-rc and Checkpoint E | Bugs only | 1.0.0 |
 
-**The critical path** is connectors batch B (#436) → package extraction (#448) → the mobile client
-(#454, #455). The 0.19.0 backend issues gate the phone: #451 the outbox, #453 mobile review. Work
-off that path runs beside it, never ahead of it.
+**The critical path** is route-scope authorization (#532, done) → the mobile shell (#448, #449) → the
+mobile client (#454, #455). The 0.19.0 backend issues gate the phone: #450 the cache's change feed,
+#451 the outbox, #453 mobile review. No endpoint a phone calls lands before #532 (done). Work off
+that path runs beside it, never ahead of it.
 
 **Room for new issues.**
 
@@ -145,9 +147,12 @@ off that path runs beside it, never ahead of it.
 - A new feature goes to the 1.1.0 candidates. It moves onto a 0.x rung only by displacing planned
   work of equal size, decided by the maintainer at an iteration boundary, never mid-iteration.
 - **The contributor lane** is the issues labelled `good first issue` or `help wanted`: #24, #99,
-  #103, #314, #334, #355, #382, #447, and #460 once #438 lands. None is on the critical path, so a
-  contributor PR never holds a tag. A connector built on the published contract (#438) needs no
-  slot at all.
+  #103, #314, #334, #355, #382, and #460 once #438 lands. None is on the critical path, so a
+  contributor PR never holds a tag. A connector built on the published contract (#438, protocol 2
+  from #541) needs no slot at all.
+- **Moved onto a rung by displacement (decided 2026-11-23).** The watch folder #459 moved from 1.1.0
+  to 0.21.0 as the folder source the Supernote connector needs. If 0.21.0 slips, page transcription
+  (#547) goes back to 1.1.0 first, then the notes mapping (#546) if #173 has slipped.
 - Work in progress: one batch per lane at a time, and one heavy job (an eval or a full ingest) on
   the host at a time.
 
@@ -155,7 +160,7 @@ off that path runs beside it, never ahead of it.
 
 1. 0.22.0's swaps (#446, #445, #124). Each allows a no-go, so a cut one is recorded as a no-go.
 2. #349 and #456, to 1.1.0.
-3. Connectors batch C, to the start of 0.19.0 (§7, "Order").
+3. Page transcription (#547), then the Supernote notes mapping (#546), to 1.1.0.
 
 **Never cut:** a checkpoint, a `bug`, or mobile reading and note capture, which is what 1.0 is
 (above).
@@ -904,7 +909,7 @@ longer imports either itself (#467).
 | **The core hosts no connector (decided 2026-11-04).** Public connectors live in [`nupsea/luminary-connectors`](https://github.com/nupsea/luminary-connectors) (Apache-2.0), YouTube first. O'Reilly lives in the maintainer's private repo, `nupsea/luminary-personal-connectors` | A licence covers code, never a source's terms. O'Reilly's Membership Agreement (updated 2024-10-09) prohibits "automated retrieval mechanisms" to download content and use "as input or a prompt to a machine learning or AI system", and the connector gets past the site's bot defence, so it is not published. YouTube's terms (2023-11-06) bar downloading "except as expressly authorized by the Service"; publishing its connector opt-in, with those terms shown before install, is the maintainer's decision |
 | The SDK lives in this repo (`packages/luminary-source-sdk/`); connectors install it from here until #438 publishes it | The contract changes with the importer that validates it. Connectors in another repo pay with paired PRs while it moves, so the protocol settles in #435 before they are written |
 | Third-party connectors live in their authors' repos, listed in a catalogue (#437) | Luminary hosts no code for a source whose terms it has not read |
-| No incremental re-sync | Re-crawling changed pages while keeping anchored notes and cards is its own design |
+| Re-sync only for a folder source (0.21.0, #459); a URL import never re-syncs | A changed item reparses into the same document. When highlights, clips or cards would move, it waits for the user's confirmation, as reparse does; it never moves them silently |
 
 | Batch | Stage | Issue | Work | What a user sees |
 |---|---|---|---|---|
@@ -917,6 +922,9 @@ longer imports either itself (#467).
 | C | 5 | #437 | **Done (#474).** Installed from the catalogue in the bundled app; O'Reilly through the private connector re-imports from its stored bundle with the connector removed. A catalogue of `luminary-connectors`, and install into a per-connector environment, shown with its licence and the source's terms first. The private repo is never listed | Installable connectors |
 | C | 6 | #467 | **Done.** The core drops its built-in O'Reilly and YouTube import, `yt-dlp` and `curl_cffi`; a link no installed connector claims says what to install | YouTube is a connector you install |
 | C | 7 | #438 | **Done but the PyPI publish, which waits on the trusted publisher; #348's HTML book and Confluence are in the catalogue (#508).** Publish the SDK; conformance kit, template repo, review checklist, `docs/connectors.md`; #348 as the second reference connector in `luminary-connectors` (MediaWiki if #348 drops) | Open to contributors |
+| D | 8 | #541 | 0.19.0. Protocol 2: a connector declares its source (URL, folder or account), lists items and fetches each; a `pages` media kind; `list` and the source kind provisional until #459 consumes them | Nothing yet |
+| D | 9 | #542 | 0.19.0. SDK 0.2: shared bases (`UrlConnector`, `FolderConnector`), a polite HTTP client, HTML extraction, test fixtures, and a `luminary-connector` command that creates, runs and validates a connector without a backend checkout. Still standard library only | Authors start from a command, not a copied folder |
+| D | 10 | #543 | 0.19.0. Both connector repos on one SDK version; the public repo carries the protocol, `CONTRIBUTING.md` and a first-connector guide; each refactored connector's bundle byte-identical to before | Nothing (the contract is proven by its own connectors) |
 
 **Order.** Batch A landed, and #464 fixed #430 directly. Nothing leaves the core before the
 catalogue can install its replacement, so #467 waits on #433, #434, #436 and #437, and no user
@@ -946,23 +954,25 @@ Then Checkpoint C.
 
 ### 8. Components separated for mobile — 0.19.0
 
-**Frontend.** Every API call goes through `lib/apiClient.ts`'s transport (base URL, headers and
-fetch, set at boot); media URLs (`img`, `audio`, `video`, pdf.js) take only its base. So the phone
-has one place for its token, its native client and its cache. ESLint fails on `fetch` or `API_BASE`
-anywhere else (#447, in progress).
-Then `packages/api` (client plus types), `packages/domain` (hooks and state) and `packages/ui` are
-extracted, and desktop and mobile become thin shells (#448). That extraction waits for #436, which
-deletes the O'Reilly screens. `surface-manifest.json` gains a `mobile` mode: a third mode, not a fork
-(#449).
+The desktop or server stays the authority; a phone is a paired client with a cache and an outbox.
+There is no peer-to-peer merge in 1.0.
 
-**Backend.** These do not depend on the frontend work and run beside it.
+| Order | Issue | What | The decision that shapes it |
+|---|---|---|---|
+| 1 | #532 | **Done (#537).** A paired device reaches only routes that declare a scope it holds (`read`, `notes:write`, `reviews:write`); every other route is local-only; existing tokens narrowed on upgrade. User assets served sandboxed (I-79, I-80) | A device token could switch the engine to cloud with its own key, install a connector and push notes through git. Note delete stays local-only until deletes leave a tombstone (#450) |
+| 2 | #447 | **Done (#536).** Every request and API URL goes through `lib/apiClient.ts`'s transport (base URL, headers, fetch); ESLint fails on `fetch` or `API_BASE` anywhere else | One place for the phone's token, native client and cache. Headers go only to the transport's own origin |
+| 3 | #450 | A change feed: SQLite triggers write `change_log` in the writing transaction; cursor `(library_epoch, seq)`; deletes leave tombstones | Repo-level recording misses Core bulk statements. A timestamp cursor breaks on clock skew; a snapshot restore or space import replaces the database, so a changed epoch means resync |
+| 4 | #451 | Idempotent writes (`Idempotency-Key`, one table for create, edit, delete and review) and a `rev` on notes; a stale edit gets 409 and the current row | Never last-writer-wins: the outbox (#455) turns a 409 into a conflict copy, so no user text is lost |
+| 5 | #533 | **Done (#538).** A learning card graduates on Good; the step is stored between reviews | Before, every review rebuilt the card at step 0 |
+| 6 | #453 | Every review appends an event holding what the scheduler produced; one baseline event per card on upgrade, nothing replayed | fsrs fuzzes intervals unseeded and many cards have state but no events, so replaying history would move due dates |
+| 7 | #452 | A render-ready document over `GET /sections/{id}/content`, paged per section, with an ETag | Prose is never rebuilt from chunks (I-29) |
+| 8 | #448, #449 | api/domain/ui boundaries enforced by ESLint inside `frontend/`; a mobile Vite entry; surface manifest v3 with per-surface mode sets; a separate mobile Tauri crate; CI gates on an Android debug build | Extracting packages moved no code the phone needs before it exists. The desktop crate's supervisor and single-instance lock stay out of the mobile crate |
+| 9 | #534 | The shipped Rust crates are checked against the licence policy; MPL-2.0 allowed for unmodified crates | The mobile client is Apache-2.0 because it bundles no backend; the desktop builds stay AGPL-3.0 (PyMuPDF, ebooklib) |
+| 10 | #535 | The transport design, built in 0.20.0: beyond loopback over Tailscale with a ts.net certificate, plain HTTP refused, media through short-lived signed URLs | A webview cannot pin a self-signed certificate, and phones refuse cleartext HTTP |
 
-- An incremental change feed for documents and notes (#450).
-- Idempotent writes keyed by client ids, which the offline outbox needs (#451).
-- A render-ready document endpoint for reading on the phone. Prose is never rebuilt from chunks (I-29) (#452).
-- Review logs made append-only, so an offline merge replays reviews rather than overwriting FSRS
-  state (#453). Today FSRS state is updated in place on the card, and a session's `review_events` are
-  deleted with it (`repos/study_repo.py`).
+**Beside it, the connector contract (#541–#543, §7 batch D).** It touches no mobile item and no
+migration. Protocol 2 and SDK 0.2 ship now so authors can build on them; `list` and the source kind
+stay provisional until 0.21.0's folder source (#459) is their first consumer.
 
 Desktop-only code stays in `luminary-host` and `src-tauri`, as today.
 
@@ -1024,8 +1034,24 @@ iframe after sign-in, so the URL import refuses it (`remote_source._refuse_signe
 extension, already signed in, imports it with one click (#367). Luminary never holds the claude.ai
 credential. The extension imports through 0.18.0's bundle importer (§7), not a route of its own.
 
-**Not on this rung.** A watch folder (#459) and a Zotero connector (#460, a contributor connector
-once #438 publishes the contract) are 1.1.0 candidates. Markdown export shaped for Obsidian already
+**Supernote notebooks, from the folder they sync to (#459, #544–#548; moved from 1.1.0 on
+2026-11-23).** A notebook becomes a document (each page a section with its image beside the text,
+a read-only mirror) and one draft note per page in #173's inbox.
+
+| Order | Issue | What | Rule |
+|---|---|---|---|
+| 1 | #459 | A folder source: the host lists the folder, copies a file only once its size and time hold across two scans, and hashes the copy; a changed file reparses the same document; polled, paced by `llm_admission` (I-78); local-only routes | No symlink or path outside the root is read. A sync client's half-written or cloud-only placeholder file is never imported |
+| 2 | #544 | A `pages` media kind: every page with an image is kept, and one under 50 characters is shown but not chunked | A blank or short page never vanishes |
+| 3 | #545 | The Supernote connector, in `luminary-connectors`, reading `.note` through a vendored Apache-2.0 subset of supernotelib; the device's recognised text where the notebook has it | None of supernotelib's GPL or LGPL dependencies (potracer, svglib); a test fails on one. An unknown firmware fails loudly. Fixtures are notebooks the maintainer writes on purpose |
+| 4 | #546 | Notes per page: an unedited imported note updates in place; an edited one is never touched, and the new text arrives as a linked draft | Needs #451's `rev` and #173's inbox |
+| 5 | #547 | Pages without the device's text transcribed by the local vision model, off by default until an eval with human-transcribed goldens passes | A new invariant: text not taken from the source (the device's recognition included) is always shown marked and never counts as grounding evidence |
+| 6 | #548 | Settings: add a folder source with the native picker, see sync status, confirm a re-sync that would move highlights | A paired device can neither add a source nor read a folder path (I-79) |
+
+Supernote's own cloud API is not used: it is unofficial and its terms are unread. Private Cloud (a
+server-local folder) and Browse & Access (the device's LAN server) are 1.1.0 candidates.
+
+**Not on this rung.** A Zotero connector (#460, a contributor connector once #438 publishes the
+contract) is a 1.1.0 candidate. Markdown export shaped for Obsidian already
 exists (`export_service.py`, `[[id|text]]` links become `[[title]]`). Whether a real Obsidian vault
 opens it cleanly has not been checked.
 
@@ -1149,7 +1175,7 @@ lines with their own copies of manifest, search and history plumbing.
 | 0.15 | **Done.** `summarizer.py` split into `summary_prompts.py` and `summary_assembly.py` (both pure), `repos/summary_repo.py` and `library_summary.py`; `sql_outside_repos` for it went from 22 to 0. `content_type` readers go through `DocumentProfile.of`, starting with flashcard generation, and the ratchet counts the rest (234 references in 33 files) so none is added. Eval runners read `/search` order through `evals/lib/search.py`, beside the shared manifest and history |
 | 0.16–0.17 | Repos extracted from `routers/study.py` (103 queries) and `routers/documents.py` (42), then from the services with the most direct SQL, so each store is opened in one place before the library root lands (#388). `get_collection_study_dashboard` and `list_documents` are split on the way. The 53 `DATA_DIR` joins go through the path resolver. **`routers/study.py` done:** 109 statements to 0 and off the maintainability list; the due queue, collection dashboard and teach-back pipeline are services (`study_queue.py`, `collection_dashboard.py`, `teachback_service.py`) over repos (#244 and the teach-back PR). **Every router done:** `routers/documents.py` 43 to 0, with the library list query in `repos/document_list_repo.py`, and the other 14 routers 150 to 0 in total, over new `home_repo`, `enrichment_repo`, `concept_repo`, `eval_repo` and `suggestion_repo`. **Path resolver done:** every `DATA_DIR` join goes through `app/storage.py` (`library_root` or `machine_root`, both `DATA_DIR` today), held by `tests/test_storage_roots.py`. **Services, five batches:** every service but `retriever` and `retriever_strategies`, which wait for the retrieval-change gate; statements outside repos 629 to 79, the rest in the chat runtime, the ingestion and concept workflows, and scripts. **The rest done in 0.17.0's batch 1:** the retrieval services over `repos/retrieval_repo.py`, the chat runtime, the ingestion and concept workflows, scripts and `main.py`, 79 to 0 (#337 to #339) |
 | 0.18 | `main.lifespan` (300 lines) becomes named startup phases |
-| 0.19 | `fetch` onto `apiClient`, then `DocumentReader` (1,946 lines), `PDFViewer`, `Notes` and `ChatConversation` split into `packages/domain` hooks and `packages/ui` views |
+| 0.19 | **Done:** `fetch` onto `apiClient` (#447). Then the api/domain/ui boundaries enforced by ESLint inside `frontend/` (#448); splitting `DocumentReader` (2,095 lines), `PDFViewer`, `Notes` and `ChatConversation` is done only for what the mobile entry consumes, the rest recorded against this ratchet |
 | 1.0-rc | Every target above met, or its exemption stated here with the reason |
 
 ## Deferred — decided, not scheduled
