@@ -1756,3 +1756,67 @@ class IdempotencyKeyModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )
+
+
+class CardStateEventModel(Base):
+    """What a card's schedule became, and why: append-only, never deleted (#453).
+
+    One row per review (its rating and the scheduler's output) and per change to the schedule
+    that is not a review (a card created, held cards released, a card archived), so a later merge
+    replays from where two devices diverged instead of overwriting the card. `review_events`
+    stays the activity record (streaks, XP, accuracy) and is not this log.
+    """
+
+    __tablename__ = "card_state_events"
+    __table_args__ = (
+        Index("idx_card_state_events_card", "flashcard_id", "id"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    flashcard_id: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # baseline|created|review|state
+    rating: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    state: Mapped[str | None] = mapped_column(String, nullable=True)
+    step: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stability: Mapped[float | None] = mapped_column(Float, nullable=True)
+    difficulty: Mapped[float | None] = mapped_column(Float, nullable=True)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_review: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lapses: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    device_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    client_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
+# A review is logged by `FSRSService.schedule`, with its rating; every other change to a card's
+# schedule by trigger, so a bulk release or an ORM archive cannot skip the log. Only the
+# scheduler writes `last_review`, which is how the update trigger tells the two apart.
+_CARD_STATE_COLUMNS = (
+    "flashcard_id, kind, state, step, stability, difficulty, due_date, last_review, reps, lapses"
+)
+
+
+def card_state_triggers() -> list[str]:
+    def snapshot(kind: str) -> str:
+        return (
+            f"INSERT INTO card_state_events ({_CARD_STATE_COLUMNS}) VALUES (NEW.id, '{kind}', "  # noqa: S608 -- constants, never input
+            "NEW.fsrs_state, NEW.fsrs_step, NEW.fsrs_stability, NEW.fsrs_difficulty, "
+            "NEW.due_date, NEW.last_review, NEW.reps, NEW.lapses);"
+        )
+
+    return [
+        "CREATE TRIGGER IF NOT EXISTS card_state_created AFTER INSERT ON flashcards "
+        f"BEGIN {snapshot('created')} END",
+        "CREATE TRIGGER IF NOT EXISTS card_state_changed "
+        "AFTER UPDATE OF fsrs_state, fsrs_step, fsrs_stability, fsrs_difficulty, due_date "
+        "ON flashcards WHEN NEW.last_review IS OLD.last_review "
+        f"BEGIN {snapshot('state')} END",
+    ]
+
+
+for _ddl in card_state_triggers():
+    event.listen(Base.metadata.tables["flashcards"], "after_create", DDL(_ddl))

@@ -11,7 +11,8 @@ from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import FlashcardModel
+from app.exceptions import NotFound
+from app.models import CardStateEventModel, FlashcardModel
 from app.repos.deck_stats_repo import DeckStatsRepo
 from app.repos.flashcard_repo import FlashcardRepo
 from app.repos.study_repo import StudyRepo
@@ -81,13 +82,17 @@ class FSRSService:
         card_id: str,
         rating: Literal["again", "hard", "good", "easy"],
         session: AsyncSession,
+        *,
+        device_id: str | None = None,
+        client_seq: int | None = None,
     ) -> FlashcardModel:
-        """Apply an FSRS review and persist the updated card state."""
+        """Apply an FSRS review, log what the scheduler produced (#453), and commit both with
+        whatever the caller added to *session* (its `review_events` row) in one transaction."""
         from fsrs import Rating, Scheduler  # noqa: PLC0415
 
         db_card = await FlashcardRepo(session).find(card_id)
         if db_card is None:
-            raise ValueError(f"Flashcard {card_id} not found")
+            raise NotFound(f"Flashcard {card_id} not found")
 
         fsrs_card = self._build_fsrs_card(db_card)
         rating_enum = Rating(RATING_MAP[rating])
@@ -113,6 +118,24 @@ class FSRSService:
         db_card.reps = (db_card.reps or 0) + 1
         if rating == "again":
             db_card.lapses = (db_card.lapses or 0) + 1
+        session.add(
+            CardStateEventModel(
+                flashcard_id=card_id,
+                kind="review",
+                rating=rating,
+                state=db_card.fsrs_state,
+                step=db_card.fsrs_step,
+                stability=db_card.fsrs_stability,
+                difficulty=db_card.fsrs_difficulty,
+                due_date=db_card.due_date,
+                last_review=db_card.last_review,
+                reps=db_card.reps,
+                lapses=db_card.lapses,
+                device_id=device_id,
+                client_seq=client_seq,
+                at=db_card.last_review,
+            )
+        )
 
         # successful recall closes any open misconceptions recorded for this card
         # (docs/recommender-spec.md); rides the same commit as the review itself

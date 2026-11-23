@@ -30,7 +30,7 @@ from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
@@ -924,28 +924,31 @@ async def delete_all_collection_flashcards(
 async def review_flashcard(
     card_id: str,
     req: ReviewRequest,
+    request: Request,
     session: AsyncSession = Depends(get_db),
     service: FSRSService = Depends(get_fsrs_service),
 ) -> FlashcardResponse:
     """Submit an FSRS review rating for a flashcard. Optionally link to a study session."""
-    try:
-        card = await service.schedule(card_id, req.rating, session)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
     if req.session_id:
-        # Conditional audit insert; only created when session_id is present.
-        # Kept inline because it is a single-row write with no business logic.
-        event = ReviewEventModel(
-            id=str(uuid.uuid4()),
-            session_id=req.session_id,
-            flashcard_id=card_id,
-            rating=req.rating,
-            is_correct=req.rating != "again",
-            predicted_rating=req.predicted_rating,
+        # The activity record, committed with the card's new schedule and its log row.
+        session.add(
+            ReviewEventModel(
+                id=str(uuid.uuid4()),
+                session_id=req.session_id,
+                flashcard_id=card_id,
+                rating=req.rating,
+                is_correct=req.rating != "again",
+                predicted_rating=req.predicted_rating,
+            )
         )
-        session.add(event)
-        await session.commit()
+    principal = getattr(request.state, "principal", None)
+    card = await service.schedule(
+        card_id,
+        req.rating,
+        session,
+        device_id=principal.device_id if principal is not None else None,
+        client_seq=req.client_seq,
+    )
 
     # Bump content_activity for the doc this card sources from. Flashcard
     # grading is the canonical "meaningful interaction" signal for study

@@ -11223,6 +11223,8 @@ export interface components {
             session_id?: string | null;
             /** Predicted Rating */
             predicted_rating?: ("again" | "hard" | "good" | "easy") | null;
+            /** Client Seq */
+            client_seq?: number | null;
         };
         /** RoleResolution */
         RoleResolution: {

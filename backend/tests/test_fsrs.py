@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.exceptions import NotFound
 from app.main import app
 from app.models import FlashcardModel
 from app.services.fsrs_service import FSRSService
@@ -107,11 +108,11 @@ async def test_schedule_repeated_again_accumulates_lapses(test_db):
 
 
 async def test_schedule_raises_for_missing_card(test_db):
-    """schedule() raises ValueError when the card ID doesn't exist."""
+    """schedule() raises NotFound (404) when the card ID doesn't exist."""
     _, factory, _ = test_db
     service = FSRSService()
     async with factory() as session:
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFound, match="not found"):
             await service.schedule("nonexistent-id", "good", session)
 
 

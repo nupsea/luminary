@@ -165,6 +165,9 @@ async def test_the_upgrade_gives_every_note_a_revision_and_keeps_the_feed(memory
     async with memory_db.engine.begin() as conn:
         assert (await conn.execute(text("SELECT rev FROM notes"))).scalar() == 0
         triggers = await conn.execute(
-            text("SELECT count(*) FROM sqlite_master WHERE type = 'trigger'")
+            text(
+                "SELECT count(*) FROM sqlite_master "
+                "WHERE type = 'trigger' AND name LIKE 'change_feed_%'"
+            )
         )
         assert triggers.scalar() == 6

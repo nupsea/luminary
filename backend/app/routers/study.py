@@ -1045,10 +1045,7 @@ async def session_review(
     rating_str = _RATING_INT_MAP[req.rating]
 
     fsrs_svc = get_fsrs_service()
-    try:
-        await fsrs_svc.schedule(req.card_id, rating_str, session)  # type: ignore[arg-type]
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await fsrs_svc.schedule(req.card_id, rating_str, session)  # type: ignore[arg-type]
 
     remaining = await StudyRepo(session).due_or_unscheduled_for_document(document_id)
     if not remaining:
