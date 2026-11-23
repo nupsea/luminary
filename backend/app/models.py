@@ -2,6 +2,7 @@ import logging
 from datetime import UTC, date, datetime
 
 from sqlalchemy import (
+    DDL,
     Boolean,
     CheckConstraint,
     Date,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     text,
 )
 from sqlalchemy.dialects.sqlite import JSON
@@ -1632,3 +1634,103 @@ class DeviceModel(Base):
     )
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ChangeLogModel(Base):
+    """A note's or document's newest write, or its deletion: one row each (#450).
+
+    Written only by the triggers below, in the writing transaction, so Core bulk statements and
+    raw SQL are recorded too. A newer change replaces the older row with a larger `seq`.
+    """
+
+    __tablename__ = "change_log"
+    __table_args__ = (
+        UniqueConstraint("entity", "entity_id", name="uq_change_log_entity"),
+        {"sqlite_autoincrement": True},
+    )
+
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    entity: Mapped[str] = mapped_column(String(16), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String, nullable=False)
+    op: Mapped[str] = mapped_column(String(8), nullable=False)  # upsert | delete
+    at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
+class ChangeFeedStateModel(Base):
+    """The library's change-feed epoch, and the oldest cursor its pruned tombstones still answer.
+
+    One row. A restored library gets a new epoch, so a client's cursor from the old one resyncs.
+    """
+
+    __tablename__ = "change_feed_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    epoch: Mapped[str] = mapped_column(String(36), nullable=False)
+    horizon_seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+
+# The columns a client shows; a write that touches none of them (last_accessed_at, a content hash)
+# is not a change. The migration that created these triggers keeps its own frozen copy.
+CHANGE_FEED_TABLES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "documents": (
+        "document",
+        (
+            "title",
+            "format",
+            "stage",
+            "tags",
+            "word_count",
+            "page_count",
+            "chapter_count",
+            "error_message",
+            "form",
+            "domain",
+            "register",
+            "is_favorite",
+        ),
+    ),
+    "notes": (
+        "note",
+        (
+            "document_id",
+            "chunk_id",
+            "section_id",
+            "content",
+            "tags",
+            "group_name",
+            "title",
+            "description",
+            "archived",
+            "is_favorite",
+        ),
+    ),
+}
+
+
+def change_feed_triggers(table: str) -> list[str]:
+    """Delete then insert, never INSERT OR REPLACE: an outer statement's OR clause overrides a
+    trigger's, so `INSERT OR IGNORE INTO notes` would turn the record into a silent no-op."""
+    entity, columns = CHANGE_FEED_TABLES[table]
+
+    def record(row: str, op: str) -> str:
+        return (
+            f"DELETE FROM change_log WHERE entity = '{entity}' AND entity_id = {row}.id; "  # noqa: S608 -- constants, never input
+            f"INSERT INTO change_log (entity, entity_id, op, at) "
+            f"VALUES ('{entity}', {row}.id, '{op}', CURRENT_TIMESTAMP);"
+        )
+
+    return [
+        f"CREATE TRIGGER IF NOT EXISTS change_feed_{table}_insert AFTER INSERT ON {table} "
+        f"BEGIN {record('NEW', 'upsert')} END",
+        f"CREATE TRIGGER IF NOT EXISTS change_feed_{table}_update "
+        f"AFTER UPDATE OF {', '.join(columns)} ON {table} BEGIN {record('NEW', 'upsert')} END",
+        f"CREATE TRIGGER IF NOT EXISTS change_feed_{table}_delete AFTER DELETE ON {table} "
+        f"BEGIN {record('OLD', 'delete')} END",
+    ]
+
+
+for _table in CHANGE_FEED_TABLES:
+    for _ddl in change_feed_triggers(_table):
+        event.listen(Base.metadata.tables[_table], "after_create", DDL(_ddl))

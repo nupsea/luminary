@@ -28,6 +28,7 @@ from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
 from app.routers.audio import router as audio_router
 from app.routers.blog import router as blog_router
+from app.routers.changes import router as changes_router
 from app.routers.chat_meta import router as chat_meta_router
 from app.routers.chat_sessions import router as chat_sessions_router
 from app.routers.clips import router as clips_router
@@ -72,6 +73,7 @@ from app.runtime.request_auth import (
     require_this_computer,
 )
 from app.services.background import all_pending, clear_registries, task_registry
+from app.services.change_feed import prune_tombstones
 from app.services.chapter_backfill import ChapterBackfill
 from app.services.components import (
     install_ollama_model,
@@ -142,6 +144,7 @@ async def lifespan(app: FastAPI):
     # dev library's 98k graph rows copy in under a second.
     await run_graph_import(str(library_root(settings)))
     await optimize_database(engine)
+    await prune_tombstones()
 
     # NOTE: concept regeneration is a manual offline step (with the server stopped
     # so it does not starve the event loop):
@@ -428,6 +431,7 @@ ROUTER_REGISTRY = {
     "collections": collections_router,
     "concepts": concepts_router,
     "connectors": connectors_router,
+    "changes": changes_router,
     "devices": devices_router,
     "chat_meta": chat_meta_router,
     "chat_sessions": chat_sessions_router,
@@ -462,8 +466,9 @@ ROUTER_REGISTRY = {
 
 # settings and setup are always registered: the Settings drawer needs one, and
 # the other is what a user with an incomplete install has to reach. devices is
-# how any caller but the app gets in; libraries is which library the app opens.
-_enabled = enabled_routers(_mode) | {"settings", "setup", "devices", "libraries"}
+# how any caller but the app gets in, and changes how it keeps its cache; libraries is which
+# library the app opens.
+_enabled = enabled_routers(_mode) | {"settings", "setup", "devices", "changes", "libraries"}
 for _name, _router in ROUTER_REGISTRY.items():
     if _name in _enabled:
         app.include_router(_router, prefix=_API_PREFIX)

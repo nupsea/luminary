@@ -18,6 +18,7 @@ from app.exceptions import Conflict, InvalidInput
 from app.library import use_library
 from app.main import app
 from app.models import DeviceModel, DocumentModel, SettingsModel
+from app.repos.change_log_repo import ChangeLogRepo
 from app.services import library_snapshot
 from app.services.library_snapshot import restore_snapshot, take_snapshot
 from app.services.vector_store import get_lancedb_service
@@ -170,6 +171,22 @@ async def test_a_restore_has_all_the_originals_rows_files_and_vectors(source):
             assert list(titles) == ["The Odyssey"]
         assert get_lancedb_service().count_for_document(DOC) == 1
     assert (root / "raw" / f"{DOC}.txt").read_text() == "Sing to me of the man, Muse."
+
+
+async def test_a_restored_library_keeps_its_change_feed_under_a_new_epoch(source):
+    """A client paired with the original must resync, not read the copy as a continuation."""
+
+    async def feed(library: str) -> tuple[str, list[str]]:
+        with use_library(library):
+            async with get_session_factory()() as session:
+                repo = ChangeLogRepo(session)
+                return (await repo.state()).epoch, [c.entity_id for c in await repo.after(0, 10)]
+
+    original = await feed("first")
+    await restore_snapshot(source, "second")
+    restored = await feed("second")
+    assert restored[1] == original[1] == [DOC]
+    assert restored[0] != original[0]
 
 
 async def test_a_restore_never_writes_into_the_default_or_a_used_library(source):

@@ -1008,6 +1008,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Changes
+         * @description Changes after `since` in this library, oldest first. With `resync`, the client drops
+         *     its cache: the page restarts from 0 and lists every live note and document.
+         */
+        get: operations["list_changes_changes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/devices/pairing-code": {
         parameters: {
             query?: never;
@@ -7488,6 +7509,41 @@ export interface components {
         CatalogueResponse: {
             /** Connectors */
             connectors: components["schemas"]["CatalogueItem"][];
+        };
+        /** Change */
+        Change: {
+            /** Seq */
+            seq: number;
+            /**
+             * Entity
+             * @enum {string}
+             */
+            entity: "document" | "note";
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "upsert" | "delete";
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+        };
+        /** ChangesResponse */
+        ChangesResponse: {
+            /** Epoch */
+            epoch: string;
+            /** Changes */
+            changes: components["schemas"]["Change"][];
+            /** Next */
+            next: number;
+            /** More */
+            more: boolean;
+            /** Resync */
+            resync: boolean;
         };
         /**
          * ChapterItem
@@ -14375,6 +14431,39 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_changes_changes_get: {
+        parameters: {
+            query?: {
+                epoch?: string | null;
+                since?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangesResponse"];
                 };
             };
             /** @description Validation Error */

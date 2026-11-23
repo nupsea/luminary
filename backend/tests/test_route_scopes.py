@@ -41,6 +41,7 @@ DEVICE_ROUTES = {
     ("POST", "/notes/{note_id}/links", "notes:write"),
     ("PUT", "/notes/{note_id}", "notes:write"),
     # read
+    ("GET", "/changes", "read"),
     ("GET", "/documents", "read"),
     ("GET", "/documents/facets", "read"),
     ("GET", "/documents/{document_id}", "read"),
