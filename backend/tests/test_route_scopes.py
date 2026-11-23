@@ -35,6 +35,7 @@ BEFORE_SCOPES = "7f6bcd0f8881"
 DEVICE_ROUTES = {
     # notes:write
     ("DELETE", "/notes/{note_id}/links/{target_note_id}", "notes:write"),
+    ("DELETE", "/notes/{note_id}", "notes:write"),
     ("PATCH", "/notes/{note_id}", "notes:write"),
     ("POST", "/images/notes", "notes:write"),
     ("POST", "/notes", "notes:write"),
@@ -226,8 +227,9 @@ async def test_a_device_reads_writes_notes_and_reviews_within_its_scopes(client)
         "/study/sessions/start", json={"document_id": None, "mode": "flashcard"}, headers=device
     )
     assert started.status_code in (200, 201), started.text
-    refused = await client.delete(f"/notes/{note_id}", headers=device)
-    assert refused.status_code == 403 and refused.json()["detail"] == LOCAL_ONLY
+    # A phone's cache learns of the delete from the change feed's tombstone (#450).
+    deleted = await client.delete(f"/notes/{note_id}", headers=device)
+    assert deleted.status_code == 204, deleted.text
 
 
 async def test_a_device_without_a_scope_is_refused_what_it_needs(client, memory_db):

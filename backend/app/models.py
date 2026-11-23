@@ -452,6 +452,9 @@ class NoteModel(Base):
     is_favorite: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
+    # Bumped by every edit through the note routes, never by background writes (an auto title),
+    # so an edit made against an older revision is refused instead of overwriting (#451).
+    rev: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
@@ -1734,3 +1737,22 @@ def change_feed_triggers(table: str) -> list[str]:
 for _table in CHANGE_FEED_TABLES:
     for _ddl in change_feed_triggers(_table):
         event.listen(Base.metadata.tables[_table], "after_create", DDL(_ddl))
+
+
+class IdempotencyKeyModel(Base):
+    """A write a client may retry, keyed by its `Idempotency-Key` (#451).
+
+    Reserved before the write runs (`status_code` NULL), completed with the response, so a retry
+    of the same request replays it and a concurrent duplicate is refused rather than run twice.
+    """
+
+    __tablename__ = "idempotency_keys"
+
+    principal: Mapped[str] = mapped_column(String(80), primary_key=True)
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
