@@ -2,8 +2,12 @@
 
 Luminary starts a connector process per call and writes one request line:
 
-    {"protocol": 1, "op": "describe" | "check" | "preview" | "fetch",
+    {"protocol": 2, "op": "describe" | "check" | "preview" | "list" | "fetch",
      "input": {...}, "credentials": {...}, "dest": "/dir/the/core/named"}
+
+Protocol 2 adds `list` and a declared source (`Source`); a protocol-1 request is still answered,
+and never carries `list`. `list` and `Source.kind` are provisional until the core's folder
+source (#459) is their first caller.
 
 The connector answers with event lines and exits:
 
@@ -21,8 +25,11 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-PROTOCOL_VERSION = 1
-OPS = ("describe", "check", "preview", "fetch")
+PROTOCOL_VERSION = 2
+PROTOCOL_VERSIONS = (1, 2)
+OPS = ("describe", "check", "preview", "list", "fetch")
+# Where a connector's items come from: a pasted link, a folder the user picked, an account.
+INPUT_KINDS = ("url", "folder", "account")
 ERROR_CODES = ("input", "auth", "source", "internal")
 LOG_LEVELS = ("debug", "info", "warning", "error")
 MEDIA = ("text", "audio", "youtube")
@@ -31,7 +38,7 @@ TOOLS = ("ffmpeg",)
 # terms. The conformance kit and install both refuse it: a placeholder is not a reading.
 PLACEHOLDER_TERMS = "Quote what the source's own terms say about downloading and automated use."
 
-Op = Literal["describe", "check", "preview", "fetch"]
+Op = Literal["describe", "check", "preview", "list", "fetch"]
 
 
 @dataclass(frozen=True)
@@ -99,6 +106,41 @@ class Terms:
 
 
 @dataclass(frozen=True)
+class Source:
+    """Where the connector's items come from (protocol 2, provisional). A `url` connector
+    takes a pasted link; a `folder` or `account` connector is listed (`list`), then fetched
+    one item at a time."""
+
+    kind: str = "url"
+    # Files a folder connector reads, as glob patterns: `*.note`.
+    patterns: list[str] = field(default_factory=list)
+    max_file_bytes: int | None = None
+
+
+@dataclass(frozen=True)
+class Item:
+    """One thing `list` found. `item_id` is stable across runs; `version` is compared only for
+    equality, so a changed version means fetch again."""
+
+    item_id: str
+    version: str
+    title: str
+    updated: str | None = None
+
+
+@dataclass(frozen=True)
+class Listing:
+    """What `list` returns. Pass `cursor` back to continue; `complete` once nothing is left."""
+
+    items: list[Item]
+    cursor: str | None = None
+    complete: bool = True
+
+    def to_json(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Description:
     """What `describe` returns: everything the core shows before the connector runs."""
 
@@ -119,6 +161,9 @@ class Description:
     # Host tools it runs, from `TOOLS`. The core finds each and passes its path in the
     # fetch input as `input["tools"][name]`, or refuses the link before fetching.
     tools: list[str] = field(default_factory=list)
+    # The protocol this connector speaks; the core stores it and sends no op it lacks.
+    protocol: int = PROTOCOL_VERSION
+    source: Source = field(default_factory=Source)
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -130,10 +175,11 @@ def request(
     input: dict[str, Any] | None = None,
     credentials: dict[str, Any] | None = None,
     dest: str | None = None,
+    protocol: int = PROTOCOL_VERSION,
 ) -> str:
     return json.dumps(
         {
-            "protocol": PROTOCOL_VERSION,
+            "protocol": protocol,
             "op": op,
             "input": input or {},
             "credentials": credentials or {},

@@ -38,6 +38,8 @@ def _dispatch(connector: Connector, req: dict[str, Any], emit) -> dict[str, Any]
         return connector.check(creds).to_json()
     if op == "preview":
         return connector.preview(inp, creds).to_json()
+    if op == "list":
+        return connector.list_items(inp.get("config") or {}, creds, inp.get("cursor")).to_json()
     dest = Path(req["dest"])
     connector.fetch(inp, creds, BundleWriter(dest), lambda f, s="": emit(protocol.progress(f, s)))
     if not (dest / "manifest.json").is_file():
@@ -54,9 +56,9 @@ def handle(raw: str, entry: str, out: TextIO) -> int:
 
     try:
         req = json.loads(raw)
-        if req.get("protocol") != protocol.PROTOCOL_VERSION:
+        if req.get("protocol") not in protocol.PROTOCOL_VERSIONS:
             raise ConnectorError("internal", f"protocol {req.get('protocol')!r} is not supported")
-        if req.get("op") not in protocol.OPS:
+        if req.get("op") not in protocol.OPS or (req["op"] == "list" and req["protocol"] < 2):
             raise ConnectorError("internal", f"unknown op {req.get('op')!r}")
         emit(protocol.result(_dispatch(_load(entry), req, emit)))
         return 0

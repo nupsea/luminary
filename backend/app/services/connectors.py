@@ -32,10 +32,12 @@ _NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _RECORD = "connector.json"
 _CREDENTIALS = "credentials.json"
 _INSTALL_TIMEOUT_S = 15 * 60
-# The bundle kinds and host tools a connector may declare; `luminary_source_sdk.protocol`
-# lists the same.
+# What a connector may declare; `luminary_source_sdk.protocol` lists the same.
 MEDIA = ("text", "audio", "youtube")
 TOOLS = ("ffmpeg",)
+PROTOCOL_VERSIONS = (1, 2)
+OPS = ("describe", "check", "preview", "list", "fetch")
+INPUT_KINDS = ("url", "folder", "account")
 # `luminary_source_sdk.protocol.PLACEHOLDER_TERMS`: an unfilled template's terms, refused.
 PLACEHOLDER_TERMS = "Quote what the source's own terms say about downloading and automated use."
 _TRANSCRIBED = {"audio", "youtube"}
@@ -97,11 +99,24 @@ def _check_description(name: str, description: dict[str, Any]) -> None:
             f"describe names the connector {description.get('name')!r}, its entry point {name!r}"
         )
     _check_terms(name, description.get("terms") or {})
+    _check_source(name, description)
     for prefix in description.get("url_prefixes") or []:
         if not re.match(r"^https?://[^/\s]+/", str(prefix)):
             raise ConnectorInstallFailed(f"{name} claims {prefix!r}, which is not a URL prefix")
     _check_known(name, "writes", description.get("media") or ["text"], MEDIA)
     _check_known(name, "runs", description.get("tools") or [], TOOLS)
+
+
+def _check_source(name: str, description: dict[str, Any]) -> None:
+    protocol = description.get("protocol", 1)
+    if protocol not in PROTOCOL_VERSIONS:
+        raise ConnectorInstallFailed(
+            f"{name} speaks protocol {protocol!r}; this Luminary speaks {PROTOCOL_VERSIONS}"
+        )
+    kind = (description.get("source") or {}).get("kind", "url")
+    _check_known(name, "reads from", [kind], INPUT_KINDS)
+    if kind != "url" and protocol < 2:
+        raise ConnectorInstallFailed(f"{name} reads from a {kind}, which needs protocol 2")
 
 
 def _check_terms(name: str, terms: dict[str, Any]) -> None:

@@ -14,18 +14,23 @@ from luminary_source_sdk.connector import Connector, ConnectorError, Report
 from luminary_source_sdk.protocol import (
     PLACEHOLDER_TERMS,
     PROTOCOL_VERSION,
+    PROTOCOL_VERSIONS,
     Account,
     Choice,
     Description,
     Field,
+    Item,
+    Listing,
     Option,
     Preview,
+    Source,
     Terms,
 )
 
 __all__ = [
     "PLACEHOLDER_TERMS",
     "PROTOCOL_VERSION",
+    "PROTOCOL_VERSIONS",
     "Account",
     "BundleError",
     "BundleWriter",
@@ -34,8 +39,11 @@ __all__ = [
     "ConnectorError",
     "Description",
     "Field",
+    "Item",
+    "Listing",
     "Option",
     "Preview",
     "Report",
+    "Source",
     "Terms",
 ]
