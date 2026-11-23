@@ -28,8 +28,11 @@ function strippedAliases(luminaryMode: Mode): Record<string, string> {
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
+  // `--mode mobile` builds the phone's shell (src/mobile) from mobile.html into dist-mobile;
+  // it ships only what a server serves to a paired client, so it builds as `public`.
+  const mobile = mode === "mobile"
   const luminaryMode = (process.env.VITE_LUMINARY_MODE as Mode | undefined)
-    ?? (mode === "production" ? "public" : "full")
+    ?? (mode === "production" || mobile ? "public" : "full")
 
   return {
     plugins: [react()],
@@ -44,6 +47,10 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       chunkSizeWarningLimit: 2000,
+      ...(mobile && {
+        outDir: "dist-mobile",
+        rollupOptions: { input: path.resolve(__dirname, "mobile.html") },
+      }),
     },
     server: {
       // surface-manifest.json lives at the repo root, one level above the vite root.

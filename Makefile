@@ -903,6 +903,8 @@ endif
 		! printf '%s' "$$out" | grep -q 'Some chunks are larger than' \
 		|| { echo 'FAIL: a chunk exceeds chunkSizeWarningLimit'; exit 1; }
 	$(PY) scripts/check_public_bundle_excludes_full.py
+	# The phone's shell (#448): its own entry, so an import that breaks only it fails here.
+	cd frontend && npm run build:mobile
 	cd frontend && npm run lint
 	cd frontend && npm run knip
 	# The frontend suite was never wired into a gate: 59 files of pure-logic

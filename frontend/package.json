@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:mobile": "tsc -b && vite build --mode mobile",
     "lint": "eslint . --max-warnings 90",
     "preview": "vite preview",
     "test": "vitest run",

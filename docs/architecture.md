@@ -170,6 +170,7 @@ backend/tests/       pytest tests (mirror app/ structure)
 frontend/src/
   App.tsx            Router, nav rail, Cmd+K, global chat panel, prefetch
   main.tsx           React 19 root
+  mobile/           The phone's shell: its own entry (mobile.html, `npm run build:mobile`)
   index.css          Tailwind layers + design tokens (--type-*, .lum-*)
   store.ts, vizStore.ts  Zustand stores (main + knowledge map)
   store/             Additional Zustand slice files
@@ -196,3 +197,10 @@ frontend/src/
   types/             Generated openapi types (api.ts)
   assets/            Static assets bundled by Vite
 ```
+
+**Layers (#448).** api (`lib/apiClient.ts`, `lib/config.ts`, `lib/*Api.ts`) -> domain (the rest of
+`lib/`, `hooks/`, `store/`, `types/`) -> ui (`components/`, `pages/`, `App.tsx`). Code imports at
+runtime only from its own layer or one below, and `mobile/` never imports a desktop screen
+(`pages/`, `App`); ESLint enforces both (`eslint.config.js`, `layerRule`). A type-only import is
+allowed, since it is erased at build: a few domain types still live under `components/` and
+`pages/`.

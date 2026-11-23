@@ -21,6 +21,24 @@ const NO_TRANSPORT_BYPASS = [
   },
 ]
 
+// api -> domain -> ui (#448): code imports only from its own layer or one below, so the phone's
+// shell takes the api and domain layers without the desktop's screens. A type-only import is
+// erased at build and allowed: some domain types still live beside the screens that drew them.
+const UI_LAYER = ['**/components/**', '**/pages/**', '**/App', '**/App.tsx']
+const DOMAIN_LAYER = ['**/hooks/**', '**/store', '**/store/**', '**/store.ts']
+const layerRule = (group, layer) => [
+  'error',
+  {
+    patterns: [
+      {
+        group,
+        allowTypeImports: true,
+        message: `${layer} code may not import a higher layer at runtime (api -> domain -> ui, #448).`,
+      },
+    ],
+  },
+]
+
 // I-67
 const NO_INLINE_INNER_HTML = {
   selector: 'JSXAttribute[name.name="dangerouslySetInnerHTML"] > JSXExpressionContainer > ObjectExpression',
@@ -76,5 +94,20 @@ export default defineConfig([
         { patterns: [{ regex: '(^@/lib|^\\.{1,2}(/\\.\\.)*(/lib)?)/config$', importNames: ['API_BASE'], message: API_BASE_MESSAGE }] },
       ],
     },
+  },
+  {
+    files: ['src/lib/**/*.{ts,tsx}', 'src/hooks/**/*.{ts,tsx}', 'src/store/**/*.ts', 'src/store.ts', 'src/types/**/*.ts'],
+    ignores: ['src/**/*.test.{ts,tsx}'],
+    rules: { '@typescript-eslint/no-restricted-imports': layerRule(UI_LAYER, 'Domain') },
+  },
+  {
+    files: ['src/lib/apiClient.ts', 'src/lib/config.ts', 'src/lib/*Api.ts'],
+    rules: { '@typescript-eslint/no-restricted-imports': layerRule([...UI_LAYER, ...DOMAIN_LAYER], 'API') },
+  },
+  {
+    // The phone's shell: the api and domain layers and shared components, never a desktop screen.
+    files: ['src/mobile/**/*.{ts,tsx}'],
+    ignores: ['src/**/*.test.{ts,tsx}'],
+    rules: { '@typescript-eslint/no-restricted-imports': layerRule(['**/pages/**', '**/App', '**/App.tsx'], 'Mobile') },
   },
 ])
