@@ -6,6 +6,28 @@ a citation points at.
 
 Standard library only, Apache-2.0.
 
+## Start
+
+    luminary-connector new my-source        # a project: connector, test, pyproject.toml
+    cd my-source && uv run pytest
+    uv run luminary-connector run luminary_my_source:MySource fetch --url https://... --dest out/
+    uv run luminary-connector validate out/   # what Luminary would refuse
+
+No Luminary checkout is needed until the conformance kit's import check (below).
+
+The template subclasses `bases.UrlConnector`: `describe` comes from class attributes (`NAME`,
+`VERSION`, `TERMS`, `URL_PREFIXES`, ...), `claimed_url(input)` refuses a link the connector does
+not take, and `self.finish(bundle, title=...)` stamps the name, version and terms. The helpers
+the published connectors each wrote for themselves:
+
+| Module | Gives |
+|---|---|
+| `client.PoliteClient` | GET with a named user agent, a delay between requests, retries on a dropped connection; 401 is an `auth` error, other refusals `source` |
+| `pages.main_html` | a page's `<title>` and the inside of its `<main>` |
+| `progress.Progress` | a fraction that never goes back as more work is found |
+| `testing.serve_pages` | a local web server for a connector's tests |
+| `bases.FolderConnector` | a connector for files in a folder the user picked; provisional until Luminary's folder source lands |
+
 ## A connector
 
 ```python

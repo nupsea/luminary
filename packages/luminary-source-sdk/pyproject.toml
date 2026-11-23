@@ -10,6 +10,9 @@ requires-python = ">=3.11"
 # never bring Luminary's (or an AGPL package) into a connector's environment.
 dependencies = []
 
+[project.scripts]
+luminary-connector = "luminary_source_sdk.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/nupsea/luminary"
 Documentation = "https://github.com/nupsea/luminary/blob/master/docs/connectors.md"
