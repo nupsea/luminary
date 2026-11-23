@@ -6,8 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-24
+
+Components separated for mobile: the server a phone will sync from, and the phone's shell.
+
+### Added
+- **A change feed a paired client syncs from.** `GET /changes` pages every note and document write by an (epoch, seq) cursor, recorded by triggers in the writing transaction, so bulk and raw writes are seen too; a restored library starts a new epoch and its clients resync (#450, I-81).
+- **A write a phone retries happens once, and an edit never overwrites a newer one.** Note create, edit and delete and a card review take an `Idempotency-Key`; a note edit that names its revision is refused with the current note once another edit got there first (#451).
+- **A document's sections revalidate and arrive compressed.** The section content routes send an ETag and gzip: DDIA's first 40 sections, 130 KB plain, 43 KB gzipped, nothing on revalidation (#452).
+- **A card's schedule is an append-only log.** Every review records what the scheduler produced, every other schedule change is logged by trigger, and nothing deletes it; upgrading writes one baseline row per card and moves no due date (#453, I-82).
+- **The phone's shell.** A separate mobile entry and Tauri crate (Apache-2.0, no backend), built for Android in CI; it accepts only an https server beyond loopback. Pairing and reading arrive in 0.20.0 (#448, #449).
+- **Connectors: protocol 2 and SDK 0.2.** A connector can declare a folder or account source and list it (provisional until the folder source); `luminary-connector new / run / validate` starts, runs and checks one without a Luminary checkout; every public connector moved onto it with its bundles byte-identical (#541, #542, #543).
+- **The shipped Rust crates are checked against the licence policy**, the phone's under a stricter key no desktop exception covers (#534).
+
 ### Security
-- **A paired device can do only what a phone needs.** Its token reads the library, writes notes and records reviews, and asks with the computer's own model, never one it names or web search; settings, setup, connectors, the blog, admin, deletes, spaces and devices answer only to Luminary on the computer itself. Before, a token reached nearly every route, including the one that switches answers to a cloud key. Devices paired earlier keep exactly those three permissions (#532).
+- **A paired device can do only what a phone needs.** Its token reads the library, writes notes and records reviews, and asks with the computer's own model, never one it names or web search; settings, setup, connectors, the blog, admin, every delete but a note's, spaces and devices answer only to Luminary on the computer itself; a note a device deletes reaches the change feed (#451). Before, a token reached nearly every route, including the one that switches answers to a cloud key. Devices paired earlier keep exactly those three permissions (#532).
 - **One address can no longer void the pairing code by guessing.** It gets four attempts in any five minutes, one fewer than voids a code; an IPv6 address counts by its /64 (#532).
 - **An uploaded file can no longer run script as Luminary.** A note image keeps only an image extension, and stored images are served so that opening one directly runs nothing.
 - **A server behind a reverse proxy on the same machine no longer treats proxied requests as its own.** A request carrying a forwarding header needs a device token, and with `LUMINARY_ALLOWED_HOSTS` set so does one naming another host. A proxy that rewrites `Host` to loopback and forwards nothing (nginx's default) is not supported.
@@ -15,6 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **A card you are learning now graduates when you answer Good.** Every review restarted the card at its first learning step, so Good, Good kept it in learning and only Easy moved it on; the dev library had 88 cards stuck in learning and 3 in review. The step is now kept between reviews. On upgrade, a learning card whose last study-session review was Good resumes at the second step and every other learning or relearning card at the first; no due date changes until the card's next review (#533).
 - **An answer still arriving when you leave a document is there when you come back.** Returning reloaded the conversation from the server, which saves the answer only once it finishes, so the question showed alone. A question left without an answer, from a closed app or an engine that stopped mid-answer, now offers Retry (#539).
+
+### Known issues
+- **Practice-panel cards are below the quality bar** (#330), carried to 0.20.0.
+- **On Windows CI a test worker still exits mid-run now and then**, always in a test that runs ingestion in-process (#211, #476); a re-run passes. No user-facing symptom is known.
+- **The connector SDK is not on PyPI yet** (#438); connectors install it from GitHub by commit.
+
+### Not exercised in this release
+- A phone: the Android shell is built in CI, never run on a device. The change feed, idempotent writes and the schedule log are exercised by tests and on a copy of the dev library, not by a client.
+- Evals were not run; nothing in this release touches retrieval, answers or card generation.
+- iOS, and a server behind Tailscale (the transport design is on #535, built in 0.20.0).
 
 ## [0.18.2] - 2026-11-21
 
