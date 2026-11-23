@@ -182,13 +182,16 @@ jobs:
       - name: Check formatting
         working-directory: src-tauri-mobile
         run: cargo fmt --check
+      # Run through `npm run tauri` from frontend/: the generated Gradle project calls the CLI
+      # back the way it was started, and a bare path to the binary does not resolve from there.
       - name: Android debug build
-        working-directory: src-tauri-mobile
+        working-directory: frontend
         run: |
           export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
-          ../frontend/node_modules/.bin/tauri android init --ci
-          ../frontend/node_modules/.bin/tauri android build --debug --apk --target aarch64
-          find gen/android -name '*.apk' -print
+          export TAURI_APP_PATH="$GITHUB_WORKSPACE/src-tauri-mobile"
+          npm run tauri -- android init --ci
+          npm run tauri -- android build --debug --apk --target aarch64
+          find ../src-tauri-mobile/gen/android -name '*.apk' -print | grep .
 
   # The support policy decides whether a host is offered a local model at all,
   # and it got Windows wrong for a whole release: `_has_accelerator` probed
