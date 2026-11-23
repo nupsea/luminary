@@ -1,0 +1,28 @@
+# The phone's shell (#449). Its own crate, not a member of src-tauri's workspace: the desktop
+# shell carries the backend supervisor and the single-instance lock, which a phone has neither
+# of. Apache-2.0, and it bundles no backend, so nothing AGPL ships in it (#534).
+[package]
+name = "luminary-mobile"
+version = "0.1.0"
+description = "Luminary on a phone"
+edition = "2021"
+rust-version = "1.77"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+name = "luminary_mobile_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

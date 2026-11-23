@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "default",
+  "description": "The phone's one window: core events only. It opens nothing and reads no file; the server is reached over the network through the frontend's transport.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

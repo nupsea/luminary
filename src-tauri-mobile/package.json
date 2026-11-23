@@ -1,0 +1,8 @@
+{
+  "name": "luminary-mobile-shell",
+  "private": true,
+  "description": "Only so Gradle can call the Tauri CLI back with `npm run tauri` from this crate.",
+  "scripts": {
+    "tauri": "../frontend/node_modules/.bin/tauri"
+  }
+}
