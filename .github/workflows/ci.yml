@@ -33,6 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       shell: ${{ steps.diff.outputs.shell }}
+      mobile: ${{ steps.diff.outputs.mobile }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,6 +46,13 @@ jobs:
             echo shell=true >> "$GITHUB_OUTPUT"
           else
             echo shell=false >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$GITHUB_REF" = refs/heads/master ] \
+            || git diff --name-only origin/master...HEAD \
+              | grep -qE '^(src-tauri-mobile/|frontend/(src/mobile/|src/lib/|mobile\.html|vite\.config\.ts|package(-lock)?\.json)|\.github/workflows/ci\.yml$)'; then
+            echo mobile=true >> "$GITHUB_OUTPUT"
+          else
+            echo mobile=false >> "$GITHUB_OUTPUT"
           fi
 
   ci:
@@ -141,6 +149,46 @@ jobs:
         run: cargo test --workspace
       - name: Lint the desktop shell
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # The phone's shell (#449), 0.19.0's exit gate: an Android debug build. The runner image
+  # carries the Android SDK and NDK. iOS follows when macOS runner minutes allow.
+  mobile-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [branch-check, changes]
+    if: always() && needs.changes.outputs.mobile == 'true' && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri-mobile -> target
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build the phone's frontend
+        run: cd frontend && npm ci && npm run build:mobile
+      # Clippy on this host would compile the desktop webview stack (GTK, WebKit), which the
+      # Android build does not use; the build below compiles the crate for the phone.
+      - name: Check formatting
+        working-directory: src-tauri-mobile
+        run: cargo fmt --check
+      - name: Android debug build
+        working-directory: src-tauri-mobile
+        run: |
+          export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          ../frontend/node_modules/.bin/tauri android init --ci
+          ../frontend/node_modules/.bin/tauri android build --debug --apk --target aarch64
+          find gen/android -name '*.apk' -print
 
   # The support policy decides whether a host is offered a local model at all,
   # and it got Windows wrong for a whole release: `_has_accelerator` probed

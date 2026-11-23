@@ -150,3 +150,14 @@ def test_a_crate_ships_when_linked_or_built_with_never_as_a_dev_dependency():
         "linked": "linked-licence",
         "transitive": "transitive-licence",
     }
+
+
+def test_a_desktop_exception_never_covers_the_same_crate_on_the_phone():
+    """The mobile client is Apache-2.0 (#534): a copyleft crate the desktop ships under an
+    exception still fails when the phone's shell links it."""
+    licence = "LGPL-2.1-or-later"
+    exception = {"licence": licence, "reason": "desktop only", "issue": "#1"}
+    policy = _policy(exceptions={"rust:webview-thing": exception})
+    shipped = {"rust:webview-thing": licence, "rust-mobile:webview-thing": licence}
+    problems = check_licences.check(shipped, policy)
+    assert len(problems) == 1 and problems[0].startswith("rust-mobile:webview-thing")

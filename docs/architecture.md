@@ -172,7 +172,9 @@ backend/tests/       pytest tests (mirror app/ structure)
 frontend/src/
   App.tsx            Router, nav rail, Cmd+K, global chat panel, prefetch
   main.tsx           React 19 root
-  mobile/           The phone's shell: its own entry (mobile.html, `npm run build:mobile`)
+  mobile/           The phone's shell: its own entry (mobile.html, `npm run build:mobile`),
+                     wrapped by `src-tauri-mobile/`, a Tauri crate apart from the desktop's
+                     (Apache-2.0, no backend; CI builds it for Android)
   index.css          Tailwind layers + design tokens (--type-*, .lum-*)
   store.ts, vizStore.ts  Zustand stores (main + knowledge map)
   store/             Additional Zustand slice files

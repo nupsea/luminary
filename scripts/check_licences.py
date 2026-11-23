@@ -150,15 +150,20 @@ def python_dependants(name: str) -> list[str]:
 
 # What the installers build (`.github/workflows/desktop-installers.yml`, release-macos-app.yml).
 SHIPPED_TARGETS = ("aarch64-apple-darwin", "x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu")
+# The phone's shell (#449). Its crates are keyed `rust-mobile:`, so no desktop exception applies:
+# the mobile client is Apache-2.0 and ships nothing a review pattern catches (#534).
+MOBILE_TARGETS = ("aarch64-linux-android",)
 
 
-def shipping_rust() -> dict[str, str | None]:
-    """Crates the desktop shell links or builds with on a shipped target; never dev-dependencies."""
+def shipping_rust(
+    manifest: Path = REPO / "src-tauri" / "Cargo.toml", targets: tuple[str, ...] = SHIPPED_TARGETS
+) -> dict[str, str | None]:
+    """Crates a shell links or builds with on a shipped target; never dev-dependencies."""
     cargo = shutil.which("cargo")
     if cargo is None:
         raise FileNotFoundError("cargo")
     found: dict[str, str | None] = {}
-    for target in SHIPPED_TARGETS:
+    for target in targets:
         out = subprocess.run(  # noqa: S603 -- fixed arguments, no user input
             [
                 cargo,
@@ -169,7 +174,7 @@ def shipping_rust() -> dict[str, str | None]:
                 "--filter-platform",
                 target,
                 "--manifest-path",
-                str(REPO / "src-tauri" / "Cargo.toml"),
+                str(manifest),
             ],
             check=True,
             capture_output=True,
@@ -311,6 +316,8 @@ def main() -> int:
     shipped |= {f"npm:{n}": lic for n, lic in shipping_npm().items()}
     try:
         shipped |= {f"rust:{n}": lic for n, lic in shipping_rust().items()}
+        mobile = shipping_rust(REPO / "src-tauri-mobile" / "Cargo.toml", MOBILE_TARGETS)
+        shipped |= {f"rust-mobile:{n}": lic for n, lic in mobile.items()}
     except FileNotFoundError:
         # CI always has cargo; a backend-only checkout may not, and is told so.
         if os.environ.get("CI"):
