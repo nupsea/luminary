@@ -115,6 +115,12 @@ never runs the connector again.
 
 ## Install
 
+A connector runs as you, with your file and network access, so install only connectors you
+trust. Its `terms` are informational; nothing enforces them. Connectors are not sandboxed: the
+only isolation is a separate process with a cut-down environment. A fetch has to reach the source
+and write a bundle to disk, and no OS-level sandbox for that is shipped, so installation is a
+trust decision.
+
 `install_from_folder` runs `uv sync` (`--locked` from the catalogue) in the connector's own
 folder, into `<machine root>/connectors/<name>/env/`. The catalogue pins each entry to a GitHub
 archive by sha256 and refuses a tampered archive before unpacking it. The connector's
