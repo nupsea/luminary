@@ -4,33 +4,85 @@
 @tailwind utilities;
 
 @layer base {
+  /* The Luminary token layer. A component names a role, never a hue: every colour
+     below is an HSL triplet so Tailwind's opacity modifiers work, and the contrast
+     and colour-blind checks in src/lib/designTokens.test.ts read this block. */
   :root {
-    --background: 0 0% 99%;
-    --foreground: 222 47% 11%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 250 82% 57%;
-    --radius: 0.75rem;
-    --primary: 250 82% 57%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --sidebar: 0 0% 98%;
-    --sidebar-foreground: 222 47% 11%;
+    /* Surfaces */
+    --lum-canvas: 0 0% 100%;
+    --lum-raised: 0 0% 100%;
+    --lum-sunken: 0 0% 98%;
+    --lum-rail: 240 5.9% 96.7%;
+    --lum-hover: 220 14.3% 95.9%;
+    /* Text: ink-3 is decorative (counts, separators), never the only carrier of meaning */
+    --lum-ink-1: 221 39.3% 11%;
+    --lum-ink-2: 220 9.4% 43%;
+    --lum-ink-3: 218 10.6% 64.9%;
+    /* Lines */
+    --lum-hairline: 220 13% 91%;
+    --lum-line-strong: 216 12.2% 83.9%;
+    /* Action: Luminary indigo for primary actions and selection; violet sparingly */
+    --lum-action: 247 44.7% 18.4%;
+    --lum-action-fg: 0 0% 100%;
+    --lum-brand: 250 81.8% 56.9%;
+    --lum-focus: 250 81.8% 56.9%;
+    --lum-danger: 20 50.2% 40.2%;
+    --lum-danger-fg: 0 0% 100%;
+    /* Status: teal and terracotta stay apart on the blue-yellow axis for colour-blind readers */
+    --lum-positive: 181 27.5% 42.7%;
+    --lum-positive-soft: 180 26.3% 96.3%;
+    --lum-positive-fg: 181 36.9% 29.2%;
+    --lum-negative: 21 43.7% 50.6%;
+    --lum-negative-soft: 22 57.9% 96.3%;
+    --lum-negative-fg: 21 50.8% 35.9%;
+    --lum-caution: 41 55.6% 42.4%;
+    --lum-caution-soft: 44 70.4% 94.7%;
+    --lum-caution-fg: 41 54.9% 27.8%;
+    --lum-info: 216 32.2% 45.7%;
+    --lum-info-soft: 217 40% 96.1%;
+    --lum-info-fg: 216 40.2% 34.1%;
+    /* Study */
+    --lum-mode-recall: 250 81.8% 56.9%;
+    --lum-mode-quiz: 175 77.4% 26.1%;
+    --lum-mode-explain: 26 90.5% 37.1%;
+    --lum-answer-partial: 219 8.9% 56.1%;
+    --lum-answer-partial-soft: 240 5.9% 96.7%;
+    --lum-answer-partial-fg: 215 13.8% 34.1%;
+    /* Categorical data, colour-blind safe in this order */
+    --lum-chart-1: 216 32.2% 45.7%;
+    --lum-chart-2: 21 43.7% 50.6%;
+    --lum-chart-3: 181 27.5% 42.7%;
+    --lum-chart-4: 41 55.6% 42.4%;
+    --lum-chart-5: 268 29.6% 55.5%;
+    --lum-chart-6: 337 35.4% 47.3%;
+    --lum-chart-7: 95 29.1% 43.1%;
+    --lum-chart-8: 220 8.9% 46.1%;
 
-    /* Semantic state colors (light) */
-    --success: 142 71% 45%;
-    --warning: 38 92% 50%;
+    /* shadcn names, kept as aliases so untouched components follow the tokens */
+    --background: var(--lum-canvas);
+    --foreground: var(--lum-ink-1);
+    --border: var(--lum-hairline);
+    --input: var(--lum-hairline);
+    --ring: var(--lum-focus);
+    --radius: 0.5rem;
+    --primary: var(--lum-action);
+    --primary-foreground: var(--lum-action-fg);
+    --secondary: var(--lum-hover);
+    --secondary-foreground: var(--lum-ink-1);
+    --muted: var(--lum-hover);
+    --muted-foreground: var(--lum-ink-2);
+    --accent: var(--lum-hover);
+    --accent-foreground: var(--lum-ink-1);
+    --popover: var(--lum-raised);
+    --popover-foreground: var(--lum-ink-1);
+    --card: var(--lum-raised);
+    --card-foreground: var(--lum-ink-1);
+    --destructive: var(--lum-danger);
+    --destructive-foreground: var(--lum-danger-fg);
+    --sidebar: var(--lum-rail);
+    --sidebar-foreground: var(--lum-ink-1);
+    --success: var(--lum-positive);
+    --warning: var(--lum-caution);
 
     /* Content-type accents -- paired w/ -50/200/700 tints in DocumentCard */
     --type-book: 217 91% 60%;
@@ -45,10 +97,10 @@
     --type-notes: 215 16% 47%;
     --type-youtube: 0 84% 60%;
 
-    /* Radii scale -- existing --radius (12px) keeps default lg slot */
-    --radius-sm: 0.5rem;
-    --radius-md: 0.625rem;
-    --radius-xl: 1rem;
+    /* Radii: 4 badges, 6 buttons and inputs, 8 (--radius) cards and panels, 12 dialogs */
+    --radius-sm: 0.25rem;
+    --radius-md: 0.375rem;
+    --radius-xl: 0.75rem;
     --radius-2xl: 1.5rem;
     --radius-3xl: 1.75rem;
 
@@ -98,32 +150,51 @@
 
   .dark {
     color-scheme: dark;
-    --background: 222 35% 4%;
-    /* Cool blue-gray body text. The glare came from near-max lightness (was 98%),
-       not the hue -- softened to 86% so it reads comfortably. Raise/lower the
-       lightness to taste; keep the hue cool. */
-    --foreground: 213 20% 86%;
-    /* Headings sit a touch above body so they pop as structure without glare. */
+    --lum-canvas: 220 39.1% 4.5%;
+    --lum-raised: 220 36.6% 8%;
+    --lum-sunken: 220 35.3% 6.7%;
+    --lum-rail: 220 35.3% 6.7%;
+    --lum-hover: 219 33.3% 11.8%;
+    /* Body text at 86% lightness: near-max lightness glared, the cool hue did not. */
+    --lum-ink-1: 216 21.7% 86.5%;
+    --lum-ink-2: 217 17.5% 65.3%;
+    --lum-ink-3: 217 14% 43.3%;
+    --lum-hairline: 222 30.7% 14.7%;
+    --lum-line-strong: 220 27.3% 21.6%;
+    --lum-action: 248 78.7% 90.8%;
+    --lum-action-fg: 248 52.6% 14.9%;
+    --lum-brand: 252 86.9% 70%;
+    --lum-focus: 252 86.9% 70%;
+    --lum-danger: 20 53.3% 35.3%;
+    --lum-danger-fg: 0 0% 100%;
+    --lum-positive: 181 25.8% 55.1%;
+    --lum-positive-soft: 185 28.9% 8.8%;
+    --lum-positive-fg: 188 41.3% 75.3%;
+    --lum-negative: 22 53% 60.8%;
+    --lum-negative-soft: 23 37.5% 9.4%;
+    --lum-negative-fg: 22 63.7% 68.6%;
+    --lum-caution: 43 58.1% 57.8%;
+    --lum-caution-soft: 45 36.4% 8.6%;
+    --lum-caution-fg: 43 65.8% 71.4%;
+    --lum-info: 216 39.9% 64.1%;
+    --lum-info-soft: 219 40% 9.8%;
+    --lum-info-fg: 216 46.8% 78.6%;
+    --lum-mode-recall: 251 85.7% 78%;
+    --lum-mode-quiz: 170 49.8% 57.8%;
+    --lum-mode-explain: 29 70.3% 65.7%;
+    --lum-answer-partial: 217 14% 43.3%;
+    --lum-answer-partial-soft: 220 33.3% 10.6%;
+    --lum-answer-partial-fg: 217 16.5% 69%;
+    --lum-chart-1: 216 39.9% 64.1%;
+    --lum-chart-2: 22 53% 60.8%;
+    --lum-chart-3: 181 25.8% 55.1%;
+    --lum-chart-4: 43 58.1% 57.8%;
+    --lum-chart-5: 268 40% 70%;
+    --lum-chart-6: 337 45% 66%;
+    --lum-chart-7: 95 30% 58%;
+    --lum-chart-8: 217 17.5% 65.3%;
+    /* Headings sit a touch above body so they read as structure without glare. */
     --heading: 213 22% 88%;
-    --border: 217 33% 15%;
-    --input: 217 33% 15%;
-    --ring: 250 82% 65%;
-    --primary: 250 82% 65%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 217 33% 12%;
-    --secondary-foreground: 213 20% 86%;
-    --muted: 217 33% 12%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 217 33% 12%;
-    --accent-foreground: 213 20% 86%;
-    --popover: 222 35% 6%;
-    --popover-foreground: 213 20% 86%;
-    --card: 222 35% 7%;
-    --card-foreground: 213 20% 86%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --sidebar: 222 35% 6%;
-    --sidebar-foreground: 213 20% 86%;
   }
 }
 
@@ -140,6 +211,23 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+  }
+
+  /* One focus ring for every control; a utility that styles its own focus still wins. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--lum-focus));
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 
   /* Modern text selection styling with crystal clear contrast in dark mode */
