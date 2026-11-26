@@ -53,7 +53,7 @@ export function SourceCitationChips({ citations, navigateToCitation }: Props) {
               className="inline-flex items-center"
             >
               <Badge
-                variant="blue"
+                variant="info"
                 className="cursor-pointer hover:opacity-80 transition-opacity"
               >
                 {titleAbbrev}{headingAbbrev}{locusLabel}

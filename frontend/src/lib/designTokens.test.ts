@@ -76,6 +76,7 @@ const TEXT_PAIRS: [string, string][] = [
   ["info-fg", "info-soft"],
   ["answer-partial-fg", "answer-partial-soft"],
   ["brand", "canvas"],
+  ["brand", "sunken"],
 ]
 const MARK_NAMES = [
   "focus", "positive", "negative", "caution", "info", "answer-partial",

@@ -74,6 +74,8 @@ function routes(params) {
     }
     out.push({ id: s.id, route: filled, missing })
   }
+  // The primitive gallery exists only on the dev server; a built app redirects it home.
+  out.push({ id: "design", route: "/design", missing: null })
   return out
 }
 

@@ -1,11 +1,12 @@
 // Visual maps for confidence/transparency badges and strategy labels.
 
 import type { Confidence } from "./types"
+import type { BadgeVariant } from "@/components/ui/badge"
 
-export const CONFIDENCE_BADGE: Record<Confidence, "green" | "blue" | "gray"> = {
-  high: "green",
-  medium: "blue",
-  low: "gray",
+export const CONFIDENCE_BADGE: Record<Confidence, BadgeVariant> = {
+  high: "positive",
+  medium: "info",
+  low: "neutral",
 }
 
 // transparency badge uses green/yellow/red per AC (not the shadcn Badge variant system)

@@ -175,7 +175,7 @@ export function LibraryTable({ items, isLoading, isError, onRowClick, onRetry, o
                   {humanizeTitle(doc.title)}
                 </TableCell>
                 <TableCell>
-                  <Badge variant="gray">{KIND_LABELS[doc.kind]}</Badge>
+                  <Badge variant="neutral">{KIND_LABELS[doc.kind]}</Badge>
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground capitalize">
                   {doc.format}

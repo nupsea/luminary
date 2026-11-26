@@ -46,7 +46,7 @@ const CHECKS = {
     fix: "use rounded-sm, -md, -lg, -xl or -full",
   },
   surface_shadow: {
-    re: /(?<![\w-])(?:[a-z0-9-]+:)*shadow(?:-(?:md|lg|xl|2xl|inner))?(?![\w-])/g,
+    re: /(?<![\w-])(?:[a-z0-9-]+:)*shadow(?:-(?:md|lg|xl|2xl|inner))?(?![\w:-])/g,
     fix: "surfaces are flat; overlays use shadow-overlay",
   },
   raw_button: {

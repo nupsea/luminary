@@ -101,7 +101,6 @@
     "components/study/CollectionStudyDashboard.tsx": 13,
     "components/study/SessionHistory.tsx": 8,
     "components/study/SessionHistoryRow.tsx": 72,
-    "components/ui/badge.tsx": 16,
     "components/ui/dialog.tsx": 1,
     "components/ui/sheet.tsx": 1,
     "lib/cardSourceNote.ts": 4,

@@ -1,5 +1,15 @@
 import { clsx, type ClassValue } from "clsx"
-import { twMerge } from "tailwind-merge"
+import { extendTailwindMerge } from "tailwind-merge"
+
+// Without this, tailwind-merge reads `text-ui` as a colour and drops it beside `text-ink-2`.
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      "font-size": [{ text: ["eyebrow", "caption", "ui", "body", "title", "h3", "h2", "h1"] }],
+      shadow: [{ shadow: ["overlay"] }],
+    },
+  },
+})
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
