@@ -6,6 +6,7 @@
 
 import { apiFetch } from "@/lib/apiClient"
 import { distributeByWeight } from "@/lib/studyDistribute"
+import { tzOffsetMinutes } from "@/lib/dueCount"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -161,6 +162,7 @@ export async function fetchDueCards(
 ): Promise<Flashcard[]> {
   const params = new URLSearchParams({
     limit: String(filters.limit ?? 50),
+    tz_offset_minutes: String(tzOffsetMinutes()),
   })
   if (documentId) params.set("document_id", documentId)
   if (collectionId) params.set("collection_id", collectionId)

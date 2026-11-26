@@ -133,6 +133,55 @@ function RetrievalControl() {
   )
 }
 
+type StudySettings = components["schemas"]["StudySettings"]
+
+const NEW_CARD_CHOICES = [5, 10, 20, 30, 50]
+
+function StudyControl() {
+  const queryClient = useQueryClient()
+  const { data } = useQuery({
+    queryKey: ["study-settings"],
+    queryFn: () => apiGet<StudySettings>("/settings/study"),
+    staleTime: 60_000,
+  })
+  const mutation = useMutation({
+    mutationFn: (updates: StudySettings) => apiPatch<StudySettings>("/settings/study", updates),
+    onSuccess: (fresh) => {
+      queryClient.setQueryData(["study-settings"], fresh)
+      void queryClient.invalidateQueries({ queryKey: ["study-due-count"] })
+    },
+    onError: () => toast.error("Could not update study settings"),
+  })
+  const current = data?.new_cards_per_day
+  const choices = current !== undefined && !NEW_CARD_CHOICES.includes(current)
+    ? [...NEW_CARD_CHOICES, current].sort((a, b) => a - b)
+    : NEW_CARD_CHOICES
+  return (
+    <section>
+      <h3 className="mb-3 text-sm font-semibold text-foreground">Study</h3>
+      <label className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-foreground">New cards per day</p>
+          <p className="text-xs text-muted-foreground">
+            How many unseen cards today's session introduces. Every new card brings reviews for
+            weeks after, so this sets tomorrow's load. Studying one book or chapter is not capped.
+          </p>
+        </div>
+        <select
+          value={current ?? ""}
+          disabled={!data || mutation.isPending}
+          onChange={(e) => mutation.mutate({ new_cards_per_day: Number(e.target.value) })}
+          className="mt-0.5 rounded-md border border-border bg-background px-2 py-1 text-sm"
+        >
+          {choices.map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+      </label>
+    </section>
+  )
+}
+
 interface BackgroundSettings {
   chapter_backfill: boolean
   quiet_background: boolean
@@ -651,6 +700,10 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
 
           {/* Section 2.7: Retrieval — L3 reranker toggle */}
           <RetrievalControl />
+
+          <div className="border-t border-border" />
+
+          <StudyControl />
 
           <div className="border-t border-border" />
 

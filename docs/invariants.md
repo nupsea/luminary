@@ -243,6 +243,14 @@ directions.
 nothing it planned survives, inside the request that deletes the cards.
 `test_regenerate_session_purge.py` and `test_card_delete_session_purge.py` guard it.
 
+**I-83. A card is due only after its first review; an unseen card enters a session by the daily budget.**
+Every generator writes `due_date=now`, so a due rule of `due_date <= now` counted 1,167 unseen cards
+of the dev library's 1,258 "due" and turned a 91-review day into a pile. Every count and queue reads
+`repos/card_due.py`: `review_due` (a scheduled state, date arrived) or `unseen` (`new`, date
+arrived). The whole-library queue takes unseen cards up to `study_new_cards_per_day` less the cards
+first reviewed since the user's midnight; a chosen scope takes its own. `held` and `archived` are
+neither. `tests/test_due_count.py` fails if the due rule stops checking state.
+
 **I-70. A section scope that names no section of the document is an error, never the whole document.**
 Displays tidy headings (`_clean_title` drops a trailing colon) and two sections can share one, so
 a lookup by heading misses or finds the wrong section; a miss that falls back to the book still

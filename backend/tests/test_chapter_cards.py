@@ -566,7 +566,9 @@ async def test_practising_a_chapter_admits_its_cards_to_review(book, fakes):
     assert [(c["held"], c["due"]) for c in after] == [(0, 1)]
     assert missing.status_code == 404
     async with book.factory() as session:
-        assert await StudyRepo(session).count_due(DueScope(document_ids=["doc"])) == 1
+        # A practised card enters as an unseen card; it is due only after a review (I-83).
+        repo, scope = StudyRepo(session), DueScope(document_ids=["doc"])
+        assert (await repo.count_new(scope), await repo.count_due(scope)) == (1, 0)
 
 
 def test_a_draw_takes_unpractised_cards_before_practised_ones():

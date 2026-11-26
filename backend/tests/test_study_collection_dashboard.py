@@ -109,7 +109,8 @@ async def test_dashboard_rolls_up_the_whole_tree(tree):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["collection_name"] == "Parent"
-    assert (body["due_today"], body["new_today"], body["mastery_pct"]) == (3, 2, 14.3)
+    # Unseen cards are new, never due (I-83).
+    assert (body["due_today"], body["new_today"], body["mastery_pct"]) == (1, 2, 14.3)
     assert body["topics"] == [
         {"tag": "t1", "card_count": 3, "note_count": 1},
         {"tag": "t3", "card_count": 3, "note_count": 0},
@@ -132,7 +133,7 @@ async def test_dashboard_rolls_up_the_whole_tree(tree):
 @pytest.mark.asyncio
 async def test_dashboard_of_a_leaf(tree):
     body = (await _dashboard("C1")).json()
-    assert (body["due_today"], body["new_today"], body["mastery_pct"]) == (1, 1, 0.0)
+    assert (body["due_today"], body["new_today"], body["mastery_pct"]) == (0, 1, 0.0)
     assert body["topics"] == [{"tag": "t3", "card_count": 3, "note_count": 0}]
     assert body["sub_collections"] == [{"id": "G", "name": "Grandchild", "card_count": 1}]
 

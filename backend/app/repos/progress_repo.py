@@ -18,6 +18,7 @@ from app.models import (
     TimeOnTaskModel,
 )
 from app.repos._helpers import local_date, local_month
+from app.repos.card_due import review_due
 
 
 class ProgressRepo:
@@ -86,7 +87,7 @@ class ProgressRepo:
 
     async def count_cards_due_by(self, now: datetime) -> int:
         return await self._count(
-            select(func.count()).select_from(FlashcardModel).where(FlashcardModel.due_date <= now)
+            select(func.count()).select_from(FlashcardModel).where(review_due(now))
         )
 
     async def count_cards(self) -> int:

@@ -6,6 +6,7 @@ import { create } from "zustand"
 import { apiPost } from "@/lib/apiClient"
 import { logger } from "@/lib/logger"
 import type { StudyScope } from "@/lib/studyLauncher"
+import { tzOffsetMinutes } from "@/lib/dueCount"
 
 export type StudyMode = "quick_quiz" | "full_session" | "drill"
 
@@ -35,6 +36,7 @@ interface AssembleBody {
   mode: StudyMode
   length_min: number
   commit: boolean
+  tz_offset_minutes: number
 }
 
 interface LauncherState {
@@ -64,6 +66,7 @@ function bodyOf(state: LauncherState, commit: boolean): AssembleBody | null {
     mode: state.mode,
     length_min: state.lengthMin,
     commit,
+    tz_offset_minutes: tzOffsetMinutes(),
   }
 }
 

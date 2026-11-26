@@ -30,6 +30,7 @@ from app.repos.concept_repo import ConceptRepo
 from app.repos.document_repo import DocumentRepo
 from app.repos.flashcard_repo import FlashcardRepo
 from app.services.scope_resolver import resolve_scope
+from app.services.study_queue import new_card_budget
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,7 @@ async def assemble(
     length_min: int = 5,
     want_generated: bool = True,
     do_generate: bool = False,
+    tz_offset_minutes: int = 0,
 ) -> AssemblyResult:
     """Resolve scope -> due cards + (on commit) freshly generated questions, budget-fit.
 
@@ -104,6 +106,13 @@ async def assemble(
     concept_ids = await resolve_scope(session, scope_type, scope_ref)
     doc_ids, note_ids = await _material_ids(session, scope_type, scope_ref)
     budget = items_for_budget(length_min)
+    # Unseen cards fill the budget before anything is generated; the daily pick across the
+    # library takes them by the new-card budget (I-83).
+    new_limit = (
+        (await new_card_budget(session, tz_offset_minutes)).left
+        if scope_type == "daily"
+        else budget
+    )
 
     cards = await FlashcardRepo(session).due_in_scope(
         datetime.now(UTC),
@@ -111,6 +120,7 @@ async def assemble(
         concept_ids=concept_ids,
         document_ids=doc_ids,
         note_ids=note_ids,
+        new_limit=new_limit,
     )
 
     # Lane B generation. need = the gap to the budget. doc/note generate from their source;

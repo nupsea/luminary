@@ -30,7 +30,7 @@ the surfaces a learner reads.
 | `retention_30d` | correct reviews / total reviews | 30 days | 20 reviews |
 | `mastery` | Bloom-weighted mean of `min(fsrs_stability / 21, 1)` over cards with `reps > 0` | all time | 10 reviewed cards |
 | `mature_cards` | count of `fsrs_state = 'review' AND fsrs_stability >= 21` | all time | 1 reviewed card |
-| `due_today` | count of `due_date <= now` | — | always |
+| `due_today` | reviewed cards whose `due_date <= now`; an unseen card is new, never due (I-83) | — | always |
 | `current_streak` / `longest_streak` | stored on `study_streaks`, written by the assessment pipeline | — | always |
 | `reviews_30d` | count of `review_events` | 30 days | always |
 | `gaps_closed` | misconceptions with `status = 'resolved'` | all time | always |

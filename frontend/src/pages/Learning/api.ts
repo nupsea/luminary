@@ -2,6 +2,7 @@
 // its sub-components wire them up via tanstack-query useQuery / useMutation.
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/apiClient"
+import { tzOffsetMinutes } from "@/lib/dueCount"
 import type { LibraryFacets } from "@/components/library/FilterBar"
 import type {
   DocumentListItem,
@@ -89,7 +90,7 @@ export const retagDocument = (id: string): Promise<{ document_id: string; added:
   apiPost(`/documents/${id}/retag`, {})
 
 export const fetchDueCount = (): Promise<DueCountResponse> =>
-  apiGet<DueCountResponse>("/study/due-count")
+  apiGet<DueCountResponse>("/study/due-count", { tz_offset_minutes: tzOffsetMinutes() })
 
 export const fetchRecentSessions = (): Promise<SessionListResponse> =>
   apiGet<SessionListResponse>("/study/sessions", { page_size: 20 })
