@@ -104,6 +104,15 @@ def record_card_gate(kind: str | None) -> None:
         _bump("cards_rejected")
 
 
+def record_quiz_gate(kind: str | None) -> None:
+    """One generated quiz item through its gates; `quiz_reject_<kind>` names the gate that
+    refused it, so a gate that never fires on real output is visible."""
+    _bump("quiz_items_gated")
+    if kind:
+        _bump(f"quiz_reject_{kind}")
+        _bump("quiz_items_rejected")
+
+
 def record_key_alias() -> None:
     """A field read under an alternate name the prompt did not ask for."""
     _bump("repair_key_alias")

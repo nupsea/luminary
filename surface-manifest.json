@@ -89,7 +89,8 @@
       "backend": {
         "routers": [
           "study",
-          "flashcards"
+          "flashcards",
+          "quiz"
         ]
       },
       "labels": {

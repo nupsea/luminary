@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Quizzes, written from your own documents (backend).** Single- and multiple-answer questions at easy, medium, hard or adaptive, where the level sets how close the wrong options sit to the truth. Every right option quotes the passage, a wrong option the passage states is refused, and the model that wrote a question never judges it (I-85). A miss resets the card the question tests; a right answer never extends one (I-84). The screens follow.
+
 ### Fixed
 - **A card nobody has reviewed is no longer "due".** Generated cards were written due at once, so the dev library showed 1,258 due where 91 reviews were; a session now takes due reviews and up to a daily number of new cards (10 by default, set in Settings), while a chosen book, chapter or collection takes its own (I-83). Archived and held cards are neither.
 

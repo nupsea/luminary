@@ -41,7 +41,7 @@ through **one pipeline** -> `sessions/*.json` transcript -> `memory.md` digest l
 | Kind | What | Writes |
 |---|---|---|
 | `full_session` | warm-up -> engage -> reflect (+ teach-back in full mode) | FSRS, calibration, (teach-back coverage) |
-| `quick_quiz` | 5-10 generated questions, one screen | FSRS, calibration |
+| `quick_quiz` | a multiple-choice quiz (`quiz.md`) | FSRS on misses only (I-84), calibration |
 | `drill` | 3-min misconception fixer | FSRS, misconception status |
 | `checkpoint` | inline retrieval while reading | FSRS (light), signals |
 

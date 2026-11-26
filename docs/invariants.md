@@ -251,6 +251,24 @@ arrived). The whole-library queue takes unseen cards up to `study_new_cards_per_
 first reviewed since the user's midnight; a chosen scope takes its own. `held` and `archived` are
 neither. `tests/test_due_count.py` fails if the due rule stops checking state.
 
+**I-84. A quiz miss resets the card it tests; a right answer never moves a card's schedule.**
+Picking the right option is recognition, which is easier than recall, so a right answer that
+rated the card `good` would stretch its interval past what the learner can recall. An item is tied
+to a card only when the card is filed in the item's passage and their quotes contain one another
+(`quiz_builder._linked_card`). A miss or a partial answer on a tied item writes `again` through
+`FSRSService.schedule` (I-82) with a `review_events` row in the quiz's session; a confident miss
+also opens a misconception. A right answer writes nothing. `tests/test_quiz_api.py` fails CI if a
+right answer moves the card or a miss does not reset it.
+
+**I-85. A right quiz option quotes the passage; a wrong option the passage states is refused; the model that wrote an item never judges it.**
+Code picks the passage, the kind, the option counts and the level; the model only writes. Every
+right option's `quote` must be verbatim in the passage (`grounding_state`, I-34), and a wrong
+option of five words or more copied from it is a true statement and refused. Whether a wrong
+option is false is semantic, so it goes to the separate factuality judge (I-35): no default, refused
+when it is the writer, and `support_check='unchecked'` otherwise. Each refusal is a named kind
+counted in `quiz_reject_<kind>`. `tests/test_quiz_parsers.py` fires every structural gate, and
+`tests/test_quiz_api.py` the judge's two refusals and its self-judging refusal.
+
 **I-70. A section scope that names no section of the document is an error, never the whole document.**
 Displays tidy headings (`_clean_title` drops a trailing colon) and two sections can share one, so
 a lookup by heading misses or finds the wrong section; a miss that falls back to the book still
