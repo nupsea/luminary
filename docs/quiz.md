@@ -18,7 +18,8 @@ gates), `quiz_prompts.py`, `quiz_scoring.py` (pure), `quiz_service.py` (the life
 | `quiz_questions` | which item a quiz asks at each position, and the option order it shows |
 | `quiz_attempts` | one answer per question: picks, `confidence` (`sure` / `think` / `guess`), `outcome`, `score`, `time_ms` |
 
-Every row cascades from its document (I-63). Items are reused: a quiz takes unanswered bank items
+Deleting a document deletes its quizzes and items, and with them their options, questions and
+answers (I-63). Deleting a card only unties the items that tested it. Items are reused: a quiz takes unanswered bank items
 at its level and kind before it calls a model, so a second quiz on a chapter starts at once.
 
 ## Writing an item

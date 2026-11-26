@@ -51,6 +51,8 @@ from app.models import (
     PomodoroSessionModel,
     PredictionEventModel,
     QAHistoryModel,
+    QuizItemModel,
+    QuizModel,
     ReadingPositionModel,
     ReadingProgressModel,
     SectionModel,
@@ -75,6 +77,8 @@ logger = logging.getLogger(__name__)
 # so dependent rows go before their referents (matters when foreign-key constraints
 # are enabled; harmless otherwise).
 _DOCUMENT_ID_CHILD_TABLES: tuple[type, ...] = (
+    QuizModel,
+    QuizItemModel,
     ChapterCardRunModel,
     EnrichmentJobModel,
     ImageModel,

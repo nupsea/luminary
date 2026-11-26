@@ -481,3 +481,38 @@ async def test_the_writer_never_judges_its_own_options():
     verdicts = {"right one": "supported", "wrong one": "supported"}
     assert await _judged(verdicts, checker="same", writer="same") == "unchecked"
     assert await _judged(verdicts, checker="") == "unchecked"
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_card_unties_the_item_that_tested_it(library, stub):
+    from app.repos.flashcard_repo import FlashcardRepo
+
+    quiz = await _quiz(library, question_count=1)
+    item_id = quiz["questions"][0]["item_id"]
+    async with library["factory"]() as session:
+        assert (await session.get(QuizItemModel, item_id)).flashcard_id == library["card"].id
+        await FlashcardRepo(session).delete_by_id(library["card"].id)
+    async with library["factory"]() as session:
+        item = await session.get(QuizItemModel, item_id)
+        assert item is not None and item.flashcard_id is None
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_document_takes_its_quizzes_items_and_answers(library, stub):
+    from app.models import DocumentModel, QuizAttemptModel, QuizModel
+    from app.services.document_deletion_service import DocumentDeletionService
+
+    quiz = await _quiz(library, question_count=2)
+    q = quiz["questions"][0]
+    await _call(
+        "POST",
+        f"/study/quizzes/{quiz['id']}/answers",
+        json={"position": 0, "selected_option_ids": [q["options"][0]["id"]]},
+    )
+    async with library["factory"]() as session:
+        doc = await session.get(DocumentModel, library["doc"].id)
+        await DocumentDeletionService().delete_sqlite_cascade(session, doc)
+        await session.commit()
+    async with library["factory"]() as session:
+        for model in (QuizModel, QuizItemModel, QuizOptionModel, QuizAttemptModel):
+            assert not (await session.execute(select(model))).scalars().all(), model.__name__
