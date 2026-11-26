@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-full eval-gen-full eval-cards-full eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-followups eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards golden-flashcards-corpus eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-epub-place verify-reader-switch verify-note-nav luminary clean regen-api-types verify-router install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama stage-notices verify-stage check-stage check-licences desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-full eval-gen-full eval-cards-full eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-false-premise eval-followups eval-refusal eval-notes eval-notes-paraphrase eval-flashcards golden-flashcards golden-flashcards-corpus eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock verify-epub-place verify-reader-switch verify-note-nav luminary clean regen-api-types verify-router ui-snapshots install install-dev uninstall release docker-build docker-run stage stage-payload stage-python stage-ollama stage-notices verify-stage check-stage check-licences desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
 
 # install.sh puts uv (and Node on Linux) in ~/.local/bin, which a shell opened
 # before the install does not have on PATH.
@@ -406,6 +406,7 @@ lint:
 	cd backend && uv run ruff check .
 	cd frontend && ./node_modules/.bin/tsc -b --noEmit
 	cd frontend && npm run lint
+	cd frontend && node scripts/check-design-tokens.mjs
 	cd frontend && npm run knip
 	$(PY) scripts/check_manifest_schema.py
 	$(PY) scripts/check_manifest_coverage.py
@@ -906,6 +907,7 @@ endif
 	# The phone's shell (#448): its own entry, so an import that breaks only it fails here.
 	cd frontend && npm run build:mobile
 	cd frontend && npm run lint
+	cd frontend && node scripts/check-design-tokens.mjs
 	cd frontend && npm run knip
 	# The frontend suite was never wired into a gate: 59 files of pure-logic
 	# tests ran only when someone typed `npm test`, so a broken helper reached
@@ -919,6 +921,13 @@ check-licences:
 
 regen-api-types:
 	cd frontend && npm run regen:api-types
+
+# Every surface in light and dark at desktop and phone width, plus a keyboard focus
+# pass, for before/after review of styling changes. Needs the app already running.
+ui-snapshots:
+	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
+		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save $(PLAYWRIGHT_CORE)))
+	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} LUMINARY_API=$${LUMINARY_API:-http://localhost:$(LUMINARY_PORT)} SNAP_LABEL=$${SNAP_LABEL:-snap} node scripts/ui-snapshots.mjs
 
 # Client-side routing smoke test in a real browser. Needs the app already
 # running (make luminary) -- it drives the live UI, so it is not part of `make

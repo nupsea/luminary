@@ -102,6 +102,8 @@ DATA/study/
 
 # router verification artifacts (make verify-router)
 frontend/.router-verify/
+# before/after screenshot sets (make ui-snapshots)
+frontend/.ui-snapshots/
 
 # Tauri desktop shell
 src-tauri/target/
