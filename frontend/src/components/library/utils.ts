@@ -10,6 +10,7 @@ import {
   Youtube 
 } from "lucide-react"
 import type { DocumentKind, LearningStatus } from "./types"
+import type { BadgeVariant } from "@/components/ui/badge"
 
 export { Youtube }
 
@@ -65,12 +66,12 @@ export const STATUS_LABELS: Record<LearningStatus, string> = {
 
 export const STATUS_VARIANTS: Record<
   LearningStatus,
-  "gray" | "blue" | "indigo" | "green"
+  BadgeVariant
 > = {
-  not_started: "gray",
-  summarized: "blue",
-  flashcards_generated: "indigo",
-  studied: "green",
+  not_started: "neutral",
+  summarized: "info",
+  flashcards_generated: "brand",
+  studied: "positive",
 }
 
 export function formatWordCount(count: number): string {

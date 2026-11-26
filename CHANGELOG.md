@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **One colour, type and corner scale for the whole app.** Light and dark come from one set of role tokens: Luminary indigo for primary actions, 8px corners, one focus ring, and right and wrong answers told apart by contrast and under the three common colour blindnesses, not by hue alone. Toasts, badges and new controls use them; screens move over one at a time (#567).
+
 ### Fixed
 - **A card nobody has reviewed is no longer "due".** Generated cards were written due at once, so the dev library showed 1,258 due where 91 reviews were; a session now takes due reviews and up to a daily number of new cards (10 by default, set in Settings), while a chosen book, chapter or collection takes its own (I-83). Archived and held cards are neither.
 

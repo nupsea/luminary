@@ -1,13 +1,14 @@
 import { cn } from "@/lib/utils"
 
-type BadgeVariant = "default" | "gray" | "blue" | "indigo" | "green"
+export type BadgeVariant = "neutral" | "brand" | "info" | "positive" | "negative" | "caution"
 
 const VARIANT_CLASSES: Record<BadgeVariant, string> = {
-  default: "bg-secondary text-secondary-foreground",
-  gray: "bg-gray-100 text-gray-700 dark:bg-gray-800/60 dark:text-gray-300",
-  blue: "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300",
-  indigo: "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300",
-  green: "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300",
+  neutral: "bg-sunken text-ink-2 ring-1 ring-inset ring-hairline",
+  brand: "bg-sunken text-brand ring-1 ring-inset ring-hairline",
+  info: "bg-info-soft text-info-fg",
+  positive: "bg-positive-soft text-positive-fg",
+  negative: "bg-negative-soft text-negative-fg",
+  caution: "bg-caution-soft text-caution-fg",
 }
 
 interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
@@ -15,11 +16,11 @@ interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   children: React.ReactNode
 }
 
-export function Badge({ variant = "default", className, children, ...props }: BadgeProps) {
+export function Badge({ variant = "neutral", className, children, ...props }: BadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
+        "inline-flex h-5 items-center gap-1 rounded-sm px-1.5 text-caption font-medium",
         VARIANT_CLASSES[variant],
         className,
       )}

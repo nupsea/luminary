@@ -88,10 +88,10 @@ export function DatasetDetail({
           <div className="grid gap-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap gap-2">
-                <Badge variant={detail.status === "complete" ? "green" : "blue"}>{detail.status}</Badge>
-                {detail.size && <Badge variant="gray">{detail.size}</Badge>}
+                <Badge variant={detail.status === "complete" ? "positive" : "info"}>{detail.status}</Badge>
+                {detail.size && <Badge variant="neutral">{detail.size}</Badge>}
                 {!isFile && (
-                  <Badge variant="indigo">{detail.source_document_ids.length} docs</Badge>
+                  <Badge variant="brand">{detail.source_document_ids.length} docs</Badge>
                 )}
               </div>
               {!isFile && (

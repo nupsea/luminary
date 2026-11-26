@@ -15,7 +15,6 @@ import { UploadDialog } from "@/components/library/UploadDialog"
 import { WindowDropZone } from "@/components/library/WindowDropZone"
 import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom"
-import { Toaster } from "sonner"
 import { cn } from "./lib/utils"
 import { getHomeRedirectTarget } from "./lib/homeRedirect"
 import { isTypingTarget } from "./lib/keyboard"
@@ -32,6 +31,7 @@ import { StreakXPWidget } from "./components/StreakXPWidget"
 import { SearchDialog } from "./components/SearchDialog"
 import { StudyLauncher } from "./components/StudyLauncher"
 import { Skeleton } from "./components/ui/skeleton"
+import { Toaster } from "./components/ui/toaster"
 import { useReviewNotification } from "./hooks/useReviewNotification"
 import { LibrarySwitcher } from "./components/libraries/LibrarySwitcher"
 import { usePanelZoomShortcut } from "./hooks/usePanelZoomShortcut"
@@ -59,6 +59,8 @@ const CollectionWorkspace = lazy(() => import("@/pages/CollectionWorkspace"))
 const NotePage = lazy(() => import("@/pages/Notes/NotePage"))
 const DocumentOverview = lazy(() => import("@/pages/DocumentOverview"))
 const Hub = lazy(() => import("@/pages/Hub"))
+// Every primitive in every state, for review and the snapshot sweep. Dev builds only.
+const DesignGallery = import.meta.env.DEV ? lazy(() => import("@/dev/DesignGallery")) : null
 
 type LazyPage = React.LazyExoticComponent<React.ComponentType<unknown>>
 
@@ -618,6 +620,9 @@ function AppShell() {
             )
           })}
           {LUMINARY_MODE === "full" && <Route path="/evals" element={<Navigate to="/quality" replace />} />}
+          {DesignGallery && (
+            <Route path="/design" element={<Suspense fallback={null}><DesignGallery /></Suspense>} />
+          )}
           <Route path="*" element={<NotFoundRedirect />} />
         </Routes>
         </div>
@@ -650,7 +655,7 @@ function App() {
           <div className="pointer-events-none fixed bottom-5 left-[5.75rem] z-40 flex flex-col gap-3">
             <IngestionProgressPills />
           </div>
-          <Toaster position="bottom-right" richColors />
+          <Toaster />
         </IngestionTrackerProvider>
       </SetupGate>
     </QueryClientProvider>

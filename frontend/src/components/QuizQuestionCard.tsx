@@ -35,7 +35,7 @@ export function QuizQuestionCard({
   return (
     <div className="border-l-4 border-blue-500 pl-3 flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <Badge variant="blue" className="text-xs">
+        <Badge variant="info" className="text-xs">
           Quiz
         </Badge>
       </div>
