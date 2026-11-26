@@ -1,3 +1,6 @@
+const lum = (name) => `hsl(var(--lum-${name}) / <alpha-value>)`
+const status = (name) => ({ DEFAULT: lum(name), soft: lum(`${name}-soft`), fg: lum(`${name}-fg`) })
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   darkMode: ["class"],
@@ -62,11 +65,57 @@ module.exports = {
           DEFAULT: "hsl(var(--sidebar))",
           foreground: "hsl(var(--sidebar-foreground))",
         },
+        // The Luminary token layer (index.css): roles, never hues.
+        canvas: lum("canvas"),
+        raised: lum("raised"),
+        sunken: lum("sunken"),
+        rail: lum("rail"),
+        hover: lum("hover"),
+        ink: { 1: lum("ink-1"), 2: lum("ink-2"), 3: lum("ink-3") },
+        hairline: lum("hairline"),
+        "line-strong": lum("line-strong"),
+        action: { DEFAULT: lum("action"), fg: lum("action-fg") },
+        brand: lum("brand"),
+        focus: lum("focus"),
+        danger: { DEFAULT: lum("danger"), fg: lum("danger-fg") },
+        positive: status("positive"),
+        negative: status("negative"),
+        caution: status("caution"),
+        info: status("info"),
+        mode: { recall: lum("mode-recall"), quiz: lum("mode-quiz"), explain: lum("mode-explain") },
+        answer: {
+          right: lum("positive"),
+          "right-soft": lum("positive-soft"),
+          "right-fg": lum("positive-fg"),
+          wrong: lum("negative"),
+          "wrong-soft": lum("negative-soft"),
+          "wrong-fg": lum("negative-fg"),
+          partial: lum("answer-partial"),
+          "partial-soft": lum("answer-partial-soft"),
+          "partial-fg": lum("answer-partial-fg"),
+        },
+        chart: Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map((n) => [n, lum(`chart-${n}`)])),
+      },
+      // Nothing below 10px: the eyebrow is the floor.
+      fontSize: {
+        eyebrow: ["0.625rem", { lineHeight: "1", letterSpacing: "0.15em" }],
+        caption: ["0.75rem", { lineHeight: "1.125rem" }],
+        ui: ["0.8125rem", { lineHeight: "1.25rem" }],
+        body: ["0.875rem", { lineHeight: "1.375rem" }],
+        title: ["0.9375rem", { lineHeight: "1.375rem" }],
+        h3: ["1.125rem", { lineHeight: "1.5rem" }],
+        h2: ["1.25rem", { lineHeight: "1.75rem" }],
+        h1: ["1.875rem", { lineHeight: "2.25rem", letterSpacing: "-0.02em" }],
       },
       borderRadius: {
+        xl: "var(--radius-xl)",
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      // Surfaces are flat; only what floats over them casts a shadow.
+      boxShadow: {
+        overlay: "var(--shadow-lg)",
       },
     },
   },
