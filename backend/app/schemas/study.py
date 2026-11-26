@@ -218,7 +218,13 @@ class SectionHeatmapResponse(BaseModel):
 
 
 class DueCountResponse(BaseModel):
+    # Scheduled reviews that have come due. A card never reviewed is never counted here (I-83).
     due_today: int
+    # Unseen cards today's session may introduce: the daily budget's remainder for the whole
+    # library, every unseen card for a chosen scope.
+    new_today: int
+    new_available: int
+    new_per_day: int
 
 
 class DecayDebtItem(BaseModel):
@@ -357,6 +363,8 @@ class AssembleRequest(BaseModel):
     keep: Literal["test", "save"] = "test"
     # False = live preview (no StudyEvent written); True = Start (records the event).
     commit: bool = True
+    # JS Date.getTimezoneOffset(): where today starts for the daily new-card budget.
+    tz_offset_minutes: int = 0
 
 
 class AssemblePreview(BaseModel):

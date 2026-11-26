@@ -10,8 +10,8 @@
  *    d. Write current timestamp to "luminary:lastReviewNotif" (before fetch,
  *       to prevent concurrent events from each passing the throttle check).
  *    e. Fetch GET /study/due-count.
- *    f. If due_today > 0, fire new Notification with title "Luminary" and
- *       body "X card(s) due for review today". Clicking navigates to /study.
+ *    f. If reviews plus today's new cards > 0, fire new Notification with title "Luminary" and
+ *       body "X card(s) to study today". Clicking navigates to /study.
  * 3. Cleans up the visibilitychange listener on unmount.
  *
  * Must be called from a component inside <BrowserRouter> so useNavigate works.
@@ -21,7 +21,7 @@ import { useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAppStore } from "@/store"
 
-import { apiGet } from "@/lib/apiClient"
+import { cardsToday, fetchDueCount } from "@/lib/dueCount"
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000
 const PERM_REQUESTED_KEY = "luminary:notifPermRequested"
 const LAST_NOTIF_KEY = "luminary:lastReviewNotif"
@@ -69,12 +69,11 @@ export function useReviewNotification(): void {
       localStorage.setItem(LAST_NOTIF_KEY, String(Date.now()))
 
       try {
-        const data = await apiGet<{ due_today: number }>("/study/due-count")
-        if (data.due_today <= 0) return
+        const count = cardsToday(await fetchDueCount())
+        if (count <= 0) return
 
-        const count = data.due_today
         const notif = new Notification("Luminary", {
-          body: `${count} ${count !== 1 ? "cards" : "card"} due for review today`,
+          body: `${count} ${count !== 1 ? "cards" : "card"} to study today`,
         })
         notif.onclick = () => {
           window.focus()

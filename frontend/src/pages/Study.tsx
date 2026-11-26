@@ -57,6 +57,7 @@ import {
 // Document list for the in-tab picker
 
 import { useTimeOnTask } from "@/lib/useTimeOnTask"
+import { cardsToday, fetchDueCount } from "@/lib/dueCount"
 import { studyScopeDocumentId } from "./studyScope"
 import { apiGet, apiPost } from "@/lib/apiClient"
 
@@ -75,36 +76,42 @@ export type { DocListItem } from "./Study/types"  // re-exported for Progress.ts
 
 // SessionHistoryTab replaced by SessionManager component
 
-const _SESSION_SIZE = 15
-
-// Study landing's lead action: the due-review CTA. Surfacing today's recall load
-// here (rather than only on the Hub) means opening Study always answers "what
-// should I do now?" before the collection grid.
+// Study landing's lead action. Reviews and unseen cards are counted apart: a card nobody has
+// seen is not "due", and the daily budget decides how many of them join today (I-83).
 function StartReviewDueCard({ onStart }: { onStart: () => void }) {
-  const { data } = useQuery<{ due_today: number }>({
+  const { data } = useQuery({
     queryKey: ["study-due-count"],
-    queryFn: () => apiGet<{ due_today: number }>("/study/due-count"),
+    queryFn: fetchDueCount,
     staleTime: 30_000,
   })
-  const due = data?.due_today ?? 0
-  const sessionSize = Math.min(_SESSION_SIZE, due)
+  const reviews = data?.due_today ?? 0
+  const fresh = data?.new_today ?? 0
+  const waiting = (data?.new_available ?? 0) - fresh
+  const sessionSize = Math.min(FLASHCARD_CARD_LIMIT, cardsToday(data))
   const estMin = Math.max(1, Math.round(sessionSize * 0.9))
 
-  if (due === 0) {
+  if (sessionSize === 0) {
     return (
       <div className="flex items-center gap-3 rounded-2xl border border-border bg-card/50 px-5 py-4">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
           <Zap size={18} />
         </span>
         <div className="flex flex-col">
-          <span className="text-sm font-semibold text-foreground">You're all caught up</span>
+          <span className="text-sm font-semibold text-foreground">Done for today</span>
           <span className="text-xs text-muted-foreground">
-            No cards due right now. Pick a collection below to study ahead.
+            {waiting > 0
+              ? `Today's new cards are in. ${waiting} more wait for the next days.`
+              : "No reviews due. Pick a collection below to study ahead."}
           </span>
         </div>
       </div>
     )
   }
+
+  const parts = [
+    reviews > 0 ? `${reviews} review${reviews !== 1 ? "s" : ""}` : null,
+    fresh > 0 ? `${fresh} new` : null,
+  ].filter(Boolean)
 
   return (
     <button
@@ -116,13 +123,12 @@ function StartReviewDueCard({ onStart }: { onStart: () => void }) {
       </span>
       <div className="flex flex-1 flex-col gap-0.5">
         <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-foreground/80">
-          Start your due review
+          Today's session
         </span>
-        <span className="text-lg font-semibold sm:text-xl">
-          {due} card{due !== 1 ? "s" : ""} due
-        </span>
+        <span className="text-lg font-semibold sm:text-xl">{parts.join(" · ")}</span>
         <span className="text-xs text-primary-foreground/75">
           {sessionSize}-card session · ~{estMin} min
+          {waiting > 0 ? ` · ${waiting} more new cards wait` : ""}
         </span>
       </div>
       <ArrowRight size={20} className="shrink-0 text-primary-foreground/85 transition-transform group-hover:translate-x-0.5" />

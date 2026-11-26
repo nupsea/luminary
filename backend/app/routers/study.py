@@ -83,7 +83,7 @@ from app.services.mastery_service import get_mastery_service
 from app.services.misconceptions import (
     get_stats as get_misconception_stats,
 )
-from app.services.study_queue import due_scope
+from app.services.study_queue import due_scope, new_card_budget, new_card_limit
 from app.services.study_session_service import (
     build_session_plan as _build_session_plan,
 )
@@ -95,6 +95,7 @@ from app.services.study_session_service import (
 )
 from app.services.teachback_service import latest_event_per_card, teachback_tally
 from app.services.topic_service import get_topic_service
+from app.types import CARD_NEW, SCHEDULED_STATES
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,8 @@ router = APIRouter(prefix="/study", tags=["study"])
 
 _RATING_INT_MAP: dict[int, str] = {1: "again", 2: "hard", 3: "good", 4: "easy"}
 
+_TZ_OFFSET_DESC = "JS Date.getTimezoneOffset(): sets where the user's day starts."
+
 
 @router.get("/due-count", response_model=DueCountResponse, dependencies=[device_scope("read")])
 async def get_due_count(
@@ -122,9 +125,10 @@ async def get_due_count(
     tag: str | None = Query(default=None),
     document_ids: list[str] | None = Query(default=None),
     note_ids: list[str] | None = Query(default=None),
+    tz_offset_minutes: int = Query(default=0, description=_TZ_OFFSET_DESC),
     session: AsyncSession = Depends(get_db),
 ) -> DueCountResponse:
-    """Return the count of flashcards whose due_date is today or in the past."""
+    """Due reviews, and the unseen cards today's session for this scope may introduce."""
     scope = await due_scope(
         session,
         document_ids=document_ids,
@@ -132,9 +136,16 @@ async def get_due_count(
         collection_id=collection_id,
         tag=tag,
     )
-    count = await StudyRepo(session).count_due(scope)
-    logger.debug("due-count: %d cards due", count)
-    return DueCountResponse(due_today=count)
+    repo = StudyRepo(session)
+    available = await repo.count_new(scope)
+    budget = await new_card_budget(session, tz_offset_minutes)
+    new_today = min(available, budget.left) if scope.is_everything else available
+    return DueCountResponse(
+        due_today=await repo.count_due(scope),
+        new_today=new_today,
+        new_available=available,
+        new_per_day=budget.per_day,
+    )
 
 
 @router.get("/due", response_model=list[FlashcardResponse], dependencies=[device_scope("read")])
@@ -146,9 +157,11 @@ async def get_due_cards(
     note_ids: list[str] | None = Query(default=None),
     section_id: str | None = Query(default=None),
     limit: int = 20,
+    tz_offset_minutes: int = Query(default=0, description=_TZ_OFFSET_DESC),
     session: AsyncSession = Depends(get_db),
 ) -> list[FlashcardResponse]:
-    """Return flashcards whose due_date is now or in the past."""
+    """Due reviews first, then unseen cards: by the daily budget for the whole library,
+    up to `limit` for a chosen scope (I-83)."""
     scope = await due_scope(
         session,
         document_ids=document_ids or ([document_id] if document_id else []),
@@ -158,7 +171,8 @@ async def get_due_cards(
         section_id=section_id,
     )
     repo = StudyRepo(session)
-    cards = await repo.list_due(scope, limit=limit)
+    new_limit = await new_card_limit(session, scope, limit, tz_offset_minutes)
+    cards = await repo.list_due(scope, limit=limit, new_limit=new_limit)
 
     # Build chunk_id -> section_id map for SourcePanel
     chunk_to_section = await repo.chunk_section_id_map([c.chunk_id for c in cards if c.chunk_id])
@@ -185,6 +199,7 @@ async def assemble_study(
         want_generated=req.want_generated,
         # actually generate only on Start (commit), not on live preview
         do_generate=req.commit and req.want_generated,
+        tz_offset_minutes=req.tz_offset_minutes,
     )
 
     event_id = ""
@@ -725,8 +740,13 @@ async def get_study_stats(
     mastery_pct = round(cards_mastered / total_cards * 100, 1) if total_cards > 0 else 0.0
 
     # --- Due and New counts ---
-    due_today = sum(1 for c in all_cards if c.due_date and c.due_date.replace(tzinfo=UTC) <= now)
-    new_today = sum(1 for c in all_cards if c.fsrs_state == "new")
+    def _arrived(c: FlashcardModel) -> bool:
+        return c.due_date is None or c.due_date.replace(tzinfo=UTC) <= now
+
+    due_today = sum(
+        1 for c in all_cards if c.fsrs_state in SCHEDULED_STATES and c.due_date and _arrived(c)
+    )
+    new_today = sum(1 for c in all_cards if c.fsrs_state == CARD_NEW and _arrived(c))
 
     # --- Average retention: e^(-t/S) for reviewed cards ---
     retention_values: list[float] = []

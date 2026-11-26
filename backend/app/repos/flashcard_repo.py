@@ -20,6 +20,7 @@ from app.models import (
     TeachbackResultModel,
 )
 from app.repos._helpers import get_or_404
+from app.repos.card_due import review_due, unseen
 from app.types import CARD_HELD
 
 
@@ -220,8 +221,10 @@ class FlashcardRepo:
         concept_ids: Sequence[str] = (),
         document_ids: Sequence[str] = (),
         note_ids: Sequence[str] = (),
+        new_limit: int = 0,
     ) -> list[FlashcardModel]:
-        """Cards due by `now` on any of these concepts, documents or notes, most overdue first."""
+        """Reviews due by `now` on these concepts, documents or notes, most overdue first,
+        then up to `new_limit` unseen cards (I-83)."""
         conds = []
         if concept_ids:
             conds.append(FlashcardModel.concept_id.in_(list(concept_ids)))
@@ -233,11 +236,21 @@ class FlashcardRepo:
             return []
         result = await self.session.execute(
             select(FlashcardModel)
-            .where(FlashcardModel.due_date <= now, or_(*conds))
+            .where(review_due(now), or_(*conds))
             .order_by(FlashcardModel.due_date.asc())
             .limit(limit)
         )
-        return list(result.scalars().all())
+        cards = list(result.scalars().all())
+        take_new = min(new_limit, limit - len(cards))
+        if take_new > 0:
+            fresh = await self.session.execute(
+                select(FlashcardModel)
+                .where(unseen(now), or_(*conds))
+                .order_by(FlashcardModel.created_at.asc())
+                .limit(take_new)
+            )
+            cards.extend(fresh.scalars().all())
+        return cards
 
     async def get_many(self, card_ids: Sequence[str]) -> dict[str, FlashcardModel]:
         """The cards among these ids that still exist, by id."""
@@ -379,17 +392,8 @@ class FlashcardRepo:
             await self.session.execute(
                 select(
                     func.count(FlashcardModel.id),
-                    func.sum(
-                        case(
-                            (
-                                FlashcardModel.due_date.is_not(None)
-                                & (FlashcardModel.due_date <= now),
-                                1,
-                            ),
-                            else_=0,
-                        )
-                    ),
-                    func.sum(case((FlashcardModel.fsrs_state == "new", 1), else_=0)),
+                    func.sum(case((review_due(now), 1), else_=0)),
+                    func.sum(case((unseen(now), 1), else_=0)),
                     func.sum(case((FlashcardModel.fsrs_stability > mastered_above, 1), else_=0)),
                 ).where(or_(*clauses))
             )

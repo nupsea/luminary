@@ -4,6 +4,11 @@ from typing import Any, Literal, TypedDict, overload
 
 # A card written ahead for a chapter, outside the review schedule until the chapter is practised.
 CARD_HELD = "held"
+# Never reviewed: it enters a session by the daily new-card budget, never as "due".
+CARD_NEW = "new"
+CARD_ARCHIVED = "archived"
+# The states the scheduler writes after a first review; only these can be due.
+SCHEDULED_STATES = ("learning", "review", "relearning")
 
 # A section's `preview` is a bounded snippet; reading text lives in `body`, uncapped (I-29).
 PREVIEW_CHARS = 10000

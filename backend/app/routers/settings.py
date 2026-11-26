@@ -18,11 +18,14 @@ from app.services.background_prefs import (
 )
 from app.services.cloud_models import PROVIDER_LABELS, list_models
 from app.services.settings_service import (
+    NEW_CARDS_PER_DAY_MAX,
     get_llm_settings,
+    get_new_cards_per_day,
     get_rerank_enabled,
     previewing_routing,
     resolve_provider_api_key,
     save_provider_key,
+    set_new_cards_per_day,
     set_rerank_enabled,
     update_llm_settings,
 )
@@ -443,6 +446,23 @@ async def patch_retrieval_settings(
 ) -> RetrievalSettingsResponse:
     await set_rerank_enabled(db, body.rerank_enabled)
     return RetrievalSettingsResponse(rerank_enabled=await get_rerank_enabled(db))
+
+
+class StudySettings(BaseModel):
+    new_cards_per_day: int = Field(ge=0, le=NEW_CARDS_PER_DAY_MAX)
+
+
+@router.get("/study", response_model=StudySettings)
+async def get_study_settings(db: AsyncSession = Depends(get_db)) -> StudySettings:
+    return StudySettings(new_cards_per_day=await get_new_cards_per_day(db))
+
+
+@router.patch("/study", response_model=StudySettings)
+async def patch_study_settings(
+    body: StudySettings, db: AsyncSession = Depends(get_db)
+) -> StudySettings:
+    await set_new_cards_per_day(db, body.new_cards_per_day)
+    return StudySettings(new_cards_per_day=await get_new_cards_per_day(db))
 
 
 # Transcript vocabulary

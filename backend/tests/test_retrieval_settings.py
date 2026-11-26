@@ -37,3 +37,13 @@ async def test_service_defaults_and_persistence(test_db):
         await set_rerank_enabled(session, False)
     async with factory() as session:
         assert await get_rerank_enabled(session) is False
+
+
+async def test_study_settings_default_and_roundtrip(test_db):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/settings/study")).json() == {"new_cards_per_day": 10}
+        resp = await client.patch("/settings/study", json={"new_cards_per_day": 25})
+        assert resp.json() == {"new_cards_per_day": 25}
+        assert (
+            await client.patch("/settings/study", json={"new_cards_per_day": -1})
+        ).status_code == 422

@@ -446,6 +446,25 @@ async def set_rerank_enabled(db: AsyncSession, enabled: bool) -> None:
     await SettingsRepo(db).set_flag(_RERANK_KEY, enabled)
 
 
+_NEW_CARDS_KEY = "study_new_cards_per_day"
+# Each new card adds reviews for weeks after it is first seen, so the intake is what sets
+# tomorrow's load; 10 a day is a common default that keeps a daily session short.
+NEW_CARDS_PER_DAY_DEFAULT = 10
+NEW_CARDS_PER_DAY_MAX = 200
+
+
+async def get_new_cards_per_day(db: AsyncSession) -> int:
+    value = await SettingsRepo(db).get(_NEW_CARDS_KEY)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return NEW_CARDS_PER_DAY_DEFAULT
+    return min(max(value, 0), NEW_CARDS_PER_DAY_MAX)
+
+
+async def set_new_cards_per_day(db: AsyncSession, per_day: int) -> None:
+    await SettingsRepo(db).put(_NEW_CARDS_KEY, min(max(per_day, 0), NEW_CARDS_PER_DAY_MAX))
+    await db.commit()
+
+
 def get_llm_error_message(exc: BaseException | None = None) -> str:
     """What to tell the user about a failed model call; read from *exc* when there is one."""
     if exc is not None:

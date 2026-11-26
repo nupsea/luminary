@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import (
     ChunkModel,
+    DocumentModel,
     FlashcardModel,
     ReviewEventModel,
     SectionModel,
@@ -28,7 +29,7 @@ from app.models import (
     TeachbackResultModel,
 )
 from app.repos._helpers import get_or_404
-from app.types import CARD_HELD
+from app.repos.card_due import review_due, unseen
 
 # Gap-detection thresholds. Defined here so the repo is the single
 # source of truth for "what counts as a weak card". `routers/study.py`
@@ -43,7 +44,8 @@ class DueScope:
     """Filters on the due queue. Every non-empty field narrows it.
 
     `pool` is (document ids, note ids): a card sourced from either is in scope,
-    which is how a collection or a tag selects cards.
+    which is how a collection or a tag selects cards. An empty scope is the whole
+    library, the one queue the daily new-card budget applies to.
     """
 
     document_ids: Sequence[str] = ()
@@ -51,8 +53,11 @@ class DueScope:
     section_id: str | None = None
     pool: tuple[Sequence[str], Sequence[str]] | None = None
 
+    @property
+    def is_everything(self) -> bool:
+        return not (self.document_ids or self.note_ids or self.section_id or self.pool is not None)
+
     def apply(self, stmt):  # type: ignore[no-untyped-def]
-        stmt = stmt.where(FlashcardModel.due_date <= datetime.now(UTC))
         if self.section_id:
             stmt = stmt.where(
                 FlashcardModel.chunk_id.in_(
@@ -472,27 +477,70 @@ class StudyRepo:
     # -- Flashcard read patterns ------------------------------------------
 
     async def due_or_unscheduled_for_document(self, document_id: str) -> list[FlashcardModel]:
+        now = datetime.now(UTC)
         stmt = (
             select(FlashcardModel)
             .where(
                 FlashcardModel.document_id == document_id,
-                FlashcardModel.fsrs_state != CARD_HELD,
-                or_(
-                    FlashcardModel.due_date <= datetime.now(UTC),
-                    FlashcardModel.due_date.is_(None),
-                ),
+                or_(review_due(now), unseen(now)),
             )
             .order_by(FlashcardModel.due_date.asc())
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def count_due(self, scope: DueScope) -> int:
+        """Scheduled reviews that have come due; unseen cards are never counted here (I-83)."""
         stmt = scope.apply(select(func.count()).select_from(FlashcardModel))
+        stmt = stmt.where(review_due(datetime.now(UTC)))
         return (await self.session.execute(stmt)).scalar_one()
 
-    async def list_due(self, scope: DueScope, *, limit: int) -> list[FlashcardModel]:
-        stmt = scope.apply(select(FlashcardModel)).order_by(FlashcardModel.due_date.asc())
-        return list((await self.session.execute(stmt.limit(limit))).scalars().all())
+    async def count_new(self, scope: DueScope) -> int:
+        stmt = scope.apply(select(func.count()).select_from(FlashcardModel)).where(
+            unseen(datetime.now(UTC))
+        )
+        return (await self.session.execute(stmt)).scalar_one()
+
+    async def list_due(
+        self, scope: DueScope, *, limit: int, new_limit: int
+    ) -> list[FlashcardModel]:
+        """Due reviews, most overdue first, then up to `new_limit` unseen cards to fill `limit`.
+
+        Unseen cards come from the most recently opened documents first, in the order they
+        were written, which for chapter cards is reading order.
+        """
+        reviews_stmt = (
+            scope.apply(select(FlashcardModel))
+            .where(review_due(datetime.now(UTC)))
+            .order_by(FlashcardModel.due_date.asc())
+            .limit(limit)
+        )
+        cards = list((await self.session.execute(reviews_stmt)).scalars().all())
+        take_new = min(new_limit, limit - len(cards))
+        if take_new <= 0:
+            return cards
+        new_stmt = (
+            scope.apply(select(FlashcardModel))
+            .outerjoin(DocumentModel, DocumentModel.id == FlashcardModel.document_id)
+            .where(unseen(datetime.now(UTC)))
+            .order_by(
+                DocumentModel.last_accessed_at.desc().nulls_last(),
+                FlashcardModel.created_at.asc(),
+            )
+            .limit(take_new)
+        )
+        cards.extend((await self.session.execute(new_stmt)).scalars().all())
+        return cards
+
+    async def count_introduced_since(self, start: datetime) -> int:
+        """Cards whose first review ever happened at or after `start`."""
+        first_reviews = (
+            select(ReviewEventModel.flashcard_id)
+            .group_by(ReviewEventModel.flashcard_id)
+            .having(func.min(ReviewEventModel.reviewed_at) >= start)
+            .subquery()
+        )
+        stmt = select(func.count()).select_from(first_reviews)
+        return (await self.session.execute(stmt)).scalar_one()
 
     async def list_weak_flashcards(
         self,

@@ -160,7 +160,10 @@ class ProgressService:
             value=float(due),
             unit="count",
             sample_size=total,
-            definition="Cards whose next review date has arrived or passed.",
+            definition=(
+                "Reviewed cards whose next review date has arrived or passed. "
+                "A card never reviewed is new, not due."
+            ),
             basis=f"{due} due of {total} cards in your library.",
         )
 

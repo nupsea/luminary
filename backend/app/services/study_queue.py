@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repos.collection_repo import CollectionRepo
 from app.repos.document_repo import DocumentRepo
-from app.repos.study_repo import DueScope
+from app.repos.study_repo import DueScope, StudyRepo
 from app.repos.tag_repo import TagRepo
 from app.services.documents_service import safe_tags
+from app.services.settings_service import get_new_cards_per_day
 
 
 async def _documents_tagged(
@@ -49,3 +52,40 @@ async def due_scope(
         section_id=section_id,
         pool=pool,
     )
+
+
+@dataclass(frozen=True)
+class NewCardBudget:
+    per_day: int
+    introduced_today: int
+
+    @property
+    def left(self) -> int:
+        return max(0, self.per_day - self.introduced_today)
+
+
+def local_day_start(tz_offset_minutes: int, now: datetime | None = None) -> datetime:
+    """The user's local midnight as naive UTC; the offset is JS `getTimezoneOffset()`."""
+    utc_now = (now or datetime.now(UTC)).replace(tzinfo=None)
+    local_now = utc_now - timedelta(minutes=tz_offset_minutes)
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return local_midnight + timedelta(minutes=tz_offset_minutes)
+
+
+async def new_card_budget(session: AsyncSession, tz_offset_minutes: int = 0) -> NewCardBudget:
+    """How many unseen cards today's library-wide session may still introduce (I-83).
+
+    Counted from first reviews, so it survives restarts and covers every surface that
+    reviews a card, not only the daily session.
+    """
+    introduced = await StudyRepo(session).count_introduced_since(local_day_start(tz_offset_minutes))
+    return NewCardBudget(per_day=await get_new_cards_per_day(session), introduced_today=introduced)
+
+
+async def new_card_limit(
+    session: AsyncSession, scope: DueScope, limit: int, tz_offset_minutes: int = 0
+) -> int:
+    """The budget governs the whole-library queue only: a chosen scope asked for its cards."""
+    if not scope.is_everything:
+        return limit
+    return (await new_card_budget(session, tz_offset_minutes)).left

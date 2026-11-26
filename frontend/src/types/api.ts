@@ -5344,6 +5344,24 @@ export interface paths {
         patch: operations["patch_retrieval_settings_settings_retrieval_patch"];
         trace?: never;
     };
+    "/settings/study": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Study Settings */
+        get: operations["get_study_settings_settings_study_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Study Settings */
+        patch: operations["patch_study_settings_settings_study_patch"];
+        trace?: never;
+    };
     "/settings/transcript-vocabulary": {
         parameters: {
             query?: never;
@@ -5623,7 +5641,7 @@ export interface paths {
         };
         /**
          * Get Due Count
-         * @description Return the count of flashcards whose due_date is today or in the past.
+         * @description Due reviews, and the unseen cards today's session for this scope may introduce.
          */
         get: operations["get_due_count_study_due_count_get"];
         put?: never;
@@ -5643,7 +5661,8 @@ export interface paths {
         };
         /**
          * Get Due Cards
-         * @description Return flashcards whose due_date is now or in the past.
+         * @description Due reviews first, then unseen cards: by the daily budget for the whole library,
+         *     up to `limit` for a chosen scope (I-83).
          */
         get: operations["get_due_cards_study_due_get"];
         put?: never;
@@ -6994,6 +7013,11 @@ export interface components {
              * @default true
              */
             commit: boolean;
+            /**
+             * Tz Offset Minutes
+             * @default 0
+             */
+            tz_offset_minutes: number;
         };
         /** AssembleResponse */
         AssembleResponse: {
@@ -8631,6 +8655,12 @@ export interface components {
         DueCountResponse: {
             /** Due Today */
             due_today: number;
+            /** New Today */
+            new_today: number;
+            /** New Available */
+            new_available: number;
+            /** New Per Day */
+            new_per_day: number;
         };
         /** EnrichmentJobItem */
         EnrichmentJobItem: {
@@ -11807,6 +11837,11 @@ export interface components {
              * @default []
              */
             sub_collections: components["schemas"]["CollectionSubCollection"][];
+        };
+        /** StudySettings */
+        StudySettings: {
+            /** New Cards Per Day */
+            new_cards_per_day: number;
         };
         /** StudyStatsResponse */
         StudyStatsResponse: {
@@ -21463,6 +21498,59 @@ export interface operations {
             };
         };
     };
+    get_study_settings_settings_study_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudySettings"];
+                };
+            };
+        };
+    };
+    patch_study_settings_settings_study_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StudySettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudySettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_transcript_vocabulary_settings_transcript_vocabulary_get: {
         parameters: {
             query?: never;
@@ -21892,6 +21980,8 @@ export interface operations {
                 tag?: string | null;
                 document_ids?: string[] | null;
                 note_ids?: string[] | null;
+                /** @description JS Date.getTimezoneOffset(): sets where the user's day starts. */
+                tz_offset_minutes?: number;
             };
             header?: never;
             path?: never;
@@ -21929,6 +22019,8 @@ export interface operations {
                 note_ids?: string[] | null;
                 section_id?: string | null;
                 limit?: number;
+                /** @description JS Date.getTimezoneOffset(): sets where the user's day starts. */
+                tz_offset_minutes?: number;
             };
             header?: never;
             path?: never;

@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A card nobody has reviewed is no longer "due".** Generated cards were written due at once, so the dev library showed 1,258 due where 91 reviews were; a session now takes due reviews and up to a daily number of new cards (10 by default, set in Settings), while a chosen book, chapter or collection takes its own (I-83). Archived and held cards are neither.
+
 ## [0.19.0] - 2026-11-24
 
 Components separated for mobile: the server a phone will sync from, and the phone's shell.
