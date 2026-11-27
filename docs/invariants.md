@@ -260,14 +260,18 @@ to a card only when the card is filed in the item's passage and their quotes con
 also opens a misconception. A right answer writes nothing. `tests/test_quiz_api.py` fails CI if a
 right answer moves the card or a miss does not reset it.
 
-**I-85. A right quiz option quotes the passage; a wrong option the passage states is refused; the model that wrote an item never judges it.**
-Code picks the passage, the kind, the option counts and the level; the model only writes. Every
-right option's `quote` must be verbatim in the passage (`grounding_state`, I-34), and a wrong
-option of five words or more copied from it is a true statement and refused. Whether a wrong
-option is false is semantic, so it goes to the separate factuality judge (I-35): no default, refused
-when it is the writer, and `support_check='unchecked'` otherwise. Each refusal is a named kind
-counted in `quiz_reject_<kind>`. `tests/test_quiz_parsers.py` fires every structural gate, and
-`tests/test_quiz_api.py` the judge's two refusals and its self-judging refusal.
+**I-85. A quiz's right answer is entailed by a sentence code chose; a wrong answer the material entails is dropped; the writer never judges.**
+A model asked to pick what to test and to write wrong options alone chose licence pages and tables
+of contents, and wrote "wrong" options the book states (DDIA recommends t-digest; the judge passed
+it). Code picks the passage, refusing contents, licence, quotations and reference lists
+(`quiz_material.unfit_reason`), and the key sentence or list items a question tests; the right
+answer must be entailed by its key (`quiz_nli`, 0.8). A wrong answer is dropped when the passage
+or one of the document's five nearest chunks entails it, so a true statement is never marked
+wrong. A separate judge (`FLASHCARD_FACTUALITY_MODEL`, never the writer, I-35) must pick exactly
+the right answers with the material. Without the entailment model no question is written. Each
+refusal is counted as `quiz_reject_<kind>`, each dropped wrong answer as `quiz_drop_<kind>`.
+`tests/test_quiz_parsers.py` fires every structural gate; `tests/test_quiz_api.py` the entailment
+drop, the missing model, the judge and its self-judging refusal.
 
 **I-70. A section scope that names no section of the document is an error, never the whole document.**
 Displays tidy headings (`_clean_title` drops a trailing colon) and two sections can share one, so

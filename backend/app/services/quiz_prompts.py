@@ -1,17 +1,17 @@
-"""The quiz-item prompt: code fixes the passage, the kind, the option counts and the level.
+"""Quiz prompts, one small task each: phrase a question about sentences code chose, write wrong
+answers to it, and answer it (with the material, and without it).
 
-Difficulty is described by what the wrong options do, never by a label (I-28). The mistake
-codes are defined in plain words where they are offered, and each level offers only its own.
+Difficulty is described by what the wrong answers do, never by a label (I-28). The mistake codes
+are defined in plain words where they are offered, and each level offers only its own.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from app.types import QuizLevel
 
-QUIZ_ITEM_SYSTEM = (
-    "You write one multiple-choice question about some material, with right and wrong options, "
-    "and answer with JSON only."
-)
+QUIZ_SYSTEM = "You write exam questions about study material and answer with JSON only."
 
 # Model-facing code -> stored trap. Short words, so a small model copies them exactly.
 MISTAKE_CODES: dict[str, str] = {
@@ -24,90 +24,181 @@ MISTAKE_CODES: dict[str, str] = {
 }
 
 _CODE_MEANING = {
-    "detail": "one specific detail changed: a number, a name, an amount, or who did it",
+    "detail": "one specific detail changed: a number, a name, an amount, or who does it",
     "swap": "cause and effect, or who does what to whom, reversed",
     "condition": "the right idea, applied under the wrong condition or in the wrong situation",
-    "broader": "a true point stretched too far, made always, every or only",
-    "neighbour": "true of something related, but not of what the question asks about",
-    "belief": "a common misunderstanding of this topic that the material does not support",
+    "broader": "a true point stretched further than the material takes it",
+    "belief": "a common misunderstanding of this topic that the material corrects or contradicts",
 }
 
+# No level offers "neighbour" (true of something else the material discusses): as a statement it
+# is true, and a wrong option must be false according to the material.
 _WRONG_RULE: dict[QuizLevel, tuple[str, tuple[str, ...]]] = {
     "easy": (
-        "is about the same subject as the question, but anyone who has read the material "
-        "rejects it at once",
-        ("neighbour",),
+        "Someone who has read the material rejects it at once, but it is about the same subject "
+        "and sounds reasonable to someone who has not.",
+        ("belief", "broader"),
     ),
     "medium": (
-        "is a plausible claim about the same topic that the material does not make; at least "
-        "one of them is a common misunderstanding of the topic",
-        ("belief", "broader", "neighbour"),
+        "It is a believable answer that someone who half-remembers the material might pick; "
+        "the material shows it is wrong.",
+        ("belief", "broader", "condition"),
     ),
     "hard": (
-        "repeats something the material states with exactly one decisive detail changed: who "
-        "does it, what causes what, under which condition, how much, or how widely it applies. "
-        "It must read as true to someone who skimmed the material",
+        "It is the right answer, or another statement of the material, with exactly one decisive "
+        "detail changed: who does it, what causes what, under which condition, or how much. It "
+        "reads as true to someone who skimmed the material.",
         ("detail", "swap", "condition"),
     ),
 }
 
-_USER_TMPL = """Write one multiple-choice question from the material below.
+_SOURCE_RULE = (
+    "The question makes sense to someone who has never seen this material: it names its subject "
+    '("leader-based replication", "Ishmael"), and never says passage, text, author, document, '
+    'book, chapter, excerpt, material, "the narrator" or "this".'
+)
 
-MATERIAL:
+_QUESTION_SINGLE = """MATERIAL:
 \"\"\"
 {passage}
 \"\"\"
 
-Ask about something the material states, the way an exam asks: about the subject itself, so the \
-question makes sense to someone who has never seen this material. Never mention a passage, text, \
-author, document, book, chapter, excerpt or material, and call people by the names the \
-material gives them, never "the narrator" or "the speaker". The question has exactly \
-{n_options} options, and exactly {n_right} of them {right_verb} right.
+KEY SENTENCE, from the material:
+\"\"\"
+{key}
+\"\"\"
 
-Each right option says something the material states, in your own words, and carries "quote": \
-words from the material that show it is right, copied character for character, spelling \
-included, at least four words long.
+Write one exam question that the key sentence answers, and its answer.
 
-Each wrong option {wrong_rule}. A wrong option is never stated anywhere in the material. It \
-carries "mistake", one of these codes for the kind of mistake it sets up:
+- Ask about the idea in the key sentence: what it is, what happens, what it causes, or how it \
+works. Ask why only when the key sentence itself gives the reason.
+- {source_rule}
+- The question does not give away its answer.
+- The answer is one sentence of at most 25 words, in your own words, and says only what the key \
+sentence says.
+
+Return only JSON: {{"question": "<question>", "answer": "<answer>"}}"""
+
+_QUESTION_MULTI = """MATERIAL:
+\"\"\"
+{passage}
+\"\"\"
+
+A LIST, from the material, and {n} of its items:
+\"\"\"
+{lead_in}
+\"\"\"
+{keys}
+
+Write one exam question that asks which of several answers belong to this list, so that each of \
+the {n} items above is a right answer.
+
+- The question asks about what the list's opening line introduces, and names its subject.
+- {source_rule}
+- The question does not say how many answers are right.
+- Each answer is one sentence of at most 25 words, in your own words, and says only what its list \
+item says.
+
+Return only JSON: {{"question": "<question>", "answers": [{slots}]}}"""
+
+_WRONG = """MATERIAL:
+\"\"\"
+{passage}
+\"\"\"
+
+QUESTION: {question}
+{right_label}:
+{rights}
+
+Write {n} wrong answers to this question.
+
+Every wrong answer:
+- answers the question directly, in the same form as the right answer and about {words} words long;
+- is false according to the material, and is not anything else the material says;
+- {rule}
+- uses none of the words always, never, only, all, every, completely, entirely or none, unless the \
+right answer does.
+
+Write each wrong answer in its slot below; the slot's "mistake" names the kind of mistake it \
+sets up:
 {codes}
 
-Every option is one statement, of about the same length and style as the others. No option is \
-"all of the above", "none of the above" or a combination of other options. Every option carries \
-"why": one sentence, from the material, on why it is right or wrong.
+Return only JSON: {{"wrong": [
+  {slots}
+]}}"""
 
-Return only JSON with exactly {n_options} options, in this shape:
-{shape}"""
+_WRONG_SLOT = '{{"mistake": "{code}", "text": "<wrong answer>"}}'
 
-_RIGHT_SLOT = (
-    '{"text": "<option>", "correct": true, "quote": "<words from the material>", "why": "<reason>"}'
-)
-_WRONG_SLOT = '{"text": "<option>", "correct": false, "mistake": "<code>", "why": "<reason>"}'
+_ANSWER = """{material}QUESTION: {question}
 
-# The shape example's placeholders: an option or quote equal to one is the prompt's text.
-PROMPT_PLACEHOLDERS = frozenset(
-    {"<question>", "<option>", "<words from the material>", "<reason>", "<code>"}
-)
+{options}
+
+{ask}
+
+Return only JSON: {{"answer": ["<letter>"]}}"""
+
+# The JSON skeletons' placeholders: an answer equal to one is the prompt's text, not the model's.
+PROMPT_PLACEHOLDERS = frozenset({"<question>", "<answer>", "<wrong answer>", "<code>", "<letter>"})
+
+LETTERS = "ABCDE"
 
 
 def level_codes(level: QuizLevel) -> tuple[str, ...]:
     return _WRONG_RULE[level][1]
 
 
-def quiz_item_prompt(passage: str, level: QuizLevel, n_options: int, n_right: int) -> str:
-    rule, codes = _WRONG_RULE[level]
-    return _USER_TMPL.format(
+def question_prompt(passage: str, keys: Sequence[str], lead_in: str = "") -> str:
+    """A single-answer question about one key sentence, or a multi-answer one about list items."""
+    if len(keys) == 1:
+        return _QUESTION_SINGLE.format(passage=passage, key=keys[0], source_rule=_SOURCE_RULE)
+    return _QUESTION_MULTI.format(
         passage=passage,
-        n_options=n_options,
-        n_right=n_right,
-        right_verb="is" if n_right == 1 else "are",
-        wrong_rule=rule,
-        codes="\n".join(f'- "{c}": {_CODE_MEANING[c]}' for c in codes),
-        shape=_shape(n_options, n_right),
+        lead_in=lead_in,
+        keys="\n".join(f'{i}. """{k}"""' for i, k in enumerate(keys, 1)),
+        n=len(keys),
+        source_rule=_SOURCE_RULE,
+        slots=", ".join('"<answer>"' for _ in keys),
     )
 
 
-def _shape(n_options: int, n_right: int) -> str:
-    """The JSON skeleton with one slot per option, so the count is copied, not counted."""
-    slots = [_RIGHT_SLOT] * n_right + [_WRONG_SLOT] * (n_options - n_right)
-    return '{"question": "<question>", "options": [\n  ' + ",\n  ".join(slots) + "\n]}"
+def slot_codes(level: QuizLevel, n: int) -> list[str]:
+    """The mistake each wrong-answer slot sets up: code spreads them over the level's kinds."""
+    codes = level_codes(level)
+    return [codes[i % len(codes)] for i in range(n)]
+
+
+def wrong_prompt(
+    passage: str, question: str, rights: Sequence[str], level: QuizLevel, n: int
+) -> str:
+    rule, codes = _WRONG_RULE[level]
+    words = round(sum(len(r.split()) for r in rights) / len(rights))
+    return _WRONG.format(
+        passage=passage,
+        question=question,
+        right_label="RIGHT ANSWER" if len(rights) == 1 else "RIGHT ANSWERS",
+        rights="\n".join(f"- {r}" for r in rights),
+        n=n,
+        words=words,
+        rule=rule,
+        codes="\n".join(f'- "{c}": {_CODE_MEANING[c]}' for c in codes),
+        slots=",\n  ".join(_WRONG_SLOT.format(code=c) for c in slot_codes(level, n)),
+    )
+
+
+def answer_prompt(question: str, options: Sequence[str], n_right: int, passage: str | None) -> str:
+    """The question as a learner sees it. With *passage* it is the judge's open-book check;
+    without, the guess a test-wise reader makes."""
+    material = f'MATERIAL:\n"""\n{passage}\n"""\n\n' if passage is not None else ""
+    basis = "Using only the material, choose" if passage is not None else "Choose"
+    ask = f"{basis} the one right answer." if n_right == 1 else f"{basis} every right answer."
+    if passage is not None:
+        ask += (
+            " If no option is right according to the material, or the question assumes something"
+            " the material does not say, return an empty list."
+        )
+    return _ANSWER.format(
+        material=material,
+        question=question,
+        options="\n".join(f"{LETTERS[i]}. {o}" for i, o in enumerate(options)),
+        ask=ask,
+    )

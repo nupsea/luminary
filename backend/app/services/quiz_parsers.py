@@ -1,63 +1,82 @@
-"""Reading a model's quiz item, and the checks that need no model.
+"""Reading a model's quiz replies, and the checks that need no model.
 
 Every refusal is a named kind with a message, logged and counted, so a gate that never fires on
-real output shows up as one (`.claude/rules/common/product-integrity.md`).
+real output shows up as one (`.claude/rules/common/product-integrity.md`). A question is refused
+whole; a wrong answer is dropped alone, and the question is refused only when too few survive.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from app.services.flashcard_parsers import (
-    GROUNDING_VERIFIED,
     _normalise_for_match,
     _pointing_message,
     excerpt_is_verbatim,
-    grounding_state,
 )
+from app.services.flashcard_units import _content, names_not_in
 from app.services.llm_json import parse_llm_json_object
-from app.services.quiz_prompts import MISTAKE_CODES, PROMPT_PLACEHOLDERS
-from app.types import QUIZ_TRAPS, QuizKind
+from app.services.quiz_prompts import LETTERS, MISTAKE_CODES, PROMPT_PLACEHOLDERS
+from app.types import QuizKind
 
+# Whole-question refusals.
 REFUSE_UNPARSED = "unparsed"
 REFUSE_SHAPE = "shape"
-REFUSE_UNGROUNDED = "ungrounded"
-REFUSE_STATED_WRONG = "wrong_option_stated"
-REFUSE_GIVEAWAY = "giveaway"
 REFUSE_POINTING = "points_at_source"
-REFUSE_LONGEST_RIGHT = "right_is_longest"
+REFUSE_INVENTED_NAME = "invented_name"
+REFUSE_OFF_KEY = "answer_off_key"
+REFUSE_UNSUPPORTED_WHY = "why_without_reason"
+REFUSE_OTHER_SCRIPT = "other_script"
+REFUSE_ANSWER_IN_STEM = "answer_in_stem"
+REFUSE_COUNT_IN_STEM = "count_in_stem"
+REFUSE_TOO_FEW_WRONG = "too_few_wrong"
 REFUSE_DUPLICATE = "duplicate_options"
-REFUSE_JUDGED_WRONG = "right_option_unsupported"
-REFUSE_JUDGED_RIGHT = "wrong_option_supported"
-REFUSE_LEVEL = "off_level"
+REFUSE_RIGHT_IS_LONGEST = "right_is_longest"
+REFUSE_NOT_ANSWERABLE = "not_answerable"
+REFUSE_GUESSABLE = "guessable"
+
+# Single wrong answers dropped.
+DROP_STATED = "wrong_stated"
+DROP_ENTAILED = "wrong_entailed"
+DROP_TRUE_ELSEWHERE = "wrong_true_elsewhere"
+DROP_ABSOLUTE = "wrong_absolute"
+DROP_LENGTH = "wrong_length"
+DROP_REFERS_TO_OPTIONS = "wrong_refers_to_options"
+DROP_REPEATED = "wrong_repeated"
 
 # Code decides the counts (single: 4 options, 1 right; multi: 5 options, 2 or 3 right).
 OPTION_COUNT: dict[QuizKind, int] = {"single": 4, "multi": 5}
 RIGHT_COUNTS: dict[QuizKind, tuple[int, ...]] = {"single": (1,), "multi": (2, 3)}
+# Wrong answers asked for beyond those needed, so one dropped does not cost a call.
+SPARE_WRONG = 3
 
-# A wrong option copied from the passage is a true statement. Below five words a copied span is
-# a phrase any passage on the topic repeats; the judge, not this rule, checks those. Unbracketed:
-# it did not fire in 171 real writes (docs/quiz.md).
-_MIN_COPIED_WORDS = 5
-
-# Single-answer only: a right option much longer than every wrong one is found by its length.
-# Unbracketed: in 17 real single items the right option was at most 1.06 times the longest wrong.
-LONGEST_RIGHT_RATIO = 1.6
-
-_GIVEAWAY = re.compile(
-    r"\b(?:all|none|both|neither) of (?:the )?(?:above|these|those|options|answers)\b"
-    r"|\b(?:options?|answers?) [a-e]\b(?: and [a-e]\b)?"
-    r"|^\s*[a-e]\s+and\s+[a-e]\s*$",
-    re.IGNORECASE,
+# Words a test-wise reader takes as the mark of a wrong option (Haladyna's item-writing
+# guidelines); allowed in a wrong answer only when the right answer uses one too.
+_ABSOLUTE = re.compile(
+    r"\b(?:always|never|only|all|every|completely|entirely|none|solely|universally)\b", re.I
 )
+# A multi-answer stem that counts its answers hands over the count.
+_COUNT = re.compile(r"\b(?:two|three|four|[2-4])\b", re.I)
+_REFERS_TO_OPTIONS = re.compile(
+    r"\b(?:all|none|both|neither) of (?:the )?(?:above|these|those|options|answers)\b", re.I
+)
+# Wrong answers far shorter or longer than the right one are told apart by their length.
+# Unbracketed: no measured pair has yet decided either bound.
+_LENGTH_BAND = (0.5, 1.8)
+# Single-answer: a right answer longer than every wrong one by this much is found by its length.
+# Unbracketed.
+_LONGEST_RIGHT = 1.25
+# The stem carries most of the answer's content words: the question answers itself. Unbracketed.
+_STEM_COVERS_ANSWER = 0.8
 
 
 @dataclass
 class ParsedOption:
     text: str
     correct: bool
-    explanation: str
+    explanation: str = ""
     quote: str | None = None
     trap: str | None = None
 
@@ -77,7 +96,7 @@ class ParsedItem:
 
 
 class QuizRefusal(Exception):
-    """An item refused by a named gate."""
+    """A question refused by a named gate."""
 
     def __init__(self, kind: str, message: str) -> None:
         super().__init__(f"{kind}: {message}")
@@ -85,143 +104,165 @@ class QuizRefusal(Exception):
         self.message = message
 
 
-def _field(item: dict, *names: str) -> str:
-    for name in names:
-        value = item.get(name)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return ""
+def _text(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""
 
 
-def _is_true(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"true", "yes", "1", "right", "correct"}
-
-
-def _option(entry: object) -> ParsedOption:
-    if not isinstance(entry, dict):
-        raise QuizRefusal(REFUSE_UNPARSED, "an option is not an object")
-    code = _field(entry, "mistake", "trap", "error").lower()
-    return ParsedOption(
-        text=_field(entry, "text", "option", "statement"),
-        correct=_is_true(entry.get("correct", entry.get("is_correct"))),
-        explanation=_field(entry, "why", "explanation", "reason"),
-        quote=_field(entry, "quote", "evidence") or None,
-        trap=MISTAKE_CODES.get(code, code) or None,
-    )
-
-
-def parse_item(raw: str | None) -> ParsedItem:
-    """The model's item, or a refusal. Field names a model commonly swaps in are accepted."""
+def _reply(raw: str | None) -> dict:
     data = parse_llm_json_object(raw or "")
     if not isinstance(data, dict):
         raise QuizRefusal(REFUSE_UNPARSED, "no JSON object in the reply")
-    stem = _field(data, "question", "stem", "q")
-    raw_options = data.get("options") or data.get("choices") or data.get("answers")
-    if not stem or not isinstance(raw_options, list):
-        raise QuizRefusal(REFUSE_UNPARSED, "no question or no options list")
-    return ParsedItem(stem=stem, options=[_option(entry) for entry in raw_options])
+    return data
 
 
-def settle_traps(item: ParsedItem, offered: tuple[str, ...]) -> None:
-    """Where the level offers one mistake code, that code is the level's definition, so a wrong
-    option the model labelled with a code of its own invention takes it."""
-    if len(offered) != 1:
-        return
-    for option in item.wrong:
-        if option.trap not in QUIZ_TRAPS:
-            option.trap = MISTAKE_CODES[offered[0]]
+def _answers(data: dict, n_keys: int) -> list[str]:
+    answers = data.get("answers") if n_keys > 1 else [data.get("answer")]
+    if not isinstance(answers, list):
+        raise QuizRefusal(REFUSE_UNPARSED, "no answers list")
+    texts = [_text(a) for a in answers]
+    if len(texts) != n_keys or any(not a or a in PROMPT_PLACEHOLDERS for a in texts):
+        raise QuizRefusal(REFUSE_SHAPE, f"{len(texts)} answers where {n_keys} were asked for")
+    return texts
 
 
-def _check_counts(item: ParsedItem, kind: QuizKind) -> None:
-    if not item.stem.rstrip(" \"'\u201d\u2019)]").endswith("?"):
-        raise QuizRefusal(REFUSE_SHAPE, f"the stem is not a question ({item.stem[:60]!r})")
-    if len(item.options) != OPTION_COUNT[kind]:
-        raise QuizRefusal(
-            REFUSE_SHAPE, f"{len(item.options)} options where {OPTION_COUNT[kind]} were asked for"
-        )
-    if len(item.right) not in RIGHT_COUNTS[kind]:
-        raise QuizRefusal(
-            REFUSE_SHAPE, f"{len(item.right)} right options for a {kind}-answer question"
-        )
+def parse_question(raw: str | None, n_keys: int) -> tuple[str, list[str]]:
+    """The question and one right answer per key sentence, or a refusal."""
+    data = _reply(raw)
+    stem = _text(data.get("question"))
+    answers = _answers(data, n_keys)
+    if not stem or stem in PROMPT_PLACEHOLDERS:
+        raise QuizRefusal(REFUSE_SHAPE, "no question of its own")
+    if not stem.rstrip(" \"'\u201d\u2019)]").endswith("?"):
+        raise QuizRefusal(REFUSE_SHAPE, f"the stem is not a question ({stem[:60]!r})")
+    return stem, answers
 
 
-def _check_option(option: ParsedOption) -> None:
-    if not option.text or option.text in PROMPT_PLACEHOLDERS:
-        raise QuizRefusal(REFUSE_SHAPE, "an option has no text of its own")
-    if option.correct and not option.quote:
-        raise QuizRefusal(REFUSE_SHAPE, f"right option without a quote ({option.text[:50]!r})")
-    if not option.correct and option.trap not in QUIZ_TRAPS:
-        raise QuizRefusal(REFUSE_SHAPE, f"wrong option with no known mistake ({option.trap!r})")
+def parse_wrong(raw: str | None, slots: Sequence[str]) -> list[ParsedOption]:
+    """Wrong answers in slot order. Each keeps its slot's mistake unless the model named another
+    the level offers."""
+    data = _reply(raw)
+    entries = data.get("wrong")
+    if not isinstance(entries, list):
+        raise QuizRefusal(REFUSE_UNPARSED, "no wrong list")
+    options = []
+    for i, entry in enumerate(entries[: len(slots)]):
+        if not isinstance(entry, dict):
+            continue
+        text = _text(entry.get("text"))
+        code = _text(entry.get("mistake")).lower()
+        code = code if code in slots else slots[i]
+        if text and text not in PROMPT_PLACEHOLDERS:
+            options.append(ParsedOption(text=text, correct=False, trap=MISTAKE_CODES[code]))
+    return options
 
 
-def check_shape(item: ParsedItem, kind: QuizKind) -> None:
-    """The counts code asked for, a question, a quote on every right option and a known trap on
-    every wrong one."""
-    _check_counts(item, kind)
-    for option in item.options:
-        _check_option(option)
-    texts = [_normalise_for_match(o.text) for o in item.options]
-    if len(set(texts)) < len(texts):
-        raise QuizRefusal(REFUSE_DUPLICATE, "two options are the same text")
+def parse_letters(raw: str | None, n_options: int) -> set[int]:
+    """The option indices a model chose; empty when it chose none it was offered."""
+    try:
+        data = _reply(raw)
+    except QuizRefusal:
+        return set()
+    picked = data.get("answer")
+    picked = picked if isinstance(picked, list) else [picked]
+    return {
+        LETTERS.index(c)
+        for c in (str(p).strip().upper()[:1] for p in picked)
+        if c and c in LETTERS[:n_options]
+    }
 
 
-# A model wraps a quote as it would a JSON string ('"the words",') and copies a typesetter's
-# line-break hyphen inside a word, which the matcher joins in the passage. Neither trimming nor
-# joining can turn invented words into a match.
-_QUOTE_WRAPPING = "\"'\u201c\u201d\u2018\u2019,;:. "
-_BREAK_HYPHENS = str.maketrans("", "", "\u2010\u00ad")
+# A "why" question about a sentence that gives no reason makes up its premise: "Why does the whale
+# attempt to impale itself?" of a whale that meant to leap the ship (run 3 of #571).
+_WHY = re.compile(r"^\s*why\b", re.I)
+_REASON = re.compile(
+    r"\b(?:because|since|so that|so|in order to|therefore|thus|hence|due to|as a result"
+    r"|which means|means that|leads? to|caus\w+|reason)\b",
+    re.I,
+)
+# Sources the card check does not name, which quiz stems used: "According to the story, why ..."
+# and "... according to the discussion on fault tolerance?" (runs 3 and 4 of #571).
+_STORY_SOURCE = re.compile(
+    r"\b(?:according\s+to|as\s+(?:told|described|discussed|mentioned)\s+in|in)\s+the\s+"
+    r"(?:story|account|discussion|narrative|description|tale|reading)\b"
+    r"|\bthe\s+(?:story|account|discussion|narrative|narrator|author|writer)\s+"
+    r"(?:says|said|describes|described|mentions|mentioned|suggests|tells|claims)\b",
+    re.I,
+)
+# Letters outside the Latin and Greek blocks: an answer that drifted into another script.
+_OTHER_SCRIPT = re.compile(r"[\u0400-\u04ff\u0590-\u06ff\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
 
 
-def _quote_found(quote: str, passage: str) -> bool:
-    # A newline escaped twice arrives as the two characters backslash and n.
-    trimmed = quote.replace("\\n", " ").strip(_QUOTE_WRAPPING)
-    return any(
-        grounding_state(q, passage) == GROUNDING_VERIFIED
-        for q in dict.fromkeys((trimmed, trimmed.translate(_BREAK_HYPHENS)))
-    )
-
-
-def check_grounding(item: ParsedItem, passage: str) -> None:
-    """Every right option quotes the passage; no wrong option is copied from it."""
-    for option in item.right:
-        quote = option.quote or ""
-        if quote in PROMPT_PLACEHOLDERS or not _quote_found(quote, passage):
-            raise QuizRefusal(
-                REFUSE_UNGROUNDED, f"right option's quote is not in the passage ({quote[:60]!r})"
-            )
-    for option in item.wrong:
-        if len(option.text.split()) >= _MIN_COPIED_WORDS and excerpt_is_verbatim(
-            option.text, passage
-        ):
-            raise QuizRefusal(
-                REFUSE_STATED_WRONG, f"wrong option is stated in the passage ({option.text[:60]!r})"
-            )
-
-
-def check_giveaways(item: ParsedItem, kind: QuizKind) -> None:
-    """Nothing a test-wise reader could answer without knowing the material."""
-    pointing = _pointing_message(item.stem)
+def _stem_refusal(stem: str, keys: Sequence[str], passage: str) -> QuizRefusal | None:
+    pointing = _pointing_message(stem)
     if pointing:
-        raise QuizRefusal(REFUSE_POINTING, pointing)
-    for option in item.options:
-        if _GIVEAWAY.search(option.text):
-            raise QuizRefusal(REFUSE_GIVEAWAY, f"option refers to other options ({option.text!r})")
-    if kind == "single":
-        right = len(item.right[0].text)
-        longest_wrong = max(len(o.text) for o in item.wrong)
-        if right > LONGEST_RIGHT_RATIO * longest_wrong:
-            raise QuizRefusal(
-                REFUSE_LONGEST_RIGHT,
-                f"right option is {right} characters against at most {longest_wrong}",
-            )
+        return QuizRefusal(REFUSE_POINTING, pointing)
+    story = _STORY_SOURCE.search(stem)
+    if story:
+        return QuizRefusal(REFUSE_POINTING, f"question points at its source ({story.group(0)!r})")
+    invented = names_not_in(stem, passage)
+    if invented:
+        return QuizRefusal(REFUSE_INVENTED_NAME, f"the question names {', '.join(invented)}")
+    if len(keys) > 1 and _COUNT.search(stem):
+        return QuizRefusal(REFUSE_COUNT_IN_STEM, f"the stem counts its answers ({stem[:60]!r})")
+    if _WHY.match(stem) and not any(_REASON.search(k) for k in keys):
+        return QuizRefusal(REFUSE_UNSUPPORTED_WHY, "asks why of a sentence that gives no reason")
+    return None
 
 
-def check_structure(
-    item: ParsedItem, kind: QuizKind, passage: str, offered: tuple[str, ...] = ()
-) -> None:
-    settle_traps(item, offered)
-    check_shape(item, kind)
-    check_grounding(item, passage)
-    check_giveaways(item, kind)
+def _answer_refusal(answer: str, stem_words: set[str], passage: str) -> QuizRefusal | None:
+    if _OTHER_SCRIPT.search(answer) and not _OTHER_SCRIPT.search(passage):
+        return QuizRefusal(REFUSE_OTHER_SCRIPT, f"{answer[:60]!r} is in another script")
+    words = _content(answer)
+    if words and len(words & stem_words) >= _STEM_COVERS_ANSWER * len(words):
+        return QuizRefusal(REFUSE_ANSWER_IN_STEM, f"the stem already says {answer[:60]!r}")
+    return None
+
+
+def check_question(stem: str, answers: Sequence[str], keys: Sequence[str], passage: str) -> None:
+    """A question that stands alone, names only people the material names, asks why only of a
+    reason, and whose answers are not stated by the stem. That each answer says what its key
+    sentence says needs the entailment model (`quiz_builder`)."""
+    refusal = _stem_refusal(stem, keys, passage)
+    stem_words = _content(stem)
+    for answer in answers:
+        refusal = refusal or _answer_refusal(answer, stem_words, passage)
+    if refusal:
+        raise refusal
+
+
+def drop_reason(option: ParsedOption, rights: Sequence[str], passage: str) -> str | None:
+    """Why one wrong answer cannot stand, by the checks that need no model."""
+    if excerpt_is_verbatim(option.text, passage):
+        return DROP_STATED
+    if _ABSOLUTE.search(option.text) and not any(_ABSOLUTE.search(r) for r in rights):
+        return DROP_ABSOLUTE
+    mean = sum(len(r.split()) for r in rights) / len(rights)
+    low, high = _LENGTH_BAND
+    if not low * mean <= len(option.text.split()) <= high * mean:
+        return DROP_LENGTH
+    if _REFERS_TO_OPTIONS.search(option.text):
+        return DROP_REFERS_TO_OPTIONS
+    return None
+
+
+def distinct(options: Sequence[ParsedOption], rights: Sequence[str]) -> list[ParsedOption]:
+    """*options* without one that repeats a right answer or an earlier wrong one."""
+    seen = {_normalise_for_match(r) for r in rights}
+    kept = []
+    for option in options:
+        key = _normalise_for_match(option.text)
+        if key not in seen:
+            seen.add(key)
+            kept.append(option)
+    return kept
+
+
+def check_lengths(item: ParsedItem, kind: QuizKind) -> None:
+    if kind != "single":
+        return
+    right = len(item.right[0].text)
+    longest_wrong = max(len(o.text) for o in item.wrong)
+    if right > _LONGEST_RIGHT * longest_wrong:
+        raise QuizRefusal(
+            REFUSE_RIGHT_IS_LONGEST, f"right answer is {right} characters against {longest_wrong}"
+        )

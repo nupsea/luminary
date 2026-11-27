@@ -4,9 +4,10 @@ A multiple-choice quiz written from the learner's own documents: single-answer (
 multi-answer (checkbox) questions, at a level that sets how close the wrong options sit to the
 truth. Backend only so far; the screens follow the approved prototype.
 
-Code lives in `services/quiz_builder.py` (writing items), `quiz_parsers.py` (the structural
-gates), `quiz_prompts.py`, `quiz_scoring.py` (pure), `quiz_service.py` (the lifecycle),
-`repos/quiz_repo.py` and `routers/quiz.py`.
+Code lives in `services/quiz_builder.py` (writing items), `quiz_material.py` (passages and key
+sentences, pure), `quiz_parsers.py` (the structural gates), `quiz_nli.py` (entailment),
+`quiz_prompts.py`, `quiz_scoring.py` (pure), `quiz_service.py` (the lifecycle), `repos/quiz_repo.py`
+and `routers/quiz.py`.
 
 ## Tables
 
@@ -24,53 +25,81 @@ at its level and kind before it calls a model, so a second quiz on a chapter sta
 
 ## Writing an item
 
-Code decides; the model writes JSON (`{question, options: [{text, correct, quote | mistake, why}]}`).
+Code picks what is tested; the model phrases it, in small calls (I-85).
 
-- **Passage:** consecutive chunks of one section, 300 to 2,400 characters. Material no item was
-  written from comes first, sections with the most missed answers and card lapses first among it.
+1. **Passage:** consecutive chunks of one section, 300 to 2,400 characters, joined without the
+   chunker's overlap. Refused before any call: a contents page, licence text, a quotation
+   collection, a reference list (`quiz_material.unfit_reason`). Material no item was written from
+   comes first, sections with the most missed answers and card lapses first among it.
+2. **Key:** a single-answer question tests one whole sentence: never a question or a numbered
+   note, among the eight longest learnable ones, those more than 0.15 below the closest to the
+   section's summary dropped, then the longest. A multi-answer question tests 2 or 3 items of one
+   list, with the line that introduces it; a passage with no list gets a single-answer question.
+3. **Question call:** the stem and one answer per key.
+4. **Wrong-answer call:** code assigns each of 6 or 7 slots its mistake type; the model fills them.
+   The survivors nearest the right answers' length are kept.
+5. **Judge call:** a separate model answers with the passage and must pick exactly the right
+   answers, or none when the question assumes what the material does not say.
+6. **Guess calls:** `QUIZ_GUESS_MODEL` (default: the default model) answers without the passage in
+   three orders. Right every time refuses the question above easy; at easy it is counted.
+
 - **Kind and counts:** single = 4 options, 1 right; multi = 5 options, 2 or 3 right. A mixed quiz
   asks every third question as multi.
 - **Level**, described by what the wrong options do, never named (I-28):
 
 | Level | Wrong options | Mistake codes offered |
 |---|---|---|
-| easy | same subject, rejected at once by anyone who read the passage | `neighbour` |
-| medium | plausible claims the passage does not make; one a common misunderstanding | `belief`, `broader`, `neighbour` |
-| hard | a passage statement with one decisive detail changed | `detail`, `swap`, `condition` |
+| easy | same subject, rejected at once by anyone who read the passage | `belief`, `broader` |
+| medium | believable to someone who half-remembers it; the material shows them wrong | `belief`, `broader`, `condition` |
+| hard | the right answer or another statement with one decisive detail changed | `detail`, `swap`, `condition` |
 
-The codes map to the stored `trap` set: `near_miss_detail`, `swapped_relation`, `wrong_condition`,
-`overgeneralised`, `related_but_different`, `common_misconception`.
+No level offers `neighbour` (true of something else the material discusses): as a statement it is
+true. The codes map to the stored `trap` set: `near_miss_detail`, `swapped_relation`,
+`wrong_condition`, `overgeneralised`, `common_misconception`, and `related_but_different` for
+items assembled from cards.
 
 - **Adaptive** starts at medium; two right in a row go up a level, one miss (wrong or partial)
   goes down, which settles near 71% correct (three in a row would settle near 79%). The next
   question is written after the answer before it, so the staircase is real.
-- **One write and two rewrites per question**, each on the next passage. A question that cannot be
-  written ends the quiz there, and `question_count` says so.
-- **Without a model**, single-answer items are assembled from grounded cards in the scope, with
-  three other cards' answers as the wrong options: `origin='cards'`, always `easy`.
+- **Three passages per question**, each tried once. A question that cannot be written ends the
+  quiz there, and `question_count` says so.
+- **Without a writing model**, single-answer items are assembled from grounded cards in the scope,
+  with three other cards' answers as the wrong options: `origin='cards'`, always `easy`. Without the
+  entailment model (`QUIZ_NLI_MODEL`, fetched on request) the model writes nothing.
 
 ## Gates
 
-Each refusal is a named kind, logged and counted as `quiz_reject_<kind>` (`GET /evals/output-stats`).
+A question is refused whole (`quiz_reject_<kind>`); a wrong answer is dropped alone
+(`quiz_drop_<kind>`), and the question refused when too few survive. Both at `GET /evals/output-stats`.
 
-| Kind | Refuses |
+| Question refused | When |
 |---|---|
-| `unparsed` | no JSON object, no question or no options |
-| `shape` | a stem that is not a question; option or right-option counts other than asked; a right option without a quote; a wrong option without a known mistake code; an option that is the prompt's placeholder |
-| `ungrounded` | a right option's quote not verbatim in the passage (I-34's matcher and 12-character floor) |
-| `wrong_option_stated` | a wrong option of five or more words copied from the passage |
-| `points_at_source` | a stem that needs the passage in view (I-50's rule) |
-| `giveaway` | "all / none of the above", or an option naming other options |
-| `right_is_longest` | single-answer: the right option over 1.6 times the longest wrong one |
-| `duplicate_options` | two options with the same text, or embedding cosine of 0.95 or more |
-| `right_option_unsupported` / `wrong_option_supported` | the factuality judge rejects a right option or accepts a wrong one |
-| `off_level` | a wrong option outside its level's similarity band. Off: cosine does not separate the levels (below) |
+| `unparsed`, `shape` | no JSON; a stem that is not a question; answer count other than asked; the prompt's placeholder |
+| `points_at_source` | the stem needs its source in view (I-50's rule), or credits "the story", "the discussion" |
+| `invented_name` | the stem names someone the passage never does |
+| `why_without_reason` | a "why" stem over keys that give no reason |
+| `count_in_stem` | a multi-answer stem with a number in it |
+| `other_script` | an answer in a script the passage does not use |
+| `answer_in_stem` | the stem carries 80% of an answer's content words |
+| `answer_off_key` | an answer no key sentence entails at 0.8 (each key used once) |
+| `too_few_wrong` | fewer wrong answers survived than the kind needs |
+| `right_is_longest` | single-answer: the right answer over 1.25 times the longest wrong one |
+| `duplicate_options` | embedding cosine of 0.95 or more between two options |
+| `not_answerable` | the judge picks other than exactly the right answers |
+| `guessable` | right without the material in all three orders, above easy |
 
-The judge is `FLASHCARD_FACTUALITY_MODEL`, never the writer (I-85). It is given the stem and told it
-judges one option alone: asked about a bare option, it rejected fragments that mean something only
-under their stem, and against a "which of these" stem it read one true option as a partial answer.
-Without a judge, items are `support_check='unchecked'` and wrong options are checked only
-structurally.
+| Wrong answer dropped | When |
+|---|---|
+| `wrong_stated` | copied verbatim from the passage |
+| `wrong_absolute` | always, never, only, all, every, completely, entirely, none, solely or universally, when no right answer uses one |
+| `wrong_length` | under 0.5 or over 1.8 times the right answers' mean length |
+| `wrong_entailed` | the passage entails it at 0.8 |
+| `wrong_true_elsewhere` | one of the document's five nearest chunks entails it at 0.8 |
+
+The entailment threshold is bracketed twice, with `facebook/bart-large-mnli` on CPU: true "wrong"
+options scored at least 0.84 and false ones at most 0.68 (25 items, 101 options); clean paraphrase
+answers at least 0.90 and answers adding a claim at most 0.46 (92 answers). Another model needs
+its own brackets.
 
 ## Scoring and the learner record
 
@@ -96,23 +125,24 @@ structurally.
 
 ## Measured
 
-2026-11-26, a copy of the dev library, writer `ollama/qwen3.5:4b`, judge
-`ollama/qwen2.5:14b-instruct`, DDIA and Moby-Dick, 6 questions per level, mixed kinds.
+2026-11-27, a copy of the dev library, writer `ollama/qwen2.5:14b-instruct`, judge
+`ollama/gemma4:latest`, guesser `ollama/qwen3.5:4b`; DDIA medium and hard, Moby-Dick medium,
+Federalist Papers medium; 4 questions asked of each. Reviewed by reading each accepted question
+against its passage.
 
-| | |
-|---|---|
-| Writes | 156, all parsed first time; 20 accepted (13%) |
-| Refused by | source-pointing stem 56 (24 of them "the narrator", Moby-Dick), judge rejects a right option 36, shape 21, ungrounded quote 15, judge accepts a wrong option 4, unparsed 2, identical options 2 |
-| Never fired | `wrong_option_stated`, `giveaway`, `right_is_longest` (right option at most 1.06 times the longest wrong one), the 0.95 cosine duplicate |
-| Built of 6 | DDIA 6 at every level; Moby-Dick 1 easy, 2 medium, 4 hard before the call budget ran out |
-| First question | 82 to 96 s when nothing was banked, 2 s from the bank; 4 to 8.5 min for 6 |
-| Wrong-option cosine, median | easy 0.645, medium 0.601, hard 0.610: the levels do not separate |
-| Right answer as shown | positions 6, 2, 5, 4 over 17 single items; the longest option in 2 of 17 |
+| Run | Accepted | Keep / fix / drop |
+|---|---|---|
+| 4 | 12 | 7 / 4 / 1 |
+| 5 | 9 | 4 / 2 / 3 |
+| 6 (summary-ranked keys) | 6 | 4 / 2 / 0 |
 
-Read by hand, the accepted items are on topic and quoted, but many hard items have wrong options
-that are absurd rather than one detail off, and one wrong option was true (DDIA recommends t-digest
-for rolling percentiles; the judge passed it). The stem and judge framing above came after this run;
-15 further writes are too few to say what they changed.
+- No accepted question in runs 4 to 6 had a wrong option the material makes true.
+- Fixable: stems that lose their subject or credit their source, trivia, recall of a whole list.
+  Dropped: an editorial note asked twice, an aside read as fact, one right answer that reversed
+  its sentence's logic (neither entailment nor the judge caught it).
+- Most frequent refusals per run: guessable 18 to 25, points_at_source 20 to 23, answer_off_key 10
+  to 14; drops: wrong_absolute about 50, wrong_entailed 25 to 46.
+- First question 44 to 420 s with nothing banked; 6 to 12 questions per 35-minute run.
 
-Not measured: the people-rated gate (6 in 10 items kept, on two runs, the reason for each
-discard). Quiz is not on by default until it passes.
+The bar before people rate a sample is 8 in 10 kept on two runs; the people-rated gate is 6 in 10.
+Neither is met, and Quiz is not on by default.

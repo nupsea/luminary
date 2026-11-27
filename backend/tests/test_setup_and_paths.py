@@ -228,7 +228,7 @@ def test_prefetch_specs_cover_every_downloaded_phase():
     would silently fall back to serialized download inside the load lock."""
     from app.services import model_prefetch
 
-    assert {s.key for s in model_prefetch.specs()} == {"embedder", "reranker", "ner"}
+    assert {s.key for s in model_prefetch.specs()} == {"embedder", "reranker", "ner", "nli"}
     for spec in model_prefetch.specs():
         assert spec.repo_id and spec.slug and spec.size_bytes > 0
 

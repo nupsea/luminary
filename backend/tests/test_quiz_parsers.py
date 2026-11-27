@@ -4,234 +4,237 @@ import json
 
 import pytest
 
+from app.services.quiz_material import join_chunks, pick_keys, pick_list, unfit_reason
 from app.services.quiz_parsers import (
-    LONGEST_RIGHT_RATIO,
-    REFUSE_DUPLICATE,
-    REFUSE_GIVEAWAY,
-    REFUSE_LONGEST_RIGHT,
+    DROP_ABSOLUTE,
+    DROP_LENGTH,
+    DROP_STATED,
+    REFUSE_ANSWER_IN_STEM,
+    REFUSE_COUNT_IN_STEM,
+    REFUSE_INVENTED_NAME,
+    REFUSE_OTHER_SCRIPT,
     REFUSE_POINTING,
+    REFUSE_RIGHT_IS_LONGEST,
     REFUSE_SHAPE,
-    REFUSE_STATED_WRONG,
-    REFUSE_UNGROUNDED,
     REFUSE_UNPARSED,
+    REFUSE_UNSUPPORTED_WHY,
+    ParsedItem,
+    ParsedOption,
     QuizRefusal,
-    check_structure,
-    parse_item,
+    check_lengths,
+    check_question,
+    distinct,
+    drop_reason,
+    parse_letters,
+    parse_question,
+    parse_wrong,
 )
 
 PASSAGE = (
     "In leaderless replication, the client sends each write to several replicas in parallel. "
-    "Read repair fixes stale values when a client notices them during a read. Quorum reads and "
-    "writes overlap when the number of nodes written plus the number read exceeds the replica "
-    "count, so at least one node read holds the latest value."
+    "Read repair fixes stale values when a client notices them during a read of several nodes. "
+    "Quorum reads and writes overlap when the number of nodes written plus the number read "
+    "exceeds the replica count, so at least one node read holds the latest value."
 )
-QUOTE = "the client sends each write to several replicas in parallel"
+KEY = "In leaderless replication, the client sends each write to several replicas in parallel."
+QUESTION = "How does a client write data under leaderless replication?"
+ANSWER = "It sends every write to several replicas at the same time."
 
 
-def _option(text, correct, **extra):
-    return {"text": text, "correct": correct, "why": "because", **extra}
-
-
-def _item(**overrides):
-    item = {
-        "question": "How does a client write under leaderless replication?",
-        "options": [
-            _option("It sends every write to several replicas at once", True, quote=QUOTE),
-            _option("It sends every write to one elected leader", False, mistake="neighbour"),
-            _option("It waits for a follower to be promoted first", False, mistake="neighbour"),
-            _option("It writes only to the replica closest to it", False, mistake="neighbour"),
-        ],
-    }
-    item.update(overrides)
-    return item
-
-
-def _refusal(item, kind="single", passage=PASSAGE) -> QuizRefusal:
+def _refused(call, *args) -> QuizRefusal:
     with pytest.raises(QuizRefusal) as caught:
-        check_structure(parse_item(json.dumps(item)), kind, passage)
+        call(*args)
     return caught.value
 
 
-def test_a_clean_item_passes_and_maps_the_mistake_code():
-    parsed = parse_item(json.dumps(_item()))
-    check_structure(parsed, "single", PASSAGE)
-    assert [o.trap for o in parsed.wrong] == ["related_but_different"] * 3
-    assert parsed.right[0].quote == QUOTE
+# ---- the material
 
 
-def test_swapped_field_names_are_read():
-    raw = json.dumps(
-        {
-            "stem": "How does a client write under leaderless replication?",
-            "choices": [
-                {"option": o["text"], "is_correct": o["correct"], "explanation": "x"}
-                | ({"evidence": QUOTE} if o["correct"] else {"trap": "neighbour"})
-                for o in _item()["options"]
-            ],
-        }
+def test_overlapping_chunks_are_joined_without_the_repeat():
+    first = "Leaders accept writes. Followers apply the replication log in the same order."
+    second = "apply the replication log in the same order. Failover promotes a follower."
+    joined = join_chunks([first, second])
+    assert joined.count("apply the replication log") == 1
+    assert joined.endswith("Failover promotes a follower.")
+
+
+def test_a_contents_page_licence_quotations_and_references_are_not_material():
+    contents = "\n".join(f"CHAPTER {n}. The Whale as a Dish." for n in range(60, 70))
+    quotations = "\n".join(f"“A whale.”\n— Hamlet {n}." for n in range(4))
+    references = "[1] E. F. Codd: A Relational Model.\n[2] M. Stonebraker: What Goes Around."
+    assert unfit_reason(contents) == "contents"
+    assert unfit_reason(quotations) == "quotations"
+    assert unfit_reason("This eBook is for the use of anyone anywhere.") == "licence"
+    assert unfit_reason(references) == "references"
+    assert unfit_reason(PASSAGE) is None
+
+
+def test_a_key_is_a_whole_sentence_and_a_fragment_is_never_one():
+    fragment = "partway through a sentence that the chunk boundary cut in half and then went on. "
+    [key] = pick_keys(fragment + PASSAGE, 1, set())
+    assert key[0].isupper() and not key.startswith("partway")
+
+
+def test_a_question_or_a_numbered_note_is_never_a_key():
+    note = (
+        "2. In order that the whole subject may be laid before the public, it is proposed to "
+        "publish them weekly."
     )
-    check_structure(parse_item(raw), "single", PASSAGE)
+    asked = "What inducements could the separate states have, if disunited, to make war?"
+    [key] = pick_keys(f"{note} {asked} {PASSAGE}", 1, set())
+    assert key not in (note, asked)
 
 
-def test_no_json_is_unparsed():
-    with pytest.raises(QuizRefusal) as caught:
-        parse_item("Sure! Here is a question about replication.")
-    assert caught.value.kind == REFUSE_UNPARSED
+def test_a_key_far_from_the_section_summary_loses_to_a_shorter_central_one():
+    long_aside = (
+        "It is out of the idolatrous dotings of the old Egyptians upon broiled ibis and roasted "
+        "river horse that you see the mummies of those creatures in their huge bake-houses."
+    )
+    central = "Ishmael goes to sea whenever he grows grim about the mouth and gloomy in his soul."
+    passage = f"{long_aside} {central}"
+    assert pick_keys(passage, 1, set()) == [long_aside]
+    assert pick_keys(passage, 1, set(), closeness=[0.40, 0.58]) == [central]
+    assert pick_keys(passage, 1, set(), closeness=[0.50, 0.58]) == [long_aside]
+
+
+LIST = (
+    "Leaderless replication repairs data in several ways, including:\n"
+    "\u2022 Read repair, which writes the newer value back when a read sees a stale one\n"
+    "\u2022 Anti-entropy, a background process that copies missing data between replicas\n"
+    "\u2022 Hinted handoff, which holds writes for a node that is down until it returns\n"
+    "Each has its own cost."
+)
+
+
+def test_a_multi_answer_question_is_written_from_one_list_and_its_opening_line():
+    lead_in, items = pick_list(LIST, 2)
+    assert lead_in == "Leaderless replication repairs data in several ways, including:"
+    assert len(items) == 2 and all(i in LIST for i in items)
+    assert pick_list(PASSAGE, 2) is None
+
+
+# ---- the question
+
+
+def test_a_clean_question_passes():
+    stem, answers = parse_question(json.dumps({"question": QUESTION, "answer": ANSWER}), 1)
+    check_question(stem, answers, [KEY], PASSAGE)
+
+
+def test_no_json_is_unparsed_and_a_statement_is_not_a_question():
+    assert _refused(parse_question, "Sure, here it is.", 1).kind == REFUSE_UNPARSED
+    raw = json.dumps({"question": "Leaderless replication writes", "answer": ANSWER})
+    assert _refused(parse_question, raw, 1).kind == REFUSE_SHAPE
+
+
+def test_the_prompt_placeholder_is_not_an_answer():
+    raw = json.dumps({"question": QUESTION, "answer": "<answer>"})
+    assert _refused(parse_question, raw, 1).kind == REFUSE_SHAPE
+
+
+def test_a_question_pointing_at_its_source_is_refused():
+    stem = "According to the passage, how does a client write?"
+    assert _refused(check_question, stem, [ANSWER], [KEY], PASSAGE).kind == REFUSE_POINTING
 
 
 @pytest.mark.parametrize(
-    ("change", "message"),
+    "stem",
     [
-        ({"question": "Leaderless replication sends writes to replicas."}, "not a question"),
-        ({"options": _item()["options"][:3]}, "3 options where 4"),
-        (
-            {"options": [_option("A", True, quote=QUOTE)] * 2 + _item()["options"][2:]},
-            "2 right options",
-        ),
-        (
-            {"options": [_option("It sends writes to replicas", True)] + _item()["options"][1:]},
-            "without a quote",
-        ),
-        (
-            {
-                "options": _item()["options"][:3]
-                + [_option("It writes to the nearest replica", False, mistake="vibes")]
-            },
-            "no known mistake",
-        ),
-        (
-            {"options": _item()["options"][:3] + [_option("<option>", False, mistake="detail")]},
-            "no text of its own",
-        ),
+        "According to the story, why were cobblestones carried on the first sloop?",
+        "Which problems arise in data systems according to the discussion on fault tolerance?",
     ],
 )
-def test_shape_refusals(change, message):
-    refusal = _refusal(_item(**change))
-    assert refusal.kind == REFUSE_SHAPE
-    assert message in refusal.message
+def test_a_question_crediting_a_story_or_discussion_is_refused(stem):
+    assert _refused(check_question, stem, [ANSWER], [KEY], PASSAGE).kind == REFUSE_POINTING
 
 
-def test_identical_option_text_is_a_duplicate():
-    options = _item()["options"]
-    refusal = _refusal(_item(options=[*options[:3], {**options[2]}]))
-    assert refusal.kind == REFUSE_DUPLICATE
+def test_a_name_the_material_never_mentions_is_refused():
+    stem = "How does Cassandra write data under leaderless replication?"
+    refusal = _refused(check_question, stem, [ANSWER], [KEY], PASSAGE)
+    assert refusal.kind == REFUSE_INVENTED_NAME and "Cassandra" in refusal.message
 
 
-def test_a_quote_not_in_the_passage_is_ungrounded():
-    options = _item()["options"]
-    bad = _option(options[0]["text"], True, quote="the client always writes to a single leader")
-    refusal = _refusal(_item(options=[bad, *options[1:]]))
-    assert refusal.kind == REFUSE_UNGROUNDED
-    assert "not in the passage" in refusal.message
+def test_why_is_asked_only_of_a_sentence_that_gives_a_reason():
+    stem = "Why does the client send writes to several replicas under leaderless replication?"
+    refusal = _refused(check_question, stem, [ANSWER], [KEY], PASSAGE)
+    assert refusal.kind == REFUSE_UNSUPPORTED_WHY
+    reasoned = "The client writes to several replicas because any one of them may be down."
+    check_question(stem, [ANSWER], [reasoned], PASSAGE + " " + reasoned)
 
 
-def test_the_prompts_own_placeholder_is_never_a_quote():
-    options = _item()["options"]
-    bad = _option(options[0]["text"], True, quote="<words from the material>")
-    passage = PASSAGE + " <words from the material>"
-    assert _refusal(_item(options=[bad, *options[1:]]), passage=passage).kind == REFUSE_UNGROUNDED
+def test_an_answer_in_another_script_is_refused():
+    answer = "It sends every write to several replicas \u540c\u65f6."
+    assert _refused(check_question, QUESTION, [answer], [KEY], PASSAGE).kind == REFUSE_OTHER_SCRIPT
 
 
-def test_a_wrong_option_the_passage_states_is_refused():
-    options = _item()["options"]
-    copied = _option("Read repair fixes stale values", False, mistake="neighbour")
-    refusal = _refusal(_item(options=[*options[:3], copied]))
-    assert refusal.kind == REFUSE_STATED_WRONG
+def test_a_stem_that_states_its_answer_is_refused():
+    stem = "How does the client send every write to several replicas at the same time?"
+    assert _refused(check_question, stem, [ANSWER], [KEY], PASSAGE).kind == REFUSE_ANSWER_IN_STEM
 
 
-def test_a_four_word_copied_phrase_is_left_to_the_judge():
-    options = _item()["options"]
-    phrase = _option("Read repair fixes stale", False, mistake="neighbour")
-    check_structure(
-        parse_item(json.dumps(_item(options=[*options[:3], phrase]))), "single", PASSAGE
+def test_a_multi_answer_stem_that_counts_its_answers_is_refused():
+    _, keys = pick_list(LIST, 2)
+    stem = "Which two ways does leaderless replication repair data?"
+    answers = [f"{k.split(',')[0]} repairs stale or missing data between replicas." for k in keys]
+    assert _refused(check_question, stem, answers, keys, LIST).kind == REFUSE_COUNT_IN_STEM
+
+
+# ---- the wrong answers
+
+
+def _wrong(text, mistake="belief"):
+    return ParsedOption(text=text, correct=False, trap={"belief": "common_misconception"}[mistake])
+
+
+def test_wrong_answers_take_their_slot_code_unless_they_name_another_offered_one():
+    raw = json.dumps(
+        {
+            "wrong": [
+                {"text": "It writes to one leader first.", "mistake": "made_up"},
+                {"text": "It writes to the nearest replica.", "mistake": "belief"},
+            ]
+        }
     )
-
-
-def test_all_of_the_above_is_a_giveaway():
-    options = _item()["options"]
-    refusal = _refusal(
-        _item(options=[*options[:3], _option("All of the above", False, mistake="neighbour")])
-    )
-    assert refusal.kind == REFUSE_GIVEAWAY
-
-
-def test_a_stem_that_points_at_its_source_is_refused():
-    refusal = _refusal(_item(question="According to the passage, how are writes sent?"))
-    assert refusal.kind == REFUSE_POINTING
-
-
-def test_a_right_option_found_by_its_length_is_refused():
-    options = _item()["options"]
-    wrong_len = max(len(o["text"]) for o in options[1:])
-    right_text = "It sends every write to several replicas in parallel " + "x" * int(
-        wrong_len * LONGEST_RIGHT_RATIO
-    )
-    refusal = _refusal(_item(options=[{**options[0], "text": right_text}, *options[1:]]))
-    assert refusal.kind == REFUSE_LONGEST_RIGHT
-
-
-def test_length_is_not_checked_on_multi_answer_questions():
-    right = [
-        _option(
-            "It sends every write to several replicas at once, all in parallel", True, quote=QUOTE
-        ),
-        _option(
-            "Stale values are fixed on read",
-            True,
-            quote="Read repair fixes stale values when a client notices them",
-        ),
+    assert [o.trap for o in parse_wrong(raw, ["broader", "broader"])] == [
+        "overgeneralised",
+        "overgeneralised",
     ]
-    wrong = [_option(f"Wrong idea number {n}", False, mistake="belief") for n in range(3)]
-    check_structure(parse_item(json.dumps(_item(options=right + wrong))), "multi", PASSAGE)
+    assert [o.trap for o in parse_wrong(raw, ["broader", "belief"])][1] == "common_misconception"
 
 
-def test_a_quote_wrapped_as_a_json_string_is_still_found():
-    options = _item()["options"]
-    wrapped = {**options[0], "quote": f'"{QUOTE}",'}
-    check_structure(
-        parse_item(json.dumps(_item(options=[wrapped, *options[1:]]))), "single", PASSAGE
+def test_a_wrong_answer_copied_from_the_material_is_dropped():
+    option = _wrong("the client sends each write to several replicas in parallel")
+    assert drop_reason(option, [ANSWER], PASSAGE) == DROP_STATED
+
+
+def test_an_absolute_word_only_the_wrong_answer_uses_is_dropped():
+    option = _wrong("It always writes to the single replica nearest the client.")
+    plain = "It sends each write to several replicas at the same time."
+    assert drop_reason(option, [plain], PASSAGE) == DROP_ABSOLUTE
+    assert drop_reason(option, ["It always sends writes to many replicas."], PASSAGE) is None
+
+
+def test_a_wrong_answer_far_off_the_right_answers_length_is_dropped():
+    assert drop_reason(_wrong("A leader."), [ANSWER], PASSAGE) == DROP_LENGTH
+
+
+def test_a_wrong_answer_repeating_the_right_one_is_dropped():
+    kept = distinct([_wrong(ANSWER), _wrong("It writes to one leader.")], [ANSWER])
+    assert [o.text for o in kept] == ["It writes to one leader."]
+
+
+def test_a_right_answer_longer_than_every_wrong_one_is_refused():
+    item = ParsedItem(
+        stem=QUESTION,
+        options=[ParsedOption(text=ANSWER * 2, correct=True), *[_wrong("One leader.")] * 3],
     )
+    assert _refused(check_lengths, item, "single").kind == REFUSE_RIGHT_IS_LONGEST
 
 
-def test_a_typesetters_line_break_hyphen_is_read_as_the_matcher_reads_it():
-    passage = PASSAGE + " Consider the time\u2010\nscale for delivery of every write."
-    options = _item()["options"]
-    hyphened = {**options[0], "quote": "the time\u2010scale for delivery"}
-    check_structure(
-        parse_item(json.dumps(_item(options=[hyphened, *options[1:]]))), "single", passage
-    )
+# ---- the judge's and the guesser's letters
 
 
-def test_trimming_never_admits_invented_words():
-    options = _item()["options"]
-    invented = {**options[0], "quote": '"the client writes to a single leader",'}
-    assert _refusal(_item(options=[invented, *options[1:]])).kind == REFUSE_UNGROUNDED
-
-
-def test_an_invented_code_takes_the_levels_only_code():
-    options = _item()["options"]
-    invented = {**options[3], "mistake": "falsehood"}
-    item = parse_item(json.dumps(_item(options=[*options[:3], invented])))
-    check_structure(item, "single", PASSAGE, ("neighbour",))
-    assert item.wrong[-1].trap == "related_but_different"
-
-
-def test_an_invented_code_is_refused_where_the_level_offers_a_choice():
-    options = _item()["options"]
-    invented = {**options[3], "mistake": "falsehood"}
-    with pytest.raises(QuizRefusal) as caught:
-        check_structure(
-            parse_item(json.dumps(_item(options=[*options[:3], invented]))),
-            "single",
-            PASSAGE,
-            ("detail", "swap", "condition"),
-        )
-    assert caught.value.kind == REFUSE_SHAPE
-
-
-def test_a_doubly_escaped_newline_in_a_quote_is_whitespace():
-    options = _item()["options"]
-    escaped = {**options[0], "quote": "the client sends each write\\nto several replicas"}
-    check_structure(
-        parse_item(json.dumps(_item(options=[escaped, *options[1:]]))), "single", PASSAGE
-    )
+def test_letters_are_read_and_an_unoffered_letter_is_ignored():
+    assert parse_letters('{"answer": ["B", "d"]}', 4) == {1, 3}
+    assert parse_letters('{"answer": ["E"]}', 4) == set()
+    assert parse_letters("B", 4) == set()

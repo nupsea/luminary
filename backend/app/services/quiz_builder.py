@@ -1,8 +1,9 @@
-"""Writing quiz items: code picks the passage, the kind and the level; the model writes JSON.
+"""Writing quiz items: code picks the passage, the sentences a question tests, the kind and the
+level; the model phrases the question, then writes wrong answers to it.
 
-An item reaches the bank only through every gate in `quiz_parsers` plus the two that need more
-than the text: option similarity from the embedder, and the separate factuality judge, which is
-never the model that wrote the item (I-35). See docs/quiz.md.
+A question reaches the bank only through every gate in `quiz_parsers` and the ones that need more
+than the text: entailment (a wrong answer the material states is dropped, I-85), a separate
+judge that must find the right answer with the material, and a guess without it. See docs/quiz.md.
 """
 
 from __future__ import annotations
@@ -18,35 +19,57 @@ from dataclasses import dataclass
 import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.exceptions import NotFound
+from app.config import get_settings
+from app.exceptions import ModelNotDownloaded, NotFound
 from app.models import ChunkModel, QuizItemModel, QuizOptionModel
 from app.repos.document_repo import DocumentRepo
 from app.repos.quiz_repo import QuizRepo
-from app.services import llm_output_stats
+from app.services import llm_output_stats, quiz_nli
 from app.services.flashcard_factuality import (
-    FACTUALITY_SUPPORTED,
-    FACTUALITY_UNVERIFIABLE,
-    check_answer,
     effective_generation_model,
     factuality_model,
     is_self_judging,
 )
 from app.services.flashcard_parsers import _normalise_for_match
-from app.services.flashcard_units import bare_passage
 from app.services.llm_admission import awaited
 from app.services.llm_errors import describe
+from app.services.quiz_material import (
+    CANDIDATES,
+    join_chunks,
+    key_candidates,
+    pick_keys,
+    pick_list,
+    unfit_reason,
+)
 from app.services.quiz_parsers import (
+    DROP_ENTAILED,
+    DROP_TRUE_ELSEWHERE,
     OPTION_COUNT,
     REFUSE_DUPLICATE,
-    REFUSE_JUDGED_RIGHT,
-    REFUSE_JUDGED_WRONG,
-    REFUSE_LEVEL,
+    REFUSE_GUESSABLE,
+    REFUSE_NOT_ANSWERABLE,
+    REFUSE_OFF_KEY,
+    REFUSE_TOO_FEW_WRONG,
+    RIGHT_COUNTS,
+    SPARE_WRONG,
     ParsedItem,
+    ParsedOption,
     QuizRefusal,
-    check_structure,
-    parse_item,
+    check_lengths,
+    check_question,
+    distinct,
+    drop_reason,
+    parse_letters,
+    parse_question,
+    parse_wrong,
 )
-from app.services.quiz_prompts import QUIZ_ITEM_SYSTEM, level_codes, quiz_item_prompt
+from app.services.quiz_prompts import (
+    QUIZ_SYSTEM,
+    answer_prompt,
+    question_prompt,
+    slot_codes,
+    wrong_prompt,
+)
 from app.types import QuizKind, QuizLevel, QuizScopeType
 
 logger = logging.getLogger(__name__)
@@ -56,28 +79,19 @@ logger = logging.getLogger(__name__)
 _MIN_PASSAGE_CHARS = 300
 _MAX_PASSAGE_CHARS = 2400
 
-# One write and up to two rewrites per question, each on fresh material, since the passage itself
-# can be the cause (a list, a table of contents).
+# Passages tried per question, each on fresh material, since the passage itself can be the cause.
 CALLS_PER_QUESTION = 3
 
 # Two options this close say the same thing. Above the closest distinct pair measured (0.837,
 # a wrong option against its right one); no real near-duplicate has yet bracketed it from above.
 DUPLICATE_COSINE = 0.95
 
-# How close a wrong option sits to the nearest right one, per level. OFF: on 70 measured wrong
-# options the medians were easy 0.645, medium 0.601, hard 0.610, so cosine does not tell the
-# levels apart and a band would refuse at random. Re-enable with a measure that separates them.
-LEVEL_BANDS: dict[QuizLevel, tuple[float, float]] = {}
+# Chunks of the whole document searched for a wrong answer stated somewhere else in it.
+_ELSEWHERE_CHUNKS = 5
 
-
-# An option is often a phrase that means something only under its stem, so the judge sees the
-# stem; against a "which of these" stem one true option reads as a partial answer, so the judge
-# is told it judges one option alone.
-_JUDGE_NOTE = "(This is one of several options. Judge only whether this option is right.)"
-
-
-def judge_question(stem: str) -> str:
-    return f"{stem}\n{_JUDGE_NOTE}"
+# A test-wise guess: the question shown without its material, this many orders. Right every time
+# means the wrong answers give themselves away. Gated above easy; measured at easy.
+_GUESSES = 3
 
 
 class ModelUnavailable(Exception):
@@ -138,14 +152,19 @@ def _continues(run: Sequence[ChunkModel], chunk: ChunkModel) -> bool:
 
 
 def _window(run: Sequence[ChunkModel]) -> Window | None:
-    text = bare_passage([c.text or "" for c in run])
+    text = join_chunks([c.text or "" for c in run])
     if len(text) < _MIN_PASSAGE_CHARS:
+        return None
+    unfit = unfit_reason(text)
+    if unfit:
+        llm_output_stats.record_quiz_drop(f"passage_{unfit}")
         return None
     return Window(run[0].section_id, tuple(c.id for c in run), text)
 
 
 def windows(chunks: Sequence[ChunkModel]) -> list[Window]:
-    """Runs of consecutive chunks within one section, each between the passage bounds."""
+    """Runs of consecutive chunks within one section, each between the passage bounds and none
+    a contents page, licence or collection of quotations."""
     runs: list[list[ChunkModel]] = []
     for chunk in sorted(chunks, key=lambda c: c.chunk_index):
         if runs and _continues(runs[-1], chunk):
@@ -177,61 +196,21 @@ def _cosines(texts: list[str]) -> np.ndarray:
     return vectors @ vectors.T
 
 
-def _refuse_duplicates(sims: np.ndarray) -> None:
-    n = sims.shape[0]
-    for i, j in itertools.combinations(range(n), 2):
+async def measure_options(item: ParsedItem) -> list[float | None]:
+    """Each wrong option's cosine to its nearest right option (None for right options). Refuses
+    near-duplicate options."""
+    sims = await asyncio.to_thread(_cosines, [o.text for o in item.options])
+    for i, j in itertools.combinations(range(sims.shape[0]), 2):
         if sims[i, j] >= DUPLICATE_COSINE:
             raise QuizRefusal(
                 REFUSE_DUPLICATE,
                 f"options {i + 1} and {j + 1} say the same thing ({sims[i, j]:.3f})",
             )
-
-
-def _refuse_off_level(values: Sequence[float | None], level: QuizLevel) -> None:
-    band = LEVEL_BANDS.get(level)
-    if not band:
-        return
-    low, high = band
-    for value in (v for v in values if v is not None):
-        if not low <= value < high:
-            raise QuizRefusal(
-                REFUSE_LEVEL, f"a wrong option at {value:.3f} is outside {level} [{low}, {high})"
-            )
-
-
-async def measure_options(item: ParsedItem, level: QuizLevel) -> list[float | None]:
-    """Each wrong option's cosine to its nearest right option (None for right options). Refuses
-    near-duplicate options and, once bands are measured, an item off its level."""
-    sims = await asyncio.to_thread(_cosines, [o.text for o in item.options])
-    _refuse_duplicates(sims)
     right = [i for i, o in enumerate(item.options) if o.correct]
-    values: list[float | None] = [
+    return [
         None if option.correct else float(max(sims[i, j] for j in right))
         for i, option in enumerate(item.options)
     ]
-    _refuse_off_level(values, level)
-    return values
-
-
-async def judge(item: ParsedItem, passage: str, llm) -> str:  # type: ignore[no-untyped-def]
-    """`supported` when the separate judge agrees every right option follows from the passage and
-    no wrong one does; `unchecked` when there is no judge, it is the writer, or it could not say.
-    Raises on a right option it rejects or a wrong option it accepts."""
-    checker = factuality_model()
-    if not checker or is_self_judging(checker, effective_generation_model()):
-        return "unchecked"
-    conclusive = True
-    for option in item.options:
-        verdict = await check_answer(
-            judge_question(item.stem), option.text, passage, checker=checker, llm=llm
-        )
-        if verdict == FACTUALITY_UNVERIFIABLE:
-            conclusive = False
-        elif option.correct and verdict != FACTUALITY_SUPPORTED:
-            raise QuizRefusal(REFUSE_JUDGED_WRONG, f"judge rejects {option.text[:60]!r}")
-        elif not option.correct and verdict == FACTUALITY_SUPPORTED:
-            raise QuizRefusal(REFUSE_JUDGED_RIGHT, f"judge accepts {option.text[:60]!r}")
-    return "supported" if conclusive else "unchecked"
 
 
 def _quotes_meet(quote: str, excerpt: str) -> bool:
@@ -291,6 +270,187 @@ def _item_rows(
     return row, options
 
 
+@dataclass
+class _Writer:
+    """One question's calls: the writing model, and the separate judge when there is one."""
+
+    llm: object
+    model: str | None
+    document_id: str
+
+    async def ask(self, prompt: str, model: str | None = None) -> str:
+        try:
+            with awaited():
+                return await self.llm.generate(  # type: ignore[attr-defined]
+                    prompt,
+                    system=QUIZ_SYSTEM,
+                    model=model or self.model,
+                    stream=False,
+                    background=True,
+                    response_format={"type": "json_object"},
+                    temperature=0 if model else None,
+                )
+        except Exception as exc:  # noqa: BLE001 -- every failure to reach the model is one case
+            raise ModelUnavailable(describe(exc)[1]) from exc
+
+    async def elsewhere(self, text: str) -> list[str]:
+        """The document's chunks nearest *text*, in three-sentence windows."""
+        from app.services.retriever import get_retriever  # noqa: PLC0415
+
+        hits = await asyncio.to_thread(
+            get_retriever().vector_search, text, [self.document_id], _ELSEWHERE_CHUNKS
+        )
+        return [w for hit in hits for w in quiz_nli.windows(hit.text)]
+
+
+async def _closeness(texts: list[str], summary: str | None) -> list[float] | None:
+    """Each text's cosine to the section summary; None without a summary."""
+    if not summary or not texts:
+        return None
+    sims = await asyncio.to_thread(_cosines, [summary, *texts])
+    return [float(v) for v in sims[0, 1:]]
+
+
+async def _take(
+    candidates: list[Window], kind: QuizKind, summaries: dict[str, str]
+) -> tuple[Window, list[str], str] | None:
+    """The first passage that can carry a *kind* question, taken off *candidates*, with its key
+    sentences and, for a multi-answer question, the line that introduces its list."""
+    n_right = random.choice(RIGHT_COUNTS[kind])  # noqa: S311 -- not a secret
+    for i, window in enumerate(candidates):
+        if kind == "multi":
+            listed = pick_list(window.text, n_right)
+            if listed:
+                return candidates.pop(i), listed[1], listed[0]
+            continue
+        options = key_candidates(window.text)[:CANDIDATES]
+        closeness = await _closeness(options, summaries.get(window.section_id or ""))
+        keys = pick_keys(window.text, 1, set(), closeness)
+        if keys:
+            return candidates.pop(i), keys, ""
+    return None
+
+
+async def _summaries(session: AsyncSession, document_id: str) -> dict[str, str]:
+    from app.repos.summary_repo import SummaryRepo  # noqa: PLC0415
+
+    joined: dict[str, list[str]] = {}
+    for row in await SummaryRepo(session).section_summaries(document_id):
+        if row.section_id:
+            joined.setdefault(row.section_id, []).append(row.content)
+    return {k: " ".join(v)[:_MAX_PASSAGE_CHARS] for k, v in joined.items()}
+
+
+async def _wrong_answers(
+    writer: _Writer, window: Window, stem: str, rights: list[str], level: QuizLevel, need: int
+) -> list[ParsedOption]:
+    """*need* wrong answers that pass every check, from one call that asks for spares."""
+    slots = slot_codes(level, need + SPARE_WRONG)
+    raw = await writer.ask(wrong_prompt(window.text, stem, rights, level, len(slots)))
+    passage_windows = quiz_nli.windows(window.text)
+    passed: list[ParsedOption] = []
+    for option in distinct(parse_wrong(raw, slots), rights):
+        reason = drop_reason(option, rights, window.text)
+        if (
+            reason is None
+            and await quiz_nli.entailment(passage_windows, option.text) >= quiz_nli.ENTAILED
+        ):
+            reason = DROP_ENTAILED
+        if reason is None:
+            elsewhere = await writer.elsewhere(option.text)
+            if await quiz_nli.entailment(elsewhere, option.text) >= quiz_nli.ENTAILED:
+                reason = DROP_TRUE_ELSEWHERE
+        if reason:
+            llm_output_stats.record_quiz_drop(reason)
+            logger.info("quiz: dropped a wrong answer (%s): %s", reason, option.text[:80])
+            continue
+        passed.append(option)
+    if len(passed) < need:
+        raise QuizRefusal(REFUSE_TOO_FEW_WRONG, f"{len(passed)} of {need} wrong answers passed")
+    # The ones nearest the right answers' length, so no option stands out by its length.
+    mean = sum(len(r) for r in rights) / len(rights)
+    return sorted(passed, key=lambda o: abs(len(o.text) - mean))[:need]
+
+
+def _shown(item: ParsedItem, rng: random.Random) -> tuple[list[str], set[int]]:
+    order = list(range(len(item.options)))
+    rng.shuffle(order)
+    return [item.options[i].text for i in order], {
+        pos for pos, i in enumerate(order) if item.options[i].correct
+    }
+
+
+async def _judge(writer: _Writer, item: ParsedItem, passage: str) -> str:
+    """`supported` when a separate judge, given the material, picks exactly the right answers;
+    `unchecked` when there is no judge or it is the writer. Raises when it picks otherwise."""
+    checker = factuality_model()
+    if not checker or is_self_judging(checker, effective_generation_model()):
+        return "unchecked"
+    texts, right = _shown(item, random.Random(item.stem))  # noqa: S311 -- an order, not a secret
+    raw = await writer.ask(answer_prompt(item.stem, texts, len(right), passage), model=checker)
+    picked = parse_letters(raw, len(texts))
+    if picked != right:
+        raise QuizRefusal(
+            REFUSE_NOT_ANSWERABLE,
+            f"the judge chose {sorted(picked)}, not {sorted(right)}",
+        )
+    return "supported"
+
+
+async def _guessed(writer: _Writer, item: ParsedItem) -> bool:
+    """Whether the guessing model finds the right answers without the material, in every order."""
+    settings = get_settings()
+    guesser = settings.QUIZ_GUESS_MODEL or settings.LITELLM_DEFAULT_MODEL
+    rng = random.Random(len(item.stem))  # noqa: S311 -- an order, not a secret
+    for _ in range(_GUESSES):
+        texts, right = _shown(item, rng)
+        raw = await writer.ask(answer_prompt(item.stem, texts, len(right), None), model=guesser)
+        if parse_letters(raw, len(texts)) != right:
+            return False
+    return True
+
+
+async def _check_keys(answers: Sequence[str], keys: Sequence[str]) -> None:
+    """Each answer says what one key sentence says: entailed by it, a different key each."""
+    entailed = [
+        {
+            j
+            for j, key in enumerate(keys)
+            if await quiz_nli.entailment([key], a) >= quiz_nli.ENTAILED
+        }
+        for a in answers
+    ]
+    if not any(
+        all(j in entailed[i] for i, j in enumerate(order))
+        for order in itertools.permutations(range(len(keys)))
+    ):
+        missing = next((a for a, e in zip(answers, entailed, strict=True) if not e), answers[0])
+        raise QuizRefusal(REFUSE_OFF_KEY, f"{missing[:60]!r} does not say what a key sentence says")
+
+
+async def _compose(
+    writer: _Writer, window: Window, keys: list[str], lead_in: str, level: QuizLevel, kind: QuizKind
+) -> tuple[ParsedItem, list[float | None], str]:
+    raw = await writer.ask(question_prompt(window.text, keys, lead_in))
+    stem, answers = parse_question(raw, len(keys))
+    check_question(stem, answers, keys, window.text)
+    await _check_keys(answers, keys)
+    need = OPTION_COUNT[kind] - len(keys)
+    wrong = await _wrong_answers(writer, window, stem, answers, level, need)
+    right = [
+        ParsedOption(text=a, correct=True, quote=k) for a, k in zip(answers, keys, strict=True)
+    ]
+    item = ParsedItem(stem=stem, options=right + wrong)
+    check_lengths(item, kind)
+    similarities = await measure_options(item)
+    support = await _judge(writer, item, window.text)
+    if await _guessed(writer, item):
+        if level != "easy":
+            raise QuizRefusal(REFUSE_GUESSABLE, "answered right without the material every time")
+        llm_output_stats.record_quiz_drop("easy_guessable")
+    return item, similarities, support
+
+
 async def write_item(
     session: AsyncSession,
     *,
@@ -301,35 +461,27 @@ async def write_item(
     llm,  # type: ignore[no-untyped-def]
     model: str | None,
 ) -> QuizItemModel | None:
-    """One item from the first window that yields a clean one, within the call budget. Each
-    window tried is taken off *candidates*, so no passage is asked about twice in a quiz.
-    *model* is None unless the user chose one, so the LLM service keeps routing it (and its
-    offline reroute); the item records the model that actually wrote it."""
+    """One item from the first passage that yields a clean one, within the attempt budget. Each
+    passage tried is taken off *candidates*, so none is asked about twice in a quiz. *model* is
+    None unless the user chose one, so the LLM service keeps routing it (and its offline
+    reroute); the item records the model that actually wrote it."""
     cards = await QuizRepo(session).grounded_cards(document_id)
-    n_right = 1 if kind == "single" else random.choice((2, 3))  # noqa: S311 -- not a secret
-    writer = model or effective_generation_model() or None
+    writer = _Writer(llm=llm, model=model, document_id=document_id)
+    summaries = await _summaries(session, document_id)
     for _ in range(CALLS_PER_QUESTION):
-        if not candidates:
+        taken = await _take(candidates, kind, summaries)
+        if taken is None and kind == "multi":
+            # No list left in scope: a single-answer question, never one over scattered sentences.
+            kind = "single"
+            taken = await _take(candidates, kind, summaries)
+        if taken is None:
             break
-        window = candidates.pop(0)
-        prompt = quiz_item_prompt(window.text, level, OPTION_COUNT[kind], n_right)
+        window, keys, lead_in = taken
         try:
-            with awaited():
-                raw = await llm.generate(
-                    prompt,
-                    system=QUIZ_ITEM_SYSTEM,
-                    model=model,
-                    stream=False,
-                    background=True,
-                    response_format={"type": "json_object"},
-                )
-        except Exception as exc:  # noqa: BLE001 -- every failure to reach the model is one case
-            raise ModelUnavailable(describe(exc)[1]) from exc
-        try:
-            item = parse_item(raw)
-            check_structure(item, kind, window.text, level_codes(level))
-            similarities = await measure_options(item, level)
-            support = await judge(item, window.text, llm)
+            item, similarities, support = await _compose(writer, window, keys, lead_in, level, kind)
+        except ModelNotDownloaded as exc:
+            # Without the entailment model no wrong answer can be shown false: no question at all.
+            raise ModelUnavailable(str(exc)) from exc
         except QuizRefusal as refusal:
             llm_output_stats.record_quiz_gate(refusal.kind)
             logger.info("quiz: refused a %s %s item: %s", level, kind, refusal)
@@ -343,7 +495,7 @@ async def write_item(
             kind=kind,
             similarities=similarities,
             support=support,
-            model=writer,
+            model=model or effective_generation_model() or None,
             flashcard_id=_linked_card(item, window, cards),
         )
         QuizRepo(session).add_all([row, *options])

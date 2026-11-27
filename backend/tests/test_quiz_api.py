@@ -3,6 +3,7 @@
 import asyncio
 import json
 import re
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import numpy as np
@@ -19,65 +20,120 @@ from app.models import (
     ReviewEventModel,
     StudySessionModel,
 )
-from app.services import quiz_builder, quiz_service
+from app.services import quiz_builder, quiz_nli, quiz_service
 from app.services.quiz_parsers import ParsedItem, ParsedOption, QuizRefusal
 from tests.factories import make_card, make_chunk, make_document, make_section
 
 TOPICS = ["replication", "partitioning", "transactions", "consistency"]
+WORDS = [
+    "amber",
+    "birch",
+    "cedar",
+    "delta",
+    "ember",
+    "fjord",
+    "grove",
+    "heron",
+    "inlet",
+    "juniper",
+    "kestrel",
+    "lagoon",
+]
+OTHER = ["oak", "elm", "fir", "yew", "ash", "pine", "teak", "palm"]
+MARK = "Indeed"
 
 
 def _sentences(topic: str, n: int) -> list[str]:
+    """Sentence 0 is the longest, so it is each passage's key sentence."""
     return [
-        f"Fact {i} about {topic} says that the {topic} layer handles case number {i} with care."
+        f"Fact {WORDS[i]} about {topic} says that the {topic} layer handles the {WORDS[i]} case "
+        f"with care{' and attention' if i == 0 else ''}"
         for i in range(n)
     ]
 
 
 class StubLLM:
-    """Writes a clean item: right options quote the passage's first sentences."""
+    """A model for each quiz prompt: it phrases the key sentences, writes wrong answers of the
+    same length, answers with the material by finding its own right answers, and guesses wrong
+    without it unless *guessable*."""
 
-    def __init__(self, fail: bool = False, garbled: int = 0) -> None:
+    def __init__(self, fail: bool = False, garbled: int = 0, guessable: bool = False) -> None:
         self.calls = 0
+        self.questions = 0
         self.fail = fail
         self.garbled = garbled
+        self.guessable = guessable
 
     async def generate(self, prompt: str, system: str = "", **kwargs) -> str:
         self.calls += 1
         if self.fail:
             raise ConnectionError("connection refused")
-        if self.calls <= self.garbled:
+        if "KEY SENTENCE" in prompt or "A LIST" in prompt:
+            return self._question(prompt)
+        if "wrong answers to this question" in prompt:
+            return self._wrong(prompt)
+        return self._answer(prompt)
+
+    def _question(self, prompt: str) -> str:
+        self.questions += 1
+        if self.questions <= self.garbled:
             return "Here is a question about the passage."
-        passage = prompt.split('"""')[1].strip()
-        n_options = int(re.search(r"exactly (\d) options", prompt).group(1))
-        n_right = int(re.search(r"exactly (\d) of them", prompt).group(1))
-        sentences = [s.strip() for s in passage.split(".") if len(s.split()) >= 6]
-        right = [
-            {
-                "text": f"Claim {i}: {sentences[i][:40]}",
-                "correct": True,
-                "quote": sentences[i],
-                "why": "stated",
-            }
-            for i in range(n_right)
+        keys = re.findall(r'"""\s*(Fact .+?)\s*"""', re.split("KEY SENTENCE|A LIST", prompt)[1])
+        topic = re.search(r"about (\w+) says", keys[0]).group(1)
+        answers = [
+            f"{MARK}, the {topic} layer handles the {re.search(r'Fact (\w+)', k).group(1)} case "
+            "with care."
+            for k in keys
         ]
+        if len(keys) == 1:
+            stem = f"How does the {topic} layer treat what it receives?"
+            return json.dumps({"question": stem, "answer": answers[0]})
+        stem = f"Which statements about the {topic} layer are true?"
+        return json.dumps({"question": stem, "answers": answers})
+
+    def _wrong(self, prompt: str) -> str:
+        n = int(re.search(r"Write (\d) wrong answers", prompt).group(1))
+        topic = re.search(r"QUESTION: .*?the (\w+) layer", prompt).group(1)
         wrong = [
             {
-                "text": f"Invented claim {i} about something else entirely",
-                "correct": False,
-                "mistake": "neighbour",
-                "why": "not stated",
+                "text": f"The {topic} layer drops the {OTHER[i]} case it receives without care.",
+                "mistake": "belief",
             }
-            for i in range(n_options - n_right)
+            for i in range(n)
         ]
-        topic = re.search(r"about (\w+) says", passage).group(1)
-        return json.dumps(
-            {"question": f"What holds for the {topic} layer?", "options": right + wrong}
-        )
+        return json.dumps({"wrong": wrong})
+
+    def _answer(self, prompt: str) -> str:
+        options = re.findall(r"^([A-E])\. (.*)$", prompt, re.MULTILINE)
+        right = [letter for letter, text in options if text.startswith(MARK)]
+        if "MATERIAL:" in prompt or self.guessable:
+            return json.dumps({"answer": right})
+        return json.dumps({"answer": [next(c for c, t in options if not t.startswith(MARK))]})
 
 
 def _cosines(texts):
     n = len(texts)
     return np.full((n, n), 0.5) + np.eye(n) * 0.5
+
+
+async def _not_entailed(premises, hypothesis):
+    """Only the stub's own right answers follow from the material."""
+    return 0.9 if hypothesis.startswith(MARK) else 0.0
+
+
+async def _nowhere(self, text):
+    return []
+
+
+@contextmanager
+def _model(llm, entailment=_not_entailed):
+    with (
+        patch("app.services.llm.get_llm_service", return_value=llm),
+        patch.object(quiz_builder, "_cosines", _cosines),
+        patch.object(quiz_nli, "entailment", entailment),
+        patch.object(quiz_builder._Writer, "elsewhere", _nowhere),
+    ):
+        yield llm
 
 
 async def _call(method: str, url: str, **kwargs):
@@ -105,6 +161,10 @@ async def library(test_db):
         sentences = _sentences(topic, 12)
         for part in range(3):
             text = ". ".join(sentences[part * 4 : part * 4 + 4]) + "."
+            if topic == "consistency" and part == 0:
+                # One list in the document, for multi-answer questions.
+                items = "\n".join(f"\u2022 {s}" for s in sentences[:4])
+                text = f"The consistency layer keeps several promises, including:\n{items}\n"
             rows.append(
                 make_chunk(
                     id=f"{topic}-{part}",
@@ -132,11 +192,7 @@ async def library(test_db):
 
 @pytest.fixture
 def stub():
-    llm = StubLLM()
-    with (
-        patch("app.services.llm.get_llm_service", return_value=llm),
-        patch.object(quiz_builder, "_cosines", _cosines),
-    ):
+    with _model(StubLLM()) as llm:
         yield llm
 
 
@@ -162,7 +218,7 @@ async def test_a_fixed_quiz_writes_every_question_and_hides_the_answers(library,
     quiz = await _quiz(library, question_count=3)
     assert quiz["status"] == "ready"
     assert len(quiz["questions"]) == 3
-    assert stub.calls == 3
+    assert stub.questions == 3
     for q in quiz["questions"]:
         assert q["level"] == "medium" and q["kind"] == "single" and q["select_count"] == 1
         assert q["origin"] == "model" and q["support_check"] == "unchecked"
@@ -174,14 +230,10 @@ async def test_a_fixed_quiz_writes_every_question_and_hides_the_answers(library,
 
 @pytest.mark.asyncio
 async def test_a_question_refused_on_every_try_does_not_end_the_quiz(library):
-    llm = StubLLM(garbled=3)
-    with (
-        patch("app.services.llm.get_llm_service", return_value=llm),
-        patch.object(quiz_builder, "_cosines", _cosines),
-    ):
+    with _model(StubLLM(garbled=3)) as llm:
         quiz = await _quiz(library, question_count=1)
     # Three refused writes used three passages; the fourth passage gave the question.
-    assert (llm.calls, quiz["status"], len(quiz["questions"])) == (4, "ready", 1)
+    assert (llm.questions, quiz["status"], len(quiz["questions"])) == (4, "ready", 1)
 
 
 @pytest.mark.asyncio
@@ -203,9 +255,9 @@ async def test_a_miss_resets_the_linked_card_and_a_confident_one_opens_a_misconc
     revealed = body["question"]
     assert revealed["revealed"]
     [right] = [o for o in revealed["options"] if o["is_correct"]]
-    assert right["quote"] == _sentences("replication", 1)[0].rstrip(".")
+    assert right["quote"] == _sentences("replication", 1)[0] + "."
     assert all(
-        o["trap"] == "related_but_different" for o in revealed["options"] if not o["is_correct"]
+        o["trap"] == "common_misconception" for o in revealed["options"] if not o["is_correct"]
     )
 
     async with library["factory"]() as session:
@@ -290,7 +342,7 @@ async def test_results_hold_score_calibration_traps_and_sections_to_revisit(libr
     assert (results["answered"], results["correct"], results["score_pct"]) == (3, 2, 66.7)
     calibration = {c["confidence"]: (c["answered"], c["correct"]) for c in results["calibration"]}
     assert calibration == {"sure": (2, 1), "think": (0, 0), "guess": (1, 1)}
-    assert results["traps"] == [{"trap": "related_but_different", "shown": 9, "picked": 1}]
+    assert results["traps"] == [{"trap": "common_misconception", "shown": 9, "picked": 1}]
     [revisit] = results["revisit"]
     assert revisit["section_id"] == quiz["questions"][1]["section_id"] and revisit["missed"] == 1
     assert results["retake_count"] == 2
@@ -358,10 +410,7 @@ async def test_without_a_model_questions_come_from_grounded_cards(library):
                 )
             )
         await session.commit()
-    with (
-        patch("app.services.llm.get_llm_service", return_value=StubLLM(fail=True)),
-        patch.object(quiz_builder, "_cosines", _cosines),
-    ):
+    with _model(StubLLM(fail=True)):
         quiz = await _quiz(library, question_count=2, difficulty="hard")
     assert quiz["status"] == "ready" and len(quiz["questions"]) == 2
     for q in quiz["questions"]:
@@ -427,8 +476,8 @@ def _parsed() -> ParsedItem:
     return ParsedItem(
         stem="What holds?",
         options=[
-            ParsedOption("right one", True, "", quote="q"),
-            ParsedOption("wrong one", False, "", trap="near_miss_detail"),
+            ParsedOption(f"{MARK} right one", True, quote="q"),
+            ParsedOption("wrong one", False, trap="near_miss_detail"),
         ],
     )
 
@@ -437,50 +486,83 @@ def _parsed() -> ParsedItem:
 async def test_options_that_say_the_same_thing_are_refused():
     with patch.object(quiz_builder, "_cosines", lambda texts: np.array([[1.0, 0.97], [0.97, 1.0]])):
         with pytest.raises(QuizRefusal) as caught:
-            await quiz_builder.measure_options(_parsed(), "hard")
+            await quiz_builder.measure_options(_parsed())
     assert caught.value.kind == "duplicate_options" and "0.970" in caught.value.message
 
 
 @pytest.mark.asyncio
 async def test_key_similarity_is_the_cosine_to_the_nearest_right_option():
     with patch.object(quiz_builder, "_cosines", lambda texts: np.array([[1.0, 0.8], [0.8, 1.0]])):
-        assert await quiz_builder.measure_options(_parsed(), "hard") == [None, pytest.approx(0.8)]
+        assert await quiz_builder.measure_options(_parsed()) == [None, pytest.approx(0.8)]
 
 
-async def _judged(verdicts: dict[str, str], checker="judge", writer="writer"):
-    async def fake_check(question, answer, passage, *, checker, llm):
-        assert question.startswith("What holds?\n") and "one of several options" in question
-        return verdicts[answer]
+@pytest.mark.asyncio
+async def test_a_wrong_answer_the_material_states_is_dropped_and_too_few_refuse_the_question(
+    library,
+):
+    async def states_the_oak_case(premises, hypothesis):
+        return 0.9 if " oak " in hypothesis or hypothesis.startswith(MARK) else 0.0
 
+    with _model(StubLLM(), entailment=states_the_oak_case):
+        quiz = await _quiz(library, question_count=1)
+    options = await _options(library)
+    texts = [options[o["id"]].text for o in quiz["questions"][0]["options"]]
+    assert not any(" oak " in t for t in texts) and len(texts) == 4
+
+    async def states_everything(premises, hypothesis):
+        return 0.9
+
+    with _model(StubLLM(), entailment=states_everything):
+        empty = await _quiz(library, question_count=1, difficulty="hard")
+    assert empty["questions"] == [] and empty["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_a_question_guessed_without_the_material_is_refused_above_easy(library):
+    with _model(StubLLM(guessable=True)):
+        medium = await _quiz(library, question_count=1, difficulty="medium")
+        easy = await _quiz(library, question_count=1, difficulty="easy")
+    assert medium["questions"] == []
+    assert len(easy["questions"]) == 1
+
+
+class _Judge:
+    """Answers the open-book check with *picks*: "right" for the item's right letters."""
+
+    def __init__(self, picks) -> None:
+        self.picks = picks
+        self.models: list[str | None] = []
+
+    async def generate(self, prompt, **kwargs):
+        self.models.append(kwargs.get("model"))
+        assert "MATERIAL:" in prompt
+        options = re.findall(r"^([A-E])\. (.*)$", prompt, re.MULTILINE)
+        if self.picks == "right":
+            return json.dumps({"answer": [c for c, t in options if t.startswith(MARK)]})
+        return json.dumps({"answer": self.picks})
+
+
+async def _judged(picks, checker="judge", writer="writer"):
+    judge = _Judge(picks)
     with (
         patch.object(quiz_builder, "factuality_model", return_value=checker),
         patch.object(quiz_builder, "effective_generation_model", return_value=writer),
-        patch.object(quiz_builder, "check_answer", fake_check),
     ):
-        return await quiz_builder.judge(_parsed(), "passage", llm=None)
+        verdict = await quiz_builder._judge(
+            quiz_builder._Writer(llm=judge, model=None, document_id="d"), _parsed(), "passage"
+        )
+    assert judge.models in ([], [checker])
+    return verdict
 
 
 @pytest.mark.asyncio
-async def test_the_judge_supports_an_item_only_when_every_option_is_judged():
-    assert await _judged({"right one": "supported", "wrong one": "unsupported"}) == "supported"
-    assert await _judged({"right one": "supported", "wrong one": "unverifiable"}) == "unchecked"
-
-
-@pytest.mark.asyncio
-async def test_the_judge_refuses_a_wrong_option_it_finds_true_and_a_right_one_it_does_not():
+async def test_the_judge_supports_only_the_right_answers_and_never_its_own_writing():
+    assert await _judged("right") == "supported"
     with pytest.raises(QuizRefusal) as caught:
-        await _judged({"right one": "supported", "wrong one": "supported"})
-    assert caught.value.kind == "wrong_option_supported"
-    with pytest.raises(QuizRefusal) as caught:
-        await _judged({"right one": "unsupported", "wrong one": "unsupported"})
-    assert caught.value.kind == "right_option_unsupported"
-
-
-@pytest.mark.asyncio
-async def test_the_writer_never_judges_its_own_options():
-    verdicts = {"right one": "supported", "wrong one": "supported"}
-    assert await _judged(verdicts, checker="same", writer="same") == "unchecked"
-    assert await _judged(verdicts, checker="") == "unchecked"
+        await _judged(["A", "B"])
+    assert caught.value.kind == "not_answerable"
+    assert await _judged(["A", "B"], checker="same", writer="same") == "unchecked"
+    assert await _judged(["A", "B"], checker="") == "unchecked"
 
 
 @pytest.mark.asyncio
@@ -516,3 +598,27 @@ async def test_deleting_a_document_takes_its_quizzes_items_and_answers(library, 
     async with library["factory"]() as session:
         for model in (QuizModel, QuizItemModel, QuizOptionModel, QuizAttemptModel):
             assert not (await session.execute(select(model))).scalars().all(), model.__name__
+
+
+@pytest.mark.asyncio
+async def test_an_answer_no_key_sentence_entails_is_refused():
+    async def entails(premises, hypothesis):
+        return 0.9 if premises == ["key one"] and hypothesis == "answer one" else 0.0
+
+    with patch.object(quiz_nli, "entailment", entails):
+        await quiz_builder._check_keys(["answer one"], ["key one"])
+        with pytest.raises(QuizRefusal) as caught:
+            await quiz_builder._check_keys(["answer one", "answer two"], ["key one", "key two"])
+    assert caught.value.kind == "answer_off_key" and "answer two" in caught.value.message
+
+
+@pytest.mark.asyncio
+async def test_without_the_entailment_model_no_question_is_written(library):
+    from app.exceptions import ModelNotDownloaded
+
+    async def missing(premises, hypothesis):
+        raise ModelNotDownloaded("facebook/bart-large-mnli is not downloaded.", model="nli")
+
+    with _model(StubLLM(), entailment=missing):
+        quiz = await _quiz(library, question_count=1)
+    assert all(q["origin"] != "model" for q in quiz["questions"])
