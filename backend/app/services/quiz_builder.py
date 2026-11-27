@@ -24,7 +24,7 @@ from app.exceptions import ModelNotDownloaded, NotFound
 from app.models import ChunkModel, QuizItemModel, QuizOptionModel
 from app.repos.document_repo import DocumentRepo
 from app.repos.quiz_repo import QuizRepo
-from app.services import llm_output_stats, quiz_nli
+from app.services import llm_output_stats, model_router, quiz_nli
 from app.services.flashcard_factuality import (
     effective_generation_model,
     factuality_model,
@@ -399,8 +399,7 @@ async def _judge(writer: _Writer, item: ParsedItem, passage: str) -> str:
 
 async def _guessed(writer: _Writer, item: ParsedItem) -> bool:
     """Whether the guessing model finds the right answers without the material, in every order."""
-    settings = get_settings()
-    guesser = settings.QUIZ_GUESS_MODEL or settings.LITELLM_DEFAULT_MODEL
+    guesser = get_settings().QUIZ_GUESS_MODEL or model_router.resolve("background").model
     rng = random.Random(len(item.stem))  # noqa: S311 -- an order, not a secret
     for _ in range(_GUESSES):
         texts, right = _shown(item, rng)

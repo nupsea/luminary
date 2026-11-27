@@ -318,7 +318,7 @@ class Settings(BaseSettings):
     # rated run it scored every true "wrong" option at least 0.84 and every false one at most 0.68.
     QUIZ_NLI_MODEL: str = "facebook/bart-large-mnli"
     # The test-wise reader that guesses each quiz question without its material; empty = the
-    # default model. Fixed apart from the writer, so a stronger writer does not raise the bar.
+    # background model. Fixed apart from the writer, so a stronger writer does not raise the bar.
     QUIZ_GUESS_MODEL: str = ""
     # Unit-first flashcards: code picks the sentences, the model phrases one card each (#191).
     # On: it beat the shipped prompt in every document type over two blind runs. It ignores the

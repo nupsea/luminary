@@ -40,7 +40,7 @@ Code picks what is tested; the model phrases it, in small calls (I-85).
    The survivors nearest the right answers' length are kept.
 5. **Judge call:** a separate model answers with the passage and must pick exactly the right
    answers, or none when the question assumes what the material does not say.
-6. **Guess calls:** `QUIZ_GUESS_MODEL` (default: the default model) answers without the passage in
+6. **Guess calls:** `QUIZ_GUESS_MODEL` (default: the background model) answers without the passage in
    three orders. Right every time refuses the question above easy; at easy it is counted.
 
 - **Kind and counts:** single = 4 options, 1 right; multi = 5 options, 2 or 3 right. A mixed quiz
