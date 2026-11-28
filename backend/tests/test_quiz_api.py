@@ -20,7 +20,7 @@ from app.models import (
     ReviewEventModel,
     StudySessionModel,
 )
-from app.services import quiz_builder, quiz_nli, quiz_service
+from app.services import llm_output_stats, quiz_builder, quiz_nli, quiz_service
 from app.services.quiz_parsers import ParsedItem, ParsedOption, QuizRefusal
 from tests.factories import make_card, make_chunk, make_document, make_section
 
@@ -63,6 +63,7 @@ class StubLLM:
         self.fail = fail
         self.garbled = garbled
         self.guessable = guessable
+        self.question_prompts: list[str] = []
 
     async def generate(self, prompt: str, system: str = "", **kwargs) -> str:
         self.calls += 1
@@ -76,6 +77,7 @@ class StubLLM:
 
     def _question(self, prompt: str) -> str:
         self.questions += 1
+        self.question_prompts.append(prompt)
         if self.questions <= self.garbled:
             return "Here is a question about the passage."
         keys = re.findall(r'"""\s*(Fact .+?)\s*"""', re.split("KEY SENTENCE|A LIST", prompt)[1])
@@ -232,8 +234,11 @@ async def test_a_fixed_quiz_writes_every_question_and_hides_the_answers(library,
 async def test_a_question_refused_on_every_try_does_not_end_the_quiz(library):
     with _model(StubLLM(garbled=3)) as llm:
         quiz = await _quiz(library, question_count=1)
-    # Three refused writes used three passages; the fourth passage gave the question.
+    # The first passage was asked twice and refused twice; the second passage's retry passed.
     assert (llm.questions, quiz["status"], len(quiz["questions"])) == (4, "ready", 1)
+    first, retried = llm.question_prompts[:2]
+    assert "was refused" not in first
+    assert "Your last question about this was refused: no JSON object in the reply" in retried
 
 
 @pytest.mark.asyncio
@@ -515,6 +520,26 @@ async def test_a_wrong_answer_the_material_states_is_dropped_and_too_few_refuse_
     with _model(StubLLM(), entailment=states_everything):
         empty = await _quiz(library, question_count=1, difficulty="hard")
     assert empty["questions"] == [] and empty["status"] == "error"
+
+
+def _unsearched() -> int:
+    return llm_output_stats.snapshot()["counts"].get("quiz_drop_elsewhere_unsearched", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_answer_the_document_search_could_not_check_is_counted(library):
+    before = _unsearched()
+    with _model(StubLLM()):
+        await _quiz(library, question_count=1)
+    assert _unsearched() > before
+
+    async def somewhere(self, text):
+        return ["The consistency layer keeps several promises."]
+
+    before = _unsearched()
+    with _model(StubLLM()), patch.object(quiz_builder._Writer, "elsewhere", somewhere):
+        await _quiz(library, question_count=1)
+    assert _unsearched() == before
 
 
 @pytest.mark.asyncio

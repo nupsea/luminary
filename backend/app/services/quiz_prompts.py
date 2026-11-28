@@ -53,9 +53,9 @@ _WRONG_RULE: dict[QuizLevel, tuple[str, tuple[str, ...]]] = {
 }
 
 _SOURCE_RULE = (
-    "The question makes sense to someone who has never seen this material: it names its subject "
-    '("leader-based replication", "Ishmael"), and never says passage, text, author, document, '
-    'book, chapter, excerpt, material, "the narrator" or "this".'
+    "The question makes sense to someone who has never seen this material: it names its subject, "
+    "and never says passage, text, author, document, book, chapter, excerpt, material, "
+    '"the narrator" or "this".'
 )
 
 _QUESTION_SINGLE = """MATERIAL:
@@ -76,7 +76,7 @@ works. Ask why only when the key sentence itself gives the reason.
 - The question does not give away its answer.
 - The answer is one sentence of at most 25 words, in your own words, and says only what the key \
 sentence says.
-
+{refused}
 Return only JSON: {{"question": "<question>", "answer": "<answer>"}}"""
 
 _QUESTION_MULTI = """MATERIAL:
@@ -98,7 +98,7 @@ the {n} items above is a right answer.
 - The question does not say how many answers are right.
 - Each answer is one sentence of at most 25 words, in your own words, and says only what its list \
 item says.
-
+{refused}
 Return only JSON: {{"question": "<question>", "answers": [{slots}]}}"""
 
 _WRONG = """MATERIAL:
@@ -147,17 +147,24 @@ def level_codes(level: QuizLevel) -> tuple[str, ...]:
     return _WRONG_RULE[level][1]
 
 
-def question_prompt(passage: str, keys: Sequence[str], lead_in: str = "") -> str:
-    """A single-answer question about one key sentence, or a multi-answer one about list items."""
+def question_prompt(passage: str, keys: Sequence[str], lead_in: str = "", refused: str = "") -> str:
+    """A single-answer question about one key sentence, or a multi-answer one about list items.
+    *refused* is why the previous question about these keys was refused."""
+    context = {
+        "passage": passage,
+        "source_rule": _SOURCE_RULE,
+        "refused": f"\nYour last question about this was refused: {refused}. Write a new one.\n"
+        if refused
+        else "",
+    }
     if len(keys) == 1:
-        return _QUESTION_SINGLE.format(passage=passage, key=keys[0], source_rule=_SOURCE_RULE)
+        return _QUESTION_SINGLE.format(key=keys[0], **context)
     return _QUESTION_MULTI.format(
-        passage=passage,
         lead_in=lead_in,
         keys="\n".join(f'{i}. """{k}"""' for i, k in enumerate(keys, 1)),
         n=len(keys),
-        source_rule=_SOURCE_RULE,
         slots=", ".join('"<answer>"' for _ in keys),
+        **context,
     )
 
 

@@ -31,11 +31,14 @@ Code picks what is tested; the model phrases it, in small calls (I-85).
    chunker's overlap. Refused before any call: a contents page, licence text, a quotation
    collection, a reference list (`quiz_material.unfit_reason`). Material no item was written from
    comes first, sections with the most missed answers and card lapses first among it.
-2. **Key:** a single-answer question tests one whole sentence: never a question or a numbered
-   note, among the eight longest learnable ones, those more than 0.15 below the closest to the
+2. **Key:** a single-answer question tests one whole sentence: never a question, a numbered
+   note or a sentence about the work itself ("this chapter", "we will"), among the eight longest learnable ones, those more than 0.15 below the closest to the
    section's summary dropped, then the longest. A multi-answer question tests 2 or 3 items of one
    list, with the line that introduces it; a passage with no list gets a single-answer question.
-3. **Question call:** the stem and one answer per key.
+3. **Question call:** the stem and one answer per key. A clause crediting the source at either end
+   of the stem ("According to the text, ...", "... in the passage?") is cut by code. A question
+   refused by the gates below is asked once more, with the refusal's reason in the prompt
+   (`quiz_drop_retried_<kind>`).
 4. **Wrong-answer call:** code assigns each of 6 or 7 slots its mistake type; the model fills them.
    The survivors nearest the right answers' length are kept.
 5. **Judge call:** a separate model answers with the passage and must pick exactly the right
@@ -75,8 +78,9 @@ A question is refused whole (`quiz_reject_<kind>`); a wrong answer is dropped al
 | Question refused | When |
 |---|---|
 | `unparsed`, `shape` | no JSON; a stem that is not a question; answer count other than asked; the prompt's placeholder |
-| `points_at_source` | the stem needs its source in view (I-50's rule), or credits "the story", "the discussion" |
+| `points_at_source` | the stem needs its source in view (I-50's rule), credits "the story", "the discussion", "the introduction", or says "mentioned" |
 | `invented_name` | the stem names someone the passage never does |
+| `vague_subject` | the stem says someone, people, a person and the like where its key sentence names who |
 | `why_without_reason` | a "why" stem over keys that give no reason |
 | `count_in_stem` | a multi-answer stem with a number in it |
 | `other_script` | an answer in a script the passage does not use |
@@ -93,8 +97,12 @@ A question is refused whole (`quiz_reject_<kind>`); a wrong answer is dropped al
 | `wrong_stated` | copied verbatim from the passage |
 | `wrong_absolute` | always, never, only, all, every, completely, entirely, none, solely or universally, when no right answer uses one |
 | `wrong_length` | under 0.5 or over 1.8 times the right answers' mean length |
+| `wrong_first_person` | I, me, my, we, us or our, when no right answer speaks in the first person |
+| `wrong_untested_item` | multi-answer: 40% of its words (the stem's aside) are those of a list item the question leaves out, which is true; NLI cannot tell a harmless changed word from a decisive one |
 | `wrong_entailed` | the passage entails it at 0.8 |
 | `wrong_true_elsewhere` | one of the document's five nearest chunks entails it at 0.8 |
+
+A document with no vectors gives that search nothing, and the option passes unchecked: `quiz_drop_elsewhere_unsearched` counts each one.
 
 The entailment threshold is bracketed twice, with `facebook/bart-large-mnli` on CPU: true "wrong"
 options scored at least 0.84 and false ones at most 0.68 (25 items, 101 options); clean paraphrase
@@ -125,24 +133,30 @@ its own brackets.
 
 ## Measured
 
-2026-11-27, a copy of the dev library, writer `ollama/qwen2.5:14b-instruct`, judge
+2026-11-28, a copy of the dev library, writer `ollama/qwen2.5:14b-instruct`, judge
 `ollama/gemma4:latest`, guesser `ollama/qwen3.5:4b`; DDIA medium and hard, Moby-Dick medium,
 Federalist Papers medium; 4 questions asked of each. Reviewed by reading each accepted question
-against its passage.
+against its whole passage and the document around it.
 
-| Run | Accepted | Keep / fix / drop |
-|---|---|---|
-| 4 | 12 | 7 / 4 / 1 |
-| 5 | 9 | 4 / 2 / 3 |
-| 6 (summary-ranked keys) | 6 | 4 / 2 / 0 |
+| Run | Accepted | Keep / fix / drop | True wrong options |
+|---|---|---|---|
+| 8 | 12 | 7 / 4 / 1 | 1 |
+| 9 | 11 | 6 / 3 / 2 | 1 |
+| 10 | 10 | 2 / 7 / 1 | 0 |
+| 11 | 11 | 6 / 4 / 1 | 1 |
 
-- No accepted question in runs 4 to 6 had a wrong option the material makes true.
-- Fixable: stems that lose their subject or credit their source, trivia, recall of a whole list.
-  Dropped: an editorial note asked twice, an aside read as fact, one right answer that reversed
-  its sentence's logic (neither entailment nor the judge caught it).
-- Most frequent refusals per run: guessable 18 to 25, points_at_source 20 to 23, answer_off_key 10
-  to 14; drops: wrong_absolute about 50, wrong_entailed 25 to 46.
-- First question 44 to 420 s with nothing banked; 6 to 12 questions per 35-minute run.
+- Runs 8 and 9 ran with an empty vector table, so `wrong_true_elsewhere` searched nothing; runs
+  10 and 11 dropped 12 to 13 options with it. An empty table is now counted
+  (`quiz_drop_elsewhere_unsearched`).
+- The three true wrong options: an unpicked list item with one word changed (now
+  `wrong_untested_item`), another paper's argument answering an open stem, and a paraphrase of
+  the next sentence ("to improve his health" for "driving off the spleen"). Entailment scored
+  the second 0.16 and the third under the 0.8 drop line.
+- Fixable: a garbled or narrowed right answer, a wrong option as close to the text as the right
+  one, two wrong options making one claim, a wrong option that is a right one plus "is optional",
+  a stand-in for a named subject. Dropped: a trivial key ("humans build software", picked twice).
+- Most frequent refusals per run: guessable 13 to 26, right_is_longest 10 to 18, too_few_wrong 11
+  to 16; drops: wrong_absolute 54 to 72, wrong_entailed 37 to 58.
 
 The bar before people rate a sample is 8 in 10 kept on two runs; the people-rated gate is 6 in 10.
 Neither is met, and Quiz is not on by default.

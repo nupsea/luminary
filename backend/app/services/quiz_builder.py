@@ -40,6 +40,7 @@ from app.services.quiz_material import (
     pick_keys,
     pick_list,
     unfit_reason,
+    untested_items,
 )
 from app.services.quiz_parsers import (
     DROP_ENTAILED,
@@ -342,7 +343,13 @@ async def _summaries(session: AsyncSession, document_id: str) -> dict[str, str]:
 
 
 async def _wrong_answers(
-    writer: _Writer, window: Window, stem: str, rights: list[str], level: QuizLevel, need: int
+    writer: _Writer,
+    window: Window,
+    stem: str,
+    rights: list[str],
+    level: QuizLevel,
+    need: int,
+    untested: list[str],
 ) -> list[ParsedOption]:
     """*need* wrong answers that pass every check, from one call that asks for spares."""
     slots = slot_codes(level, need + SPARE_WRONG)
@@ -350,7 +357,7 @@ async def _wrong_answers(
     passage_windows = quiz_nli.windows(window.text)
     passed: list[ParsedOption] = []
     for option in distinct(parse_wrong(raw, slots), rights):
-        reason = drop_reason(option, rights, window.text)
+        reason = drop_reason(option, rights, window.text, stem=stem, untested=untested)
         if (
             reason is None
             and await quiz_nli.entailment(passage_windows, option.text) >= quiz_nli.ENTAILED
@@ -358,7 +365,10 @@ async def _wrong_answers(
             reason = DROP_ENTAILED
         if reason is None:
             elsewhere = await writer.elsewhere(option.text)
-            if await quiz_nli.entailment(elsewhere, option.text) >= quiz_nli.ENTAILED:
+            if not elsewhere:
+                # No vectors for the document: the check passes nothing it searched, so count it.
+                llm_output_stats.record_quiz_drop("elsewhere_unsearched")
+            elif await quiz_nli.entailment(elsewhere, option.text) >= quiz_nli.ENTAILED:
                 reason = DROP_TRUE_ELSEWHERE
         if reason:
             llm_output_stats.record_quiz_drop(reason)
@@ -427,15 +437,39 @@ async def _check_keys(answers: Sequence[str], keys: Sequence[str]) -> None:
         raise QuizRefusal(REFUSE_OFF_KEY, f"{missing[:60]!r} does not say what a key sentence says")
 
 
-async def _compose(
-    writer: _Writer, window: Window, keys: list[str], lead_in: str, level: QuizLevel, kind: QuizKind
-) -> tuple[ParsedItem, list[float | None], str]:
-    raw = await writer.ask(question_prompt(window.text, keys, lead_in))
+async def _asked(
+    writer: _Writer, window: Window, keys: list[str], lead_in: str, refused: str
+) -> tuple[str, list[str]]:
+    raw = await writer.ask(question_prompt(window.text, keys, lead_in, refused))
     stem, answers = parse_question(raw, len(keys))
     check_question(stem, answers, keys, window.text)
     await _check_keys(answers, keys)
+    return stem, answers
+
+
+async def _question(
+    writer: _Writer, window: Window, keys: list[str], lead_in: str
+) -> tuple[str, list[str]]:
+    """The question and its answers, asked again once with the reason a first one was refused."""
+    try:
+        return await _asked(writer, window, keys, lead_in, "")
+    except QuizRefusal as refusal:
+        llm_output_stats.record_quiz_drop(f"retried_{refusal.kind}")
+        return await _asked(writer, window, keys, lead_in, refusal.message)
+
+
+async def _compose(
+    writer: _Writer,
+    window: Window,
+    keys: list[str],
+    lead_in: str,
+    level: QuizLevel,
+    kind: QuizKind,
+) -> tuple[ParsedItem, list[float | None], str]:
+    stem, answers = await _question(writer, window, keys, lead_in)
     need = OPTION_COUNT[kind] - len(keys)
-    wrong = await _wrong_answers(writer, window, stem, answers, level, need)
+    untested = untested_items(window.text, keys) if kind == "multi" else []
+    wrong = await _wrong_answers(writer, window, stem, answers, level, need, untested)
     right = [
         ParsedOption(text=a, correct=True, quote=k) for a, k in zip(answers, keys, strict=True)
     ]

@@ -26,6 +26,7 @@ REFUSE_UNPARSED = "unparsed"
 REFUSE_SHAPE = "shape"
 REFUSE_POINTING = "points_at_source"
 REFUSE_INVENTED_NAME = "invented_name"
+REFUSE_VAGUE_SUBJECT = "vague_subject"
 REFUSE_OFF_KEY = "answer_off_key"
 REFUSE_UNSUPPORTED_WHY = "why_without_reason"
 REFUSE_OTHER_SCRIPT = "other_script"
@@ -45,6 +46,8 @@ DROP_ABSOLUTE = "wrong_absolute"
 DROP_LENGTH = "wrong_length"
 DROP_REFERS_TO_OPTIONS = "wrong_refers_to_options"
 DROP_REPEATED = "wrong_repeated"
+DROP_FIRST_PERSON = "wrong_first_person"
+DROP_UNTESTED_ITEM = "wrong_untested_item"
 
 # Code decides the counts (single: 4 options, 1 right; multi: 5 options, 2 or 3 right).
 OPTION_COUNT: dict[QuizKind, int] = {"single": 4, "multi": 5}
@@ -62,6 +65,15 @@ _COUNT = re.compile(r"\b(?:two|three|four|[2-4])\b", re.I)
 _REFERS_TO_OPTIONS = re.compile(
     r"\b(?:all|none|both|neither) of (?:the )?(?:above|these|those|options|answers)\b", re.I
 )
+# A first-person narrator's "me" carried into a wrong answer, when the right one speaks of them in
+# the third person, marks that answer as made up from the passage's wording.
+# A wrong option on a list question that shares this much with an item the question leaves out,
+# the stem's own words aside, is that true item with a word changed, and the change need not make
+# it false ("up to date with performance patches" of "up to date, including security patches").
+# NLI scores that one contradicted (0.84), like a real swap (0.95), so the overlap decides.
+# Bracketed on runs 6 to 8: 0.50 ("security patches are user-installed") dropped, 0.38 kept.
+_ECHOES_UNTESTED = 0.4
+_FIRST_PERSON = re.compile(r"\b(?:I|[Mm]e|[Mm]y|[Mm]yself|[Ww]e|us|[Oo]urs?)\b")
 # Wrong answers far shorter or longer than the right one are told apart by their length.
 # Unbracketed: no measured pair has yet decided either bound.
 _LENGTH_BAND = (0.5, 1.8)
@@ -125,10 +137,33 @@ def _answers(data: dict, n_keys: int) -> list[str]:
     return texts
 
 
+# A clause crediting the source, at either end of a question that stands without it. Cutting it
+# adds no word of ours; every check still runs on what is left.
+_SOURCE_NOUN = (
+    r"(?:the|this)\s+(?:material|text|passage|excerpt|story|reading|account|discussion|author"
+    r"|narrator|writer)"
+)
+_SOURCE_LEAD = re.compile(
+    rf"^\s*(?:according\s+to|as\s+(?:described|stated|explained)\s+in|based\s+on)\s+"
+    rf"{_SOURCE_NOUN}\s*,\s*",
+    re.I,
+)
+_SOURCE_TRAIL = re.compile(
+    rf",?\s+(?:according\s+to|as\s+(?:described|stated|explained)\s+in|based\s+on|in)\s+"
+    rf"{_SOURCE_NOUN}(?=\s*\?\s*$)",
+    re.I,
+)
+
+
+def without_source_clause(stem: str) -> str:
+    cut = _SOURCE_TRAIL.sub("", _SOURCE_LEAD.sub("", stem, count=1), count=1)
+    return cut[:1].upper() + cut[1:] if cut != stem else stem
+
+
 def parse_question(raw: str | None, n_keys: int) -> tuple[str, list[str]]:
     """The question and one right answer per key sentence, or a refusal."""
     data = _reply(raw)
-    stem = _text(data.get("question"))
+    stem = without_source_clause(_text(data.get("question")))
     answers = _answers(data, n_keys)
     if not stem or stem in PROMPT_PLACEHOLDERS:
         raise QuizRefusal(REFUSE_SHAPE, "no question of its own")
@@ -180,16 +215,35 @@ _REASON = re.compile(
     re.I,
 )
 # Sources the card check does not name, which quiz stems used: "According to the story, why ..."
-# and "... according to the discussion on fault tolerance?" (runs 3 and 4 of #571).
+# and "... according to the discussion on fault tolerance?" (runs 3 and 4 of #571). "Mentioned"
+# always means mentioned in the material: "the duties mentioned", "what attempts are mentioned".
 _STORY_SOURCE = re.compile(
     r"\b(?:according\s+to|as\s+(?:told|described|discussed|mentioned)\s+in|in)\s+the\s+"
-    r"(?:story|account|discussion|narrative|description|tale|reading)\b"
+    r"(?:story|account|discussion|narrative|description|tale|reading|introduction)\b"
+    r"|\bmentioned\b"
     r"|\bthe\s+(?:story|account|discussion|narrative|narrator|author|writer)\s+"
-    r"(?:says|said|describes|described|mentions|mentioned|suggests|tells|claims)\b",
+    r"(?:says|said|describes|described|mentions|mentioned|suggests|tells|claims)\b"
+    # The source as the one acting, with verbs the card check lacks: "What comparison does the
+    # text make", "What events does the text use" (run 10). "The document model makes" stands.
+    r"|\bthe\s+(?:text|passage|excerpt|material|book|chapter|author|writer|narrator)\s+"
+    r"(?:us|mak|giv|offer|compar|illustrat|provid|portray|depict|paint|draw|focus|reveal|convey)\w*\b"
+    r"|\bkey\s+sentences?\b",
     re.I,
+)
+# A stand-in for the particular person or group a question is about. The learner cannot tell
+# which one is meant, unless the key sentence itself speaks this generally.
+_STAND_IN = re.compile(
+    r"\b(?:someone|somebody|anyone|anybody|a person|a man|a woman|individuals|people)\b", re.I
 )
 # Letters outside the Latin and Greek blocks: an answer that drifted into another script.
 _OTHER_SCRIPT = re.compile(r"[\u0400-\u04ff\u0590-\u06ff\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
+
+
+def _vague_subject(stem: str, keys: Sequence[str]) -> str | None:
+    found = _STAND_IN.search(stem)
+    if not found or re.search(rf"\b{found.group(0)}\b", " ".join(keys), re.I):
+        return None
+    return found.group(0)
 
 
 def _stem_refusal(stem: str, keys: Sequence[str], passage: str) -> QuizRefusal | None:
@@ -202,6 +256,9 @@ def _stem_refusal(stem: str, keys: Sequence[str], passage: str) -> QuizRefusal |
     invented = names_not_in(stem, passage)
     if invented:
         return QuizRefusal(REFUSE_INVENTED_NAME, f"the question names {', '.join(invented)}")
+    vague = _vague_subject(stem, keys)
+    if vague:
+        return QuizRefusal(REFUSE_VAGUE_SUBJECT, f"the question says {vague!r}, not who it means")
     if len(keys) > 1 and _COUNT.search(stem):
         return QuizRefusal(REFUSE_COUNT_IN_STEM, f"the stem counts its answers ({stem[:60]!r})")
     if _WHY.match(stem) and not any(_REASON.search(k) for k in keys):
@@ -230,11 +287,31 @@ def check_question(stem: str, answers: Sequence[str], keys: Sequence[str], passa
         raise refusal
 
 
-def drop_reason(option: ParsedOption, rights: Sequence[str], passage: str) -> str | None:
-    """Why one wrong answer cannot stand, by the checks that need no model."""
+def _only_in_option(pattern: re.Pattern[str], option: str, rights: Sequence[str]) -> bool:
+    return bool(pattern.search(option)) and not any(pattern.search(r) for r in rights)
+
+
+def _echoes_untested(option: str, stem: str, untested: Sequence[str]) -> bool:
+    subject = _content(stem)
+    words = _content(option) - subject
+    return bool(words) and any(
+        len(words & (_content(u) - subject)) >= _ECHOES_UNTESTED * len(words) for u in untested
+    )
+
+
+def drop_reason(
+    option: ParsedOption,
+    rights: Sequence[str],
+    passage: str,
+    *,
+    stem: str = "",
+    untested: Sequence[str] = (),
+) -> str | None:
+    """Why one wrong answer cannot stand, by the checks that need no model. *untested* are the
+    other items of the list a multi-answer question was picked from."""
     if excerpt_is_verbatim(option.text, passage):
         return DROP_STATED
-    if _ABSOLUTE.search(option.text) and not any(_ABSOLUTE.search(r) for r in rights):
+    if _only_in_option(_ABSOLUTE, option.text, rights):
         return DROP_ABSOLUTE
     mean = sum(len(r.split()) for r in rights) / len(rights)
     low, high = _LENGTH_BAND
@@ -242,6 +319,10 @@ def drop_reason(option: ParsedOption, rights: Sequence[str], passage: str) -> st
         return DROP_LENGTH
     if _REFERS_TO_OPTIONS.search(option.text):
         return DROP_REFERS_TO_OPTIONS
+    if _only_in_option(_FIRST_PERSON, option.text, rights):
+        return DROP_FIRST_PERSON
+    if _echoes_untested(option.text, stem, untested):
+        return DROP_UNTESTED_ITEM
     return None
 
 

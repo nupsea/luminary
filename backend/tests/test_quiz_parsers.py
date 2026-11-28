@@ -4,11 +4,19 @@ import json
 
 import pytest
 
-from app.services.quiz_material import join_chunks, pick_keys, pick_list, unfit_reason
+from app.services.quiz_material import (
+    join_chunks,
+    pick_keys,
+    pick_list,
+    unfit_reason,
+    untested_items,
+)
 from app.services.quiz_parsers import (
     DROP_ABSOLUTE,
+    DROP_FIRST_PERSON,
     DROP_LENGTH,
     DROP_STATED,
+    DROP_UNTESTED_ITEM,
     REFUSE_ANSWER_IN_STEM,
     REFUSE_COUNT_IN_STEM,
     REFUSE_INVENTED_NAME,
@@ -18,6 +26,7 @@ from app.services.quiz_parsers import (
     REFUSE_SHAPE,
     REFUSE_UNPARSED,
     REFUSE_UNSUPPORTED_WHY,
+    REFUSE_VAGUE_SUBJECT,
     ParsedItem,
     ParsedOption,
     QuizRefusal,
@@ -97,6 +106,16 @@ def test_a_key_far_from_the_section_summary_loses_to_a_shorter_central_one():
     assert pick_keys(passage, 1, set(), closeness=[0.50, 0.58]) == [long_aside]
 
 
+def test_a_sentence_about_the_work_itself_is_never_a_key():
+    plan = (
+        "We had occasion, in a former paper, to take notice of the repeated trials made to reform "
+        "the constitution of the confederacy."
+    )
+    ahead = "We will return to the question of consistency guarantees and their costs later on."
+    [key] = pick_keys(f"{plan} {ahead} {PASSAGE}", 1, set())
+    assert key not in (plan, ahead)
+
+
 LIST = (
     "Leaderless replication repairs data in several ways, including:\n"
     "\u2022 Read repair, which writes the newer value back when a read sees a stale one\n"
@@ -132,6 +151,31 @@ def test_the_prompt_placeholder_is_not_an_answer():
     assert _refused(parse_question, raw, 1).kind == REFUSE_SHAPE
 
 
+@pytest.mark.parametrize(
+    "asked",
+    [
+        "According to the material, how does a client write data under leaderless replication?",
+        "How does a client write data under leaderless replication according to the text?",
+        "How does a client write data under leaderless replication, as described in the passage?",
+    ],
+)
+def test_a_clause_crediting_the_source_is_cut_and_the_rest_is_checked(asked):
+    stem, _ = parse_question(json.dumps({"question": asked, "answer": ANSWER}), 1)
+    assert stem == "How does a client write data under leaderless replication?"
+    check_question(stem, [ANSWER], [KEY], PASSAGE)
+
+
+def test_a_source_named_inside_the_question_is_not_cut_and_is_refused():
+    asked = "What does the passage say a client does with each write?"
+    stem, _ = parse_question(json.dumps({"question": asked, "answer": ANSWER}), 1)
+    assert stem == asked
+    assert _refused(check_question, stem, [ANSWER], [KEY], PASSAGE).kind == REFUSE_POINTING
+    stem = "What does the key sentence say about writes under leaderless replication?"
+    assert _refused(check_question, stem, [ANSWER], [KEY], PASSAGE).kind == REFUSE_POINTING
+    stem = "Which duties of a leader are mentioned for leaderless replication?"
+    assert _refused(check_question, stem, [ANSWER], [KEY], PASSAGE).kind == REFUSE_POINTING
+
+
 def test_a_question_pointing_at_its_source_is_refused():
     stem = "According to the passage, how does a client write?"
     assert _refused(check_question, stem, [ANSWER], [KEY], PASSAGE).kind == REFUSE_POINTING
@@ -142,16 +186,40 @@ def test_a_question_pointing_at_its_source_is_refused():
     [
         "According to the story, why were cobblestones carried on the first sloop?",
         "Which problems arise in data systems according to the discussion on fault tolerance?",
+        "What comparison does the text make between leaderless and leader-based replication?",
+        "Which example does the passage use to illustrate leaderless replication?",
     ],
 )
 def test_a_question_crediting_a_story_or_discussion_is_refused(stem):
     assert _refused(check_question, stem, [ANSWER], [KEY], PASSAGE).kind == REFUSE_POINTING
 
 
+def test_a_source_noun_naming_the_subject_is_not_refused():
+    check_question(
+        "How does the document model make writes easier under leaderless replication?",
+        [ANSWER],
+        [KEY],
+        PASSAGE,
+    )
+
+
 def test_a_name_the_material_never_mentions_is_refused():
     stem = "How does Cassandra write data under leaderless replication?"
     refusal = _refused(check_question, stem, [ANSWER], [KEY], PASSAGE)
     assert refusal.kind == REFUSE_INVENTED_NAME and "Cassandra" in refusal.message
+
+
+def test_a_stand_in_for_the_one_the_question_is_about_is_refused():
+    stem = "How does someone write data under leaderless replication?"
+    refusal = _refused(check_question, stem, [ANSWER], [KEY], PASSAGE)
+    assert refusal.kind == REFUSE_VAGUE_SUBJECT and "someone" in refusal.message
+    general = "People who run several replicas send each write to all of them in parallel."
+    check_question(
+        "What do people who run several replicas do with a write?",
+        [ANSWER],
+        [general],
+        PASSAGE + " " + general,
+    )
 
 
 def test_why_is_asked_only_of_a_sentence_that_gives_a_reason():
@@ -216,6 +284,27 @@ def test_an_absolute_word_only_the_wrong_answer_uses_is_dropped():
 
 def test_a_wrong_answer_far_off_the_right_answers_length_is_dropped():
     assert drop_reason(_wrong("A leader."), [ANSWER], PASSAGE) == DROP_LENGTH
+
+
+def test_a_narrators_first_person_in_a_wrong_answer_only_is_dropped():
+    option = _wrong("The client told me to send each write to one replica.")
+    assert drop_reason(option, [ANSWER], PASSAGE) == DROP_FIRST_PERSON
+    first_person_right = "My client sends each write to several replicas."
+    assert drop_reason(option, [first_person_right], PASSAGE) is None
+    abbreviation = _wrong("The US client sends each write to one replica.")
+    assert drop_reason(abbreviation, [ANSWER], PASSAGE) is None
+
+
+def test_a_wrong_answer_echoing_a_list_item_the_question_leaves_out_is_dropped():
+    _, keys = pick_list(LIST, 2)
+    untested = untested_items(LIST, keys)
+    assert len(untested) == 1 and untested[0] not in keys
+    echo = _wrong(untested[0].replace("writes", "reads"))
+    stem = "Which ways does leaderless replication repair data?"
+    assert drop_reason(echo, keys, LIST, stem=stem, untested=untested) == DROP_UNTESTED_ITEM
+    unrelated = _wrong("Leader election, a vote that picks a new primary once the old one fails")
+    assert drop_reason(unrelated, keys, LIST, stem=stem, untested=untested) is None
+    assert untested_items(LIST, ["not an item of the list"]) == []
 
 
 def test_a_wrong_answer_repeating_the_right_one_is_dropped():

@@ -8,7 +8,7 @@ Pure module: no I/O, no LLM calls.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 
 from app.services.flashcard_units import _LEADING_LABEL, _learnable_words, split_units
 
@@ -89,13 +89,24 @@ def _whole(unit: str) -> bool:
     return bool(_OPENER.match(unit) and _CLOSER.search(unit))
 
 
+# A sentence about the work itself, its parts or its plan, tests no idea of the material.
+_SELF_REFERENCE = re.compile(
+    r"\b(?:this|the\s+(?:next|previous|following|last)|a\s+former|an\s+earlier|a\s+later)\s+"
+    r"(?:chapter|book|paper|section|part|volume|essay)\b"
+    r"|\bwe\s+(?:will|shall|had\s+occasion|have\s+(?:seen|discussed))\b",
+    re.I,
+)
+
+
 def key_candidates(passage: str) -> list[str]:
     """Whole sentences of *passage* a question may test, longest learnable first (#191: length
     after furniture is cut was the whole salience signal)."""
     units = [
         u
         for u in split_units(passage)
-        if _MIN_KEY_WORDS <= len(u.split()) <= _MAX_KEY_WORDS and _whole(u)
+        if _MIN_KEY_WORDS <= len(u.split()) <= _MAX_KEY_WORDS
+        and _whole(u)
+        and not _SELF_REFERENCE.search(u)
     ]
     return sorted((u for u in units if _learnable_words(u) > 0), key=lambda u: -_learnable_words(u))
 
@@ -129,23 +140,34 @@ _MIN_ITEM_WORDS = 6
 _MIN_ITEMS = 3
 
 
-def pick_list(passage: str, count: int) -> tuple[str, list[str]] | None:
-    """The sentence that introduces a list in *passage*, and *count* of its items, longest
-    first and shown in list order; None when the passage has no list of enough items."""
+def _lists(passage: str) -> Iterator[tuple[str, list[str]]]:
+    """Each list in *passage* that a line introduces, with that line."""
     lines = passage.splitlines()
     for start, line in enumerate(lines):
         if not _ITEM.match(line):
             continue
-        items = _items(lines[start:])
-        if len(items) < max(_MIN_ITEMS, count + 1):
-            continue
         lead = " ".join(lines[:start]).strip()
         lead_in = re.split(r"(?<=[.!?])\s+", lead)[-1] if lead else ""
-        if not lead_in.rstrip().endswith((":", "including", "include", "follows")):
-            continue
-        chosen = sorted(items, key=lambda i: -len(i))[:count]
-        return lead_in.strip(), sorted(chosen, key=items.index)
+        if lead_in.rstrip().endswith((":", "including", "include", "follows")):
+            yield lead_in.strip(), _items(lines[start:])
+
+
+def pick_list(passage: str, count: int) -> tuple[str, list[str]] | None:
+    """The sentence that introduces a list in *passage*, and *count* of its items, longest
+    first and shown in list order; None when the passage has no list of enough items."""
+    for lead_in, items in _lists(passage):
+        if len(items) >= max(_MIN_ITEMS, count + 1):
+            chosen = sorted(items, key=lambda i: -len(i))[:count]
+            return lead_in, sorted(chosen, key=items.index)
     return None
+
+
+def untested_items(passage: str, keys: Sequence[str]) -> list[str]:
+    """The other items of the list *keys* were picked from: true answers the question leaves out."""
+    for _lead_in, items in _lists(passage):
+        if set(keys) <= set(items):
+            return [i for i in items if i not in keys]
+    return []
 
 
 def _items(lines: Sequence[str]) -> list[str]:
