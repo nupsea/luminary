@@ -1,0 +1,340 @@
+<title>Mac Studio Quiz Run</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* One column, form first: what the Mac Studio session needs from you, then the reference it runs from. */
+:root {
+  --canvas: #ffffff; --sunken: #fafafa; --ink-1: #111827; --ink-2: #6b7280; --ink-3: #9ca3af;
+  --hairline: #e5e7eb; --line-strong: #d1d5db; --action: #1f1a44; --action-fg: #ffffff;
+  --focus: #5537eb; --positive: #4f8a8b; --negative: #b8714a; --chip-on: #f1f0f7;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --canvas: #111114; --sunken: #18181c; --ink-1: #ececef; --ink-2: #a1a1aa; --ink-3: #71717a;
+  --hairline: #2a2a30; --line-strong: #3a3a42; --action: #d9d6f5; --action-fg: #15122e;
+  --focus: #8f7cf7; --positive: #7fb5b6; --negative: #d99a76; --chip-on: #22203a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --canvas: #111114; --sunken: #18181c; --ink-1: #ececef; --ink-2: #a1a1aa; --ink-3: #71717a;
+  --hairline: #2a2a30; --line-strong: #3a3a42; --action: #d9d6f5; --action-fg: #15122e;
+  --focus: #8f7cf7; --positive: #7fb5b6; --negative: #d99a76; --chip-on: #22203a; color-scheme: dark }
+body { background: var(--canvas); color: var(--ink-1); font: 13px/1.5 var(--sans); }
+.wrap { max-width: 780px; margin: 0 auto; padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 28px; }
+h1 { font: 600 20px/1.25 var(--sans); margin: 0; text-wrap: balance; }
+h2 { font: 600 10px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 10px; }
+p { margin: 0; }
+.sub { color: var(--ink-2); margin-top: 4px; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.pill { display: inline-flex; gap: 6px; align-items: baseline; border: 1px solid var(--hairline); border-radius: 999px;
+  padding: 3px 10px; font-variant-numeric: tabular-nums; cursor: help; }
+.pill b { font-weight: 600; }
+.pill.bad b { color: var(--negative); }
+.pill.ok b { color: var(--positive); }
+section { border-top: 1px solid var(--hairline); padding-top: 16px; display: grid; gap: 14px; }
+.field { display: grid; gap: 6px; }
+.field > label, .legend { font-weight: 500; }
+.hint { color: var(--ink-3); cursor: help; border-bottom: 1px dotted var(--ink-3); }
+.row { display: flex; flex-wrap: wrap; gap: 12px; }
+.row > .field { flex: 1 1 200px; min-width: 0; }
+input[type=text], input[type=number], select, textarea {
+  font: inherit; color: var(--ink-1); background: var(--canvas); border: 1px solid var(--line-strong);
+  border-radius: 6px; padding: 6px 8px; width: 100%; box-sizing: border-box; }
+textarea { min-height: 84px; resize: vertical; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { position: relative; }
+.chip input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.chip span { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line-strong); border-radius: 6px;
+  padding: 4px 9px; font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+.chip span em { font: 11px var(--sans); font-style: normal; color: var(--ink-3); }
+.chip input:checked + span { border-color: var(--action); color: var(--ink-1); background: var(--chip-on); }
+.chip input:disabled + span { opacity: .75; }
+.chip input:focus-visible + span, input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--focus); outline-offset: 2px; }
+.radios { display: flex; flex-wrap: wrap; gap: 6px; }
+.bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; position: sticky; bottom: 0;
+  background: var(--canvas); border-top: 1px solid var(--hairline); padding-block: 12px calc(12px + env(safe-area-inset-bottom, 0px)); }
+button { font: 500 13px var(--sans); border-radius: 6px; padding: 7px 14px; cursor: pointer; border: 1px solid var(--action);
+  background: var(--action); color: var(--action-fg); }
+button.secondary { background: transparent; color: var(--ink-1); border-color: var(--line-strong); }
+#status { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+#status.err { color: var(--negative); }
+.warn { color: var(--negative); font-size: 12px; }
+details { border: 1px solid var(--hairline); border-radius: 8px; padding: 10px 12px; }
+details + details { margin-top: 8px; }
+summary { cursor: pointer; font-weight: 500; }
+details ol, details ul { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 6px; color: var(--ink-1); }
+.content { font-family: var(--serif); font-size: 14px; line-height: 1.55; max-width: 65ch; }
+code { font: 12px var(--mono); background: var(--sunken); border: 1px solid var(--hairline); border-radius: 4px; padding: 0 4px; }
+pre { margin: 10px 0 0; overflow-x: auto; background: var(--sunken); border: 1px solid var(--hairline); border-radius: 6px;
+  padding: 10px 12px; font: 12px/1.6 var(--mono); }
+.copy { margin-top: 8px; padding: 4px 10px; font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Mac Studio Quiz Run</h1>
+    <p class="sub">Your choices for the writer-model comparison on PR #572. The Claude session on the Mac Studio reads them from here.</p>
+    <div class="stats">
+      <span class="pill bad" title="Accepted questions kept by Claude's review against the full passage, runs 8 to 11 with qwen2.5:14b writing: 7/12, 6/11, 2/10, 6/11."><b>48%</b> kept, runs 8 to 11</span>
+      <span class="pill" title="Bar before you rate: 8 in 10 kept on two independent runs, with no wrong option the material makes true. Your own gate is 6 in 10."><b>80%</b> bar</span>
+      <span class="pill bad" title="Wrong options the book makes true: an unpicked list item (now dropped by a check), another paper's argument, and a paraphrase of the next sentence."><b>3</b> true wrong options in 4 runs</span>
+      <span class="pill" title="Commit on feature/quiz-engine that runs 10 and 11 measured, plus the 'the text uses' source check."><b>2a599915</b> pipeline</span>
+    </div>
+  </header>
+
+  <form id="inputs" autocomplete="off">
+    <div style="display:grid;gap:28px">
+      <section>
+        <h2>The machine</h2>
+        <div class="row">
+          <div class="field">
+            <label for="chip">Chip</label>
+            <select id="chip" name="chip">
+              <option value="">Choose</option>
+              <option>M1 Ultra</option><option>M2 Max</option><option>M2 Ultra</option>
+              <option>M3 Ultra</option><option>M4 Max</option><option>Other</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="memory">Unified memory, GB <span class="hint" title="Decides which writers fit beside the judge, the guesser and the 1.6 GB NLI model. A 32B model at 4-bit needs about 20 GB.">?</span></label>
+            <input type="number" id="memory" name="memory" min="16" step="16" placeholder="e.g. 64">
+          </div>
+        </div>
+        <div class="field">
+          <span class="legend">Ollama there <span class="hint" title="If something else uses it, Claude warns before every model run and stops when you say so.">?</span></span>
+          <div class="radios">
+            <label class="chip"><input type="radio" name="ollama" value="dedicated"><span>free for these runs</span></label>
+            <label class="chip"><input type="radio" name="ollama" value="shared"><span>shared, warn first</span></label>
+          </div>
+        </div>
+        <div class="field">
+          <span class="legend">Model downloads there <span class="hint" title="Writers come from Ollama; NLI candidates and bart-large-mnli come from Hugging Face. Neither is allowed on the office laptop.">?</span></span>
+          <div class="radios">
+            <label class="chip"><input type="radio" name="downloads" value="both"><span>Ollama and Hugging Face</span></label>
+            <label class="chip"><input type="radio" name="downloads" value="ollama"><span>Ollama only</span></label>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Library</h2>
+        <div class="radios">
+          <label class="chip"><input type="radio" name="library" value="copy"><span>copy from the laptop <em>416 MB with vectors</em></span></label>
+          <label class="chip"><input type="radio" name="library" value="fresh"><span>ingest the three books fresh <em>new document ids</em></span></label>
+        </div>
+        <p class="warn" title="Runs 1 to 9 ran with an empty vector table, so the check for wrong options true elsewhere searched nothing.">Either way, vector counts are checked against chunk counts before the first run.</p>
+      </section>
+
+      <section>
+        <h2>What to compare</h2>
+        <div class="field">
+          <span class="legend">Writers <span class="hint" title="Each is judged by Claude's review keep rate, true wrong options, wrong options dropped per question, and answers off their key. The writer and judge must come from different families.">?</span></span>
+          <div class="chips" id="writers">
+            <label class="chip"><input type="checkbox" name="writers" value="qwen2.5:14b-instruct" checked disabled><span>qwen2.5:14b-instruct <em>baseline</em></span></label>
+            <label class="chip"><input type="checkbox" name="writers" value="qwen3:14b"><span>qwen3:14b</span></label>
+            <label class="chip"><input type="checkbox" name="writers" value="qwen3:32b"><span>qwen3:32b</span></label>
+            <label class="chip"><input type="checkbox" name="writers" value="qwen3.5 (larger)"><span>qwen3.5, a larger size</span></label>
+            <label class="chip"><input type="checkbox" name="writers" value="gemma3:27b"><span>gemma3:27b <em>needs a qwen judge</em></span></label>
+            <label class="chip"><input type="checkbox" name="writers" value="mistral-small3.2:24b"><span>mistral-small3.2:24b</span></label>
+          </div>
+          <input type="text" id="writers_other" name="writers_other" placeholder="Other writers, comma separated Ollama tags">
+        </div>
+        <div class="field">
+          <span class="legend">Judges <span class="hint" title="Answers each question with the passage; must pick exactly the right answers. Measured by agreement with Claude's review on the accepted set.">?</span></span>
+          <div class="chips" id="judges">
+            <label class="chip"><input type="checkbox" name="judges" value="gemma4:latest" checked><span>gemma4:latest <em>current</em></span></label>
+            <label class="chip"><input type="checkbox" name="judges" value="qwen2.5:14b-instruct"><span>qwen2.5:14b-instruct</span></label>
+            <label class="chip"><input type="checkbox" name="judges" value="gemma3:27b"><span>gemma3:27b</span></label>
+          </div>
+        </div>
+        <div class="field">
+          <span class="legend">Entailment models <span class="hint" title="Pass when every true wrong option scores 0.8 or more and every false one scores below, on the reviewed options of runs 4 to 11. bart-large-mnli missed two of the three true ones.">?</span></span>
+          <div class="chips" id="nli">
+            <label class="chip"><input type="checkbox" name="nli" value="facebook/bart-large-mnli" checked disabled><span>bart-large-mnli <em>current, 1.6 GB</em></span></label>
+            <label class="chip"><input type="checkbox" name="nli" value="MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli"><span>DeBERTa-v3-base-mnli-fever-anli <em>370 MB</em></span></label>
+            <label class="chip"><input type="checkbox" name="nli" value="cross-encoder/nli-deberta-v3-small"><span>nli-deberta-v3-small</span></label>
+            <label class="chip" title="Tested on the laptop on the 127 wrong options of runs 8 to 11: the three true ones scored 0.01 to 0.67, and reversals up to 0.94. No threshold separates them."><input type="checkbox" name="nli" value="bespoke-minicheck" disabled><span>bespoke-minicheck <em>tested, no separation</em></span></label>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Each run</h2>
+        <div class="field">
+          <span class="legend">Books and levels</span>
+          <div class="chips">
+            <label class="chip"><input type="checkbox" name="scope" value="DDIA:medium" checked><span>DDIA medium</span></label>
+            <label class="chip"><input type="checkbox" name="scope" value="DDIA:hard" checked><span>DDIA hard</span></label>
+            <label class="chip"><input type="checkbox" name="scope" value="moby-dick:medium" checked><span>Moby-Dick medium</span></label>
+            <label class="chip"><input type="checkbox" name="scope" value="federalist:medium" checked><span>Federalist medium</span></label>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="per_quiz">Questions asked per quiz</label>
+            <input type="number" id="per_quiz" name="per_quiz" min="2" max="10" value="4">
+          </div>
+          <div class="field">
+            <label for="runs">Runs per writer <span class="hint" title="Two independent runs agreeing separates an effect from noise. Fewer than two cannot meet the bar.">?</span></label>
+            <input type="number" id="runs" name="runs" min="2" max="5" value="2">
+          </div>
+        </div>
+        <div class="field">
+          <label for="window">When it may run <span class="hint" title="About 40 to 70 minutes per run on the laptop; the Mac Studio should be faster.">?</span></label>
+          <input type="text" id="window" name="window" placeholder="e.g. overnight, weekends, any time">
+        </div>
+      </section>
+
+      <section>
+        <h2>After the runs</h2>
+        <div class="field">
+          <span class="legend">If a writer clears the bar</span>
+          <div class="radios">
+            <label class="chip"><input type="radio" name="on_pass" value="page"><span>publish its questions for me to rate</span></label>
+            <label class="chip"><input type="radio" name="on_pass" value="report"><span>report first, I decide</span></label>
+          </div>
+        </div>
+        <div class="field">
+          <span class="legend">Pushes to feature/quiz-engine <span class="hint" title="Commits as nseaup with DCO sign-off, pushed with the nupsea account. Never merged.">?</span></span>
+          <div class="radios">
+            <label class="chip"><input type="radio" name="push" value="yes"><span>allowed</span></label>
+            <label class="chip"><input type="radio" name="push" value="ask"><span>ask each time</span></label>
+          </div>
+        </div>
+        <div class="field">
+          <label for="notes">Anything else</label>
+          <textarea id="notes" name="notes" placeholder="Paths, models you already have there, limits"></textarea>
+        </div>
+      </section>
+
+      <div class="bar">
+        <button type="submit" id="save">Save</button>
+        <span id="status" aria-live="polite">Not saved yet</span>
+      </div>
+    </div>
+  </form>
+
+  <section>
+    <h2>Reference</h2>
+    <div>
+      <details>
+        <summary>What still fails</summary>
+        <ul class="content">
+          <li>A right answer that garbles or narrows its sentence.</li>
+          <li>A wrong option as close to the text as the right one, or a paraphrase of a nearby sentence that entailment misses.</li>
+          <li>Two wrong options making one claim; a wrong option that is a right one plus "is optional".</li>
+          <li>Trivial key sentences ("humans build software"), and stand-ins such as "a homeless person" for a named character.</li>
+        </ul>
+      </details>
+      <details>
+        <summary>The pipeline</summary>
+        <ol class="content">
+          <li><b>Passage.</b> Contents pages, licences, quotation lists and references are refused.</li>
+          <li><b>Key sentences.</b> Code picks what is tested: one whole sentence ranked against the section summary, or 2 to 3 items of one list.</li>
+          <li><b>Question.</b> The writer phrases it. Refused if the answer misses the key's words, it names someone the passage doesn't, points at its source, says "someone", or the stem states the answer. One retry with the reason.</li>
+          <li><b>Wrong options.</b> Dropped if copied, absolute when the right one isn't, the wrong length, first person, an echo of an untested list item, or entailed by the passage or the five nearest chunks.</li>
+          <li><b>Judge</b> answers with the passage and must pick exactly the right answers.</li>
+          <li><b>Guesser</b> answers without it in three orders; right every time refuses the question at medium and hard.</li>
+        </ol>
+      </details>
+      <details>
+        <summary>Moving it</summary>
+        <ol class="content">
+          <li><code>git fetch &amp;&amp; git worktree add ../lm-quiz-engine feature/quiz-engine</code> in the Luminary checkout.</li>
+          <li>Copy <code>lm-quiz-verify-scripts</code>. With downloads allowed, fetch <code>facebook/bart-large-mnli</code> and the chosen NLI models into <code>&lt;library&gt;/models/</code>.</li>
+          <li>Copy <code>lm-quiz-verify-data/luminary.db</code> and <code>vectors/</code>, or ingest the three books and update the document ids in <code>run_build.py</code>.</li>
+          <li>Check every document's vector count equals its chunk count.</li>
+        </ol>
+      </details>
+      <details>
+        <summary>Run one build</summary>
+        <pre id="cmd">cd ~/DEV/LM/lm-quiz-engine/backend
+DATA_DIR=&lt;verify-library&gt; HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  LITELLM_GENERATION_MODEL=ollama/&lt;writer&gt; FLASHCARD_FACTUALITY_MODEL=ollama/&lt;judge&gt; \
+  QUIZ_GUESS_MODEL=ollama/qwen3.5:4b OMP_NUM_THREADS=4 PYTHONPATH=. \
+  &lt;venv&gt;/bin/python &lt;scripts&gt;/run_build.py 4 &lt;out&gt;.json DDIA:medium,DDIA:hard,moby-dick:medium,federalist:medium
+python3 &lt;scripts&gt;/review_export.py &lt;verify-library&gt;/luminary.db &lt;out&gt;.json &lt;out&gt;.md</pre>
+        <button type="button" class="secondary copy" id="copy">Copy</button>
+        <p class="sub">Empty the quiz tables before each run, after checking a saved copy holds their rows.</p>
+      </details>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  const form = document.getElementById("inputs");
+  const status = document.getElementById("status");
+  const DRAFT = "mac-studio-inputs-draft";
+  const DOC = "handoff/inputs";
+  let db = null;
+
+  function read() {
+    const out = {};
+    for (const el of form.elements) {
+      if (!el.name || el.disabled) continue;
+      if (el.type === "checkbox") { (out[el.name] = out[el.name] || []); if (el.checked) out[el.name].push(el.value); }
+      else if (el.type === "radio") { if (el.checked) out[el.name] = el.value; else if (!(el.name in out)) out[el.name] = ""; }
+      else if (el.type === "number") out[el.name] = el.value === "" ? null : Number(el.value);
+      else out[el.name] = el.value;
+    }
+    out.writers = ["qwen2.5:14b-instruct", ...(out.writers || [])];
+    out.nli = ["facebook/bart-large-mnli", ...(out.nli || [])];
+    return out;
+  }
+  function fill(data) {
+    if (!data) return;
+    for (const el of form.elements) {
+      if (!el.name || el.disabled || !(el.name in data)) continue;
+      const v = data[el.name];
+      if (el.type === "checkbox") el.checked = Array.isArray(v) && v.includes(el.value);
+      else if (el.type === "radio") el.checked = v === el.value;
+      else el.value = v == null ? "" : String(v);
+    }
+  }
+  function say(text, bad) { status.textContent = text; status.classList.toggle("err", !!bad); }
+  function when(iso) {
+    const d = new Date(iso);
+    return isNaN(d) ? "" : d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+
+  try { const draft = localStorage.getItem(DRAFT); if (draft) fill(JSON.parse(draft)); } catch (e) {}
+  form.addEventListener("input", () => {
+    try { localStorage.setItem(DRAFT, JSON.stringify(read())); } catch (e) {}
+    if (db) say("Unsaved changes");
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!db) { say("Saving is unavailable here; your answers stay in this browser only", true); return; }
+    const body = read();
+    body.savedAt = new Date().toISOString();
+    say("Saving...");
+    try {
+      await db.doc(DOC).set(body);
+      say("Saved " + when(body.savedAt));
+    } catch (err) {
+      say(err && err.code === "unavailable" ? "Could not reach the store. Try Save again." : "Not saved: " + ((err && err.message) || "unknown error"), true);
+    }
+  });
+
+  document.getElementById("copy").addEventListener("click", async () => {
+    const text = document.getElementById("cmd").textContent;
+    try { await navigator.clipboard.writeText(text); say("Command copied"); }
+    catch (e) { const r = document.createRange(); r.selectNodeContents(document.getElementById("cmd")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+  });
+
+  (async () => {
+    if (!window.claude || !window.claude.use) { say("Saving is unavailable here; your answers stay in this browser only", true); return; }
+    db = await window.claude.use("db");
+    if (!db) { say("Saving is unavailable here; your answers stay in this browser only", true); return; }
+    try {
+      const snap = await db.doc(DOC).get();
+      if (snap.exists) { const data = snap.data(); fill(data); say("Saved " + when(data.savedAt)); }
+    } catch (e) { say("Could not load saved answers", true); }
+  })();
+})();
+</script>

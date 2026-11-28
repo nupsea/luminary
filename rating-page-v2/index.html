@@ -1,0 +1,388 @@
+<title>Quiz v2 Question Rating</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a numbered rail of the questions beside one question at a time, its passage underneath. */
+:root {
+  --canvas: #ffffff; --sunken: #f7f7f9; --rail: #f4f4f7;
+  --ink-1: #15131f; --ink-2: #5d5b6b; --ink-3: #9a98a8;
+  --hairline: #e4e3ea; --line-strong: #cfcdd8;
+  --action: #1f1a44; --action-fg: #ffffff; --focus: #5537eb;
+  --right: #3f7c7d; --right-soft: #e8f1f1;
+  --wrong: #a9643f; --wrong-soft: #f8ede6;
+  --fix: #8a6d1f; --fix-soft: #f6f0dc;
+  --mark: #fff2b3;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --canvas: #121119; --sunken: #1a1924; --rail: #16151f;
+  --ink-1: #ecebf3; --ink-2: #a5a3b4; --ink-3: #6f6d80;
+  --hairline: #2a2937; --line-strong: #3a3948;
+  --action: #c9c3ff; --action-fg: #15131f; --focus: #9d8cff;
+  --right: #7fbcbd; --right-soft: #1b2b2c; --wrong: #e0a07c; --wrong-soft: #2f2119;
+  --fix: #d9bd6a; --fix-soft: #2b2616; --mark: #4a4220; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --canvas: #121119; --sunken: #1a1924; --rail: #16151f;
+  --ink-1: #ecebf3; --ink-2: #a5a3b4; --ink-3: #6f6d80;
+  --hairline: #2a2937; --line-strong: #3a3948;
+  --action: #c9c3ff; --action-fg: #15131f; --focus: #9d8cff;
+  --right: #7fbcbd; --right-soft: #1b2b2c; --wrong: #e0a07c; --wrong-soft: #2f2119;
+  --fix: #d9bd6a; --fix-soft: #2b2616; --mark: #4a4220; color-scheme: dark }
+
+* { box-sizing: border-box; }
+body { background: var(--canvas); color: var(--ink-1); font: 13px/1.5 var(--sans); }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.eyebrow { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+
+header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--canvas);
+  border-bottom: 1px solid var(--hairline); padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--canvas); }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; max-width: 1180px; margin: 0 auto; }
+.bar h1 { font-size: 15px; margin: 0; font-weight: 600; }
+.stats { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.stats b { color: var(--ink-1); font-weight: 600; }
+.gate { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--hairline); }
+.gate.pass { color: var(--right); border-color: var(--right); }
+.gate.fail { color: var(--wrong); border-color: var(--wrong); }
+.save { margin-left: auto; color: var(--ink-3); font-size: 12px; }
+.save.warn { color: var(--wrong); }
+
+.shell { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 24px; max-width: 1180px; margin: 0 auto;
+  padding-block: 20px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+nav.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 64px); align-self: start;
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.rail button { height: 28px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--canvas);
+  font-variant-numeric: tabular-nums; font-size: 12px; position: relative; }
+.rail button[aria-current="true"] { border-color: var(--action); box-shadow: inset 0 0 0 1px var(--action); }
+.rail button.keep { background: var(--right-soft); color: var(--right); border-color: transparent; }
+.rail button.fix { background: var(--fix-soft); color: var(--fix); border-color: transparent; }
+.rail button.drop { background: var(--wrong-soft); color: var(--wrong); border-color: transparent; }
+.legend { grid-column: 1 / -1; margin-top: 10px; color: var(--ink-3); font-size: 11px; line-height: 1.7; }
+.legend kbd, .hint kbd { font: 11px var(--mono); border: 1px solid var(--hairline); border-radius: 4px; padding: 0 4px; color: var(--ink-2); }
+
+main { min-width: 0; display: grid; gap: 20px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; color: var(--ink-2); }
+.tag { border: 1px solid var(--hairline); border-radius: 4px; padding: 0 6px; font-size: 11px; color: var(--ink-2); }
+.stem { font: 18px/1.45 var(--serif); margin: 6px 0 0; text-wrap: pretty; max-width: 68ch; }
+
+ol.options { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.opt { border: 1px solid var(--hairline); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
+.opt.r { border-left: 3px solid var(--right); }
+.opt.w { border-left: 3px solid var(--wrong); }
+.opt-head { display: flex; gap: 10px; align-items: baseline; }
+.mark-label { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; font-weight: 700; min-width: 44px; }
+.r .mark-label { color: var(--right); } .w .mark-label { color: var(--wrong); }
+.opt-text { font: 15px/1.45 var(--serif); min-width: 0; }
+.opt-sub { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding-left: 54px; }
+.quote { font: 12px/1.4 var(--serif); color: var(--ink-2); font-style: italic; }
+.trap { font-size: 11px; color: var(--ink-3); }
+.flags { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
+.flag { border: 1px solid var(--hairline); background: transparent; border-radius: 999px; padding: 1px 8px; font-size: 11px; color: var(--ink-2); }
+.flag[aria-pressed="true"] { background: var(--wrong-soft); color: var(--wrong); border-color: var(--wrong); }
+
+section.verdict { border: 1px solid var(--line-strong); border-radius: 8px; padding: 14px; display: grid; gap: 12px; background: var(--sunken); }
+.choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.choice { border: 1px solid var(--line-strong); background: var(--canvas); border-radius: 6px; padding: 6px 14px; font-weight: 600; display: inline-flex; gap: 8px; align-items: center; }
+.choice kbd { font: 11px var(--mono); color: var(--ink-3); font-weight: 400; }
+.choice[data-v="keep"][aria-pressed="true"] { background: var(--right); color: var(--canvas); border-color: var(--right); }
+.choice[data-v="fix"][aria-pressed="true"] { background: var(--fix); color: var(--canvas); border-color: var(--fix); }
+.choice[data-v="drop"][aria-pressed="true"] { background: var(--wrong); color: var(--canvas); border-color: var(--wrong); }
+.choice[aria-pressed="true"] kbd { color: inherit; opacity: .7; }
+.qtags { display: flex; flex-wrap: wrap; gap: 4px; }
+.qtags .flag[aria-pressed="true"] { background: var(--action); color: var(--action-fg); border-color: var(--action); }
+textarea { width: 100%; min-height: 64px; resize: vertical; border: 1px solid var(--line-strong); border-radius: 6px;
+  padding: 8px 10px; font: 13px/1.5 var(--sans); background: var(--canvas); color: var(--ink-1); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.nav { display: flex; gap: 8px; }
+.btn { border: 1px solid var(--line-strong); background: var(--canvas); border-radius: 6px; padding: 5px 12px; }
+.btn.primary { background: var(--action); color: var(--action-fg); border-color: var(--action); }
+.btn:disabled { opacity: .4; cursor: default; }
+.hint { color: var(--ink-3); font-size: 11px; }
+
+.claude { border-top: 1px dashed var(--line-strong); padding-top: 10px; display: grid; gap: 4px; }
+.claude p { margin: 0; max-width: 72ch; color: var(--ink-2); }
+.claude .agree { font-size: 11px; font-weight: 600; }
+.agree.same { color: var(--right); } .agree.differ { color: var(--wrong); }
+
+details.passage { border: 1px solid var(--hairline); border-radius: 8px; }
+details.passage summary { padding: 10px 12px; cursor: pointer; color: var(--ink-2); list-style: none; display: flex; justify-content: space-between; }
+details.passage summary::-webkit-details-marker { display: none; }
+.passage-body { padding: 4px 16px 16px; font: 14px/1.65 var(--serif); white-space: pre-wrap; max-width: 76ch; color: var(--ink-1); }
+mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
+
+.empty { color: var(--ink-2); padding: 40px 0; }
+.export { display: flex; gap: 8px; align-items: center; }
+
+@media (max-width: 760px) {
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  nav.rail { position: static; grid-template-columns: repeat(9, 1fr); }
+  .legend { display: none; }
+  .opt-sub { padding-left: 0; }
+  .flags { margin-left: 0; }
+  .stem { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header>
+  <div class="bar">
+    <h1>Quiz v2 question rating</h1>
+    <div class="stats" id="stats"><span>Loading the questions…</span></div>
+    <span class="save" id="save" title="Where your marks are kept">Connecting</span>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="rail" id="rail" aria-label="Questions"></nav>
+  <main id="main"><p class="empty">Loading the questions from the verification run…</p></main>
+</div>
+
+<script>
+(() => {
+  const OPTION_FLAGS = {
+    right: [["unsupported", "Not supported", "The passage does not back this option up"],
+            ["not_answer", "Doesn't answer", "True, but it doesn't answer the question"],
+            ["garbled", "Garbled", "Badly worded or meaningless"]],
+    wrong: [["is_true", "Actually true", "This 'wrong' option is true, so the quiz would mark you wrong for knowing it"],
+            ["giveaway", "Giveaway", "Obviously wrong; nobody who read the passage would pick it"],
+            ["garbled", "Garbled", "Badly worded or meaningless"]],
+  };
+  const QUESTION_TAGS = [
+    ["not_worth_asking", "Not worth asking", "Front matter, a table of contents, or a vacuous point"],
+    ["trivia", "Trivia", "Accurate but not worth learning"],
+    ["stem_unclear", "Stem unclear", "The question is ambiguous or misstates the text"],
+    ["too_easy", "Too easy for its level", "Answerable without reading the passage"],
+    ["too_hard", "Unfair", "Needs something the passage doesn't give"],
+  ];
+  const VERDICTS = [["keep", "Keep", "1", "Good enough to show the public as it is"],
+                    ["fix", "Fixable", "2", "The right idea, but one option or the wording needs to change"],
+                    ["drop", "Drop", "3", "Should never have been written"]];
+  const LABEL = { keep: "Keep", fix: "Fixable", drop: "Drop" };
+
+  let items = [], idx = 0, db = null, store = "local";
+  const ratings = {};
+  const saveEl = document.getElementById("save");
+  const el = (tag, props = {}, kids = []) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === "text") n.textContent = v;
+      else if (k === "class") n.className = v;
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else n.setAttribute(k, v);
+    }
+    for (const c of [].concat(kids)) if (c) n.append(c);
+    return n;
+  };
+  const key = (n) => "q" + String(n).padStart(2, "0");
+  const blank = () => ({ verdict: null, tags: [], option_flags: {}, note: "" });
+  const rating = (n) => (ratings[n] ||= blank());
+
+  // ---- storage: db when the viewer serves it, browser storage otherwise
+  const LOCAL = "quiz-rating-v2";
+  function loadLocal() {
+    try { Object.assign(ratings, JSON.parse(localStorage.getItem(LOCAL) || "{}")); } catch {}
+  }
+  function saveLocal() { try { localStorage.setItem(LOCAL, JSON.stringify(ratings)); } catch {} }
+  const timers = {};
+  function persist(n, immediate) {
+    saveLocal();
+    if (!db) { setSave("Saved in this browser only; use Copy ratings to send them", true); return; }
+    clearTimeout(timers[n]);
+    setSave("Saving…");
+    timers[n] = setTimeout(async () => {
+      const r = rating(n), item = items.find((i) => i.n === n);
+      try {
+        await db.doc("ratings/" + key(n)).set({
+          n, item_id: item.item_id, verdict: r.verdict, tags: r.tags,
+          option_flags: r.option_flags, note: r.note, updated_at: new Date().toISOString(),
+        });
+        setSave("Saved for Claude");
+      } catch (e) { setSave("Not saved: " + (e && e.message || "the store refused"), true); }
+    }, immediate ? 0 : 600);
+  }
+  function setSave(text, warn) { saveEl.textContent = text; saveEl.classList.toggle("warn", !!warn); }
+
+  // ---- summary
+  function renderStats() {
+    const rated = items.filter((i) => ratings[i.n]?.verdict);
+    const c = { keep: 0, fix: 0, drop: 0 };
+    rated.forEach((i) => c[ratings[i.n].verdict]++);
+    const share = rated.length ? c.keep / rated.length : 0;
+    const agree = rated.filter((i) => ratings[i.n].verdict === i.claude.verdict).length;
+    const stats = document.getElementById("stats");
+    stats.replaceChildren(
+      el("span", {}, [el("b", { text: `${rated.length}` }), ` of ${items.length} rated`]),
+      el("span", {}, [el("b", { text: String(c.keep) }), " keep · ", el("b", { text: String(c.fix) }), " fixable · ", el("b", { text: String(c.drop) }), " drop"]),
+      el("span", {
+        class: "gate " + (rated.length ? (share >= 0.6 ? "pass" : "fail") : ""),
+        title: "Quiz stays off by default until at least 6 in 10 questions are good enough to keep, on two runs",
+        text: rated.length ? `${Math.round(share * 100)}% keep; gate is 60%` : "Gate: 60% keep",
+      }),
+      rated.length ? el("span", { title: "How often your verdict matches Claude's. Shown once you have rated a question.", text: `Agree with Claude on ${agree} of ${rated.length}` }) : null,
+    );
+  }
+
+  function renderRail() {
+    const rail = document.getElementById("rail");
+    rail.replaceChildren(...items.map((it, i) => el("button", {
+      class: ratings[it.n]?.verdict || "", "aria-current": String(i === idx),
+      "aria-label": `Question ${it.n}${ratings[it.n]?.verdict ? ", " + LABEL[ratings[it.n].verdict] : ", not rated"}`,
+      text: String(it.n), onclick: () => go(i),
+    })), el("div", { class: "legend" }, [
+      el("kbd", { text: "1" }), " keep  ", el("kbd", { text: "2" }), " fixable  ", el("kbd", { text: "3" }), " drop", el("br"),
+      el("kbd", { text: "←" }), " ", el("kbd", { text: "→" }), " previous, next",
+    ]));
+  }
+
+  // ---- the passage, with each quote marked where it occurs
+  const norm = (s) => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[‐-—−]/g, "-");
+  function passageNodes(text, quotes) {
+    const base = norm(text).toLowerCase();
+    const spans = [];
+    for (const q of quotes) {
+      for (const part of norm(q).replace(/^["'\s]+|["'\s]+$/g, "").split(/\s*\.\.\.\s*|\s*…\s*/)) {
+        const p = part.trim().toLowerCase();
+        if (p.length < 6) continue;
+        let at = base.indexOf(p);
+        while (at >= 0) { spans.push([at, at + p.length]); at = base.indexOf(p, at + p.length); }
+      }
+    }
+    spans.sort((a, b) => a[0] - b[0]);
+    const out = []; let pos = 0;
+    for (const [s, e] of spans) {
+      if (s < pos) continue;
+      out.push(document.createTextNode(text.slice(pos, s)), el("mark", { text: text.slice(s, e) }));
+      pos = e;
+    }
+    out.push(document.createTextNode(text.slice(pos)));
+    return out;
+  }
+
+  function toggle(list, v) { const i = list.indexOf(v); i >= 0 ? list.splice(i, 1) : list.push(v); }
+
+  function renderItem() {
+    const it = items[idx], r = rating(it.n), main = document.getElementById("main");
+    const options = el("ol", { class: "options" }, it.options.map((o, oi) => {
+      const kind = o.right ? "right" : "wrong";
+      const flags = (r.option_flags[oi] ||= []);
+      return el("li", { class: "opt " + (o.right ? "r" : "w") }, [
+        el("div", { class: "opt-head" }, [
+          el("span", { class: "mark-label", text: o.right ? "Right" : "Wrong" }),
+          el("span", { class: "opt-text", text: o.text }),
+        ]),
+        el("div", { class: "opt-sub" }, [
+          o.quote ? el("span", { class: "quote", title: "The quote the writer gave as evidence", text: "“" + o.quote.replace(/^["“]+|["”]+$/g, "") + "”" }) : null,
+          o.trap ? el("span", { class: "trap", title: "The mistake this wrong option is meant to catch", text: o.trap.replaceAll("_", " ") }) : null,
+          el("span", { class: "flags" }, OPTION_FLAGS[kind].map(([v, label, tip]) => el("button", {
+            class: "flag", "aria-pressed": String(flags.includes(v)), title: tip, text: label,
+            onclick: () => { toggle(flags, v); persist(it.n); renderItem(); },
+          }))),
+        ]),
+      ]);
+    }));
+
+    const quotes = it.options.filter((o) => o.quote).map((o) => o.quote);
+    const claudeBlock = r.verdict ? el("div", { class: "claude" }, [
+      el("span", { class: "eyebrow", text: "Claude's read, shown after yours" }),
+      el("span", { class: "agree " + (r.verdict === it.claude.verdict ? "same" : "differ"),
+        text: `${LABEL[it.claude.verdict]}${r.verdict === it.claude.verdict ? ", same as yours" : `, yours is ${LABEL[r.verdict]}`}` }),
+      el("p", { text: it.claude.why }),
+    ]) : null;
+
+    const note = el("textarea", { id: "note-" + it.n, placeholder: "What should it have asked, or what would make the wrong options good? Optional." });
+    note.value = r.note || "";
+    note.addEventListener("input", () => { r.note = note.value; persist(it.n); });
+
+    main.replaceChildren(
+      el("div", {}, [
+        el("div", { class: "meta" }, [
+          el("span", { class: "eyebrow", text: `Question ${it.n} of ${items.length}` }),
+          el("span", { text: `${it.document} · ${it.section}` }),
+          el("span", { class: "tag", title: "The build run that wrote it", text: it.run }),
+          el("span", { class: "tag", title: "Difficulty the quiz asked for", text: it.level }),
+          el("span", { class: "tag", title: it.kind === "multi" ? "Checkbox: pick every right option" : "Radio: one right option", text: it.kind === "multi" ? "choose all" : "choose one" }),
+        ]),
+        el("p", { class: "stem", text: it.stem }),
+      ]),
+      options,
+      el("section", { class: "verdict", "aria-label": "Your verdict" }, [
+        el("div", { class: "row" }, [
+          el("div", { class: "choices", role: "group", "aria-label": "Verdict" }, VERDICTS.map(([v, label, k, tip]) => el("button", {
+            class: "choice", "data-v": v, "aria-pressed": String(r.verdict === v), title: tip,
+            onclick: () => setVerdict(v),
+          }, [label, el("kbd", { text: k })]))),
+          el("div", { class: "nav" }, [
+            el("button", { class: "btn", text: "Previous", onclick: () => go(idx - 1), ...(idx === 0 ? { disabled: "" } : {}) }),
+            el("button", { class: "btn primary", text: idx === items.length - 1 ? "Last question" : "Next", onclick: () => go(idx + 1), ...(idx === items.length - 1 ? { disabled: "" } : {}) }),
+          ]),
+        ]),
+        el("div", { class: "qtags" }, QUESTION_TAGS.map(([v, label, tip]) => el("button", {
+          class: "flag", "aria-pressed": String(r.tags.includes(v)), title: tip, text: label,
+          onclick: () => { toggle(r.tags, v); persist(it.n); renderItem(); },
+        }))),
+        note,
+        claudeBlock,
+      ]),
+      el("details", { class: "passage", open: "" }, [
+        el("summary", {}, [el("span", { text: "Source passage, as the writer saw it" }), el("span", { class: "hint", title: "Highlighted text is each option's quote. Some lines repeat where neighbouring chunks overlap.", text: `${it.passage.length.toLocaleString()} characters` })]),
+        el("div", { class: "passage-body" }, passageNodes(it.passage, quotes)),
+      ]),
+      el("div", { class: "row" }, [
+        el("span", { class: "hint", text: "Marks save as you go." }),
+        el("div", { class: "export" }, [el("button", { class: "btn", text: "Copy ratings", title: "Copy every rating as JSON, if you want to paste them somewhere", onclick: copyAll })]),
+      ]),
+    );
+  }
+
+  function setVerdict(v) {
+    const it = items[idx], r = rating(it.n);
+    r.verdict = r.verdict === v ? null : v;
+    persist(it.n, true); renderAll();
+  }
+  function go(i) {
+    if (i < 0 || i >= items.length) return;
+    idx = i; renderAll(); window.scrollTo({ top: 0 });
+  }
+  function renderAll() { renderStats(); renderRail(); renderItem(); }
+
+  async function copyAll() {
+    const text = JSON.stringify(items.map((i) => ({ n: i.n, item_id: i.item_id, ...rating(i.n) })), null, 1);
+    try { await navigator.clipboard.writeText(text); setSave("Copied"); }
+    catch { setSave("Copy was blocked by this view", true); }
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.target.closest("textarea, input") || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "ArrowRight") go(idx + 1);
+    else if (e.key === "ArrowLeft") go(idx - 1);
+    else if (["1", "2", "3"].includes(e.key)) setVerdict(VERDICTS[+e.key - 1][0]);
+  });
+
+  async function start() {
+    loadLocal();
+    try {
+      items = await (await fetch("items.json")).json();
+    } catch {
+      document.getElementById("main").replaceChildren(el("p", { class: "empty", text: "The questions did not load. Reload the page to try again." }));
+      return;
+    }
+    renderAll();
+    setSave("Saved in this browser only", true);
+    db = window.claude?.use ? await window.claude.use("db") : null;
+    if (!db) { setSave("Saved in this browser only; use Copy ratings to send them", true); return; }
+    try {
+      const snap = await db.collection("ratings").get();
+      for (const d of snap.docs) {
+        const v = d.data();
+        if (v && v.n) ratings[v.n] = { verdict: v.verdict ?? null, tags: v.tags || [], option_flags: v.option_flags || {}, note: v.note || "" };
+      }
+      setSave("Saved for Claude");
+      renderAll();
+    } catch (e) { db = null; setSave("Saved in this browser only; the shared store did not answer", true); }
+  }
+  start();
+})();
+</script>

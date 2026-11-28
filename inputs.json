@@ -1,0 +1,11 @@
+{
+  "_source": "https://claude.ai/artifact/9KyoJCfr3bcEohMTyDpqqS handoff/inputs, version 2, saved 2026-11-28T11:45:22Z; the live document wins",
+  "chip": "M4 Max", "memory": 64, "ollama": "shared", "downloads": "both", "library": "",
+  "writers": ["qwen2.5:14b-instruct", "qwen3:14b"],
+  "writers_other": "Anything that can run within a 16 GB laptop comfortably. ",
+  "judges": ["gemma4:latest"],
+  "nli": ["facebook/bart-large-mnli", "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli", "cross-encoder/nli-deberta-v3-small"],
+  "scope": ["DDIA:medium", "DDIA:hard", "moby-dick:medium", "federalist:medium"],
+  "per_quiz": 5, "runs": 2, "window": "any time", "on_pass": "page", "push": "yes",
+  "notes": "Important to research if there are better strategies and models out there to make this whole study pipeline better. We could make use of decision based models or some other machine learning/transformer or suitable models at different stages to optimally arrive at better questions and answers with options that'll help all the three facades (quiz, flashcards and teach back) "
+}

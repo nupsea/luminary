@@ -1,0 +1,81 @@
+{
+  "runs": [
+    {
+      "doc": "DDIA",
+      "level": "medium",
+      "quiz_id": "f5f5cefc-2ba2-4422-aac6-a82690d821cc",
+      "status": "ready",
+      "error": null,
+      "built": 3,
+      "first_question_s": 445.4,
+      "total_s": 896.6
+    },
+    {
+      "doc": "DDIA",
+      "level": "hard",
+      "quiz_id": "27a3d372-3d3c-4c3a-845d-afc1d999517b",
+      "status": "ready",
+      "error": null,
+      "built": 3,
+      "first_question_s": 286.7,
+      "total_s": 1027.6
+    },
+    {
+      "doc": "moby-dick",
+      "level": "medium",
+      "quiz_id": "e916d883-fafd-47df-af11-f765294563e9",
+      "status": "ready",
+      "error": null,
+      "built": 4,
+      "first_question_s": 608.5,
+      "total_s": 2551.1
+    },
+    {
+      "doc": "federalist",
+      "level": "medium",
+      "quiz_id": "5f91c005-f227-4b19-b679-1536882bec25",
+      "status": "ready",
+      "error": null,
+      "built": 1,
+      "first_question_s": 627.4,
+      "total_s": 699.5
+    }
+  ],
+  "stats": {
+    "counts": {
+      "quiz_drop_wrong_entailed": 58,
+      "quiz_reject_invented_name": 2,
+      "quiz_reject_points_at_source": 7,
+      "quiz_drop_wrong_untested_item": 1,
+      "quiz_drop_retried_why_without_reason": 2,
+      "quiz_reject_guessable": 25,
+      "quiz_drop_passage_quotations": 10,
+      "quiz_drop_retried_points_at_source": 11,
+      "quiz_drop_retried_answer_off_key": 10,
+      "quiz_drop_wrong_true_elsewhere": 12,
+      "parses": 318,
+      "quiz_reject_too_few_wrong": 12,
+      "quiz_drop_wrong_length": 5,
+      "quiz_reject_answer_off_key": 6,
+      "quiz_reject_not_answerable": 1,
+      "quiz_reject_why_without_reason": 1,
+      "quiz_drop_passage_licence": 11,
+      "quiz_reject_right_is_longest": 14,
+      "quiz_drop_retried_answer_in_stem": 2,
+      "quiz_drop_passage_contents": 3,
+      "quiz_reject_duplicate_options": 6,
+      "quiz_drop_wrong_absolute": 68,
+      "parses_first_pass": 318,
+      "quiz_drop_passage_references": 136,
+      "quiz_items_rejected": 77,
+      "quiz_drop_retried_count_in_stem": 1,
+      "quiz_drop_retried_shape": 3,
+      "quiz_items_gated": 88,
+      "quiz_drop_retried_invented_name": 1,
+      "quiz_drop_retried_vague_subject": 1,
+      "quiz_reject_vague_subject": 3
+    },
+    "first_pass_rate": 1.0,
+    "attempts_per_generation": null
+  }
+}

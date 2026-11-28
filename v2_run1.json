@@ -1,0 +1,61 @@
+{
+  "runs": [
+    {
+      "doc": "DDIA",
+      "level": "medium",
+      "quiz_id": "d731ba77-b67f-4ef8-bccb-9f09bbc49a07",
+      "status": "ready",
+      "error": null,
+      "built": 1,
+      "first_question_s": 194.4,
+      "total_s": 226.5
+    },
+    {
+      "doc": "DDIA",
+      "level": "hard",
+      "quiz_id": "a9796450-11ea-46ab-83d6-88204a695fc0",
+      "status": "ready",
+      "error": null,
+      "built": 2,
+      "first_question_s": 178.3,
+      "total_s": 224.5
+    },
+    {
+      "doc": "moby-dick",
+      "level": "medium",
+      "quiz_id": "705deb8f-a65b-4daa-b823-1457f406bb8e",
+      "status": "ready",
+      "error": null,
+      "built": 2,
+      "first_question_s": 116.2,
+      "total_s": 182.4
+    }
+  ],
+  "stats": {
+    "counts": {
+      "quiz_reject_answer_off_key": 22,
+      "quiz_reject_right_is_longest": 1,
+      "quiz_reject_guessable": 7,
+      "parses_first_pass": 158,
+      "quiz_drop_passage_contents": 3,
+      "quiz_reject_duplicate_options": 1,
+      "quiz_drop_wrong_unknown_mistake": 13,
+      "quiz_reject_too_few_wrong": 27,
+      "quiz_drop_passage_licence": 11,
+      "quiz_reject_count_in_stem": 1,
+      "quiz_items_rejected": 72,
+      "quiz_drop_wrong_absolute": 22,
+      "quiz_items_gated": 77,
+      "quiz_reject_points_at_source": 1,
+      "quiz_drop_wrong_length": 3,
+      "quiz_drop_passage_references": 136,
+      "parses": 158,
+      "quiz_drop_passage_quotations": 5,
+      "quiz_reject_shape": 3,
+      "quiz_reject_invented_name": 9,
+      "quiz_drop_wrong_entailed": 49
+    },
+    "first_pass_rate": 1.0,
+    "attempts_per_generation": null
+  }
+}

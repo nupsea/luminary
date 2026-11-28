@@ -1,0 +1,1458 @@
+[
+ {
+  "run": 8,
+  "item": "1eb92bea-e30a-444d-ab58-0797679db94e",
+  "verdict": "fix",
+  "tags": [
+   "wrong_half_true"
+  ],
+  "label": "false",
+  "text": "Using percentiles such as p95 or p99 provides a better idea of the worst-case scenarios, making them more useful.",
+  "passage": 0.9239336612371167,
+  "near": 0.5323036777341446
+ },
+ {
+  "run": 8,
+  "item": "1eb92bea-e30a-444d-ab58-0797679db94e",
+  "verdict": "fix",
+  "tags": [
+   "wrong_half_true"
+  ],
+  "label": "false",
+  "text": "The arithmetic mean is ideal for understanding typical user experience as it balances fast and slow responses.",
+  "passage": 0.0442761584363769,
+  "near": 0.04100487100766991
+ },
+ {
+  "run": 8,
+  "item": "1eb92bea-e30a-444d-ab58-0797679db94e",
+  "verdict": "fix",
+  "tags": [
+   "wrong_half_true"
+  ],
+  "label": "false",
+  "text": "The mode is best to determine typical wait times because it shows the most frequent response time.",
+  "passage": 0.02529615207575271,
+  "near": 0.045455829017145816
+ },
+ {
+  "run": 8,
+  "item": "ae1b2d43-e935-4564-859e-3a656b34284c",
+  "verdict": "fix",
+  "tags": [
+   "too_easy"
+  ],
+  "label": "false",
+  "text": "Using IDs complicates user interface design and functionality.",
+  "passage": 0.005135468855498424,
+  "near": 0.003280825789921599
+ },
+ {
+  "run": 8,
+  "item": "ae1b2d43-e935-4564-859e-3a656b34284c",
+  "verdict": "fix",
+  "tags": [
+   "too_easy"
+  ],
+  "label": "false",
+  "text": "Standardized lists make it easier to change user permissions.",
+  "passage": 0.010634378739452591,
+  "near": 0.0597450444191693
+ },
+ {
+  "run": 8,
+  "item": "f8def023-4376-449c-ae1c-a6d38cf9c65f",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "All western territories were declared public domain, ending state claims entirely.",
+  "passage": 0.015638483576893458,
+  "near": 0.004946478962042834
+ },
+ {
+  "run": 8,
+  "item": "f8def023-4376-449c-ae1c-a6d38cf9c65f",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Congress settled disputes by granting disputed land to the first settlers in the area.",
+  "passage": 0.004958085339416264,
+  "near": 0.0012732807009698899
+ },
+ {
+  "run": 8,
+  "item": "f8def023-4376-449c-ae1c-a6d38cf9c65f",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Congress used military intervention to settle territorial claims between states.",
+  "passage": 0.0060514428176005755,
+  "near": 0.2658069933651448
+ },
+ {
+  "run": 8,
+  "item": "9861adc2-3f47-4419-9a81-13e280556473",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "War history dominated by vast territorial exchanges and continuous frontiers shifting between nations.",
+  "passage": 0.20962201146143758,
+  "near": 0.29235755432026306
+ },
+ {
+  "run": 8,
+  "item": "9861adc2-3f47-4419-9a81-13e280556473",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "European warfare characterized by swift victories and rapid expansion of territories during conflicts.",
+  "passage": 0.10451012097860968,
+  "near": 0.04866745332449989
+ },
+ {
+  "run": 8,
+  "item": "9861adc2-3f47-4419-9a81-13e280556473",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Disciplined armies leading to quick conquests and decisive battles in neighboring nations.",
+  "passage": 0.06622999660201069,
+  "near": 0.13800446507176917
+ },
+ {
+  "run": 8,
+  "item": "cf88d0c9-3bad-4f5b-af4e-cccc2df8b6eb",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Each state might have existed as an independent monarchy.",
+  "passage": 0.41160860714454905,
+  "near": 0.8228519297953732
+ },
+ {
+  "run": 8,
+  "item": "cf88d0c9-3bad-4f5b-af4e-cccc2df8b6eb",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Mankind would have formed multiple small city-states.",
+  "passage": 0.1707951775406411,
+  "near": 0.12264789951512498
+ },
+ {
+  "run": 8,
+  "item": "cf88d0c9-3bad-4f5b-af4e-cccc2df8b6eb",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "People would have lived under rotating dictatorship.",
+  "passage": 0.12772389392887948,
+  "near": 0.3426976351953183
+ },
+ {
+  "run": 8,
+  "item": "57babc7a-6d96-4e31-a853-d2a0a20d381a",
+  "verdict": "fix",
+  "tags": [
+   "trivia"
+  ],
+  "label": "false",
+  "text": "The landlord offered to let me use his own bed temporarily.",
+  "passage": 0.20376072361161557,
+  "near": 0.3029426171471123
+ },
+ {
+  "run": 8,
+  "item": "57babc7a-6d96-4e31-a853-d2a0a20d381a",
+  "verdict": "fix",
+  "tags": [
+   "trivia"
+  ],
+  "label": "false",
+  "text": "The landlord suggested staying in a tent outside for the night.",
+  "passage": 0.009207264977913614,
+  "near": 0.007300934401113366
+ },
+ {
+  "run": 8,
+  "item": "57babc7a-6d96-4e31-a853-d2a0a20d381a",
+  "verdict": "fix",
+  "tags": [
+   "trivia"
+  ],
+  "label": "false",
+  "text": "The landlord offered to sleep on his own bed instead.",
+  "passage": 0.06698149998358491,
+  "near": 0.06083011738037206
+ },
+ {
+  "run": 8,
+  "item": "f7ed99af-d3d8-45a9-9606-39ce0f9da0b0",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "The guest demands to know about the harpooneer's past adventures at sea and his reputation among sailors.",
+  "passage": 0.015723441517064892,
+  "near": 0.013378619478593813
+ },
+ {
+  "run": 8,
+  "item": "f7ed99af-d3d8-45a9-9606-39ce0f9da0b0",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "The guest wants to know if the harpooneer is a notorious criminal and if he will be safe with him.",
+  "passage": 0.33725781345901046,
+  "near": 0.19310787269894625
+ },
+ {
+  "run": 8,
+  "item": "f7ed99af-d3d8-45a9-9606-39ce0f9da0b0",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "The guest wants to know if the harpooneer has any connections to the landlord's family and if it's safe to stay under one roof.",
+  "passage": 0.12313237547423603,
+  "near": 0.2251360789521062
+ },
+ {
+  "run": 8,
+  "item": "04e05acf-5590-4367-8c80-1ce12c1f4538",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "A knock on the door and a voice outside.",
+  "passage": 0.0039156191972582605,
+  "near": 0.7307847468239342
+ },
+ {
+  "run": 8,
+  "item": "04e05acf-5590-4367-8c80-1ce12c1f4538",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "The sound of rain tapping against the window.",
+  "passage": 0.004074746295597183,
+  "near": 0.07388136765969053
+ },
+ {
+  "run": 8,
+  "item": "04e05acf-5590-4367-8c80-1ce12c1f4538",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "A sudden noise from a nearby clock.",
+  "passage": 0.0021489136748740717,
+  "near": 0.006112427450707907
+ },
+ {
+  "run": 8,
+  "item": "4181a015-2808-457b-84fa-c0df0b7c4536",
+  "verdict": "fix",
+  "tags": [
+   "wrong_repeated"
+  ],
+  "label": "false",
+  "text": "The challenge lies in managing the peak rate for reading home timelines rather than fan-out at both average and peak loads.",
+  "passage": 0.15830505819630894,
+  "near": 0.45294341354804996
+ },
+ {
+  "run": 8,
+  "item": "4181a015-2808-457b-84fa-c0df0b7c4536",
+  "verdict": "fix",
+  "tags": [
+   "wrong_repeated"
+  ],
+  "label": "false",
+  "text": "The scalability issues are primarily due to the low number of followers each user has rather than the many they follow.",
+  "passage": 0.020529062687485413,
+  "near": 0.02848869801179867
+ },
+ {
+  "run": 8,
+  "item": "4181a015-2808-457b-84fa-c0df0b7c4536",
+  "verdict": "fix",
+  "tags": [
+   "wrong_repeated"
+  ],
+  "label": "false",
+  "text": "Each user following and being followed by a small number of people causes Twitter's scaling difficulties, not many connections.",
+  "passage": 0.19433438995785163,
+  "near": 0.14079828738157074
+ },
+ {
+  "run": 8,
+  "item": "01f9e378-bacd-489f-a680-ed746a889628",
+  "verdict": "drop",
+  "tags": [
+   "wrong_is_true",
+   "stem_unclear"
+  ],
+  "label": "false",
+  "text": "Monitoring the cause of problems when systems are operating smoothly.",
+  "passage": 0.06542934470480688,
+  "near": 0.08314549959630366
+ },
+ {
+  "run": 8,
+  "item": "01f9e378-bacd-489f-a680-ed746a889628",
+  "verdict": "drop",
+  "tags": [
+   "wrong_is_true",
+   "stem_unclear"
+  ],
+  "label": "false",
+  "text": "Avoiding problematic changes by monitoring external network conditions.",
+  "passage": 0.03594966496069713,
+  "near": 0.49479234060063243
+ },
+ {
+  "run": 8,
+  "item": "01f9e378-bacd-489f-a680-ed746a889628",
+  "verdict": "drop",
+  "tags": [
+   "wrong_is_true",
+   "stem_unclear"
+  ],
+  "label": "true",
+  "text": "Ensuring software and platforms are up to date with performance patches.",
+  "passage": 0.1645321492095459,
+  "near": 0.2548076622791589
+ },
+ {
+  "run": 8,
+  "item": "365a6482-ac62-40e3-afad-13f9cb5bb808",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "It keeps queues artificially long, skewing measurements of real-world performance.",
+  "passage": 0.6113341886490096,
+  "near": 0.7170692947226405
+ },
+ {
+  "run": 8,
+  "item": "365a6482-ac62-40e3-afad-13f9cb5bb808",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "It keeps queues artificially short, but does not affect the overall system performance.",
+  "passage": 0.09868429974560569,
+  "near": 0.06171580346460311
+ },
+ {
+  "run": 8,
+  "item": "365a6482-ac62-40e3-afad-13f9cb5bb808",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Skewing measurements helps to reflect real-world conditions more accurately.",
+  "passage": 0.03578984940435363,
+  "near": 0.12903146480736935
+ },
+ {
+  "run": 8,
+  "item": "648df355-41ea-4019-a69e-4e6f5191df4d",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "The term 'NoSQL' was created to describe closed-source, non-relational database systems.",
+  "passage": 0.011230640557090527,
+  "near": 0.007870614828229523
+ },
+ {
+  "run": 8,
+  "item": "648df355-41ea-4019-a69e-4e6f5191df4d",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "The hashtag was first used to label discussions about relational database limitations.",
+  "passage": 0.6809499122662039,
+  "near": 0.66908195038136
+ },
+ {
+  "run": 8,
+  "item": "648df355-41ea-4019-a69e-4e6f5191df4d",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "A software developer coined the term NoSQL as an alternative name for SQL databases.",
+  "passage": 0.1074818644721607,
+  "near": 0.25173317680132345
+ },
+ {
+  "run": 9,
+  "item": "0592729f-cfa6-436e-b3fe-a1120a327294",
+  "verdict": "fix",
+  "tags": [
+   "stem_unclear"
+  ],
+  "label": "false",
+  "text": "Automatic scaling is unnecessary if system load is predictable and constant.",
+  "passage": 0.23627038155890492,
+  "near": 0.4684026223731623
+ },
+ {
+  "run": 9,
+  "item": "0592729f-cfa6-436e-b3fe-a1120a327294",
+  "verdict": "fix",
+  "tags": [
+   "stem_unclear"
+  ],
+  "label": "false",
+  "text": "Vertical scaling involves distributing the load across multiple machines.",
+  "passage": 0.03494991353841239,
+  "near": 0.10452983307976792
+ },
+ {
+  "run": 9,
+  "item": "0592729f-cfa6-436e-b3fe-a1120a327294",
+  "verdict": "fix",
+  "tags": [
+   "stem_unclear"
+  ],
+  "label": "false",
+  "text": "Systems can scale down by removing resources to handle decreased load.",
+  "passage": 0.08265022107510861,
+  "near": 0.09210464628638189
+ },
+ {
+  "run": 9,
+  "item": "abc7518f-9d31-4caf-a12d-4601a543d772",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Application developers decide how to represent JSON/XML/relational/graph data as bytes.",
+  "passage": 0.2907403914105402,
+  "near": 0.6139330583078308
+ },
+ {
+  "run": 9,
+  "item": "abc7518f-9d31-4caf-a12d-4601a543d772",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "API developers represent electrical currents, pulses of light, magnetic fields in terms of bytes.",
+  "passage": 0.24416334029988784,
+  "near": 0.19847844658960784
+ },
+ {
+  "run": 9,
+  "item": "abc7518f-9d31-4caf-a12d-4601a543d772",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Software architects express objects or data structures directly on the network.",
+  "passage": 0.1125986777099939,
+  "near": 0.1969596566991757
+ },
+ {
+  "run": 9,
+  "item": "a5918b79-0bf8-42b6-9f42-cb1af0b5cf0e",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Congress declared the Western territory as federal land.",
+  "passage": 0.8039655917387847,
+  "near": 0.5940215652205757
+ },
+ {
+  "run": 9,
+  "item": "a5918b79-0bf8-42b6-9f42-cb1af0b5cf0e",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "States resolved disputes through direct negotiations.",
+  "passage": 0.43297025881229995,
+  "near": 0.024901512782535717
+ },
+ {
+  "run": 9,
+  "item": "a5918b79-0bf8-42b6-9f42-cb1af0b5cf0e",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Congress used military force to resolve disputes.",
+  "passage": 0.0023812038233163545,
+  "near": 0.07770828929542906
+ },
+ {
+  "run": 9,
+  "item": "53a4a18c-c3ae-4bac-8247-83d0d3f35468",
+  "verdict": "drop",
+  "tags": [
+   "wrong_is_true"
+  ],
+  "label": "false",
+  "text": "It defends states from environmental disasters alone.",
+  "passage": 0.009727967483467404,
+  "near": 0.006012708616966283
+ },
+ {
+  "run": 9,
+  "item": "53a4a18c-c3ae-4bac-8247-83d0d3f35468",
+  "verdict": "drop",
+  "tags": [
+   "wrong_is_true"
+  ],
+  "label": "false",
+  "text": "It ensures peace and stability in international relations.",
+  "passage": 0.042488756906247496,
+  "near": 0.08862125260751051
+ },
+ {
+  "run": 9,
+  "item": "53a4a18c-c3ae-4bac-8247-83d0d3f35468",
+  "verdict": "drop",
+  "tags": [
+   "wrong_is_true"
+  ],
+  "label": "true",
+  "text": "It stops economic disputes between states.",
+  "passage": 0.008197826860600214,
+  "near": 0.13982312090695773
+ },
+ {
+  "run": 9,
+  "item": "9894760e-8113-4912-9293-d9ba6912e000",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "It is likely due to strong correlations like common causes, such as temperature in server racks.",
+  "passage": 0.3953037433808624,
+  "near": 0.42469638670362614
+ },
+ {
+  "run": 9,
+  "item": "9894760e-8113-4912-9293-d9ba6912e000",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Multiple hardware components experience simultaneous failure when there are no weak correlations.",
+  "passage": 0.09223401532787603,
+  "near": 0.12507025916862782
+ },
+ {
+  "run": 9,
+  "item": "9894760e-8113-4912-9293-d9ba6912e000",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Multiple hardware components are more likely to fail simultaneously during software updates.",
+  "passage": 0.0632985648910969,
+  "near": 0.06196988469496734
+ },
+ {
+  "run": 9,
+  "item": "40b46c19-2603-4076-9f2e-13ca4ada81de",
+  "verdict": "fix",
+  "tags": [
+   "wrong_defensible"
+  ],
+  "label": "false",
+  "text": "Monitoring the health of applications and quickly deploying new features.",
+  "passage": 0.02195892071644829,
+  "near": 0.08741706125211116
+ },
+ {
+  "run": 9,
+  "item": "40b46c19-2603-4076-9f2e-13ca4ada81de",
+  "verdict": "fix",
+  "tags": [
+   "wrong_defensible"
+  ],
+  "label": "false",
+  "text": "Identifying the impact of user changes on system performance and stability.",
+  "passage": 0.7135896689343764,
+  "near": 0.48085699391984704
+ },
+ {
+  "run": 9,
+  "item": "109f7b2c-033e-41a7-ab26-3e7eaeedc71e",
+  "verdict": "drop",
+  "tags": [
+   "not_worth_asking",
+   "too_easy"
+  ],
+  "label": "false",
+  "text": "Software systems are maintained by AI.",
+  "passage": 0.0023457979333302305,
+  "near": 0.0013155883466659623
+ },
+ {
+  "run": 9,
+  "item": "109f7b2c-033e-41a7-ab26-3e7eaeedc71e",
+  "verdict": "drop",
+  "tags": [
+   "not_worth_asking",
+   "too_easy"
+  ],
+  "label": "false",
+  "text": "Designers maintain but do not create.",
+  "passage": 0.017373227446080504,
+  "near": 0.047818222781274775
+ },
+ {
+  "run": 9,
+  "item": "109f7b2c-033e-41a7-ab26-3e7eaeedc71e",
+  "verdict": "drop",
+  "tags": [
+   "not_worth_asking",
+   "too_easy"
+  ],
+  "label": "false",
+  "text": "Operators design, but users maintain.",
+  "passage": 0.17898661788484987,
+  "near": 0.0871649669881233
+ },
+ {
+  "run": 9,
+  "item": "f0bd91dd-3637-462c-a759-4a5053c430bc",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Doing more work at read time allows Twitter to handle the high volume of tweets being posted efficiently.",
+  "passage": 0.14473762170796972,
+  "near": 0.7237717834191835
+ },
+ {
+  "run": 9,
+  "item": "f0bd91dd-3637-462c-a759-4a5053c430bc",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Published tweets are far more numerous than home timeline reads, making this an efficient strategy.",
+  "passage": 0.8898554544434288,
+  "near": 0.9438550187707937
+ },
+ {
+  "run": 9,
+  "item": "f0bd91dd-3637-462c-a759-4a5053c430bc",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "This approach does less work at write time to prioritize faster delivery of tweets to followers.",
+  "passage": 0.11253851010788488,
+  "near": 0.3885097895149113
+ },
+ {
+  "run": 9,
+  "item": "a51dd150-e978-4516-8e53-288607f3ea62",
+  "verdict": "fix",
+  "tags": [
+   "too_easy"
+  ],
+  "label": "false",
+  "text": "Because the Commodore orders sailors to prevent fresh air from reaching him.",
+  "passage": 0.11414384729968809,
+  "near": 0.08124399816950977
+ },
+ {
+  "run": 9,
+  "item": "a51dd150-e978-4516-8e53-288607f3ea62",
+  "verdict": "fix",
+  "tags": [
+   "too_easy"
+  ],
+  "label": "false",
+  "text": "Because modern ships are designed with better ventilation systems.",
+  "passage": 0.00479395468063913,
+  "near": 0.0069111863405208005
+ },
+ {
+  "run": 9,
+  "item": "a51dd150-e978-4516-8e53-288607f3ea62",
+  "verdict": "fix",
+  "tags": [
+   "too_easy"
+  ],
+  "label": "false",
+  "text": "Because the ship's design blocks air flow to the quarter-deck.",
+  "passage": 0.007544204260383952,
+  "near": 0.08322439246033049
+ },
+ {
+  "run": 9,
+  "item": "ad16fc18-cf26-4b65-986d-bedeb096b71d",
+  "verdict": "keep",
+  "tags": [
+   "trivia"
+  ],
+  "label": "false",
+  "text": "He was told that his room was ready and could have it immediately.",
+  "passage": 0.03785823974183799,
+  "near": 0.25273160124952015
+ },
+ {
+  "run": 9,
+  "item": "ad16fc18-cf26-4b65-986d-bedeb096b71d",
+  "verdict": "keep",
+  "tags": [
+   "trivia"
+  ],
+  "label": "false",
+  "text": "He requested a blanket but was given a full bed instead.",
+  "passage": 0.12284820546270403,
+  "near": 0.0903810336205545
+ },
+ {
+  "run": 9,
+  "item": "ad16fc18-cf26-4b65-986d-bedeb096b71d",
+  "verdict": "keep",
+  "tags": [
+   "trivia"
+  ],
+  "label": "false",
+  "text": "He inquired about supper, not accommodation for lodging.",
+  "passage": 0.20427458846458213,
+  "near": 0.39150765228029677
+ },
+ {
+  "run": 9,
+  "item": "5b3c1812-5685-4394-9727-3a65a87749e6",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "The sound of raindrops hitting the roof interrupts the sleep.",
+  "passage": 0.0016921073166813437,
+  "near": 0.04191493420402729
+ },
+ {
+  "run": 9,
+  "item": "5b3c1812-5685-4394-9727-3a65a87749e6",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "A knock on the door and a voice speaking loudly interrupt the sleep.",
+  "passage": 0.008710748381120957,
+  "near": 0.46338669282217354
+ },
+ {
+  "run": 9,
+  "item": "5b3c1812-5685-4394-9727-3a65a87749e6",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "A sudden thunderclap wakes the sleeper from light doze.",
+  "passage": 0.006504075078379897,
+  "near": 0.1596918266474502
+ },
+ {
+  "run": 10,
+  "item": "2ce4a43a-44dc-4a77-9137-1361ad038b3c",
+  "verdict": "fix",
+  "tags": [
+   "points_at_source",
+   "giveaway_wrong"
+  ],
+  "label": "false",
+  "text": "The disturbances in Pennsylvania are the sole evidence of declining national dignity and credit.",
+  "passage": 0.016066630179374083,
+  "near": 0.014424713329709614
+ },
+ {
+  "run": 10,
+  "item": "2ce4a43a-44dc-4a77-9137-1361ad038b3c",
+  "verdict": "fix",
+  "tags": [
+   "points_at_source",
+   "giveaway_wrong"
+  ],
+  "label": "false",
+  "text": "The violent flame throughout the nation and House of Commons breaking out declare this decline.",
+  "passage": 0.3623242046748393,
+  "near": 0.6036885749790657
+ },
+ {
+  "run": 10,
+  "item": "2ce4a43a-44dc-4a77-9137-1361ad038b3c",
+  "verdict": "fix",
+  "tags": [
+   "points_at_source",
+   "giveaway_wrong"
+  ],
+  "label": "false",
+  "text": "The granting of letters of reprisal and ensuing war show a loss in national credit.",
+  "passage": 0.6817242214901874,
+  "near": 0.8777472271484886
+ },
+ {
+  "run": 10,
+  "item": "5ffb56b1-c69f-439a-b893-b52daf63b3ed",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Cultural traditions push nations to adopt military institutions that limit rights.",
+  "passage": 0.07219594862199709,
+  "near": 0.11785783363749541
+ },
+ {
+  "run": 10,
+  "item": "5ffb56b1-c69f-439a-b893-b52daf63b3ed",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Internal conflicts, not external dangers, drive nations to sacrifice freedoms.",
+  "passage": 0.24770421412438287,
+  "near": 0.8028486429604902
+ },
+ {
+  "run": 10,
+  "item": "5ffb56b1-c69f-439a-b893-b52daf63b3ed",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Technological advancements compel nations to give up liberties for security.",
+  "passage": 0.011678873644315932,
+  "near": 0.0018951177542376493
+ },
+ {
+  "run": 10,
+  "item": "5dddc1d0-227a-4629-aca2-8a97ca06f5c9",
+  "verdict": "drop",
+  "tags": [
+   "trivial"
+  ],
+  "label": "false",
+  "text": "Artificial intelligence designers, builders, and operators.",
+  "passage": 0.06555850892894849,
+  "near": 0.046088640842205944
+ },
+ {
+  "run": 10,
+  "item": "5dddc1d0-227a-4629-aca2-8a97ca06f5c9",
+  "verdict": "drop",
+  "tags": [
+   "trivial"
+  ],
+  "label": "false",
+  "text": "Humans design and build software but machines operate them.",
+  "passage": 0.07142608236926687,
+  "near": 0.2015410565131734
+ },
+ {
+  "run": 10,
+  "item": "5dddc1d0-227a-4629-aca2-8a97ca06f5c9",
+  "verdict": "drop",
+  "tags": [
+   "trivial"
+  ],
+  "label": "false",
+  "text": "Automated bots design, build, and maintain software systems.",
+  "passage": 0.00892949433765444,
+  "near": 0.010190543132133663
+ },
+ {
+  "run": 10,
+  "item": "7fcd7e1d-be51-444e-ad3a-9ddcc34773eb",
+  "verdict": "fix",
+  "tags": [
+   "defensible_wrong",
+   "answer_narrows_key"
+  ],
+  "label": "false",
+  "text": "They will head towards any kind of shelter rather than water.",
+  "passage": 0.036968273913071566,
+  "near": 0.1503334082467614
+ },
+ {
+  "run": 10,
+  "item": "7fcd7e1d-be51-444e-ad3a-9ddcc34773eb",
+  "verdict": "fix",
+  "tags": [
+   "defensible_wrong",
+   "answer_narrows_key"
+  ],
+  "label": "false",
+  "text": "They will head to any body of water, whether near or far.",
+  "passage": 0.8191481386309197,
+  "near": 0.20762099324015518
+ },
+ {
+  "run": 10,
+  "item": "7fcd7e1d-be51-444e-ad3a-9ddcc34773eb",
+  "verdict": "fix",
+  "tags": [
+   "defensible_wrong",
+   "answer_narrows_key"
+  ],
+  "label": "false",
+  "text": "They will be drawn towards the nearest mountain range.",
+  "passage": 0.2831889132533068,
+  "near": 0.04157285670698996
+ },
+ {
+  "run": 10,
+  "item": "e7c57be0-9a97-4d35-98bb-bd0703b919a7",
+  "verdict": "fix",
+  "tags": [
+   "points_at_source",
+   "garbled_right"
+  ],
+  "label": "false",
+  "text": "Commodores breathe head winds directly, sailors get secondary air.",
+  "passage": 0.17096201001287822,
+  "near": 0.2973308329959403
+ },
+ {
+  "run": 10,
+  "item": "e7c57be0-9a97-4d35-98bb-bd0703b919a7",
+  "verdict": "fix",
+  "tags": [
+   "points_at_source",
+   "garbled_right"
+  ],
+  "label": "false",
+  "text": "Sailors receive head winds while commodores get pure air.",
+  "passage": 0.29036944071909776,
+  "near": 0.27924547222952195
+ },
+ {
+  "run": 10,
+  "item": "e7c57be0-9a97-4d35-98bb-bd0703b919a7",
+  "verdict": "fix",
+  "tags": [
+   "points_at_source",
+   "garbled_right"
+  ],
+  "label": "false",
+  "text": "Sailors and commodores both equally enjoy fresh deck air.",
+  "passage": 0.17755636927744942,
+  "near": 0.06537485142030557
+ },
+ {
+  "run": 10,
+  "item": "f53d76fc-0acb-43da-a710-728ef3d83694",
+  "verdict": "keep",
+  "tags": [
+   "format_tell"
+  ],
+  "label": "false",
+  "text": "Ishmael was influenced by the promise of fame and recognition, wanting to be known as a great whaler.",
+  "passage": 0.018191131575146513,
+  "near": 0.045627654187163205
+ },
+ {
+  "run": 10,
+  "item": "f53d76fc-0acb-43da-a710-728ef3d83694",
+  "verdict": "keep",
+  "tags": [
+   "format_tell"
+  ],
+  "label": "false",
+  "text": "Ishmael decided to go on the whaling voyage because he wanted to escape personal debts and start anew.",
+  "passage": 0.0011858984885631412,
+  "near": 0.010376589444850676
+ },
+ {
+  "run": 10,
+  "item": "f53d76fc-0acb-43da-a710-728ef3d83694",
+  "verdict": "keep",
+  "tags": [
+   "format_tell"
+  ],
+  "label": "false",
+  "text": "Ishmael was influenced by a sense of duty to his family, seeking to provide for them through the voyage.",
+  "passage": 0.002192657359185695,
+  "near": 0.10022807241976325
+ },
+ {
+  "run": 10,
+  "item": "f99c8bf3-4125-44e4-84c0-54ebabcbbd61",
+  "verdict": "fix",
+  "tags": [
+   "compound_stem",
+   "giveaway_wrong",
+   "trivia"
+  ],
+  "label": "false",
+  "text": "The traveler sees a dim light but hears joyful music instead of creaking, with 'Spouter Inn:\u2014Robert Fisk' written below an image of misty spray.",
+  "passage": 0.005103286471142631,
+  "near": 0.009333884215692477
+ },
+ {
+  "run": 10,
+  "item": "f99c8bf3-4125-44e4-84c0-54ebabcbbd61",
+  "verdict": "fix",
+  "tags": [
+   "compound_stem",
+   "giveaway_wrong",
+   "trivia"
+  ],
+  "label": "false",
+  "text": "Approaching an inn near the docks, the traveler sees a dim light and reads on the sign 'The Lighthouse Inn:\u2014Peter Coffin.'",
+  "passage": 0.03075478389095671,
+  "near": 0.024373152091477047
+ },
+ {
+  "run": 10,
+  "item": "f99c8bf3-4125-44e4-84c0-54ebabcbbd61",
+  "verdict": "fix",
+  "tags": [
+   "compound_stem",
+   "giveaway_wrong",
+   "trivia"
+  ],
+  "label": "false",
+  "text": "The traveler sees a bright light and hears cheerful sounds, with 'Captain Ahab's Inn' written on the sign above the door.",
+  "passage": 0.004592376806367671,
+  "near": 0.0044810170059265
+ },
+ {
+  "run": 10,
+  "item": "b9dcdf73-84ab-47b5-8655-5fbb5d5b496d",
+  "verdict": "fix",
+  "tags": [
+   "repeated_claim"
+  ],
+  "label": "false",
+  "text": "Systematic errors are less likely than random hardware faults across different machines.",
+  "passage": 0.16254815684994203,
+  "near": 0.21585572772073033
+ },
+ {
+  "run": 10,
+  "item": "b9dcdf73-84ab-47b5-8655-5fbb5d5b496d",
+  "verdict": "fix",
+  "tags": [
+   "repeated_claim"
+  ],
+  "label": "false",
+  "text": "A failure in one server's disk usually predicts failures in other servers' disks soon after.",
+  "passage": 0.176404195873402,
+  "near": 0.07492395009603815
+ },
+ {
+  "run": 10,
+  "item": "b9dcdf73-84ab-47b5-8655-5fbb5d5b496d",
+  "verdict": "fix",
+  "tags": [
+   "repeated_claim"
+  ],
+  "label": "false",
+  "text": "Disks failing in one machine significantly increases the likelihood of disks failing elsewhere.",
+  "passage": 0.14604474195258726,
+  "near": 0.17276235703187406
+ },
+ {
+  "run": 10,
+  "item": "2242c57e-ed6b-43f3-8a7a-14977ad4af16",
+  "verdict": "fix",
+  "tags": [
+   "giveaway_wrong"
+  ],
+  "label": "false",
+  "text": "Describe hardware components as the primary source for application logic.",
+  "passage": 0.04871058441370199,
+  "near": 0.0774852515363407
+ },
+ {
+  "run": 10,
+  "item": "2242c57e-ed6b-43f3-8a7a-14977ad4af16",
+  "verdict": "fix",
+  "tags": [
+   "giveaway_wrong"
+  ],
+  "label": "false",
+  "text": "Convert application data directly into hardware signals for storage.",
+  "passage": 0.21674304837671218,
+  "near": 0.004897365505278173
+ },
+ {
+  "run": 10,
+  "item": "0c9c9e4e-73a3-466a-9109-163aef60dcb9",
+  "verdict": "fix",
+  "tags": [
+   "answer_echoes_stem",
+   "compound_stem"
+  ],
+  "label": "false",
+  "text": "To speed up product release cycles, ensuring quick user feedback and constant updates.",
+  "passage": 0.010990475693399091,
+  "near": 0.011345936430424225
+ },
+ {
+  "run": 10,
+  "item": "0c9c9e4e-73a3-466a-9109-163aef60dcb9",
+  "verdict": "fix",
+  "tags": [
+   "answer_echoes_stem",
+   "compound_stem"
+  ],
+  "label": "false",
+  "text": "To meet aggressive deadlines by sacrificing robust testing phases for immediate deployment.",
+  "passage": 0.021945464653498017,
+  "near": 0.057636666650740756
+ },
+ {
+  "run": 10,
+  "item": "0c9c9e4e-73a3-466a-9109-163aef60dcb9",
+  "verdict": "fix",
+  "tags": [
+   "answer_echoes_stem",
+   "compound_stem"
+  ],
+  "label": "false",
+  "text": "To increase market share quickly without considering long-term consequences.",
+  "passage": 0.06999189512396077,
+  "near": 0.03558510010223094
+ },
+ {
+  "run": 11,
+  "item": "01f37759-2356-4138-a206-3c2dcb3e7e47",
+  "verdict": "keep",
+  "tags": [
+   "weak_wrong"
+  ],
+  "label": "false",
+  "text": "To reduce development or operational costs in proven markets or wide profit margins.",
+  "passage": 0.21725210399935435,
+  "near": 0.1005703146819479
+ },
+ {
+  "run": 11,
+  "item": "01f37759-2356-4138-a206-3c2dcb3e7e47",
+  "verdict": "keep",
+  "tags": [
+   "weak_wrong"
+  ],
+  "label": "false",
+  "text": "To sacrifice reliability when the application is mission-critical and widely used.",
+  "passage": 0.07203340671545469,
+  "near": 0.044623911351312495
+ },
+ {
+  "run": 11,
+  "item": "01f37759-2356-4138-a206-3c2dcb3e7e47",
+  "verdict": "keep",
+  "tags": [
+   "weak_wrong"
+  ],
+  "label": "false",
+  "text": "To reduce user satisfaction or customer service expenses in uncertain markets.",
+  "passage": 0.11619448722688641,
+  "near": 0.09939830917981661
+ },
+ {
+  "run": 11,
+  "item": "854f5412-7b69-4b3e-b0d3-c23d27d9a9a4",
+  "verdict": "fix",
+  "tags": [
+   "giveaway_wrong",
+   "format_tell"
+  ],
+  "label": "false",
+  "text": "The ending point vertex for any edge is optional.",
+  "passage": 0.04179670861986992,
+  "near": 0.0440765835008715
+ },
+ {
+  "run": 11,
+  "item": "854f5412-7b69-4b3e-b0d3-c23d27d9a9a4",
+  "verdict": "fix",
+  "tags": [
+   "giveaway_wrong",
+   "format_tell"
+  ],
+  "label": "false",
+  "text": "A designation describing the nature of the relationship between two vertices can be omitted.",
+  "passage": 0.0650452095717408,
+  "near": 0.3949213781489483
+ },
+ {
+  "run": 11,
+  "item": "d249175c-b935-4822-90aa-4898873b85c8",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Waiting for responses before sending more requests increases measurement accuracy.",
+  "passage": 0.12939956917602666,
+  "near": 0.04260396398003776
+ },
+ {
+  "run": 11,
+  "item": "d249175c-b935-4822-90aa-4898873b85c8",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "This behavior accurately reflects the performance under peak load conditions.",
+  "passage": 0.07348690489888905,
+  "near": 0.07943963623769631
+ },
+ {
+  "run": 11,
+  "item": "d249175c-b935-4822-90aa-4898873b85c8",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Keeping queues longer in tests than reality leads to skewed measurements.",
+  "passage": 0.8169205030062325,
+  "near": 0.8643828442796643
+ },
+ {
+  "run": 11,
+  "item": "0431a144-c7df-4a93-9c3a-250ce3ce0bcb",
+  "verdict": "keep",
+  "tags": [
+   "unattributed"
+  ],
+  "label": "false",
+  "text": "A democratic system would have been established.",
+  "passage": 0.09758653857322352,
+  "near": 0.06035610878381156
+ },
+ {
+  "run": 11,
+  "item": "0431a144-c7df-4a93-9c3a-250ce3ce0bcb",
+  "verdict": "keep",
+  "tags": [
+   "unattributed"
+  ],
+  "label": "false",
+  "text": "Humans would have lived in small tribes.",
+  "passage": 0.06231172016784599,
+  "near": 0.05298686054821003
+ },
+ {
+  "run": 11,
+  "item": "0431a144-c7df-4a93-9c3a-250ce3ce0bcb",
+  "verdict": "keep",
+  "tags": [
+   "unattributed"
+  ],
+  "label": "false",
+  "text": "Humans would have created oligarchies.",
+  "passage": 0.3916434096043115,
+  "near": 0.321135986988673
+ },
+ {
+  "run": 11,
+  "item": "c3e21f5e-f04d-4faa-af07-e6602e137b16",
+  "verdict": "drop",
+  "tags": [
+   "true_wrong"
+  ],
+  "label": "true",
+  "text": "Ishmael needed to improve his health and well-being, so he chose sailing.",
+  "passage": 0.6685119193036201,
+  "near": 0.5390959444980227
+ },
+ {
+  "run": 11,
+  "item": "c3e21f5e-f04d-4faa-af07-e6602e137b16",
+  "verdict": "drop",
+  "tags": [
+   "true_wrong"
+  ],
+  "label": "false",
+  "text": "He wanted to escape the harsh realities of war and conflict.",
+  "passage": 0.030284759852502254,
+  "near": 0.42624451682839715
+ },
+ {
+  "run": 11,
+  "item": "c3e21f5e-f04d-4faa-af07-e6602e137b16",
+  "verdict": "drop",
+  "tags": [
+   "true_wrong"
+  ],
+  "label": "false",
+  "text": "Ishmael wanted to find a better job opportunity on the sea.",
+  "passage": 0.025455903358149432,
+  "near": 0.35813158283448304
+ },
+ {
+  "run": 11,
+  "item": "8baaa353-a649-4948-accb-97b8b0cdf001",
+  "verdict": "fix",
+  "tags": [
+   "defensible_wrong"
+  ],
+  "label": "false",
+  "text": "They will lead you to the nearest building instead of water.",
+  "passage": 0.038856246610002185,
+  "near": 0.04603449922396364
+ },
+ {
+  "run": 11,
+  "item": "8baaa353-a649-4948-accb-97b8b0cdf001",
+  "verdict": "fix",
+  "tags": [
+   "defensible_wrong"
+  ],
+  "label": "false",
+  "text": "They will walk towards any body of water, whether near or far.",
+  "passage": 0.8573732356134139,
+  "near": 0.7015425153947555
+ },
+ {
+  "run": 11,
+  "item": "8baaa353-a649-4948-accb-97b8b0cdf001",
+  "verdict": "fix",
+  "tags": [
+   "defensible_wrong"
+  ],
+  "label": "false",
+  "text": "They will eventually find their way back to where they started.",
+  "passage": 0.09200122203153875,
+  "near": 0.29812485237804776
+ },
+ {
+  "run": 11,
+  "item": "325bd99e-8a06-42c6-a1b9-43cb2f01b7ac",
+  "verdict": "fix",
+  "tags": [
+   "vague_subject",
+   "near_copies"
+  ],
+  "label": "false",
+  "text": "Plug ears with rags, put corn-cob in mouth to block out loud noises but fails to shield from snowfall.",
+  "passage": 0.5860365905056584,
+  "near": 0.00423697274317107
+ },
+ {
+  "run": 11,
+  "item": "325bd99e-8a06-42c6-a1b9-43cb2f01b7ac",
+  "verdict": "fix",
+  "tags": [
+   "vague_subject",
+   "near_copies"
+  ],
+  "label": "false",
+  "text": "Wear multiple layers of clothing and cover face with a cloth, yet these do not prevent the harsh winds.",
+  "passage": 0.574383773639062,
+  "near": 0.10977091453877653
+ },
+ {
+  "run": 11,
+  "item": "325bd99e-8a06-42c6-a1b9-43cb2f01b7ac",
+  "verdict": "fix",
+  "tags": [
+   "vague_subject",
+   "near_copies"
+  ],
+  "label": "false",
+  "text": "Plug ears with rags, put corn-cob in mouth to keep out cold air but it fails to shield from heavy rain.",
+  "passage": 0.583733498539115,
+  "near": 0.019598484431613473
+ },
+ {
+  "run": 11,
+  "item": "92452e6e-a5fb-48b6-9319-ab93033158cc",
+  "verdict": "fix",
+  "tags": [
+   "unnamed_referent",
+   "answer_misstates_key"
+  ],
+  "label": "false",
+  "text": "The ship is in danger of sinking due to a massive whale swimming underneath it.",
+  "passage": 0.11910123726223144,
+  "near": 0.07812538211812292
+ },
+ {
+  "run": 11,
+  "item": "92452e6e-a5fb-48b6-9319-ab93033158cc",
+  "verdict": "fix",
+  "tags": [
+   "unnamed_referent",
+   "answer_misstates_key"
+  ],
+  "label": "false",
+  "text": "A whale leaps over multiple ships instead of just one during a stormy night.",
+  "passage": 0.3196303003102158,
+  "near": 0.053034938181700436
+ },
+ {
+  "run": 11,
+  "item": "92452e6e-a5fb-48b6-9319-ab93033158cc",
+  "verdict": "fix",
+  "tags": [
+   "unnamed_referent",
+   "answer_misstates_key"
+  ],
+  "label": "false",
+  "text": "The captain of the ship tries to harpoon the whale but misses, allowing it to escape unhurt.",
+  "passage": 0.024993852732404294,
+  "near": 0.059683293166401995
+ },
+ {
+  "run": 11,
+  "item": "c0c67333-5015-48e9-8b6f-e8ff524ac65b",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "To optimize for high tweet publication rates by prioritizing write speed.",
+  "passage": 0.3972047464760379,
+  "near": 0.34274043356247674
+ },
+ {
+  "run": 11,
+  "item": "c0c67333-5015-48e9-8b6f-e8ff524ac65b",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "To decrease the number of followers per user for better load management.",
+  "passage": 0.05095621154863216,
+  "near": 0.03897523921228624
+ },
+ {
+  "run": 11,
+  "item": "c0c67333-5015-48e9-8b6f-e8ff524ac65b",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "To reduce the load on servers by minimizing write operations.",
+  "passage": 0.7882530681652529,
+  "near": 0.3111965193123704
+ },
+ {
+  "run": 11,
+  "item": "4b699d02-a195-4de2-b579-9e6fd5de3a01",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Ensuring software development is error-free before deployment.",
+  "passage": 0.03722141755236727,
+  "near": 0.08591972065623193
+ },
+ {
+  "run": 11,
+  "item": "4b699d02-a195-4de2-b579-9e6fd5de3a01",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Providing user interface design improvements regularly.",
+  "passage": 0.008562479661643847,
+  "near": 0.1166523634626912
+ },
+ {
+  "run": 11,
+  "item": "7eb96383-4158-4d1b-8494-68a431cdc64a",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Positions, education, and contact information were stored in a single table.",
+  "passage": 0.2388663838378844,
+  "near": 0.09044352149449279
+ },
+ {
+  "run": 11,
+  "item": "7eb96383-4158-4d1b-8494-68a431cdc64a",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "Multi-valued data was stored directly in the users table columns.",
+  "passage": 0.8201834855014969,
+  "near": 0.02443641092202469
+ },
+ {
+  "run": 11,
+  "item": "7eb96383-4158-4d1b-8494-68a431cdc64a",
+  "verdict": "keep",
+  "tags": [],
+  "label": "false",
+  "text": "A JSON datatype was commonly used to store multi-valued data.",
+  "passage": 0.022739771967817596,
+  "near": 0.7509285598884479
+ }
+]

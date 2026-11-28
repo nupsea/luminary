@@ -1,0 +1,15 @@
+# Files that quote the books' passages (DDIA is copyrighted) or carry local paths. They travel in
+# lm-quiz-handoff-<date>.tar.gz, never in git; the repo is public.
+*.log
+v2_run*.md
+variants*.md
+items.json
+items.md
+rating-page/items.json
+rating-page-v2/items.json
+partial/items_*.json
+partial/run8.md
+judge_*.txt
+head_copies/
+__pycache__/
+*.db

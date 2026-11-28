@@ -1,0 +1,71 @@
+{
+  "runs": [
+    {
+      "doc": "DDIA",
+      "level": "medium",
+      "quiz_id": "e6c81082-0c83-4f4f-9d26-26600d073424",
+      "status": "ready",
+      "error": null,
+      "built": 2,
+      "first_question_s": 217.1,
+      "total_s": 644.1
+    },
+    {
+      "doc": "DDIA",
+      "level": "hard",
+      "quiz_id": "576d8a8c-ac96-46e7-adfb-e043e89742a1",
+      "status": "ready",
+      "error": null,
+      "built": 2,
+      "first_question_s": 168.3,
+      "total_s": 557.2
+    },
+    {
+      "doc": "moby-dick",
+      "level": "medium",
+      "quiz_id": "69e1c767-2935-48e0-92c3-25548cb60ce3",
+      "status": "ready",
+      "error": null,
+      "built": 2,
+      "first_question_s": 74.2,
+      "total_s": 347.0
+    },
+    {
+      "doc": "federalist",
+      "level": "medium",
+      "quiz_id": "56a7d7a2-1846-4b62-bae0-062ca3f7680d",
+      "status": "ready",
+      "error": null,
+      "built": 3,
+      "first_question_s": 318.8,
+      "total_s": 685.7
+    }
+  ],
+  "stats": {
+    "counts": {
+      "parses_first_pass": 244,
+      "quiz_reject_shape": 3,
+      "quiz_reject_invented_name": 2,
+      "quiz_drop_wrong_absolute": 49,
+      "quiz_reject_answer_off_key": 14,
+      "quiz_drop_passage_quotations": 10,
+      "quiz_drop_wrong_length": 4,
+      "quiz_drop_wrong_entailed": 25,
+      "quiz_drop_passage_contents": 3,
+      "quiz_items_gated": 98,
+      "quiz_reject_right_is_longest": 17,
+      "quiz_drop_passage_references": 136,
+      "parses": 244,
+      "quiz_items_rejected": 89,
+      "quiz_reject_count_in_stem": 1,
+      "quiz_reject_duplicate_options": 6,
+      "quiz_reject_guessable": 18,
+      "quiz_drop_passage_licence": 11,
+      "quiz_reject_points_at_source": 20,
+      "quiz_reject_not_answerable": 1,
+      "quiz_reject_why_without_reason": 7
+    },
+    "first_pass_rate": 1.0,
+    "attempts_per_generation": null
+  }
+}

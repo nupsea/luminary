@@ -1,0 +1,13 @@
+{
+"0592729f-cfa6-436e-b3fe-a1120a327294": ["fix", "'The two main methods for scaling' invites scaling up against scaling out, which the passage calls the dichotomy; the answer is elastic against manual. The stem should name what it means.", ["stem_unclear"]],
+"abc7518f-9d31-4caf-a12d-4601a543d772": ["keep", "Two of the four data-model layers, and each wrong option gives a layer to the wrong people. The stem is clumsy but clear.", []],
+"a5918b79-0bf8-42b6-9f42-cb1af0b5cf0e": ["keep", "The cession policy. 'Declared the Western territory federal land' is a fair near miss: the territory became the Union's by cession, not declaration.", []],
+"53a4a18c-c3ae-4bac-8247-83d0d3f35468": ["drop", "The stem is open: the Federalist argues the Union protects against more than faction. 'Stops economic disputes between states' is Federalist No. 7's argument, so a 'wrong' option is true of the document.", ["wrong_is_true"]],
+"9894760e-8113-4912-9293-d9ba6912e000": ["keep", "Weak correlations, failures unlikely; the likely/strong swap is a good trap.", []],
+"40b46c19-2603-4076-9f2e-13ca4ada81de": ["fix", "Three listed duties, right. 'Identifying the impact of user changes on system performance and stability' is close enough to the last listed duty that a reader could defend it.", ["wrong_defensible"]],
+"109f7b2c-033e-41a7-ab26-3e7eaeedc71e": ["drop", "Tests that software is built and run by humans, not the sentence's point (humans are unreliable). 'Maintained by AI' and the rest give themselves away.", ["not_worth_asking", "too_easy"]],
+"f0bd91dd-3637-462c-a759-4a5053c430bc": ["keep", "The read/write ratio behind the fan-out choice, with good swapped traps.", []],
+"a51dd150-e978-4516-8e53-288607f3ea62": ["fix", "A good reading question, but two of three wrong options give themselves away (the Commodore's orders, modern ventilation).", ["too_easy"]],
+"ad16fc18-cf26-4b65-986d-bedeb096b71d": ["keep", "Accurate plot detail with three distinct wrong options; the blanket inversion is a good trap.", ["trivia"]],
+"5b3c1812-5685-4394-9727-3a65a87749e6": ["keep", "The footfall and light, with fair wrong options.", []]
+}

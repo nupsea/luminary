@@ -1,0 +1,73 @@
+{
+ "1eb92bea-e30a-444d-ab58-0797679db94e": [
+  "fix",
+  "The median answer is right. The p95 option's main claim, that high percentiles show the worst cases, is what the passage says; only its ending is false, so it can catch a reader who did read it.",
+  [
+   "wrong_half_true"
+  ]
+ ],
+ "ae1b2d43-e935-4564-859e-3a656b34284c": [
+  "fix",
+  "Three real advantages from the list, but both wrong options give themselves away (one is not an advantage at all), so it is answerable without reading.",
+  [
+   "too_easy"
+  ]
+ ],
+ "f8def023-4376-449c-ae1c-a6d38cf9c65f": [
+  "keep",
+  "The cession policy, stated as the passage states it. The wrong options are plausible settlement methods.",
+  []
+ ],
+ "9861adc2-3f47-4419-9a81-13e280556473": [
+  "keep",
+  "Faithful to the sentence. The stem is a little stiff, and the wrong options are the opposite picture rather than near misses.",
+  []
+ ],
+ "cf88d0c9-3bad-4f5b-af4e-cccc2df8b6eb": [
+  "keep",
+  "Montesquieu's point, correctly answered. The stem's 'a specific form of government' could have named the confederate republic.",
+  []
+ ],
+ "57babc7a-6d96-4e31-a853-d2a0a20d381a": [
+  "fix",
+  "The answer is right but trivial. Two wrong options say nearly the same thing about the landlord's own bed, and one says 'me'.",
+  [
+   "trivia"
+  ]
+ ],
+ "f7ed99af-d3d8-45a9-9606-39ce0f9da0b0": [
+  "keep",
+  "Ishmael's demand, faithfully. The wrong options are distinct and plausible.",
+  []
+ ],
+ "04e05acf-5590-4367-8c80-1ce12c1f4538": [
+  "keep",
+  "A plot detail rather than an idea, but accurate, and the wrong options are fair.",
+  []
+ ],
+ "4181a015-2808-457b-84fa-c0df0b7c4536": [
+  "fix",
+  "Fan-out, not tweet volume: the right point. But two of the three wrong options make the same 'few followers' claim, so there are really three choices.",
+  [
+   "wrong_repeated"
+  ]
+ ],
+ "01f9e378-bacd-489f-a680-ed746a889628": [
+  "drop",
+  "The stem points at the text ('the duties mentioned'), and the wrong option about keeping platforms up to date is one of the listed responsibilities with security changed to performance: true as an answer.",
+  [
+   "wrong_is_true",
+   "stem_unclear"
+  ]
+ ],
+ "365a6482-ac62-40e3-afad-13f9cb5bb808": [
+  "keep",
+  "The closed-loop client effect, with a good swapped-relation trap. The 'does not affect performance' option is false: queueing delay is a large part of response time.",
+  []
+ ],
+ "648df355-41ea-4019-a69e-4e6f5191df4d": [
+  "keep",
+  "The hashtag origin, with plausible wrong options.",
+  []
+ ]
+}

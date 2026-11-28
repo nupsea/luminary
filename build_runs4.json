@@ -1,0 +1,48 @@
+{
+  "runs": [
+    {
+      "doc": "DDIA",
+      "level": "medium",
+      "quiz_id": "455cbab9-9097-4885-9ba7-685644fdffcd",
+      "status": "ready",
+      "error": null,
+      "built": 4,
+      "first_question_s": 2.0,
+      "total_s": 86.4
+    },
+    {
+      "doc": "moby-dick",
+      "level": "medium",
+      "quiz_id": "b4a7ee83-a3ec-4bad-bcb1-071108780b4b",
+      "status": "ready",
+      "error": null,
+      "built": 4,
+      "first_question_s": 2.0,
+      "total_s": 146.4
+    },
+    {
+      "doc": "moby-dick",
+      "level": "hard",
+      "quiz_id": "60cf1e19-37cd-448e-909e-668228a90cad",
+      "status": "ready",
+      "error": null,
+      "built": 4,
+      "first_question_s": 2.0,
+      "total_s": 2.0
+    }
+  ],
+  "stats": {
+    "counts": {
+      "quiz_reject_shape": 1,
+      "quiz_reject_ungrounded": 3,
+      "quiz_reject_points_at_source": 6,
+      "quiz_items_rejected": 12,
+      "parses_first_pass": 15,
+      "quiz_reject_right_option_unsupported": 2,
+      "quiz_items_gated": 15,
+      "parses": 15
+    },
+    "first_pass_rate": 1.0,
+    "attempts_per_generation": null
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "runs": [
+    {
+      "doc": "DDIA",
+      "level": "medium",
+      "quiz_id": "4eb7f50b-7674-4f16-b135-f7a9329a5149",
+      "status": "ready",
+      "error": null,
+      "built": 2,
+      "first_question_s": 519.9,
+      "total_s": 810.5
+    },
+    {
+      "doc": "DDIA",
+      "level": "hard",
+      "quiz_id": "7fd7dcd2-5747-4944-8a72-6018ccadc008",
+      "status": "ready",
+      "error": null,
+      "built": 4,
+      "first_question_s": 260.8,
+      "total_s": 487.4
+    },
+    {
+      "doc": "moby-dick",
+      "level": "medium",
+      "quiz_id": "8052ce43-8387-4da6-a176-e36582ddeea6",
+      "status": "ready",
+      "error": null,
+      "built": 3,
+      "first_question_s": 100.2,
+      "total_s": 625.7
+    },
+    {
+      "doc": "federalist",
+      "level": "medium",
+      "quiz_id": "7708c8f5-d0a8-45d1-b664-64fa7b54598f",
+      "status": "ready",
+      "error": null,
+      "built": 2,
+      "first_question_s": 138.6,
+      "total_s": 695.9
+    }
+  ],
+  "stats": {
+    "counts": {
+      "quiz_drop_retried_shape": 2,
+      "quiz_reject_answer_off_key": 10,
+      "quiz_reject_why_without_reason": 1,
+      "quiz_drop_wrong_length": 5,
+      "quiz_drop_retried_points_at_source": 18,
+      "quiz_reject_duplicate_options": 1,
+      "quiz_items_gated": 92,
+      "quiz_drop_wrong_entailed": 43,
+      "parses_first_pass": 317,
+      "quiz_drop_passage_references": 136,
+      "quiz_drop_passage_contents": 3,
+      "quiz_drop_retried_why_without_reason": 3,
+      "quiz_reject_invented_name": 1,
+      "quiz_items_rejected": 81,
+      "quiz_drop_retried_answer_in_stem": 2,
+      "quiz_reject_vague_subject": 3,
+      "quiz_drop_passage_licence": 11,
+      "quiz_drop_wrong_absolute": 72,
+      "quiz_drop_retried_invented_name": 1,
+      "parses": 317,
+      "quiz_drop_retried_vague_subject": 2,
+      "quiz_reject_shape": 1,
+      "quiz_reject_points_at_source": 12,
+      "quiz_drop_passage_quotations": 10,
+      "quiz_reject_too_few_wrong": 11,
+      "quiz_reject_right_is_longest": 18,
+      "quiz_reject_guessable": 23,
+      "quiz_drop_retried_answer_off_key": 13
+    },
+    "first_pass_rate": 1.0,
+    "attempts_per_generation": null
+  }
+}

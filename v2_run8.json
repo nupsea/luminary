@@ -1,0 +1,77 @@
+{
+  "runs": [
+    {
+      "doc": "DDIA",
+      "level": "medium",
+      "quiz_id": "90ce0d0d-64b1-429d-99d6-717f17e334c5",
+      "status": "ready",
+      "error": null,
+      "built": 2,
+      "first_question_s": 487.3,
+      "total_s": 816.3
+    },
+    {
+      "doc": "DDIA",
+      "level": "hard",
+      "quiz_id": "f030d2bf-fa63-47f8-a2f3-f2c936f51f99",
+      "status": "ready",
+      "error": null,
+      "built": 4,
+      "first_question_s": 342.9,
+      "total_s": 697.8
+    },
+    {
+      "doc": "moby-dick",
+      "level": "medium",
+      "quiz_id": "ced925d0-ddb0-4e31-941a-95493cb9ba02",
+      "status": "ready",
+      "error": null,
+      "built": 3,
+      "first_question_s": 415.0,
+      "total_s": 669.6
+    },
+    {
+      "doc": "federalist",
+      "level": "medium",
+      "quiz_id": "ace3dc01-4f18-425a-a480-19cd6f8a10a8",
+      "status": "ready",
+      "error": null,
+      "built": 3,
+      "first_question_s": 100.7,
+      "total_s": 724.3
+    }
+  ],
+  "stats": {
+    "counts": {
+      "quiz_reject_too_few_wrong": 12,
+      "quiz_reject_vague_subject": 2,
+      "quiz_drop_wrong_length": 11,
+      "quiz_drop_retried_vague_subject": 3,
+      "quiz_drop_wrong_entailed": 37,
+      "quiz_drop_wrong_absolute": 72,
+      "quiz_drop_passage_references": 136,
+      "quiz_reject_answer_in_stem": 1,
+      "quiz_drop_retried_answer_in_stem": 1,
+      "quiz_drop_passage_contents": 3,
+      "quiz_drop_passage_quotations": 10,
+      "quiz_reject_right_is_longest": 10,
+      "quiz_reject_answer_off_key": 11,
+      "quiz_reject_not_answerable": 1,
+      "quiz_drop_retried_points_at_source": 17,
+      "quiz_reject_guessable": 26,
+      "quiz_drop_retried_why_without_reason": 3,
+      "quiz_reject_points_at_source": 15,
+      "quiz_drop_retried_shape": 2,
+      "parses": 347,
+      "quiz_reject_count_in_stem": 1,
+      "quiz_items_rejected": 86,
+      "quiz_drop_passage_licence": 11,
+      "quiz_items_gated": 98,
+      "quiz_reject_duplicate_options": 7,
+      "quiz_drop_retried_answer_off_key": 16,
+      "parses_first_pass": 347
+    },
+    "first_pass_rate": 1.0,
+    "attempts_per_generation": null
+  }
+}
