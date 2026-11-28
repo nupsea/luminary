@@ -579,3 +579,24 @@ def as_utc(dt: datetime | None) -> datetime | None:
     if dt is None or dt.tzinfo is not None:
         return dt
     return dt.replace(tzinfo=UTC)
+
+
+# Quiz. A quiz asks at one level or adapts between them; an item is always written at one.
+QuizLevel = Literal["easy", "medium", "hard"]
+QuizDifficulty = Literal["easy", "medium", "hard", "adaptive"]
+QuizKind = Literal["single", "multi"]
+QuizKinds = Literal["single", "multi", "mixed"]
+QuizMode = Literal["practice", "exam"]
+QuizScopeType = Literal["document", "chapter", "section"]
+QuizConfidence = Literal["sure", "think", "guess"]
+QuizOutcome = Literal["correct", "partial", "wrong"]
+QUIZ_LEVELS: tuple[QuizLevel, ...] = ("easy", "medium", "hard")
+# The kinds of mistake a wrong option sets up; the closed set `quiz_options.trap` allows.
+QUIZ_TRAPS = (
+    "near_miss_detail",
+    "swapped_relation",
+    "overgeneralised",
+    "wrong_condition",
+    "related_but_different",
+    "common_misconception",
+)

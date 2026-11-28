@@ -1758,6 +1758,148 @@ class IdempotencyKeyModel(Base):
     )
 
 
+class QuizModel(Base):
+    """One quiz a learner asked for: its scope, its settings and how far its build has got."""
+
+    __tablename__ = "quizzes"
+    __table_args__ = (
+        CheckConstraint(
+            "difficulty IN ('easy', 'medium', 'hard', 'adaptive')", name="ck_quizzes_difficulty"
+        ),
+        CheckConstraint("mode IN ('practice', 'exam')", name="ck_quizzes_mode"),
+        CheckConstraint(
+            "question_kinds IN ('single', 'multi', 'mixed')", name="ck_quizzes_question_kinds"
+        ),
+        CheckConstraint(
+            "status IN ('building', 'ready', 'complete', 'error')", name="ck_quizzes_status"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # document | chapter | section; scope_ref is the id the type names
+    scope_type: Mapped[str] = mapped_column(String, nullable=False)
+    scope_ref: Mapped[str] = mapped_column(String, nullable=False)
+    difficulty: Mapped[str] = mapped_column(String, nullable=False)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    question_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    question_kinds: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    retake_of: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class QuizItemModel(Base):
+    """A question and its options, kept as a bank so a retake or a second quiz starts at once."""
+
+    __tablename__ = "quiz_items"
+    __table_args__ = (
+        CheckConstraint("kind IN ('single', 'multi')", name="ck_quiz_items_kind"),
+        CheckConstraint(
+            "difficulty IN ('easy', 'medium', 'hard')", name="ck_quiz_items_difficulty"
+        ),
+        CheckConstraint(
+            "support_check IN ('unchecked', 'supported', 'unsupported')",
+            name="ck_quiz_items_support_check",
+        ),
+        CheckConstraint("origin IN ('model', 'cards')", name="ck_quiz_items_origin"),
+        Index("ix_quiz_items_scope", "document_id", "section_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    difficulty: Mapped[str] = mapped_column(String, nullable=False)
+    stem: Mapped[str] = mapped_column(Text, nullable=False)
+    # The chunks that reached the prompt (I-35).
+    source_chunk_ids: Mapped[list] = mapped_column(JSON, nullable=False)
+    flashcard_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("flashcards.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    model: Mapped[str | None] = mapped_column(String, nullable=True)
+    # model: written by a model from a passage; cards: assembled from grounded cards without one
+    origin: Mapped[str] = mapped_column(String, nullable=False, default="model")
+    support_check: Mapped[str] = mapped_column(String, nullable=False, default="unchecked")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class QuizOptionModel(Base):
+    __tablename__ = "quiz_options"
+    __table_args__ = (
+        CheckConstraint(
+            "trap IS NULL OR trap IN ('near_miss_detail', 'swapped_relation', 'overgeneralised', "
+            "'wrong_condition', 'related_but_different', 'common_misconception')",
+            name="ck_quiz_options_trap",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    item_id: Mapped[str] = mapped_column(
+        String, ForeignKey("quiz_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Right options only: a verbatim span of the passage.
+    evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Wrong options only: the kind of mistake the option sets up.
+    trap: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Wrong options only: cosine to the nearest right option.
+    key_similarity: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class QuizQuestionModel(Base):
+    __tablename__ = "quiz_questions"
+
+    quiz_id: Mapped[str] = mapped_column(
+        String, ForeignKey("quizzes.id", ondelete="CASCADE"), primary_key=True
+    )
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    item_id: Mapped[str] = mapped_column(
+        String, ForeignKey("quiz_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Option ids in the order this quiz shows them, shuffled in code.
+    option_order: Mapped[list] = mapped_column(JSON, nullable=False)
+
+
+class QuizAttemptModel(Base):
+    __tablename__ = "quiz_attempts"
+    __table_args__ = (
+        UniqueConstraint("quiz_id", "position", name="uq_quiz_attempts_question"),
+        CheckConstraint(
+            "confidence IS NULL OR confidence IN ('sure', 'think', 'guess')",
+            name="ck_quiz_attempts_confidence",
+        ),
+        CheckConstraint(
+            "outcome IN ('correct', 'partial', 'wrong')", name="ck_quiz_attempts_outcome"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    quiz_id: Mapped[str] = mapped_column(
+        String, ForeignKey("quizzes.id", ondelete="CASCADE"), nullable=False
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_id: Mapped[str] = mapped_column(
+        String, ForeignKey("quiz_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    selected_option_ids: Mapped[list] = mapped_column(JSON, nullable=False)
+    confidence: Mapped[str | None] = mapped_column(String, nullable=True)
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    answered_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
 class CardStateEventModel(Base):
     """What a card's schedule became, and why: append-only, never deleted (#453).
 

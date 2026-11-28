@@ -54,6 +54,7 @@ from app.routers.notes import router as notes_router
 from app.routers.pomodoro import router as pomodoro_router
 from app.routers.progress import router as progress_router
 from app.routers.qa import router as qa_router
+from app.routers.quiz import router as quiz_router
 from app.routers.reading import router as reading_router
 from app.routers.references import router as references_router
 from app.routers.search import router as search_router
@@ -454,6 +455,7 @@ ROUTER_REGISTRY = {
     "pomodoro": pomodoro_router,
     "progress": progress_router,
     "qa": qa_router,
+    "quiz": quiz_router,
     "reading": reading_router,
     "references": references_router,
     "search": search_router,

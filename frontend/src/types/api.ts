@@ -4851,6 +4851,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/study/quizzes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Quiz */
+        post: operations["create_quiz_study_quizzes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/study/quizzes/{quiz_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Quiz */
+        get: operations["get_quiz_study_quizzes__quiz_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/study/quizzes/{quiz_id}/answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Answer Question */
+        post: operations["answer_question_study_quizzes__quiz_id__answers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/study/quizzes/{quiz_id}/finish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finish Quiz */
+        post: operations["finish_quiz_study_quizzes__quiz_id__finish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/study/quizzes/{quiz_id}/retake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retake Quiz */
+        post: operations["retake_quiz_study_quizzes__quiz_id__retake_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/study/quiz-items/{item_id}/to-card": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Quiz Item To Card */
+        post: operations["quiz_item_to_card_study_quiz_items__item_id__to_card_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reading/progress": {
         parameters: {
             query?: never;
@@ -10985,6 +11087,234 @@ export interface components {
              * @default false
              */
             suggested: boolean;
+        };
+        /** QuizAnswerRequest */
+        QuizAnswerRequest: {
+            /** Position */
+            position: number;
+            /** Selected Option Ids */
+            selected_option_ids: string[];
+            /** Confidence */
+            confidence?: ("sure" | "think" | "guess") | null;
+            /** Time Ms */
+            time_ms?: number | null;
+        };
+        /** QuizAnswerResponse */
+        QuizAnswerResponse: {
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "correct" | "partial" | "wrong";
+            /** Score */
+            score: number;
+            /** Retake */
+            retake: boolean;
+            /** Card Reset */
+            card_reset: boolean;
+            question: components["schemas"]["QuizQuestion"];
+        };
+        /** QuizAnswerView */
+        QuizAnswerView: {
+            /** Selected Option Ids */
+            selected_option_ids: string[];
+            /** Confidence */
+            confidence: ("sure" | "think" | "guess") | null;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "correct" | "partial" | "wrong";
+            /** Score */
+            score: number;
+        };
+        /** QuizCalibration */
+        QuizCalibration: {
+            /**
+             * Confidence
+             * @enum {string}
+             */
+            confidence: "sure" | "think" | "guess";
+            /** Answered */
+            answered: number;
+            /** Correct */
+            correct: number;
+        };
+        /** QuizCreateRequest */
+        QuizCreateRequest: {
+            /** Document Id */
+            document_id: string;
+            /**
+             * Scope Type
+             * @default document
+             * @enum {string}
+             */
+            scope_type: "document" | "chapter" | "section";
+            /** Scope Ref */
+            scope_ref?: string | null;
+            /**
+             * Difficulty
+             * @default adaptive
+             * @enum {string}
+             */
+            difficulty: "easy" | "medium" | "hard" | "adaptive";
+            /**
+             * Mode
+             * @default practice
+             * @enum {string}
+             */
+            mode: "practice" | "exam";
+            /**
+             * Question Count
+             * @default 10
+             */
+            question_count: number;
+            /**
+             * Question Kinds
+             * @default mixed
+             * @enum {string}
+             */
+            question_kinds: "single" | "multi" | "mixed";
+        };
+        /** QuizItemCardResponse */
+        QuizItemCardResponse: {
+            /** Flashcard Id */
+            flashcard_id: string;
+            /** Question */
+            question: string;
+            /** Answer */
+            answer: string;
+        };
+        /** QuizOption */
+        QuizOption: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+            /** Is Correct */
+            is_correct?: boolean | null;
+            /** Explanation */
+            explanation?: string | null;
+            /** Quote */
+            quote?: string | null;
+            /** Trap */
+            trap?: string | null;
+        };
+        /** QuizQuestion */
+        QuizQuestion: {
+            /** Position */
+            position: number;
+            /** Item Id */
+            item_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "single" | "multi";
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "easy" | "medium" | "hard";
+            /** Stem */
+            stem: string;
+            /** Select Count */
+            select_count: number | null;
+            /** Origin */
+            origin: string;
+            /** Support Check */
+            support_check: string;
+            /** Section Id */
+            section_id: string | null;
+            /** Revealed */
+            revealed: boolean;
+            /** Options */
+            options: components["schemas"]["QuizOption"][];
+            answer?: components["schemas"]["QuizAnswerView"] | null;
+        };
+        /** QuizResponse */
+        QuizResponse: {
+            /** Id */
+            id: string;
+            /** Document Id */
+            document_id: string;
+            /**
+             * Scope Type
+             * @enum {string}
+             */
+            scope_type: "document" | "chapter" | "section";
+            /** Scope Ref */
+            scope_ref: string;
+            /**
+             * Difficulty
+             * @enum {string}
+             */
+            difficulty: "easy" | "medium" | "hard" | "adaptive";
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "practice" | "exam";
+            /** Question Count */
+            question_count: number;
+            /**
+             * Question Kinds
+             * @enum {string}
+             */
+            question_kinds: "single" | "multi" | "mixed";
+            /** Status */
+            status: string;
+            /** Error */
+            error: string | null;
+            /** Retake Of */
+            retake_of: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Completed At */
+            completed_at: string | null;
+            /** Questions */
+            questions: components["schemas"]["QuizQuestion"][];
+            results?: components["schemas"]["QuizResults"] | null;
+        };
+        /** QuizResults */
+        QuizResults: {
+            /** Answered */
+            answered: number;
+            /** Total */
+            total: number;
+            /** Correct */
+            correct: number;
+            /** Score Pct */
+            score_pct: number | null;
+            /** Calibration */
+            calibration: components["schemas"]["QuizCalibration"][];
+            /** Traps */
+            traps: components["schemas"]["QuizTrapStat"][];
+            /** Revisit */
+            revisit: components["schemas"]["QuizRevisit"][];
+            /** Retake Count */
+            retake_count: number;
+        };
+        /** QuizRevisit */
+        QuizRevisit: {
+            /** Section Id */
+            section_id: string;
+            /** Heading */
+            heading: string;
+            /** Missed */
+            missed: number;
+        };
+        /** QuizTrapStat */
+        QuizTrapStat: {
+            /** Trap */
+            trap: string;
+            /** Shown */
+            shown: number;
+            /** Picked */
+            picked: number;
         };
         /** ReadingPositionResponse */
         ReadingPositionResponse: {
@@ -20748,6 +21078,198 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroundedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_quiz_study_quizzes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuizCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuizResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quiz_study_quizzes__quiz_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quiz_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuizResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    answer_question_study_quizzes__quiz_id__answers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quiz_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuizAnswerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuizAnswerResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    finish_quiz_study_quizzes__quiz_id__finish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quiz_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuizResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retake_quiz_study_quizzes__quiz_id__retake_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quiz_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuizResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    quiz_item_to_card_study_quiz_items__item_id__to_card_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuizItemCardResponse"];
                 };
             };
             /** @description Validation Error */

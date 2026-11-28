@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models import Base, CardStateEventModel, MisconceptionModel, ReviewEventModel
-from app.repos.flashcard_repo import _CARD_CHILD_TABLES, FlashcardRepo
+from app.repos.flashcard_repo import _CARD_CHILD_TABLES, _CARD_UNTIED_TABLES, FlashcardRepo
 from tests.factories import make_card
 
 pytestmark = pytest.mark.usefixtures("card_documents")
@@ -34,7 +34,9 @@ def _models_with_flashcard_id() -> set[type]:
 
 
 def test_every_card_scoped_table_is_cascaded_or_declared():
-    accounted = set(_CARD_CHILD_TABLES) | set(_CARD_LEARNER_RECORD_TABLES)
+    accounted = (
+        set(_CARD_CHILD_TABLES) | set(_CARD_UNTIED_TABLES) | set(_CARD_LEARNER_RECORD_TABLES)
+    )
     unaccounted = {cls.__tablename__ for cls in _models_with_flashcard_id() - accounted}
     assert not unaccounted, (
         f"tables carry a flashcard_id but deleting a card ignores them: "

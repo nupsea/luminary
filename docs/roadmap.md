@@ -55,6 +55,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 | The docked reader panel: faces, per-type citations, docked chat and composer, live markdown, the in-reader practice loop (0.11.0) | `reader-panel.md`, `make verify-dock` |
 | Transcripts that spell their terms: the uploader's captions over speech recognition, Whisper primed with the video's metadata, a judged glossary pass, a personal vocabulary and a reader fix that rewrites text, index and vectors | `invariants.md` I-66, `services/transcript_correction.py`, `services/transcript_fix.py` |
 | Route-scope authorization: a paired device reaches only routes declaring a scope it holds, user assets served sandboxed (0.19.0) | `invariants.md` I-79, I-80, `install.md`, `backend/tests/test_route_scopes.py` |
+| Quiz backend: generated items behind structural and judged gates, adaptive level, scoring into the learner record. Open: the screens, and the people-rated gate (6 in 10 items kept on two runs) before Quiz is on by default | `quiz.md`, `invariants.md` I-84, I-85 |
 
 Notes and the recommender shipped without a surviving contract doc because their behaviour is
 adequately described by `architecture.md` plus the code. Their specs were deleted on

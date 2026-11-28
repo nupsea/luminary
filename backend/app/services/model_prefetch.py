@@ -126,6 +126,14 @@ def specs() -> tuple[ModelSpec, ...]:
             ignore=_OTHER_FRAMEWORKS + _DUPLICATE_TORCH_WEIGHTS,
             on_request=True,
         ),
+        ModelSpec(
+            "nli",
+            get_settings().QUIZ_NLI_MODEL,
+            get_settings().QUIZ_NLI_MODEL.rsplit("/", 1)[-1].lower(),
+            1630 * _MB,
+            ignore=_OTHER_FRAMEWORKS + _DUPLICATE_TORCH_WEIGHTS,
+            on_request=True,
+        ),
         # GLiNER publishes only a torch checkpoint, so excluding it would leave
         # nothing to load.
         ModelSpec("ner", _ner_repo(), "gliner", _ner_size_bytes(), on_request=True),

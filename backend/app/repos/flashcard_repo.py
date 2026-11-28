@@ -17,6 +17,7 @@ from app.models import (
     FlashcardModel,
     MisconceptionModel,
     NoteTagIndexModel,
+    QuizItemModel,
     TeachbackResultModel,
 )
 from app.repos._helpers import get_or_404
@@ -49,6 +50,10 @@ _CARD_CHILD_TABLES: tuple[type, ...] = (
     MisconceptionModel,
     TeachbackResultModel,
 )
+
+# Outlive the card they point at: a quiz item still tests its passage, so deleting the card
+# only unties it (the foreign key's SET NULL, done here too so it holds without the pragma).
+_CARD_UNTIED_TABLES: tuple[type, ...] = (QuizItemModel,)
 
 # `review_events` is deliberately NOT in that list. It is the activity record --
 # streaks, XP and per-day accuracy read it -- and it records what the learner did,
@@ -574,6 +579,12 @@ class FlashcardRepo:
     async def _delete_children_of(self, card_ids: Sequence[str]) -> None:
         for model in _CARD_CHILD_TABLES:
             await self.session.execute(delete(model).where(model.flashcard_id.in_(list(card_ids))))
+        for model in _CARD_UNTIED_TABLES:
+            await self.session.execute(
+                update(model)
+                .where(model.flashcard_id.in_(list(card_ids)))
+                .values(flashcard_id=None)
+            )
 
     async def delete_by_id(self, card_id: str) -> None:
         await self._delete_children_of([card_id])
